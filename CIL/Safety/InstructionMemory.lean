@@ -103,10 +103,8 @@ def observerCount : CIL.Instruction → Nat
   | .ldfld _ | .ldflda _ => 1
   | .stfld _ => 2
   -- Memory and fields
-  | .fieldAt ..
   | .ldind _ | .initobj _ => 1
   | .ldobj type => if Extraction.spanLocal type then 0 else 1
-  | .setFieldAt ..
   | .stind _ | .cpobj _ | .stobj _ => 2
   | .ldlen => 1
   | .ldelem _ | .ldelem_ref | .ldelem_any _ | .ldelema .. => 2
@@ -1401,18 +1399,13 @@ def observedTransfer (kind : TransferKind) (store : Bool) (stack : List Value) (
     .error (.unsupported "Instruction observes unspecified vector bits")
   else transferValues kind store stack memory
 
-/-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate
-    fields, vector lanes, constants and stack shuffles. `step` falls back to it for ops with
-    neither their own arm nor a value-only meaning; a `.memory` op goes to `memoryInstruction`
-    without static-field metadata, and any other op is unsupported here. -/
-def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
+/-- Reads a primitive or vector struct field at its checked offset from a value or reference. -/
+def loadValueField (offset width : Nat) (signed : Bool) (stack : List Value) (m : Memory) :
     ExecutionResult (Memory × List Value) := do
-  if unspecifiedOperands (observerCount op) stack then
+  if unspecifiedOperands 1 stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  match op, stack with
-  -- Typed copies and scalar and aggregate memory
-  -- Fields
-  | .fieldAt offset width signed, .scalar (.aggregate bytes) :: rest =>
+  match stack with
+  | .scalar (.aggregate bytes) :: rest =>
     if offset + width > bytes.length then .error .invalidState else
       let number := byteNumber ((bytes.drop offset).take width)
       let value ← match width with
@@ -1426,7 +1419,7 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
         | 32 => .ok (.v256 (BitVec.ofNat 256 number))
         | _ => .error (.unsupported "Aggregate field width")
       return (m, .scalar value :: rest)
-  | .fieldAt offset width signed, .scalar (.snapshot (.aggregate size) bytes) :: rest =>
+  | .scalar (.snapshot (.aggregate size) bytes) :: rest =>
     if bytes.length != size || offset + width > size then .error .invalidState else
       if width = 16 || width = 32 then
         let value ← bitcastValue (.aggregate width) (if width = 16 then .vector128 else .vector256)
@@ -1445,21 +1438,31 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
           | _ => .error (.unsupported "Snapshot field width")
         return (m, .scalar value :: rest)
       else .error (.unsupported "Uninitialized snapshot field")
-  | .fieldAt offset width signed, .reference (.address r) :: rest
-  | .fieldAt offset width signed, .readOnlyReference (.address r) :: rest =>
+  | .reference (.address r) :: rest
+  | .readOnlyReference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (m, .scalar (← loadValue m (.address address) width signed) :: rest)
-  | .setFieldAt offset 16, .scalar value :: .reference (.address r) :: rest =>
+  | .reference .null :: _ | .readOnlyReference .null :: _ =>
+    .error (.memory .nullDereference .null 0)
+  | _ => .error (.unsupported "Not a memory instruction")
+
+/-- Writes a primitive or vector struct field at its checked offset through a writable reference. -/
+def storeValueField (offset width : Nat) (stack : List Value) (m : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  if unspecifiedOperands 2 stack then
+    .error (.unsupported "Instruction observes unspecified vector bits") else
+  match width, stack with
+  | 16, .scalar value :: .reference (.address r) :: rest =>
     let some bytes := valueSnapshot .vector128 value | .error .invalidState
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (← checkedAt (.address address) 16
       (writeSnapshot m address bytes ordinaryAccessAlignment), rest)
-  | .setFieldAt offset 32, .scalar value :: .reference (.address r) :: rest =>
+  | 32, .scalar value :: .reference (.address r) :: rest =>
     let some bytes := valueSnapshot .vector256 value | .error .invalidState
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (← checkedAt (.address address) 32
       (writeSnapshot m address bytes ordinaryAccessAlignment), rest)
-  | .setFieldAt offset width, .scalar value :: .reference (.address r) :: rest =>
+  | width, .scalar value :: .reference (.address r) :: rest =>
     let number ← match width, value with
       | 1, .i32 bits => .ok bits.toNat
       | 2, .i32 bits => .ok bits.toNat
@@ -1470,12 +1473,18 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
     return (← checkedAt (.address address) width
       (write m address (numberBytes number width) ordinaryAccessAlignment), rest)
   -- Field stores need write permission, however the backing allocation may be written.
-  | .setFieldAt _ width, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r width)
-  -- Field accesses through null fault like `referenceAt`, before any offset is formed.
-  | .fieldAt .., .reference .null :: _
-  | .fieldAt .., .readOnlyReference .null :: _
-  | .setFieldAt .., .scalar _ :: .reference .null :: _ =>
-    .error (.memory .nullDereference .null 0)
+  | width, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r width)
+  | _, .scalar _ :: .reference .null :: _ => .error (.memory .nullDereference .null 0)
+  | _, _ => .error (.unsupported "Not a memory instruction")
+
+/-- Runs loads, stores, vector lanes, constants and stack shuffles on the stack and memory. `step` falls back to it for ops with
+    neither their own arm nor a value-only meaning; a `.memory` op goes to `memoryInstruction`
+    without static-field metadata, and any other op is unsupported here. -/
+def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  if unspecifiedOperands (observerCount op) stack then
+    .error (.unsupported "Instruction observes unspecified vector bits") else
+  match op, stack with
   -- Memory operations and constants
   | .memory operation, _ => memoryInstruction operation stack m
   | .ldc_i4 bits, _ => return (m, .scalar (.i32 bits) :: stack)

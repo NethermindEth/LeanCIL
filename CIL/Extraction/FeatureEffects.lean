@@ -62,7 +62,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .sizeof _ | .ldc_i4 _ | .ldc_i8 _ | .ldnull | .ldarg _ | .ldloc .. => some (0, 1)
   | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2 | .conv_i8 | .conv_i4 | .conv_u1
   | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .conv_ovf _ | .conv_ovf_un _
-  | .ldobj _ | .ldind _ | .fieldAt ..
+  | .ldobj _ | .ldind _
   | .castclass _ | .isinst _ | .ldfld _ | .ldflda _ | .ldlen => some (1, 1)
   -- Two-operand arithmetic and comparisons, plain or with a widened native operand.
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
@@ -73,7 +73,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .stelem _ | .stelem_ref | .stelem_any _ => some (3, 0)
   -- Stores and initialization through a reference, `pop` and `dup`.
   | .stind _ | .cpobj _ | .stobj _
-  | .setFieldAt .. | .stfld _ => some (2, 0)
+  | .stfld _ => some (2, 0)
   | .initobj _ | .pop => some (1, 0)
   | .dup => some (1, 2)
   -- Calls, construction, intrinsics and memory operations.

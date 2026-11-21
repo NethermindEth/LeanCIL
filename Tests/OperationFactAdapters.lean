@@ -145,13 +145,15 @@ theorem field_store_literal_conversion (left right : CIL.W64)
       (numberBytes (left + right + (1#32).signExtend 64).toNat 8) 1 = .ok final)
     (written : write memory reference
       (numberBytes (left + right + (1#32).signExtend 64).toNat 8) 1 = .ok final)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) :
-    step body (.setFieldAt 0 8) pc args frame
+    (body : CIL.Method) (operand : CIL.Extraction.FieldRef)
+    (shape : body.fieldShape operand = .value 0 8 false)
+    (pc : Nat) (args : List Value) (frame : Frame) :
+    step body (.stfld operand) pc args frame
       [.scalar (.i64 (left + right + 1#64)), .reference (.address reference)] memory =
       .ok (.next (pc + 1) [] frame final) := by
-  fail_if_success cil_checked_step [added, _wrongMemory]
-  fail_if_success cil_checked_step [added, _wrongReference]
-  cil_checked_step [added, written]
+  fail_if_success cil_checked_step [shape, added, _wrongMemory]
+  fail_if_success cil_checked_step [shape, added, _wrongReference]
+  cil_checked_step [shape, added, written]
 #print axioms field_store_literal_conversion
 
 /-- A truth-tested branch selects one of two distinct scalar results. -/

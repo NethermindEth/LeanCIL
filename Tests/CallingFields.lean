@@ -3,6 +3,7 @@ import CIL.Safety.LoopFrames
 import CIL.Safety.CallSegments
 import CIL.Safety.Forwarders
 import Tests.Support
+import Tests.WordFields
 
 /-!
 # Checked by-reference field evidence
@@ -13,45 +14,10 @@ The stepper obtains field reads and formed references from `ValidCall` itself.
 
 namespace Tests.CallingFields
 open CIL.Safety
+open Tests.WordFields
 
 /-- A four-word argument range. -/
 def words (reference : Reference) : ArgumentView := ⟨reference, 32⟩
-
-/-- `T::Words`, four `UInt64` fields. -/
-def wordsLayouts : List CIL.Extraction.RawLayout := [
-  { identity := "T::Words", explicit := false, packing := 0, declaredSize := 0,
-    fields := List.replicate 4 { type := .unsigned64 } }]
-
-/-- The layout CoreCLR computes for `T::Words`: the fields at offsets 0, 8, 16 and 24. -/
-def wordsComputed : Array CIL.Extraction.ComputedLayout := #[
-  ⟨{ size := 32, fields := [{ offset := 0, width := 8 }, { offset := 8, width := 8 },
-    { offset := 16, width := 8 }, { offset := 24, width := 8 }] }, 8⟩]
-
-theorem words_valid : CIL.Extraction.LayoutsValid wordsLayouts wordsComputed .x64 := by
-  decide +kernel
-#print axioms words_valid
-
-/-- The layout environment both methods use to resolve the four words. -/
-@[cil_code] def wordsEnvironment : CIL.LayoutEnvironment :=
-  { rawLayouts := wordsLayouts, layouts := wordsComputed }
-
-/-- The field of `T::Words` at `index`. -/
-def wordField (index : Nat) : CIL.Extraction.FieldRef :=
-  { owner := .aggregate "T::Words" 0, index, name := name!"word",
-    type := .atom CIL.Extraction.runtimeScope "System.UInt64" }
-/-- The first, second, third and fourth words. -/
-def word0 : CIL.Extraction.FieldRef := wordField 0
-/-- The output word at byte offset 8. -/
-def word1 : CIL.Extraction.FieldRef := wordField 1
-/-- The output word at byte offset 16. -/
-def word2 : CIL.Extraction.FieldRef := wordField 2
-/-- The output word at byte offset 24. -/
-def word3 : CIL.Extraction.FieldRef := wordField 3
-
-cil_field_shape wordsEnvironment word0
-cil_field_shape wordsEnvironment word1
-cil_field_shape wordsEnvironment word2
-cil_field_shape wordsEnvironment word3
 
 /-- The instantiated byref argument of Unsafe.SkipInit<T::Words>. -/
 def skipWords : CIL.Extraction.MethodRef :=
@@ -128,12 +94,12 @@ theorem writes_after_reads (memory : Memory) (left right output : Reference)
 
 /-- Four writes followed by a read exercise argument evidence at each new memory. -/
 @[cil_code] def repeatedWriter : CIL.Method :=
-  { locals := [], returnsValue := true, code := [
+  { environment := wordsEnvironment, locals := [], returnsValue := true, code := [
     .ldarg 2, .ldc_i8 1, .stind .i8,
-    .ldarg 2, .ldc_i8 2, .setFieldAt 8 8,
-    .ldarg 2, .ldc_i8 3, .setFieldAt 16 8,
-    .ldarg 2, .ldc_i8 4, .setFieldAt 24 8,
-    .ldarg 0, .fieldAt 0 8, .ret] }
+    .ldarg 2, .ldc_i8 2, .stfld word1,
+    .ldarg 2, .ldc_i8 3, .stfld word2,
+    .ldarg 2, .ldc_i8 4, .stfld word3,
+    .ldarg 0, .ldfld word0, .ret] }
 
 /-- Later loads observe the current memory, even when output aliases either input. -/
 theorem reads_after_writes (memory : Memory) (left right output : Reference)
@@ -197,7 +163,7 @@ theorem output_bounds_and_permissions (memory : Memory) (output _other : Referen
     (_call : ValidCall memory [] [⟨output, 8⟩]) : True := by
   fail_if_success
     have outside : WP (Execution (fun fuel => run
-      [{ locals := [], returnsValue := false, code := [.setFieldAt 8 8, .ret] }] fuel 0 0 []
+      [{ environment := wordsEnvironment, locals := [], returnsValue := false, code := [.stfld word1, .ret] }] fuel 0 0 []
       { activation := 0, locals := [], owned := [] }
       [.scalar (.i64 1), .reference (.address output)] memory)) (fun _ => True) := by
       cil_contract_steps []
@@ -239,7 +205,8 @@ theorem helper_checked (subtract : Bool) {program : CIL.Program} {callee : Nat}
 
 /-- Both helper choices share the same caller segment and return convention. -/
 @[cil_code] def caller (callee : Nat) : CIL.Method :=
-  { locals := [], returnsValue := false, code := loadCallStoreCode (Tests.callee 2) ++ [.ret],
+  { environment := wordsEnvironment, locals := [], returnsValue := false,
+    code := loadCallStoreCode (Tests.callee 2) word0 word0 ++ [.ret],
     links := [(5, .direct callee)] }
 
 /-- The shared segment writes the chosen operation on the original input snapshots. -/
@@ -263,7 +230,7 @@ theorem composed (subtract : Bool) : Composed subtract := by
   apply WP.load_call_store (helper_checked subtract rfl)
     ((⟨left, 8⟩ : ArgumentView).word memory 0,
       (⟨right, 8⟩ : ArgumentView).word memory 0) id left right output
-    rfl (by rfl) rfl rfl (fun _ _ => rfl) call rfl trivial (fun _ => rfl)
+    rfl (by rfl) rfl rfl rfl rfl (fun _ _ => rfl) call rfl trivial (fun _ => rfl)
   intro middle value after result written
   have readback := write_readback _ _ _ _ _ written
   simp only [numberBytes, List.length_map, List.length_range] at readback

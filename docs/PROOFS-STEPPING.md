@@ -257,9 +257,9 @@ directly or `simp only [cil_step, facts]`.
 Reference and field instructions have one `@[cil_instruction_step]` equation per operand shape in
 [InstructionSteps](../CIL/Safety/InstructionSteps.lean), which rewrites a step to checked memory
 and formation operations. They cover the `instruction` arms of `ldind` and `stind` through a reference, `ldind.i` on a native method table cursor, `ldlen` and
-`ldelem.i` of a managed handler table, `fieldAt` on an address, `setFieldAt` of
-width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and `initobj`. A
-struct field `ldfld` or `stfld` uses the load or store selected by the field's shape. For a
+`ldelem.i` of a managed handler table, `skipInit` and `initobj`.
+For `ldfld` and `stfld`, the stepper resolves the field operand in the method's layout environment.
+The checked shape supplies the offset, width and signedness. For a
 struct `ldflda`, the checked field offset and a pointer-addition fact give the resulting writable
 or readonly reference.
 
@@ -761,7 +761,7 @@ type, so an unrelated context adds nothing to simp. It gathers:
   (`LoopFrame.form_home`), so `ldloca` and a homed `ldarga` step, and the load of each
   remembered home through `LoopFrame.load`, with `localResult`;
 - for a struct local remembered as `.aggregate (layout.encode fields)`, the read of each field by
-  value (`ldloc` then `ldfld`, [`step_fieldAt_encode`](../CIL/Safety/FieldValues.lean)) and by
+  value (`ldloc` then `ldfld`, [`step_ldfld_encode`](../CIL/Safety/FieldValues.lean)) and by
   address (`LoopFrame.load_field`), as that field's value;
 - [`LoopFrame.leave_kept`](../CIL/Safety/LoopFrames.lean) of each `LoopFrame []` with the entry's
   `setup` equation, when the goal is an exit;

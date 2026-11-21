@@ -25,6 +25,17 @@ private def tallyEnvironment : CIL.LayoutEnvironment := {
     fields := [⟨.unsigned32, none⟩, ⟨.unsigned32, none⟩] }]
   layouts := #[⟨layout, 4⟩] }
 
+def tallyCount : CIL.Extraction.FieldRef :=
+  { owner := tallyType, index := 0, name := name!"Count",
+    type := .atom CIL.Extraction.runtimeScope "System.UInt32" }
+
+def tallySum : CIL.Extraction.FieldRef :=
+  { owner := tallyType, index := 1, name := name!"Sum",
+    type := .atom CIL.Extraction.runtimeScope "System.UInt32" }
+
+cil_field_shape tallyEnvironment tallyCount
+cil_field_shape tallyEnvironment tallySum
+
 /-- The layout's fields are in bounds and apart. -/
 theorem layout_valid : layout.Valid := by decide +kernel
 
@@ -32,9 +43,9 @@ theorem layout_valid : layout.Valid := by decide +kernel
 @[cil_code] def tally : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 8 0)], localKinds := [.aggregate 8]
   environment := tallyEnvironment
-  code := [.ldloca 0, .initobj tallyType, .br 14, .ldloca 0, .ldloc 0, .fieldAt 4 4,
-    .call (Tests.callee 1) {}, .setFieldAt 4 4, .ldloca 0, .ldloc 0, .fieldAt 0 4, .ldc_i4 1, .add,
-    .setFieldAt 0 4, .ldloc 0, .fieldAt 0 4, .ldarg 0, .bne_un 3, .ldloc 0, .fieldAt 4 4, .ret]
+  code := [.ldloca 0, .initobj tallyType, .br 14, .ldloca 0, .ldloc 0, .ldfld tallySum,
+    .call (Tests.callee 1) {}, .stfld tallySum, .ldloca 0, .ldloc 0, .ldfld tallyCount, .ldc_i4 1, .add,
+    .stfld tallyCount, .ldloc 0, .ldfld tallyCount, .ldarg 0, .bne_un 3, .ldloc 0, .ldfld tallySum, .ret]
   links := [(6, .direct 1)] }
 
 /-- `return x + 2;` -/
@@ -203,7 +214,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
   cil_loop_recurse recurse (count + 1, sum)
 
 -- A store whose home has no frame fact at its memory stops the walk at that store.
-/-- error: cil_loop_recurse: cannot step pc 7 (CIL.Instruction.setFieldAt 4 4) at memory
+/-- error: cil_loop_recurse: cannot step pc 7 (CIL.Instruction.stfld tallySum) at memory
   final -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory)
@@ -238,7 +249,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
 
 -- A store with no frame fact at its memory fails naming the pc, the instruction and the
 -- memory, and what to supply.
-/-- error: cil_loop_steps: cannot step pc 7 (CIL.Instruction.setFieldAt 4 4) at memory
+/-- error: cil_loop_steps: cannot step pc 7 (CIL.Instruction.stfld tallySum) at memory
   final -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory) :
@@ -281,7 +292,7 @@ example (memory current : Memory) (home : Reference)
 -- A by-value read of a field narrower than the value it lists cannot name the value.
 /-- error: could not synthesize default value for parameter 'exact' using tactics -/
 #guard_msgs (substring := true) in
-example := step_fieldAt_encode layout_valid 0 [.i64 0, .i32 0]
+example := step_ldfld_encode layout_valid 0 [.i64 0, .i32 0]
 
 /-- A struct of a flag byte at 0, a signed 16-bit count at 2, a 32-bit total at 4 and a nested
     8-byte struct at 8. -/
@@ -294,6 +305,22 @@ private def mixedEnvironment : CIL.LayoutEnvironment := {
     identity := "Mixed", explicit := false, packing := 0, declaredSize := 0
     fields := [⟨.unsigned8, none⟩, ⟨.signed16, none⟩, ⟨.unsigned32, none⟩, ⟨.aggregate 0, none⟩] }]
   layouts := tallyEnvironment.layouts.push ⟨mixed, 4⟩ }
+
+def mixedFlag : CIL.Extraction.FieldRef :=
+  { owner := .aggregate "Mixed" 1, index := 0, name := name!"Flag",
+    type := .atom CIL.Extraction.runtimeScope "System.Byte" }
+
+def mixedCount : CIL.Extraction.FieldRef :=
+  { owner := .aggregate "Mixed" 1, index := 1, name := name!"Count",
+    type := .atom CIL.Extraction.runtimeScope "System.Int16" }
+
+def mixedTotal : CIL.Extraction.FieldRef :=
+  { owner := .aggregate "Mixed" 1, index := 2, name := name!"Total",
+    type := .atom CIL.Extraction.runtimeScope "System.UInt32" }
+
+cil_field_shape mixedEnvironment mixedFlag
+cil_field_shape mixedEnvironment mixedCount
+cil_field_shape mixedEnvironment mixedTotal
 
 /-- Both fixtures use the recomputed layouts of the local and its nested fields. -/
 theorem loop_layouts_valid :
@@ -315,7 +342,7 @@ example : mixed.zeros = [.i32 0, .i32 0, .i32 0, .aggregate (List.replicate 8 0)
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
   environment := mixedEnvironment
   code := [.ldloca 0, .initobj (.aggregate "Mixed" 1), .br 6, .ldloca 0, .ldc_i4 1,
-    .setFieldAt 0 1, .ldloc 0, .fieldAt 0 1, .brfalse 3, .ldloca 0, .fieldAt 2 2 true, .ret] }
+    .stfld mixedFlag, .ldloc 0, .ldfld mixedFlag, .brfalse 3, .ldloca 0, .ldfld mixedCount, .ret] }
 
 /-- The program of `flagged` alone. -/
 @[cil_code] def flaggedProgram : CIL.Program := [flagged]
@@ -380,29 +407,34 @@ example (memory current : Memory) (home : Reference)
 -- A narrow read of a 4-byte field is refused; that field reads back exactly.
 /-- error: could not synthesize default value for parameter 'narrow' using tactics -/
 #guard_msgs (substring := true) in
-example := step_fieldAt_encode_narrow mixed_valid 2
+example := step_ldfld_encode_narrow mixed_valid 2
   [.i32 0, .i32 0, .i32 7, .aggregate (List.replicate 8 0)]
 
 -- A stored byte reads back truncated to its field: 0x1FF in the flag byte loads as 0xFF, and
 -- as -1 signed.
 example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
-    (rest : List Value) :
-    step body (.fieldAt 0 1 false) pc args frame (.scalar (.aggregate (mixed.encode
+    (rest : List Value) (unsigned signed : CIL.Extraction.FieldRef)
+    (zeroExtended : body.fieldShape unsigned = .value 0 1 false)
+    (signExtended : body.fieldShape signed = .value 0 1 true) :
+    step body (.ldfld unsigned) pc args frame (.scalar (.aggregate (mixed.encode
       [.i32 0x1FF, .i32 0, .i32 0, .aggregate (List.replicate 8 0)])) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 0xFF) :: rest) frame memory) ∧
-    step body (.fieldAt 0 1 true) pc args frame (.scalar (.aggregate (mixed.encode
+    step body (.ldfld signed) pc args frame (.scalar (.aggregate (mixed.encode
       [.i32 0x1FF, .i32 0, .i32 0, .aggregate (List.replicate 8 0)])) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 (-1)) :: rest) frame memory) := by
-  constructor <;> rw [step_fieldAt_encode_narrow mixed_valid 0 _] <;> rfl
+  have read := step_ldfld_encode_narrow mixed_valid 0
+    [.i32 0x1FF, .i32 0, .i32 0, .aggregate (List.replicate 8 0)]
+  exact ⟨read body unsigned false zeroExtended pc args frame memory rest,
+    read body signed true signExtended pc args frame memory rest⟩
 
 /-- `s = default; while (s.total != value) s.total++; s.flag = 1; return s.flag;`, storing the
     flag byte on the exit path. -/
 @[cil_code] def marked : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
   environment := mixedEnvironment
-  code := [.ldloca 0, .initobj (.aggregate "Mixed" 1), .br 9, .ldloca 0, .ldloc 0, .fieldAt 4 4,
-    .ldc_i4 1, .add, .setFieldAt 4 4, .ldloc 0, .fieldAt 4 4, .ldarg 0, .bne_un 3, .ldloca 0,
-    .ldc_i4 1, .setFieldAt 0 1, .ldloc 0, .fieldAt 0 1, .ret] }
+  code := [.ldloca 0, .initobj (.aggregate "Mixed" 1), .br 9, .ldloca 0, .ldloc 0, .ldfld mixedTotal,
+    .ldc_i4 1, .add, .stfld mixedTotal, .ldloc 0, .ldfld mixedTotal, .ldarg 0, .bne_un 3, .ldloca 0,
+    .ldc_i4 1, .stfld mixedFlag, .ldloc 0, .ldfld mixedFlag, .ret] }
 
 /-- The program of `marked` alone. -/
 @[cil_code] def markedProgram : CIL.Program := [marked]

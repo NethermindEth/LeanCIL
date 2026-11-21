@@ -247,7 +247,7 @@ theorem narrow_read_lifetime :
       .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 2) := rfl
 
 theorem narrow_write_permission :
-    instruction (.setFieldAt 0 2) [.scalar (.i32 65535), Tests.reference]
+    storeValueField 0 2 [.scalar (.i32 65535), Tests.reference]
       { Tests.caller with views := [⟨0, 0, 8, true, false⟩] } =
         .error (.memory .unwritable (.address ⟨0, 0⟩) 2) := rfl
 
@@ -482,11 +482,15 @@ theorem null_reference_accesses_fault :
       .error (.memory .nullDereference .null 0) ∧
     instructions [.memory .nullRef, .memory .load256] [] Memory.empty =
       .error (.memory .nullDereference .null 32) ∧
-    instructions [.memory .nullRef, .fieldAt 8 8] [] Memory.empty =
+    (do
+      let (memory, stack) ← instruction (.memory .nullRef) [] Memory.empty
+      loadValueField 8 8 false stack memory) =
       .error (.memory .nullDereference .null 0) ∧
     structFieldAddress 8 [.reference .null] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .ldc_i8 7, .setFieldAt 8 8] [] Memory.empty =
+    (do
+      let (memory, stack) ← instructions [.memory .nullRef, .ldc_i8 7] [] Memory.empty
+      storeValueField 8 8 stack memory) =
       .error (.memory .nullDereference .null 0) :=
   ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 

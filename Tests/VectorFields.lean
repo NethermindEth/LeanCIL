@@ -16,28 +16,28 @@ def memory : CIL.Safety.Memory := {
   views := [⟨0, 0, 35, true, true⟩] }
 
 example : (do
-    let (stored, _) ← instruction (.setFieldAt 3 32)
+    let (stored, _) ← storeValueField 3 32
       [.scalar (.snapshot .vector256 cells), Tests.reference] memory
-    instruction (.fieldAt 3 32) [Tests.reference] stored).map Prod.snd =
+    loadValueField 3 32 false [Tests.reference] stored).map Prod.snd =
     .ok [.scalar (.snapshot .vector256 cells)] := by rfl
 
-example : instruction (.fieldAt 3 32)
+example : loadValueField 3 32 false
     [.scalar (.snapshot (.aggregate 35) ([(0, true), (0, true), (0, true)] ++ cells))] memory =
     .ok (memory, [.scalar (.snapshot .vector256 cells)]) := by rfl
 
-example : instruction (.fieldAt 0 32)
+example : loadValueField 0 32 false
     [.scalar (.snapshot (.aggregate 35) cells)] memory = .error .invalidState := by rfl
 
-example : instruction (.fieldAt 4 32)
+example : loadValueField 4 32 false
     [.scalar (.aggregate (List.replicate 35 0))] memory = .error .invalidState := by rfl
 
-example : instruction (.setFieldAt 3 32) [.scalar (.v128 0), Tests.reference] memory =
+example : storeValueField 3 32 [.scalar (.v128 0), Tests.reference] memory =
     .error .invalidState := by rfl
 
-example : instruction (.setFieldAt 4 32) [.scalar (.v256 0), Tests.reference] memory =
+example : storeValueField 4 32 [.scalar (.v256 0), Tests.reference] memory =
     .error (.memory .outsideAllocation (.address ⟨0, 4⟩) 32) := by rfl
 
-example : instruction (.setFieldAt 3 32) [.scalar (.v256 0), .reference .null] memory =
+example : storeValueField 3 32 [.scalar (.v256 0), .reference .null] memory =
     .error (.memory .nullDereference .null 0) := by rfl
 
 example : computeLayouts [{

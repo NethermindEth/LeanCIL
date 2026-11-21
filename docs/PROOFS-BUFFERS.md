@@ -434,8 +434,8 @@ valid fieldIndex value` steps `stfld` to a frame remembering `fields.set fieldIn
 equation, the frame after it and `MemoryBelow`; the slot, the field and its width are checked by
 `rfl` and `decide`, so a field outside the layout or a value of another width does not elaborate.
 A by-value read, `ldloc` then `ldfld`, loads the struct and reads the field with
-`step_fieldAt_encode`. A 1- or 2-byte field holds an `.i32` and reads back truncated to its width
-and zero or sign extended, as `narrowLoad width signed bits`: `step_fieldAt_encode_narrow` reads
+`step_ldfld_encode`. A 1- or 2-byte field holds an `.i32` and reads back truncated to its width
+and zero or sign extended, as `narrowLoad width signed bits`: `step_ldfld_encode_narrow` reads
 it by value and `load_narrow_field` through the address.
 
 For a nested struct, `ldfld` uses the offset and size in the method's checked field shape.

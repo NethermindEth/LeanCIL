@@ -796,68 +796,53 @@ def fieldShapeIn (body field : Expr) : SimpM (Expr × Expr) := do
   return (← whnfR (← instantiateMVars shape.expr), ← shape.getProof)
 
 open Lean Meta in
-/-- The lowered instruction a struct field or typed object access steps as, with a proof of
-    `∀ pc args frame memory stack` that both step alike; `none` for any other instruction and for
-    a field whose shape no fact or evaluation shows to be a struct field. A span load steps as
-    `nop` only on a span value, so it lowers only for a `stack` whose head is one. -/
-def storageLowering? (body op : Expr) (stack : Option Expr := none) :
+/-- A vector object access steps as its checked vector operation. A span load steps as a no-op
+    on a known span value. Each result supplies a proof at the requested stack. -/
+def typedObjectLowering? (body op : Expr) (stack : Option Expr := none) :
     MetaM (Option (Expr × Expr)) := do
   let (name, #[field]) := (← whnfR op).getAppFnArgs | return none
+  unless name == ``CIL.Instruction.ldobj || name == ``CIL.Instruction.stobj do return none
   let lowering (equation : Name) (lowered : Expr) (premises : Array Expr) := do
     let type ← inferType (mkApp (mkConst equation) body)
     forallBoundedTelescope type (some 4) fun variables _ => do
       let proof := mkAppN (mkConst equation) (#[body] ++ variables ++ #[field] ++ premises)
       return some (lowered, ← mkLambdaFVars variables proof)
-  if name == ``CIL.Instruction.ldobj || name == ``CIL.Instruction.stobj then
-    let resolver := mkApp2 (mkConst ``CIL.Method.valueShape) body field
-    let some (.done shared) ← ResolutionFacts.sharedShape? ``CIL.Method.valueShape resolver
-      | return none
-    let some proof := shared.proof? | return none
-    let load := name == ``CIL.Instruction.ldobj
-    match shared.expr.getAppFnArgs with
-    | (``CIL.ValueShape.vector, #[width]) =>
-      let some (equation, operation) := (match ← getNatValue? width, load with
-        | some 16, true => some (``step_ldobj_vector16, ``CIL.MemoryOp.load128)
-        | some 32, true => some (``step_ldobj_vector32, ``CIL.MemoryOp.load256)
-        | some 64, true => some (``step_ldobj_vector64, ``CIL.MemoryOp.load512)
-        | some 16, false => some (``step_stobj_vector16, ``CIL.MemoryOp.store128)
-        | some 32, false => some (``step_stobj_vector32, ``CIL.MemoryOp.store256)
-        | some 64, false => some (``step_stobj_vector64, ``CIL.MemoryOp.store512)
-        | _, _ => none) | return none
-      return ← lowering equation (mkApp (mkConst ``CIL.Instruction.memory) (mkConst operation))
-        #[proof]
-    | (``CIL.ValueShape.span, #[]) =>
-      let some stack := stack | return none
-      unless load do return none
-      let (``List.cons, #[_, head, rest]) := (← whnfR stack).getAppFnArgs | return none
-      let (equation, operands) := match (← whnfR head).getAppFnArgs with
-        | (``CIL.Safety.Value.bufferSpan, #[view]) => (``step_ldobj_span, #[view])
-        | (``CIL.Safety.Value.span, #[reference, length]) =>
-          (``step_ldobj_span_value, #[reference, length])
-        | _ => (Name.anonymous, #[])
-      if operands.isEmpty then return none
-      let some (lowered, proof) ← lowering equation (mkConst ``CIL.Instruction.nop)
-          (#[proof] ++ operands ++ #[rest]) | return none
-      -- The equation is stated at this stack; the caller still supplies one for every lowering.
-      let ignored ← forallBoundedTelescope (← inferType proof) (some 4) fun variables _ => do
-        withLocalDeclD `stack (mkApp (mkConst ``List [levelZero]) (mkConst ``CIL.Safety.Value))
-          fun unused => do
-            mkLambdaFVars (variables.push unused) (mkAppN proof variables).headBeta
-      return some (lowered, ignored)
-    | _ => return none
-  let accesses := [``CIL.Instruction.ldfld, ``CIL.Instruction.stfld]
-  unless accesses.contains name do
-    return none
-  let some (shape, proof) ← (try fieldShapeKnown? body field catch _ => pure none) | return none
-  match name, shape.getAppFnArgs with
-  | ``CIL.Instruction.ldfld, (``CIL.FieldShape.value, #[offset, width, signed]) =>
-    lowering ``step_ldfld_value_eq (mkApp3 (mkConst ``CIL.Instruction.fieldAt) offset width signed)
-      #[offset, width, signed, proof]
-  | ``CIL.Instruction.stfld, (``CIL.FieldShape.value, #[offset, width, signed]) =>
-    lowering ``step_stfld_value_eq (mkApp2 (mkConst ``CIL.Instruction.setFieldAt) offset width)
-      #[offset, width, signed, proof]
-
-  | _, _ => return none
+  let resolver := mkApp2 (mkConst ``CIL.Method.valueShape) body field
+  let some (.done shared) ← ResolutionFacts.sharedShape? ``CIL.Method.valueShape resolver
+    | return none
+  let some proof := shared.proof? | return none
+  let load := name == ``CIL.Instruction.ldobj
+  match shared.expr.getAppFnArgs with
+  | (``CIL.ValueShape.vector, #[width]) =>
+    let some (equation, operation) := (match ← getNatValue? width, load with
+      | some 16, true => some (``step_ldobj_vector16, ``CIL.MemoryOp.load128)
+      | some 32, true => some (``step_ldobj_vector32, ``CIL.MemoryOp.load256)
+      | some 64, true => some (``step_ldobj_vector64, ``CIL.MemoryOp.load512)
+      | some 16, false => some (``step_stobj_vector16, ``CIL.MemoryOp.store128)
+      | some 32, false => some (``step_stobj_vector32, ``CIL.MemoryOp.store256)
+      | some 64, false => some (``step_stobj_vector64, ``CIL.MemoryOp.store512)
+      | _, _ => none) | return none
+    return ← lowering equation (mkApp (mkConst ``CIL.Instruction.memory) (mkConst operation))
+      #[proof]
+  | (``CIL.ValueShape.span, #[]) =>
+    let some stack := stack | return none
+    unless load do return none
+    let (``List.cons, #[_, head, rest]) := (← whnfR stack).getAppFnArgs | return none
+    let (equation, operands) := match (← whnfR head).getAppFnArgs with
+      | (``CIL.Safety.Value.bufferSpan, #[view]) => (``step_ldobj_span, #[view])
+      | (``CIL.Safety.Value.span, #[reference, length]) =>
+        (``step_ldobj_span_value, #[reference, length])
+      | _ => (Name.anonymous, #[])
+    if operands.isEmpty then return none
+    let some (lowered, proof) ← lowering equation (mkConst ``CIL.Instruction.nop)
+        (#[proof] ++ operands ++ #[rest]) | return none
+    -- The equation is stated at this stack; the caller still supplies one for every lowering.
+    let ignored ← forallBoundedTelescope (← inferType proof) (some 4) fun variables _ => do
+      withLocalDeclD `stack (mkApp (mkConst ``List [levelZero]) (mkConst ``CIL.Safety.Value))
+        fun unused => do
+          mkLambdaFVars (variables.push unused) (mkAppN proof variables).headBeta
+    return some (lowered, ignored)
+  | _ => return none
 
 open Lean Meta in
 /-- The step a class field instruction takes by `equation`, showing the field's owner as the
@@ -873,8 +858,8 @@ def fieldStep (field equation : Expr) : MetaM Simp.Step := do
 
 open Lean Meta in
 /-- A field load steps by the equation for the field's shape, as `fieldShapeIn` finds it: a
-    struct field as the lowered load of its shape, and a class field by the equation for its
-    slot and the receiver on the stack. A load whose shape stays unknown steps to `fieldLoad`,
+    struct field uses its checked byte offset and width, and a class field uses its slot and
+    the receiver on the stack. A load whose shape stays unknown steps to `fieldLoad`,
     whose match a later fact can decide. -/
 simproc [cil_step] reduceFieldLoad (step _ (.ldfld _) _ _ _ _ _) := fun expression => do
   let_expr CIL.Safety.step body operation pc args frame stack memory := expression
@@ -885,8 +870,27 @@ simproc [cil_step] reduceFieldLoad (step _ (.ldfld _) _ _ _ _ _) := fun expressi
   let (shape, proof) ← fieldShapeIn body field
   match shape.getAppFnArgs with
   | (``CIL.FieldShape.value, #[offset, width, signed]) =>
-    return ← equationStep (mkAppN (mkConst ``step_ldfld_value_eq)
-      (leading ++ #[offset, width, signed, proof, stack]))
+    let fallback := mkAppN (mkConst ``step_ldfld_value_eq)
+      (leading ++ #[offset, width, signed, proof, stack])
+    let_expr List.cons _ receiver rest := stack | return ← equationStep fallback
+    match (← whnfR receiver).getAppFnArgs with
+    | (kind, #[managed]) =>
+      if kind == ``Value.reference || kind == ``Value.readOnlyReference then
+        let_expr ManagedReference.address address := managed | return ← equationStep fallback
+        let rule := if kind == ``Value.reference then ``step_ldfld_value_reference_eq
+          else ``step_ldfld_value_readOnlyReference_eq
+        return ← equationStep (mkAppN (mkConst rule)
+          (leading ++ #[offset, width, signed, proof, address, rest]))
+      if kind == ``Value.scalar then
+        let_expr CIL.Value.aggregate bytes := managed | return ← equationStep fallback
+        let some rule := (match ← getNatValue? width with
+          | some 4 => some ``step_ldfld_value_aggregate_4_eq
+          | some 8 => some ``step_ldfld_value_aggregate_8_eq
+          | _ => none) | return ← equationStep fallback
+        return ← equationStep (mkAppN (mkConst rule)
+          (leading ++ #[offset, signed, proof, bytes, rest]))
+      return ← equationStep fallback
+    | _ => return ← equationStep fallback
   | (``CIL.FieldShape.aggregate, #[offset, size]) =>
     let resolved := leading ++ #[offset, size, proof]
     let fallback := mkAppN (mkConst ``step_ldfld_aggregate_eq) (resolved.push stack)
@@ -938,8 +942,21 @@ simproc [cil_step] reduceFieldStore (step _ (.stfld _) _ _ _ _ _) := fun express
   let (shape, proof) ← fieldShapeIn body field
   match shape.getAppFnArgs with
   | (``CIL.FieldShape.value, #[offset, width, signed]) =>
-    return ← equationStep (mkAppN (mkConst ``step_stfld_value_eq)
-      (leading ++ #[offset, width, signed, proof, stack]))
+    let fallback := mkAppN (mkConst ``step_stfld_value_eq)
+      (leading ++ #[offset, width, signed, proof, stack])
+    let_expr List.cons _ stored below := stack | return ← equationStep fallback
+    let_expr List.cons _ receiver rest := below | return ← equationStep fallback
+    let_expr Value.reference reference := receiver | return ← equationStep fallback
+    let_expr ManagedReference.address address := reference | return ← equationStep fallback
+    let_expr Value.scalar number := stored | return ← equationStep fallback
+    let some (rule, bits) := (match ← getNatValue? (← whnfR width), (← whnfR number).getAppFnArgs with
+      | some 1, (``CIL.Value.i32, #[bits]) => some (``step_stfld_value_i32_1_eq, bits)
+      | some 2, (``CIL.Value.i32, #[bits]) => some (``step_stfld_value_i32_2_eq, bits)
+      | some 4, (``CIL.Value.i32, #[bits]) => some (``step_stfld_value_i32_4_eq, bits)
+      | some 8, (``CIL.Value.i64, #[bits]) => some (``step_stfld_value_i64_eq, bits)
+      | _, _ => none) | return ← equationStep fallback
+    return ← equationStep (mkAppN (mkConst rule)
+      (leading ++ #[offset, signed, proof, bits, address, rest]))
   | (``CIL.FieldShape.aggregate, #[offset, size]) =>
     return ← equationStep (mkAppN (mkConst ``step_stfld_aggregate_eq)
       (leading ++ #[offset, size, proof, stack]))

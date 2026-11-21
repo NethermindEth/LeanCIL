@@ -218,7 +218,6 @@ def named : List (RawInstruction × Instruction) := [
 
 /-- Constructors no opcode decodes to: the families outside the value opcodes. -/
 def undecoded : List Name := [
-  ``Instruction.fieldAt, ``Instruction.setFieldAt,
   ``Instruction.feature,
   ``Instruction.intrinsic, ``Instruction.throw,
   ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld,
@@ -738,7 +737,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 92, undecoded 10 of 102 constructors -/
+/-- info: decoded 92, undecoded 8 of 100 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

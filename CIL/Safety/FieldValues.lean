@@ -8,10 +8,10 @@ after each field stores its value, as `initobj` followed by one `stfld` per fiel
 proof that tracks a struct local this way names its field values, such as `[.i32 count,
 .i32 sum]`, instead of its bytes, offsets and widths. On a valid, disjoint layout a field store
 replaces exactly that value (`AggregateLayout.setIn_encode`), and a field holding an int, word or
-vector of exactly its width reads back as that value, by value (`step_fieldAt_encode`) or through
-the struct's address (`fieldAt_encode_home`). A 1- or 2-byte field stores a truncated int, which
-reads back as `narrowLoad`, its low bytes zero or sign extended (`step_fieldAt_encode_narrow`,
-`fieldAt_encode_home_narrow`).
+vector of exactly its width reads back as that value, by value (`step_ldfld_encode`) or through
+the struct's address (`ldfld_encode_home`). A 1- or 2-byte field stores a truncated int, which
+reads back as `narrowLoad`, its low bytes zero or sign extended (`step_ldfld_encode_narrow`,
+`ldfld_encode_home_narrow`).
 
 `AggregateLayout.zeros` are the field values of a zeroed struct, each the value its kind loads
 from zero bytes (`FieldLayout.zero_loaded`, `FieldLayout.zero_nested`): an int for a 1-, 2- or
@@ -284,53 +284,56 @@ namespace CIL.Safety
 /-- A by-value `ldfld` of a field holding `number` in struct bytes that contain it pushes the
     value an exact field `value` with that number decodes to, signed or not. The step holds in
     any method and frame. -/
-theorem step_fieldAt_value {bytes : List (BitVec 8)} {offset width : Nat} {value : CIL.Value}
+theorem step_ldfld_value {bytes : List (BitVec 8)} {offset width : Nat} {value : CIL.Value}
     (within : offset + width ≤ bytes.length) (exact : FieldExact width value)
     (decoded : byteNumber ((bytes.drop offset).take width) = fieldNumber width value) :
-    ∀ body pc args frame memory rest signed,
-      step body (.fieldAt offset width signed) pc args frame (.scalar (.aggregate bytes) :: rest)
+    ∀ (body : Method) (operand : Extraction.FieldRef) (signed : Bool),
+      body.fieldShape operand = .value offset width signed → ∀ pc args frame memory rest,
+      step body (.ldfld operand) pc args frame (.scalar (.aggregate bytes) :: rest)
         memory = .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
-  intro body pc args frame memory rest signed
+  intro body operand signed shape pc args frame memory rest
   have pushed := exact.decoded false
   unfold FieldExact at exact
-  rw [step_fieldAt_eq]
+  rw [step_ldfld_value_eq _ _ _ _ _ _ _ _ _ shape]
   split at exact <;> (try cases exact) <;>
-    simp_all [instructionStep, instruction, cil_guard, unspecifiedOperands, List.take, List.any,
+    simp_all [loadValueField, cil_guard, unspecifiedOperands, List.take, List.any,
       Value.hasUnspecified, numericOfWidth, Bind.bind, Except.bind, Pure.pure, Except.pure,
       Nat.not_lt.2 within]
 
 /-- A by-value `ldfld` of field `index` of a struct of a valid, disjoint layout whose fields hold
     `values` pushes the exact value at `index`. -/
-theorem step_fieldAt_encode {layout : AggregateLayout} (valid : layout.Valid) (index : Nat)
+theorem step_ldfld_encode {layout : AggregateLayout} (valid : layout.Valid) (index : Nat)
     (values : List CIL.Value) {offset width : Nat} {aggregate : Bool}
     (found : layout.fields[index]? = some ⟨offset, width, aggregate⟩ := by rfl)
     {value : CIL.Value} (listed : values[index]? = some value := by rfl)
     (exact : FieldExact width value := by trivial) (disjoint : layout.Disjoint := by decide) :
-    ∀ body pc args frame memory rest signed,
-      step body (.fieldAt offset width signed) pc args frame
+    ∀ (body : Method) (operand : Extraction.FieldRef) (signed : Bool),
+      body.fieldShape operand = .value offset width signed → ∀ pc args frame memory rest,
+      step body (.ldfld operand) pc args frame
         (.scalar (.aggregate (layout.encode values)) :: rest) memory =
         .ok (.next (pc + 1) (.scalar value :: rest) frame memory) :=
-  step_fieldAt_value (layout.within_encode valid values _ (List.mem_of_getElem? found)) exact
+  step_ldfld_value (layout.within_encode valid values _ (List.mem_of_getElem? found)) exact
     (layout.numberIn_encode valid disjoint found listed)
 
-#print axioms step_fieldAt_value
-#print axioms step_fieldAt_encode
+#print axioms step_ldfld_value
+#print axioms step_ldfld_encode
 
 /-- `ldfld` of field `index` through the address of a struct home holding a struct of a valid,
     disjoint layout whose fields hold `values` pushes the exact value at `index`. The step holds
     in any method and frame. -/
-theorem fieldAt_encode_home {memory : Memory} {home : Reference} {layout : AggregateLayout}
+theorem ldfld_encode_home {memory : Memory} {home : Reference} {layout : AggregateLayout}
     (formed : memory.WellFormed) (valid : layout.Valid) (disjoint : layout.Disjoint)
     {values : List CIL.Value}
     (loaded : read memory home (layout.encode values).length 1 = .ok (layout.encode values))
     {index offset width : Nat} {aggregate : Bool}
     (found : layout.fields[index]? = some ⟨offset, width, aggregate⟩) {value : CIL.Value}
     (listed : values[index]? = some value) (exact : FieldExact width value) :
-    ∀ body pc args frame rest signed,
-      step body (.fieldAt offset width signed) pc args frame
+    ∀ (body : Method) (operand : Extraction.FieldRef) (signed : Bool),
+      body.fieldShape operand = .value offset width signed → ∀ pc args frame rest,
+      step body (.ldfld operand) pc args frame
         (.reference (.address home) :: rest) memory =
         .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
-  intro body pc args frame rest signed
+  intro body operand signed shape pc args frame rest
   have within := layout.within_encode valid values _ (List.mem_of_getElem? found)
   have number := layout.numberIn_encode valid disjoint found listed
   have scalar : ScalarWidth width := by
@@ -339,13 +342,13 @@ theorem fieldAt_encode_home {memory : Memory} {home : Reference} {layout : Aggre
   rw [← exact.decoded signed]
   cases signed with
   | false =>
-    simpa [number] using step_fieldAt_home (field := ⟨offset, width, aggregate⟩) formed loaded
-      within scalar body pc args frame rest
+    simpa [number] using step_ldfld_unsigned_home (field := ⟨offset, width, aggregate⟩) formed loaded
+      within scalar body operand shape pc args frame rest
   | true =>
-    simpa [number] using step_fieldAt_signed_home (field := ⟨offset, width, aggregate⟩) formed
-      loaded within scalar body pc args frame rest
+    simpa [number] using step_ldfld_signed_home (field := ⟨offset, width, aggregate⟩) formed
+      loaded within scalar body operand shape pc args frame rest
 
-#print axioms fieldAt_encode_home
+#print axioms ldfld_encode_home
 
 end CIL.Safety
 
@@ -470,68 +473,71 @@ theorem narrowLoad_decoded {width : Nat} (narrow : width = 1 ∨ width = 2) (sig
 
 /-- A by-value `ldfld` of a 1- or 2-byte field holding the number an int `bits` stores pushes
     `narrowLoad` of it. The step holds in any method and frame. -/
-theorem step_fieldAt_narrow {bytes : List (BitVec 8)} {offset width : Nat} {bits : BitVec 32}
+theorem step_ldfld_narrow {bytes : List (BitVec 8)} {offset width : Nat} {bits : BitVec 32}
     (within : offset + width ≤ bytes.length) (narrow : width = 1 ∨ width = 2)
     (decoded : byteNumber ((bytes.drop offset).take width) = fieldNumber width (.i32 bits)) :
-    ∀ body pc args frame memory rest signed,
-      step body (.fieldAt offset width signed) pc args frame (.scalar (.aggregate bytes) :: rest)
+    ∀ (body : Method) (operand : Extraction.FieldRef) (signed : Bool),
+      body.fieldShape operand = .value offset width signed → ∀ pc args frame memory rest,
+      step body (.ldfld operand) pc args frame (.scalar (.aggregate bytes) :: rest)
         memory =
         .ok (.next (pc + 1) (.scalar (.i32 (narrowLoad width signed bits)) :: rest) frame
           memory) := by
-  intro body pc args frame memory rest signed
+  intro body operand signed shape pc args frame memory rest
   have pushed := narrowLoad_decoded narrow signed bits
-  rw [step_fieldAt_eq]
+  rw [step_ldfld_value_eq _ _ _ _ _ _ _ _ _ shape]
   rcases narrow with rfl | rfl <;> cases signed <;>
-    simp_all [instructionStep, instruction, cil_guard, unspecifiedOperands, List.take, List.any,
+    simp_all [loadValueField, cil_guard, unspecifiedOperands, List.take, List.any,
       Value.hasUnspecified, signedOfWidth, numericOfWidth, Bind.bind, Except.bind, Pure.pure,
       Except.pure, Nat.not_lt.2 within]
 
 /-- A by-value `ldfld` of 1- or 2-byte field `index` of a struct of a valid, disjoint layout whose
     field values hold the int `bits` there pushes `narrowLoad` of it. -/
-theorem step_fieldAt_encode_narrow {layout : AggregateLayout} (valid : layout.Valid)
+theorem step_ldfld_encode_narrow {layout : AggregateLayout} (valid : layout.Valid)
     (index : Nat) (values : List CIL.Value) {offset width : Nat} {aggregate : Bool}
     (found : layout.fields[index]? = some ⟨offset, width, aggregate⟩ := by rfl)
     {bits : BitVec 32} (listed : values[index]? = some (.i32 bits) := by rfl)
     (narrow : width = 1 ∨ width = 2 := by decide) (disjoint : layout.Disjoint := by decide) :
-    ∀ body pc args frame memory rest signed,
-      step body (.fieldAt offset width signed) pc args frame
+    ∀ (body : Method) (operand : Extraction.FieldRef) (signed : Bool),
+      body.fieldShape operand = .value offset width signed → ∀ pc args frame memory rest,
+      step body (.ldfld operand) pc args frame
         (.scalar (.aggregate (layout.encode values)) :: rest) memory =
         .ok (.next (pc + 1) (.scalar (.i32 (narrowLoad width signed bits)) :: rest) frame
           memory) :=
-  step_fieldAt_narrow (layout.within_encode valid values _ (List.mem_of_getElem? found)) narrow
+  step_ldfld_narrow (layout.within_encode valid values _ (List.mem_of_getElem? found)) narrow
     (layout.numberIn_encode valid disjoint found listed)
 
 /-- `ldfld` of 1- or 2-byte field `index` through the address of a struct home holding a struct
     of a valid, disjoint layout whose field values hold the int `bits` there pushes `narrowLoad`
     of it. The step holds in any method and frame. -/
-theorem fieldAt_encode_home_narrow {memory : Memory} {home : Reference}
+theorem ldfld_encode_home_narrow {memory : Memory} {home : Reference}
     {layout : AggregateLayout} (formed : memory.WellFormed) (valid : layout.Valid)
     (disjoint : layout.Disjoint) {values : List CIL.Value}
     (loaded : read memory home (layout.encode values).length 1 = .ok (layout.encode values))
     {index offset width : Nat} {aggregate : Bool}
     (found : layout.fields[index]? = some ⟨offset, width, aggregate⟩) {bits : BitVec 32}
     (listed : values[index]? = some (.i32 bits)) (narrow : width = 1 ∨ width = 2) :
-    ∀ body pc args frame rest signed,
-      step body (.fieldAt offset width signed) pc args frame
+    ∀ (body : Method) (operand : Extraction.FieldRef) (signed : Bool),
+      body.fieldShape operand = .value offset width signed → ∀ pc args frame rest,
+      step body (.ldfld operand) pc args frame
         (.reference (.address home) :: rest) memory =
         .ok (.next (pc + 1) (.scalar (.i32 (narrowLoad width signed bits)) :: rest) frame
           memory) := by
-  intro body pc args frame rest signed
+  intro body operand signed shape pc args frame rest
   have within := layout.within_encode valid values _ (List.mem_of_getElem? found)
   have number := layout.numberIn_encode valid disjoint found listed
   have scalar : ScalarWidth width := by rcases narrow with rfl | rfl <;> simp [ScalarWidth]
   rw [← narrowLoad_decoded narrow signed bits]
   cases signed with
   | false =>
-    simpa [number] using step_fieldAt_home (field := ⟨offset, width, aggregate⟩) formed loaded
-      within scalar body pc args frame rest
+    simpa [number] using step_ldfld_unsigned_home (field := ⟨offset, width, aggregate⟩) formed loaded
+      within scalar body operand shape pc args frame rest
   | true =>
-    simpa [number] using step_fieldAt_signed_home (field := ⟨offset, width, aggregate⟩) formed
-      loaded within scalar body pc args frame rest
+    simpa [number] using step_ldfld_signed_home (field := ⟨offset, width, aggregate⟩) formed
+      loaded within scalar body operand shape pc args frame rest
 
 #print axioms narrowLoad_decoded
-#print axioms step_fieldAt_narrow
-#print axioms step_fieldAt_encode_narrow
-#print axioms fieldAt_encode_home_narrow
+#print axioms step_ldfld_narrow
+#print axioms step_ldfld_encode_narrow
+#print axioms ldfld_encode_home_narrow
 
 end CIL.Safety

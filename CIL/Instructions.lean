@@ -215,8 +215,6 @@ inductive Instruction where
       storage the method's layouts give that type, read-only when `readOnly` records a
       `readonly.` prefix. -/
   | ldelema (element : Extraction.TypeExpr) (readOnly : Bool)
-  | fieldAt (offset width : Nat) (signed : Bool := false)
-  | setFieldAt (offset width : Nat)
   -- Arguments and locals.
   /-- Pushes argument `index`, read as `Method.argumentAccess` says. -/
   | ldarg (index : Nat)

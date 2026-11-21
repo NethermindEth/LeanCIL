@@ -1421,6 +1421,32 @@ theorem observedTransfer_contract (kind : CIL.TransferKind) (store : Bool) (stac
   · exact transferValues_contract _ _ _ _ _ _ (by simpa [observedTransfer, observed] using h)
 #print axioms observedTransfer_contract
 
+/-- Reading a primitive or vector field preserves memory and the validity of the stack. -/
+theorem loadValueField_contract (offset width : Nat) (signed : Bool) (stack values : List Value)
+    (memory result : Memory)
+    (executed : loadValueField offset width signed stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold loadValueField at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms loadValueField_contract
+
+/-- Writing a primitive or vector field preserves memory authority and the validity of the stack. -/
+theorem storeValueField_contract (offset width : Nat) (stack values : List Value)
+    (memory result : Memory)
+    (executed : storeValueField offset width stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold storeValueField at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms storeValueField_contract
+
 set_option maxHeartbeats 800000 in
 theorem instruction_contract (operation : CIL.Instruction) (stack values : List Value)
     (m result : Memory)

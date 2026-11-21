@@ -9,19 +9,63 @@ namespace Extracted
 
 open CIL
 
+@[cil_code] def fieldEnvironment : LayoutEnvironment :=
+  { rawLayouts := [
+      { identity := "Constructs.Pair", explicit := false, packing := 0, declaredSize := 0,
+        fields := List.replicate 2 { type := .unsigned64 } },
+      { identity := "Constructs.Word", explicit := false, packing := 0, declaredSize := 0,
+        fields := List.replicate 4 { type := .unsigned64 } },
+      { identity := "Constructs.Logged", explicit := false, packing := 0, declaredSize := 0,
+        fields := [{ type := .unsigned64 }] }]
+    layouts := #[⟨⟨16, [⟨0, 8, false⟩, ⟨8, 8, false⟩]⟩, 8⟩,
+      ⟨⟨32, [⟨0, 8, false⟩, ⟨8, 8, false⟩, ⟨16, 8, false⟩, ⟨24, 8, false⟩]⟩, 8⟩,
+      ⟨⟨8, [⟨0, 8, false⟩]⟩, 8⟩] }
+
+theorem layouts_valid : Extraction.LayoutsValid fieldEnvironment.rawLayouts fieldEnvironment.layouts .x64 :=
+  by decide +kernel
+#print axioms layouts_valid
+
+def pairLow : Extraction.FieldRef :=
+  { owner := .aggregate "Constructs.Pair" 0, index := 0, name := name!"Low", type := .atom Extraction.runtimeScope "System.UInt64" }
+cil_field_shape fieldEnvironment pairLow
+
+def pairHigh : Extraction.FieldRef :=
+  { owner := .aggregate "Constructs.Pair" 0, index := 1, name := name!"High", type := .atom Extraction.runtimeScope "System.UInt64" }
+cil_field_shape fieldEnvironment pairHigh
+
+def limb0 : Extraction.FieldRef :=
+  { owner := .aggregate "Constructs.Word" 1, index := 0, name := name!"U0", type := .atom Extraction.runtimeScope "System.UInt64" }
+cil_field_shape fieldEnvironment limb0
+
+def limb1 : Extraction.FieldRef :=
+  { owner := .aggregate "Constructs.Word" 1, index := 1, name := name!"U1", type := .atom Extraction.runtimeScope "System.UInt64" }
+cil_field_shape fieldEnvironment limb1
+
+def limb2 : Extraction.FieldRef :=
+  { owner := .aggregate "Constructs.Word" 1, index := 2, name := name!"U2", type := .atom Extraction.runtimeScope "System.UInt64" }
+cil_field_shape fieldEnvironment limb2
+
+def limb3 : Extraction.FieldRef :=
+  { owner := .aggregate "Constructs.Word" 1, index := 3, name := name!"U3", type := .atom Extraction.runtimeScope "System.UInt64" }
+cil_field_shape fieldEnvironment limb3
+
+def loggedValue : Extraction.FieldRef :=
+  { owner := .aggregate "Constructs.Logged" 2, index := 0, name := name!"Value", type := .atom Extraction.runtimeScope "System.UInt64" }
+cil_field_shape fieldEnvironment loggedValue
+
 def method0Signature : String := "System.UInt64 Constructs.Calls::Root(System.UInt64,System.UInt64)"
 def method1Signature : String := "System.Void Constructs.Word::.ctor(System.UInt64,System.UInt64,System.UInt64,System.UInt64)"
 def method2Signature : String := "System.Void Constructs.Pair::.ctor(System.UInt64,System.UInt64)"
 @[cil_code] def method0 : Method := {
-  returnsValue := true, locals := [],
-  code := [.ldarg 0, .ldarg 1, .newobj (.arity 2), .fieldAt 8 8, .ldarg 1, .ldc_i4 1, .conv_i8,
-    .ldc_i4 2, .conv_i8, .ldarg 0, .newobj (.arity 4), .fieldAt 24 8, .add, .ret],
+  environment := fieldEnvironment, returnsValue := true, locals := [],
+  code := [.ldarg 0, .ldarg 1, .newobj (.arity 2), .ldfld Extracted.pairHigh, .ldarg 1, .ldc_i4 1, .conv_i8,
+    .ldc_i4 2, .conv_i8, .ldarg 0, .newobj (.arity 4), .ldfld limb3, .add, .ret],
   links := [(2, .aggregate 2 16), (10, .aggregate 1 32)] }
-@[cil_code] def method1 : Method := { returnsValue := false, locals := [], code :=
-  [.ldarg 0, .ldarg 1, .setFieldAt 0 8, .ldarg 0, .ldarg 2, .setFieldAt 8 8, .ldarg 0, .ldarg 3,
-    .setFieldAt 16 8, .ldarg 0, .ldarg 4, .setFieldAt 24 8, .ret] }
-@[cil_code] def method2 : Method := { returnsValue := false, locals := [], code :=
-  [.ldarg 0, .ldarg 1, .setFieldAt 0 8, .ldarg 0, .ldarg 2, .setFieldAt 8 8, .ret] }
+@[cil_code] def method1 : Method := { environment := Extracted.fieldEnvironment, returnsValue := false, locals := [], code :=
+  [.ldarg 0, .ldarg 1, .stfld limb0, .ldarg 0, .ldarg 2, .stfld limb1, .ldarg 0, .ldarg 3,
+    .stfld limb2, .ldarg 0, .ldarg 4, .stfld limb3, .ret] }
+@[cil_code] def method2 : Method := { environment := Extracted.fieldEnvironment, returnsValue := false, locals := [], code :=
+  [.ldarg 0, .ldarg 1, .stfld Extracted.pairLow, .ldarg 0, .ldarg 2, .stfld pairHigh, .ret] }
 @[cil_code] def program : Program := [method0, method1, method2]
 def signatures : List String := [method0Signature, method1Signature, method2Signature]
 
@@ -211,10 +255,10 @@ theorem root_correct : rootContract.Holds Extracted.program root := root_holds p
 /-! `newobj` zeroes its storage first, so an unassigned `High` reads back as zero, not uninitialized. -/
 namespace Defaults
 
-@[cil_code] def caller : CIL.Method := { returnsValue := true, locals := [], code :=
-  [.ldarg 0, .newobj (.arity 1), .fieldAt 8 8, .ret], links := [(1, .aggregate 1 16)] }
-@[cil_code] def lowOnly : CIL.Method := { returnsValue := false, locals := [], code :=
-  [.ldarg 0, .ldarg 1, .setFieldAt 0 8, .ret] }
+@[cil_code] def caller : CIL.Method := { environment := Extracted.fieldEnvironment, returnsValue := true, locals := [], code :=
+  [.ldarg 0, .newobj (.arity 1), .ldfld Extracted.pairHigh, .ret], links := [(1, .aggregate 1 16)] }
+@[cil_code] def lowOnly : CIL.Method := { environment := Extracted.fieldEnvironment, returnsValue := false, locals := [], code :=
+  [.ldarg 0, .ldarg 1, .stfld Extracted.pairLow, .ret] }
 @[cil_code] def program : CIL.Program := [caller, lowOnly]
 
 structure LowInput where
@@ -318,8 +362,8 @@ theorem missing_authority_rejected : unguardedContract.Refuted Extracted.program
       .error ⟨2, 2, .memory .unwritable (.address ⟨0, 0⟩) 8⟩)
 
 /-- `Logged(ref ulong log, ulong value) { log = 1; Value = value; }` -/
-@[cil_code] def logged : CIL.Method := { returnsValue := false, locals := [], code :=
-  [.ldarg 1, .ldc_i8 1, .stind .i8, .ldarg 0, .ldarg 2, .setFieldAt 0 8, .ret] }
+@[cil_code] def logged : CIL.Method := { environment := Extracted.fieldEnvironment, returnsValue := false, locals := [], code :=
+  [.ldarg 1, .ldc_i8 1, .stind .i8, .ldarg 0, .ldarg 2, .stfld Extracted.loggedValue, .ret] }
 @[cil_code] def loggedProgram : CIL.Program := [logged]
 
 structure LoggedInput where

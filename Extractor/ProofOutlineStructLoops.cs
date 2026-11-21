@@ -337,12 +337,13 @@ internal static partial class ProofOutline
             }
             Line($"{indent}obtain ⟨memory{index}, written{index}, -, confined{index}, held{index}⟩ :=");
             Line($"{indent}  {path.Owned[field.Offset]}.write_one {value}");
-            Line($"{indent}have stepped{index} : ∀ body pc args frame rest,");
-            Line($"{indent}    step body (.setFieldAt {field.Offset} 8) pc args frame");
+            Line($"{indent}have stepped{index} : ∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef) signed,");
+            Line($"{indent}    body.fieldShape operand = .value {field.Offset} 8 signed → ∀ pc args frame rest,");
+            Line($"{indent}    step body (.stfld operand) pc args frame");
             Line($"{indent}      (.scalar (.i64 {value}) :: .reference (.address {receiver}) :: rest)");
             Line($"{indent}      {path.Memory} = .ok (.next (pc + 1) rest frame memory{index}) := by");
-            Line($"{indent}  intros");
-            Line($"{indent}  rw [step_setFieldAt_i64_eq, added{index}]");
+            Line($"{indent}  intro body operand signed shape pc args frame rest");
+            Line($"{indent}  rw [step_stfld_value_i64_eq _ _ _ _ _ _ _ _ shape, added{index}]");
             Line($"{indent}  dsimp only [checkedAt, Except.mapError, bind, pure, Except.bind, Except.pure]");
             Line($"{indent}  rw [written{index}]");
             Line($"{indent}have formed{index} : form memory{index} {receiver} = .ok {receiver} :=");

@@ -893,43 +893,17 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
   rfl
 #print axioms step_sizeof_eq
 
--- One equation per op, so simp selects it by constructor without a side condition.
-@[cil_step] theorem step_fieldAt_eq {offset width signed} (stack : List Value) :
-    step body (.fieldAt offset width signed) pc args frame stack memory =
-      instructionStep (.fieldAt offset width signed) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
-@[cil_step] theorem step_setFieldAt_eq {offset width} (stack : List Value) :
-    step body (.setFieldAt offset width) pc args frame stack memory =
-      instructionStep (.setFieldAt offset width) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 2 stack <;> rfl
-
-
-/-! A struct field instruction steps as the lowered instruction of its checked shape, so the
-equations of the lowered forms state what it does on every stack. -/
-
-/-- A faulting guard faults the lowered instruction too, before it reads memory. -/
-private theorem instruction_guarded {operation : CIL.Instruction} {stack : List Value}
-    (unknown : unspecifiedOperands (observerCount operation) stack = true) :
-    instruction operation stack memory =
-      .error (.unsupported "Instruction observes unspecified vector bits") := by
-  unfold instruction
-  rw [if_pos unknown]
-
-/-- `ldfld` of a struct field of primitive or vector shape steps as `fieldAt` of its offset,
-    width and sign on every stack, faults included. -/
+/-- A primitive or vector struct field reads the offset, width and sign of its checked shape. -/
 theorem step_ldfld_value_eq (field : CIL.Extraction.FieldRef) (offset width : Nat)
     (signed : Bool) (shape : body.fieldShape field = .value offset width signed)
     (stack : List Value) :
-    step body (.ldfld field) pc args frame stack memory =
-      step body (.fieldAt offset width signed) pc args frame stack memory := by
-  rw [step_ldfld_eq, step_fieldAt_eq]
-  simp only [fieldLoad, shape, instructionStep]
-  cases observed : unspecifiedOperands 1 stack
-  · rfl
-  · rw [instruction_guarded memory (operation := .fieldAt offset width signed) observed]
-    rfl
+    step body (.ldfld field) pc args frame stack memory = (do
+      let (memory, stack) ← loadValueField offset width signed stack memory
+      return .next (pc + 1) stack frame memory) := by
+  rw [step_ldfld_eq]
+  simp only [fieldLoad, shape]
+  unfold loadValueField
+  split <;> rfl
 #print axioms step_ldfld_value_eq
 
 /-- A nested struct field is read from its checked offset with its initialization flags. -/
@@ -944,19 +918,17 @@ theorem step_ldfld_aggregate_eq (field : CIL.Extraction.FieldRef) (offset size :
   split <;> rfl
 #print axioms step_ldfld_aggregate_eq
 
-/-- `stfld` of a struct field of primitive or vector shape steps as `setFieldAt` of its
-    offset and width on every stack, faults included. -/
+/-- A primitive or vector struct field writes the offset and width of its checked shape. -/
 theorem step_stfld_value_eq (field : CIL.Extraction.FieldRef) (offset width : Nat)
     (signed : Bool) (shape : body.fieldShape field = .value offset width signed)
     (stack : List Value) :
-    step body (.stfld field) pc args frame stack memory =
-      step body (.setFieldAt offset width) pc args frame stack memory := by
-  rw [step_stfld_eq, step_setFieldAt_eq]
-  simp only [fieldStore, shape, instructionStep]
-  cases observed : unspecifiedOperands 2 stack
-  · rfl
-  · rw [instruction_guarded memory (operation := .setFieldAt offset width) observed]
-    rfl
+    step body (.stfld field) pc args frame stack memory = (do
+      let (memory, stack) ← storeValueField offset width stack memory
+      return .next (pc + 1) stack frame memory) := by
+  rw [step_stfld_eq]
+  simp only [fieldStore, shape]
+  unfold storeValueField
+  split <;> rfl
 #print axioms step_stfld_value_eq
 
 /-- A nested struct store writes at the offset and width from the checked field shape. -/
@@ -1023,13 +995,15 @@ theorem step_ldflda_readOnlyReference_eq (field : CIL.Extraction.FieldRef) (offs
 @[cil_step] theorem step_ldind_eq {kind} (stack : List Value) :
     step body (.ldind kind) pc args frame stack memory =
       instructionStep (.ldind kind) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
+  by_cases observed : unspecifiedOperands 1 stack = true <;>
+    simp only [step, instructionStep, instruction, observerCount, pureArity, observed, ↓reduceIte,
+      Bool.false_eq_true] <;> rfl
 @[cil_step] theorem step_stind_eq {kind} (stack : List Value) :
     step body (.stind kind) pc args frame stack memory =
       instructionStep (.stind kind) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 2 stack <;> rfl
+  by_cases observed : unspecifiedOperands 2 stack = true <;>
+    simp only [step, instructionStep, instruction, observerCount, pureArity, observed, ↓reduceIte,
+      Bool.false_eq_true] <;> rfl
 @[cil_step] theorem step_ldlen_eq (stack : List Value) :
     step body .ldlen pc args frame stack memory =
       instructionStep .ldlen pc frame stack memory := by

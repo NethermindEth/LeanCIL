@@ -18,7 +18,8 @@ namespace CIL.Safety
     decided guard leaves the single matching arm. -/
 local macro "instruction_step_proof " generic:ident : tactic => `(tactic| (
   rw [$generic:ident]
-  simp only [instructionStep, instruction, transferValues, elementInstruction, cil_guard, unspecifiedOperands,
+  simp only [instructionStep, instruction, loadValueField, storeValueField, transferValues,
+    elementInstruction, cil_guard, unspecifiedOperands,
     List.take, List.any,
     Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, bind_assoc, pure_bind]
   all_goals first | rfl | (split <;> rfl)))
@@ -103,119 +104,135 @@ theorem step_stind_i32_eq (kind : CIL.NumericKind) (narrow : kind.width ≠ 8) (
       return .next (pc + 1) rest frame stored := by
   cases kind <;> first | exact absurd rfl narrow | instruction_step_proof step_stind_eq
 
+/-- Rewrite a checked field access using its shape, then reduce the guard on known operands. -/
+local macro "field_value_step_proof " equation:ident access:ident shape:ident : tactic => `(tactic| (
+  rw [$equation:ident _ _ _ _ _ _ _ _ _ $shape:ident]
+  simp only [$access:ident, cil_guard, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    Bool.or_false, Bool.false_eq_true, ite_false, bind_assoc, pure_bind]
+  all_goals first | rfl | (split <;> rfl)))
+
 -- Fields of a referenced struct.
 /-- A field load forms the field address, then reads it at the field's width. -/
 @[cil_instruction_step high]
-theorem step_fieldAt_reference_eq (offset width : Nat) (signed : Bool)
+theorem step_ldfld_value_reference_eq (field : Extraction.FieldRef) (offset width : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .value offset width signed)
     (reference : Reference) (rest : List Value) :
-    step body (.fieldAt offset width signed) pc args frame
+    step body (.ldfld field) pc args frame
       (.reference (.address reference) :: rest) memory = do
       let address ← checkedAt (.address reference) 0
         (add memory reference 1 (BitVec.ofNat 64 offset))
       let value ← loadValue memory (.address address) width signed
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
-  instruction_step_proof step_fieldAt_eq
+  field_value_step_proof step_ldfld_value_eq loadValueField shape
 
 /-- A field load through a readonly reference reads exactly as through a writable one. -/
 @[cil_instruction_step high]
-theorem step_fieldAt_readOnlyReference_eq (offset width : Nat) (signed : Bool)
+theorem step_ldfld_value_readOnlyReference_eq (field : Extraction.FieldRef) (offset width : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .value offset width signed)
     (reference : Reference) (rest : List Value) :
-    step body (.fieldAt offset width signed) pc args frame
+    step body (.ldfld field) pc args frame
       (.readOnlyReference (.address reference) :: rest) memory = do
       let address ← checkedAt (.address reference) 0
         (add memory reference 1 (BitVec.ofNat 64 offset))
       let value ← loadValue memory (.address address) width signed
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
-  instruction_step_proof step_fieldAt_eq
+  field_value_step_proof step_ldfld_value_eq loadValueField shape
 
 /-- An i32 field store of width 1, 2 or 4 writes the value's low bytes at the field address. -/
-theorem step_setFieldAt_i32_eq (offset width : Nat) (narrow : width = 1 ∨ width = 2 ∨ width = 4)
+theorem step_stfld_value_i32_eq (field : Extraction.FieldRef) (offset width : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .value offset width signed) (narrow : width = 1 ∨ width = 2 ∨ width = 4)
     (bits : CIL.W32) (reference : Reference) (rest : List Value) :
-    step body (.setFieldAt offset width) pc args frame
+    step body (.stfld field) pc args frame
       (.scalar (.i32 bits) :: .reference (.address reference) :: rest) memory = do
       let address ← checkedAt (.address reference) 0
         (add memory reference 1 (BitVec.ofNat 64 offset))
       let stored ← checkedAt (.address address) width
         (write memory address (numberBytes bits.toNat width) ordinaryAccessAlignment)
       return .next (pc + 1) rest frame stored := by
-  rcases narrow with rfl | rfl | rfl <;> instruction_step_proof step_setFieldAt_eq
+  rcases narrow with rfl | rfl | rfl <;> field_value_step_proof step_stfld_value_eq storeValueField shape
 
 /-- A one-byte field store. -/
 @[cil_instruction_step high]
-theorem step_setFieldAt_i32_1_eq (offset : Nat) (bits : CIL.W32)
+theorem step_stfld_value_i32_1_eq (field : Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .value offset 1 signed) (bits : CIL.W32)
     (reference : Reference) (rest : List Value) :
-    step body (.setFieldAt offset 1) pc args frame
+    step body (.stfld field) pc args frame
       (.scalar (.i32 bits) :: .reference (.address reference) :: rest) memory = do
       let address ← checkedAt (.address reference) 0
         (add memory reference 1 (BitVec.ofNat 64 offset))
       let stored ← checkedAt (.address address) 1
         (write memory address (numberBytes bits.toNat 1) ordinaryAccessAlignment)
       return .next (pc + 1) rest frame stored :=
-  step_setFieldAt_i32_eq body pc args frame memory offset 1 (.inl rfl) bits reference rest
+  step_stfld_value_i32_eq body pc args frame memory field offset 1 signed shape (.inl rfl) bits reference rest
 
 /-- A two-byte field store. -/
 @[cil_instruction_step high]
-theorem step_setFieldAt_i32_2_eq (offset : Nat) (bits : CIL.W32)
+theorem step_stfld_value_i32_2_eq (field : Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .value offset 2 signed) (bits : CIL.W32)
     (reference : Reference) (rest : List Value) :
-    step body (.setFieldAt offset 2) pc args frame
+    step body (.stfld field) pc args frame
       (.scalar (.i32 bits) :: .reference (.address reference) :: rest) memory = do
       let address ← checkedAt (.address reference) 0
         (add memory reference 1 (BitVec.ofNat 64 offset))
       let stored ← checkedAt (.address address) 2
         (write memory address (numberBytes bits.toNat 2) ordinaryAccessAlignment)
       return .next (pc + 1) rest frame stored :=
-  step_setFieldAt_i32_eq body pc args frame memory offset 2 (.inr (.inl rfl)) bits reference rest
+  step_stfld_value_i32_eq body pc args frame memory field offset 2 signed shape (.inr (.inl rfl)) bits reference rest
 
 /-- A four-byte field store. -/
 @[cil_instruction_step high]
-theorem step_setFieldAt_i32_4_eq (offset : Nat) (bits : CIL.W32)
+theorem step_stfld_value_i32_4_eq (field : Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .value offset 4 signed) (bits : CIL.W32)
     (reference : Reference) (rest : List Value) :
-    step body (.setFieldAt offset 4) pc args frame
+    step body (.stfld field) pc args frame
       (.scalar (.i32 bits) :: .reference (.address reference) :: rest) memory = do
       let address ← checkedAt (.address reference) 0
         (add memory reference 1 (BitVec.ofNat 64 offset))
       let stored ← checkedAt (.address address) 4
         (write memory address (numberBytes bits.toNat 4) ordinaryAccessAlignment)
       return .next (pc + 1) rest frame stored :=
-  step_setFieldAt_i32_eq body pc args frame memory offset 4 (.inr (.inr rfl)) bits reference rest
+  step_stfld_value_i32_eq body pc args frame memory field offset 4 signed shape (.inr (.inr rfl)) bits reference rest
 
 /-- An eight-byte field store of an i64. -/
 @[cil_instruction_step high]
-theorem step_setFieldAt_i64_eq (offset : Nat) (bits : CIL.W64)
+theorem step_stfld_value_i64_eq (field : Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .value offset 8 signed) (bits : CIL.W64)
     (reference : Reference) (rest : List Value) :
-    step body (.setFieldAt offset 8) pc args frame
+    step body (.stfld field) pc args frame
       (.scalar (.i64 bits) :: .reference (.address reference) :: rest) memory = do
       let address ← checkedAt (.address reference) 0
         (add memory reference 1 (BitVec.ofNat 64 offset))
       let stored ← checkedAt (.address address) 8
         (write memory address (numberBytes bits.toNat 8) ordinaryAccessAlignment)
       return .next (pc + 1) rest frame stored := by
-  instruction_step_proof step_setFieldAt_eq
+  field_value_step_proof step_stfld_value_eq storeValueField shape
 
 -- Fields of a struct value on the stack.
 /-- A four-byte field of a struct value is read from its bytes, after a bounds check. -/
 @[cil_instruction_step high]
-theorem step_fieldAt_aggregate_4_eq (offset : Nat) (signed : Bool)
+theorem step_ldfld_value_aggregate_4_eq (field : Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .value offset 4 signed)
     (bytes : List (BitVec 8)) (rest : List Value) :
-    step body (.fieldAt offset 4 signed) pc args frame (.scalar (.aggregate bytes) :: rest)
+    step body (.ldfld field) pc args frame (.scalar (.aggregate bytes) :: rest)
       memory =
       if offset + 4 > bytes.length then .error .invalidState
       else .ok (.next (pc + 1)
         (.scalar (.i32 (BitVec.ofNat 32 (byteNumber ((bytes.drop offset).take 4)))) :: rest)
         frame memory) := by
-  instruction_step_proof step_fieldAt_eq
+  field_value_step_proof step_ldfld_value_eq loadValueField shape
 
 /-- An eight-byte field of a struct value is read from its bytes, after a bounds check. -/
 @[cil_instruction_step high]
-theorem step_fieldAt_aggregate_8_eq (offset : Nat) (signed : Bool)
+theorem step_ldfld_value_aggregate_8_eq (field : Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .value offset 8 signed)
     (bytes : List (BitVec 8)) (rest : List Value) :
-    step body (.fieldAt offset 8 signed) pc args frame (.scalar (.aggregate bytes) :: rest)
+    step body (.ldfld field) pc args frame (.scalar (.aggregate bytes) :: rest)
       memory =
       if offset + 8 > bytes.length then .error .invalidState
       else .ok (.next (pc + 1)
         (.scalar (.i64 (BitVec.ofNat 64 (byteNumber ((bytes.drop offset).take 8)))) :: rest)
         frame memory) := by
-  instruction_step_proof step_fieldAt_eq
+  field_value_step_proof step_ldfld_value_eq loadValueField shape
 
 /-- A nested struct field of a struct value is the field's bytes, after a bounds check. -/
 @[cil_instruction_step high]
@@ -307,15 +324,15 @@ simproc [cil_instruction_step] reduceObjectSize (step _ (.sizeof _) _ _ _ _ _) :
 #print axioms step_stind_i8_eq
 #print axioms step_stind_i_eq
 #print axioms step_stind_i32_eq
-#print axioms step_fieldAt_reference_eq
-#print axioms step_fieldAt_readOnlyReference_eq
-#print axioms step_setFieldAt_i32_eq
-#print axioms step_setFieldAt_i32_1_eq
-#print axioms step_setFieldAt_i32_2_eq
-#print axioms step_setFieldAt_i32_4_eq
-#print axioms step_setFieldAt_i64_eq
-#print axioms step_fieldAt_aggregate_4_eq
-#print axioms step_fieldAt_aggregate_8_eq
+#print axioms step_ldfld_value_reference_eq
+#print axioms step_ldfld_value_readOnlyReference_eq
+#print axioms step_stfld_value_i32_eq
+#print axioms step_stfld_value_i32_1_eq
+#print axioms step_stfld_value_i32_2_eq
+#print axioms step_stfld_value_i32_4_eq
+#print axioms step_stfld_value_i64_eq
+#print axioms step_ldfld_value_aggregate_4_eq
+#print axioms step_ldfld_value_aggregate_8_eq
 #print axioms step_ldfld_aggregate_value_eq
 #print axioms step_ldfld_aggregate_snapshot_eq
 #print axioms step_initobj_reference_eq

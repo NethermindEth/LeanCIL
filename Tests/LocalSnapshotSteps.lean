@@ -1,3 +1,4 @@
+import Tests.WordFields
 import CIL.Safety.CallingFields
 import CIL.Safety.LocalSnapshotSteps
 
@@ -534,8 +535,9 @@ def pair (reference : Reference) : ArgumentView := ⟨reference, 16⟩
 /-- Store an argument, then read caller data after each store: an input word, the output
     reference, and two caller limbs. -/
 @[cil_code] def callerReads : CIL.Method := {
+  environment := Tests.WordFields.pairEnvironment
   code := [.ldarg 0, .stloc 0,
-    .ldarg 1, .fieldAt 8 8, .stloc 1,
+    .ldarg 1, .ldfld Tests.WordFields.high, .stloc 1,
     .ldarg 2, .pop,
     .ldarg 3, .ldind .i8, .stloc 0,
     .ldarg 4, .ldind .i8, .pop,

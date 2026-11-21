@@ -155,9 +155,8 @@ structure LoopFetched where
   op : Lean.Expr
   /-- An unlinked call runs its model or faults in the current frame. -/
   unlinkedCall : Bool
-  /-- For a struct field access, a proof that the fetched and lowered instructions step alike,
-      over `pc args frame memory stack`. -/
-  lowering : Option Lean.Expr
+  /-- The offset and checked shape equation for a primitive or vector struct field. -/
+  valueField : Option (Lean.Expr × Lean.Expr)
   /-- A proof that the program holds the goal's method. -/
   found : Lean.Expr
   /-- A proof of the original instruction lookup at the goal's pc. -/
@@ -190,18 +189,26 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
   let found ← instantiateMVars methodLookup
   let instruction ← instantiateMVars instructionLookup
   let op ← lastArgument "loopFetch" op
-  let lowered ← match fetched.find? (·.isAppOfArity ``CIL.Method.code 1) with
-    | some code => storageLowering? code.appArg! op
+  let code? := fetched.find? (·.isAppOfArity ``CIL.Method.code 1)
+  let lowered ← match code? with
+    | some code => typedObjectLowering? code.appArg! op
     | none => pure none
+  let resolvedField : MetaM (Option (Expr × Expr)) := do
+    let some code := code? | return none
+    let (name, #[field]) := (← whnfR op).getAppFnArgs | pure none
+    unless name == ``CIL.Instruction.ldfld || name == ``CIL.Instruction.stfld do return none
+    let some (shape, proof) ← fieldShapeKnown? code.appArg! field | pure none
+    let_expr CIL.FieldShape.value offset _ _ := shape | pure none
+    return some (offset, proof)
+  let valueField ← resolvedField
   let .mvar step := stepPremise
     | throwError "loopFetch: expected a step premise, but found{indentExpr stepPremise}"
-  let lowering := lowered.map (·.2)
   let unlinkedCall ← if (← whnfR op).isAppOf ``CIL.Instruction.call then do
       let some (_, action, _) := (← instantiateMVars (← step.getType)).eq? | pure false
       let some #[body, _, pc, _, _, _, _] := argumentsOf? action ``CIL.Safety.step 7 | pure false
       unlinkedPc body pc
     else pure false
-  return { op := lowered.map (·.1) |>.getD op, unlinkedCall, lowering, found, instruction, step }
+  return { op := lowered.map (·.1) |>.getD op, unlinkedCall, valueField, found, instruction, step }
 
 /-- Instructions that only move values, which no case split decides. -/
 def loopMovesOnly : List Lean.Name :=
@@ -350,7 +357,7 @@ def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) :
     let some slot ← loopLocalAt locals index | return true
     unless (← whnfR slot).isAppOf ``LocalSlot.bytes do return true
   else unless
-      op.isAppOf ``CIL.Instruction.setFieldAt || op.isAppOf ``CIL.Instruction.initobj do
+      op.isAppOf ``CIL.Instruction.stfld || op.isAppOf ``CIL.Instruction.initobj do
     return true
   let heads := [``storeLocal, ``storeValue, ``CIL.Safety.step]
   let states (type : Expr) : Bool := (type.find? fun part =>
@@ -363,13 +370,13 @@ def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) :
 /-- The groups of `facts` the instruction `op` reads besides its core: a return reads them all,
     since its postcondition may speak of anything the loop proved, and the reference facts only
     an instruction that `references` says can check a reference or span. -/
-def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) (references : Bool) :
+def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) (references valueField : Bool) :
     Array (Array Lean.Syntax.Term) :=
   if op == ``CIL.Instruction.ret then
     #[facts.addresses, facts.fields, facts.cases, facts.references] else
   #[if op == ``CIL.Instruction.ldloca || op == ``CIL.Instruction.ldarga then facts.addresses
       else #[],
-    if op == ``CIL.Instruction.fieldAt then facts.fields else #[],
+    if op == ``CIL.Instruction.ldfld && valueField then facts.fields else #[],
     if loopMovesOnly.contains op then #[] else facts.cases,
     if references then facts.references else #[]]
 
@@ -399,7 +406,8 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
     throwError "{tactic}: cannot fetch the instruction at pc {position}: {error.toMessageData}"
   let op := fetched.op
   let opName := ((← whnfR op).getAppFn.constName?).getD Name.anonymous
-  if !fetched.unlinkedCall && stops opName then saved.restore; return
+  let frameStore := opName != ``CIL.Instruction.stfld || fetched.valueField.isSome
+  if !fetched.unlinkedCall && frameStore && stops opName then saved.restore; return
   -- A call without a link runs its model in this method, so its step is shown like any other.
   let modelled ← if opName == ``CIL.Instruction.call || opName == ``CIL.Instruction.newobj then
       modelledCallStep? fetched.step
@@ -504,10 +512,10 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
     | .finish => (· == ``CIL.Instruction.ret)
     | .advance => fun op => callsCallee op || op == ``CIL.Instruction.ret
     | .resume _ => fun op =>
-      op == ``CIL.Instruction.setFieldAt || op == ``CIL.Instruction.initobj
+      op == ``CIL.Instruction.stfld || op == ``CIL.Instruction.initobj
   -- A struct store no fact steps ends any walk but `.reach`, for the frame lemmas to take.
   let yields : Lean.Name → Bool := fun op => stops op || (mode != .reach &&
-    (op == ``CIL.Instruction.setFieldAt || op == ``CIL.Instruction.initobj ||
+    (op == ``CIL.Instruction.stfld || op == ``CIL.Instruction.initobj ||
       op == ``CIL.Instruction.stloc || op == ``CIL.Instruction.starg))
   let mut taken := 0
   let mut localIndex : LoopLocalIndex := {}
@@ -538,9 +546,10 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
       let fetched? ← observing? do
         let fetched ← loopFetch core
         let stores := [``CIL.Instruction.stloc, ``CIL.Instruction.starg,
-          ``CIL.Instruction.setFieldAt, ``CIL.Instruction.initobj]
+          ``CIL.Instruction.stfld, ``CIL.Instruction.initobj]
+        let frameStore := !(← whnfR fetched.op).isAppOf ``CIL.Instruction.stfld || fetched.valueField.isSome
         let classify : StateT LoopLocalIndex MetaM (Bool × Bool) := do
-          let unknownStore ← if stores.any (← whnfR fetched.op).isAppOf then
+          let unknownStore ← if frameStore && stores.any (← whnfR fetched.op).isAppOf then
               pure !(← loopStoreKnown fetched.op fetched.step facts.known)
             else pure false
           return (← loopReadsReferences fetched.op fetched.step, unknownStore)
@@ -556,12 +565,13 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
     -- A call or return ends an advance before any step; a resumed walk tries the store first,
     -- since a store fact the frame lemmas just produced may step it.
     let resuming := match mode with | .resume _ => true | _ => false
-    if !fetched.unlinkedCall && stops op && !finishing && !resuming then return some op
+    let frameStore := op != ``CIL.Instruction.stfld || fetched.valueField.isSome
+    if !fetched.unlinkedCall && frameStore && stops op && !finishing && !resuming then return some op
     -- A store no fact states steps only through the frame lemmas.
     if mode != .reach && unknownStore then return some op
     -- The groups this instruction reads, normalised in the goal the first time one is read.
     let mut reading := prepared
-    let read := facts.readBy op references
+    let read := facts.readBy op references fetched.valueField.isSome
     for h : index in [:read.size] do
       if read[index].isEmpty then continue
       let cached ← entryAt tactic normalised index
@@ -599,7 +609,7 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
     if ← withNormalNodes reading (attempt next) then
       taken := taken + 1
       continue
-    if !fetched.unlinkedCall && yields op then return some op
+    if !fetched.unlinkedCall && frameStore && yields op then return some op
     loopStuck tactic facts.all reading yields
     return none
   return none

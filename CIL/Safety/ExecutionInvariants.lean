@@ -535,7 +535,7 @@ theorem fieldLoad_contract (body : CIL.Method) (field : CIL.Extraction.FieldRef)
   unfold fieldLoad at executed
   split at executed
   · exact classFieldLoad_contract _ _ _ _ _ _ _ executed
-  · exact instruction_contract _ _ _ _ _ executed
+  · exact loadValueField_contract _ _ _ _ _ _ _ executed
   · exact loadAggregateField_contract _ _ _ _ _ _ executed
   · cases executed
 #print axioms fieldLoad_contract
@@ -548,7 +548,7 @@ theorem fieldStore_contract (body : CIL.Method) (field : CIL.Extraction.FieldRef
   unfold fieldStore at executed
   split at executed
   · exact classFieldStore_contract _ _ _ _ _ _ _ executed
-  · exact instruction_contract _ _ _ _ _ executed
+  · exact storeValueField_contract _ _ _ _ _ _ executed
   · exact storeAggregateField_contract _ _ _ _ _ _ executed
   · cases executed
 #print axioms fieldStore_contract

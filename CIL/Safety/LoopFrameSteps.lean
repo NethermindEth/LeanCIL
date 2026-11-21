@@ -300,7 +300,7 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   let some parts ← loopStateParts? source | return false
   let fetched ← observing? (loopFetch facts)
   saved.restore
-  let some { op, lowering, found, instruction, .. } := fetched | return false
+  let some { op, valueField, found, instruction, .. } := fetched | return false
   let op ← whnfR op
   let #[_, _, stackList, memory] := parts | return false
   let stack ← listEntries stackList
@@ -310,8 +310,8 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   let below ← loopFreshName `storedBelow
   -- A local store is a `storeLocal` fact the next step reads; a struct store is a whole step.
   let mut takesStep := true
-  let store ← if op.isAppOfArity ``CIL.Instruction.setFieldAt 2 then do
-      let some offsetTerm := argument? op 0 | return false
+  let store ← if op.isAppOfArity ``CIL.Instruction.stfld 1 then do
+      let some (offsetTerm, _) := valueField | return false
       let some offset ← literalNat? offsetTerm | return false
       let some (_, top) := stack[0]? | return false
       let some (_, address) := stack[1]? | return false
@@ -395,11 +395,10 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   try
     let found ← Term.exprToSyntax found
     let instruction ← Term.exprToSyntax instruction
-    -- A struct field store steps as its lowered store, which the frame lemma states.
-    let storing ← match lowering with
-      | some lowering => do
-        let lowering ← Term.exprToSyntax lowering
-        `(Eq.trans ($lowering _ _ _ _ _) ($stepped _ _ _ _ _))
+    let storing ← match valueField with
+      | some (_, proof) => do
+        let shape ← Term.exprToSyntax proof
+        `($stepped _ _ _ $shape _ _ _ _)
       | none =>
         if op.isAppOfArity ``CIL.Instruction.initobj 1 then
           `($stepped _ _ (by

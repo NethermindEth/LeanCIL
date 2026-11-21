@@ -6,8 +6,10 @@ import CIL.Safety.OutcomeContract
 import CIL.Safety.LocalSnapshotSteps
 import CIL.SIMD.VectorLemmas
 import Tests.Support
+import Tests.WordFields
 
 namespace Tests.Automation
+open Tests.WordFields
 
 def candidate : Nat := 7
 if_extracted Tests.Automation.candidate {
@@ -308,18 +310,18 @@ example (program : CIL.Program) (index : Nat) (memory : CIL.Safety.Memory) (a b 
     equation, so no step unfolds the dispatcher. -/
 def leafBody (profile : CIL.FeatureProfile) : CIL.Method := {
   declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
-  profile, returnsValue := true, locals := [], code := [
-  .ldarg 0, .fieldAt 0 8, .ldarg 1, .fieldAt 0 8, .xor,
-  .ldarg 0, .fieldAt 8 8, .ldarg 1, .fieldAt 8 8, .xor, .or,
-  .ldarg 0, .fieldAt 16 8, .ldarg 1, .fieldAt 16 8, .xor, .or,
-  .ldarg 0, .fieldAt 24 8, .ldarg 1, .fieldAt 24 8, .xor, .or,
+  profile, environment := wordsEnvironment, returnsValue := true, locals := [], code := [
+  .ldarg 0, .ldfld word0, .ldarg 1, .ldfld word0, .xor,
+  .ldarg 0, .ldfld word1, .ldarg 1, .ldfld word1, .xor, .or,
+  .ldarg 0, .ldfld word2, .ldarg 1, .ldfld word2, .xor, .or,
+  .ldarg 0, .ldfld word3, .ldarg 1, .ldfld word3, .xor, .or,
   .ldc_i4 0, .conv_i8, .ceq, .ret] }
 
 open CIL.Safety in
 theorem leaf_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (found : program[index]? = some (leafBody profile)) (memory : Memory) (left right : Reference)
     (limb : Reference → Nat → BitVec 64) (fl : form memory left = .ok left) (fr : form memory right = .ok right)
-    (field : ∀ r offset rest, instruction (.fieldAt offset 8) (.reference (.address r) :: rest) memory =
+    (field : ∀ r offset rest, loadValueField offset 8 false (.reference (.address r) :: rest) memory =
       .ok (memory, .scalar (.i64 (limb r offset)) :: rest)) :
     let difference := (limb left 0 ^^^ limb right 0) ||| (limb left 8 ^^^ limb right 8) |||
       (limb left 16 ^^^ limb right 16) ||| (limb left 24 ^^^ limb right 24)
@@ -1005,8 +1007,8 @@ theorem literal_branch (memory : CIL.Safety.Memory) (condition value : CIL.W32) 
 
 /-- A body whose instructions, not its code list, depend on a feature. -/
 def featureOpBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [],
-    code := [if profile.avx2 then .ldarg 1 else .ldarg 0, .fieldAt 0 8, .ret] }
+  { profile, environment := wordsEnvironment, returnsValue := true, locals := [],
+    code := [if profile.avx2 then .ldarg 1 else .ldarg 0, .ldfld word0, .ret] }
 
 -- The lookup decides the feature test, so the fetched op is a constructor with a step equation.
 -- A term-mode `by`, as the contract and loop tactics call it, must still assign the op.
@@ -1019,7 +1021,7 @@ theorem feature_op_checked (program : CIL.Program) (index : Nat) (profile : CIL.
     (scalar : profile.avx2 = false) (found : program[index]? = some (featureOpBody profile))
     (frame : Frame) (memory : Memory) (left right : Reference) (limb : BitVec 64)
     (formed : form memory left = .ok left)
-    (field : ∀ rest, instruction (.fieldAt 0 8) (.reference (.address left) :: rest) memory =
+    (field : ∀ rest, loadValueField 0 8 false (.reference (.address left) :: rest) memory =
       .ok (memory, .scalar (.i64 limb) :: rest)) :
     run program 4 index 0 [.reference (.address left), .reference (.address right)] frame [] memory =
       .ok (leaveFrame frame memory, [.scalar (.i64 limb)]) := by

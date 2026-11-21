@@ -299,7 +299,7 @@ theorem Memory.Renamed.stepFieldLoad {indices : LocalIndexMap} {mapping : Alloca
           observable.bind_left).bind
       | apply (related.loadAggregateFieldResult sourceFormed _ _ stack bounds
           observable.bind_left).bind
-      | apply (related.instructionResult _ sourceFormed stack bounds observable.bind_left).bind
+      | apply (related.loadValueFieldResult sourceFormed _ _ _ stack bounds observable.bind_left).bind
     all_goals
       intro first second result
       rcases first with ⟨sourceAfter, values⟩
@@ -342,7 +342,7 @@ theorem Memory.Renamed.stepFieldStore {indices : LocalIndexMap} {mapping : Alloc
           observable.bind_left).bind
       | apply (related.storeAggregateFieldResult sourceFormed _ _ stack bounds
           observable.bind_left).bind
-      | apply (related.instructionResult _ sourceFormed stack bounds observable.bind_left).bind
+      | apply (related.storeValueFieldResult sourceFormed _ _ stack bounds observable.bind_left).bind
     all_goals
       intro first second result
       rcases first with ⟨sourceAfter, values⟩

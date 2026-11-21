@@ -1054,9 +1054,9 @@ private def objectForged : List IndirectCase := [
   typed 113 aggregateType (.ldind .u4), typed 129 aggregateType (.ldobj aggregateType),
   typed 113 enumType (.ldind .u2), typed 113 vectorType (.memory .load256),
   -- Floating-point and pointer operands, which extraction refuses.
-  typed 113 (.atom runtime "System.Double") (.fieldAt 0 4 false),
-  typed 129 (.atom runtime "System.Single") (.setFieldAt 0 8),
-  typed 113 (.pointer intType) (.fieldAt 0 1 true),
+  typed 113 (.atom runtime "System.Double") (.ldfld tupleItem1),
+  typed 129 (.atom runtime "System.Single") (.stfld tupleItem1),
+  typed 113 (.pointer intType) (.ldfld tupleItem1),
   load 40 (.ldind .i8) .word64 (operand := .call loadSite),
   store 40 (.stind .i8) (operand := .call storeSite)]
 

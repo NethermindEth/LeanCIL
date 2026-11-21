@@ -518,7 +518,7 @@ def fieldLoad (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : Lis
     (memory : Memory) : ExecutionResult (Memory × List Value) :=
   match body.fieldShape field with
   | .classSlot offset slot => classFieldLoad field.owner offset slot stack memory
-  | .value offset width signed => instruction (.fieldAt offset width signed) stack memory
+  | .value offset width signed => loadValueField offset width signed stack memory
   | .aggregate offset size => loadAggregateField offset size stack memory
   | .unsupported reason => .error (.unsupported reason)
 
@@ -528,7 +528,7 @@ def fieldStore (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : Li
     (memory : Memory) : ExecutionResult (Memory × List Value) :=
   match body.fieldShape field with
   | .classSlot offset slot => classFieldStore field.owner offset slot stack memory
-  | .value offset width _ => instruction (.setFieldAt offset width) stack memory
+  | .value offset width _ => storeValueField offset width stack memory
   | .aggregate offset size => storeAggregateField offset size stack memory
   | .unsupported reason => .error (.unsupported reason)
 

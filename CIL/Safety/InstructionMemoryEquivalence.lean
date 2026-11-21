@@ -575,6 +575,40 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.comparisonGuardInstruction _ _ _ _
     · exact same.otherMemoryInstruction _ _
 
+/-- Equivalent memories return the same value from a checked value field. -/
+theorem Memory.Equivalent.loadValueField {m n : Memory} (same : m.Equivalent n)
+    (offset width : Nat) (signed : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (loadValueField offset width signed stack m)
+      (loadValueField offset width signed stack n) := by
+  unfold CIL.Safety.loadValueField
+  simp only [same.add, same.loadValue]
+  repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.loadValueField
+
+/-- Equivalent memories preserve equivalence when writing a checked value field. -/
+theorem Memory.Equivalent.storeValueField {m n : Memory} (same : m.Equivalent n)
+    (offset width : Nat) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (storeValueField offset width stack m)
+      (storeValueField offset width stack n) := by
+  unfold CIL.Safety.storeValueField
+  simp only [same.add]
+  repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind ((same.writeSnapshot _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.storeValueField
+
 /-- Equivalent memories read the same nested field from a struct or a reference. -/
 theorem Memory.Equivalent.loadAggregateField {m n : Memory} (same : m.Equivalent n)
     (offset size : Nat) (stack : List Value) :

@@ -6,6 +6,7 @@ import CIL.Safety.WordFootprint
 import CIL.Safety.ReturnMemory
 import CIL.Safety.Segment
 import Tests.Support
+import Tests.WordFields
 
 /-! A synthetic extraction with the bodies the C# fixture compiles to:
     `Root(ref r, in b) { AddTo(in r, in b, out r); r = Mix(r, b); }`. -/
@@ -30,6 +31,7 @@ def signatures : List String := [method0Signature, method1Signature, method2Sign
 end Extracted
 
 namespace Tests.MethodContract
+open Tests.WordFields
 
 open CIL.Safety
 
@@ -338,15 +340,15 @@ theorem feature_load_contract (program : CIL.Program) (index : Nat) (profile : C
 
 /-- A body whose first instruction depends on a feature, stepped as a contract proof steps it. -/
 def featureOpBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [],
-    code := [if profile.avx2 then .ldarg 1 else .ldarg 0, .fieldAt 0 8, .ret] }
+  { profile, environment := wordsEnvironment, returnsValue := true, locals := [],
+    code := [if profile.avx2 then .ldarg 1 else .ldarg 0, .ldfld word0, .ret] }
 
 open CIL.Safety in
 theorem feature_op_contract_steps (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (scalar : profile.avx2 = false) (found : program[index]? = some (featureOpBody profile))
     (frame : Frame) (memory : Memory) (left right : Reference) (limb : BitVec 64)
     (formed : form memory left = .ok left)
-    (field : ∀ rest, instruction (.fieldAt 0 8) (.reference (.address left) :: rest) memory =
+    (field : ∀ rest, loadValueField 0 8 false (.reference (.address left) :: rest) memory =
       .ok (memory, .scalar (.i64 limb) :: rest)) :
     ∃ fuel final values,
       run program fuel index 0 [.reference (.address left), .reference (.address right)] frame [] memory =

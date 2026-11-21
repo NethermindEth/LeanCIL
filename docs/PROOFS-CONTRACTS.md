@@ -260,7 +260,7 @@ the other facts the store alone uses.
 
 The contract form then prepares its step facts again at `storedLocal`. The carried `ValidCall`
 forms the by-reference arguments and reads their fields there, and the restated reads supply their loads, so
-`.ldarg`, `.fieldAt` and memory loads of caller data continue in the same call. After a store, a
+`.ldarg`, `.ldfld` and memory loads of caller data continue in the same call. After a store, a
 word load through a `ValidCall` is stated at that store's memory, as `view.word storedLocal
 offset`. `ArgumentView.word_below localBelow view old` restates a word at the memory the store
 wrote to, and `ArgumentView.bytes_below` the whole range.
@@ -493,7 +493,8 @@ the helper's contract. Confinement, access permissions and content snapshots req
 proved effects; a cell-only footprint does not imply `Confined`.
 
 `WP.load_call_store` composes a placed `loadCallStoreCode` segment with any proved scalar helper
-contract, given the body's link of the call site to the helper (`linked`). Both input words are loaded before the call and the output write, so the argument ranges
+contract. Each `ldfld` operand must resolve to an eight-byte unsigned word at offset zero. The
+call site must link to the specified helper. Both loads precede the call and the output write, so the argument ranges
 may overlap. The continuation receives the helper's `CallResult` and the actual checked write, and
 retains the helper's full postcondition and footprint without unfolding the helper body.
 
@@ -607,8 +608,7 @@ contents separately.
 
 For a word store through a named output, `cil_contract_steps` first uses supplied checked
 operation facts. If none establishes the store, it derives a successful write from the current
-`ValidCall` and the output bounds. This covers `stind.i8`, `stind.i`, primitive eight-byte `stobj` and eight-byte
-`setFieldAt`. The continuation names:
+`ValidCall` and the output bounds. This covers `stind.i8`, `stind.i`, primitive eight-byte `stobj` and `stfld` of a checked eight-byte value field. The continuation names:
 
 | Name | Holds |
 | --- | --- |

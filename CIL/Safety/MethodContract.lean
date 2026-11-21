@@ -1025,7 +1025,7 @@ elab_rules : tactic
           (by cil_checked_step_normalized [$[$facts:term],*]) ?_
         cil_stack_cleanup)))
     unless [``CIL.Instruction.stind, ``CIL.Instruction.stobj,
-        ``CIL.Instruction.setFieldAt].contains operation do
+        ``CIL.Instruction.stfld].contains operation do
       advance facts
       return
     let saved ← saveState

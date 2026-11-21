@@ -322,13 +322,14 @@ theorem value_field_of_an_object_faults (frame : Safety.Frame) (memory : Safety.
   rfl
 #print axioms value_field_of_an_object_faults
 
--- A struct field steps as the lowered access its shape fact states, whatever the receiver.
-theorem high_load_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
+/-- Loading the high word uses the displacement, width and sign of the checked field. -/
+theorem high_load_uses_checked_offset (frame : Safety.Frame) (memory : Safety.Memory)
     (receiver : Safety.Value) :
     Safety.step body (.ldfld highField) 0 [] frame [receiver] memory =
-      Safety.step body (.fieldAt 4 4) 0 [] frame [receiver] memory := by
+      (do let (after, values) ← Safety.loadValueField 4 4 false [receiver] memory
+          return .next 1 values frame after) := by
   simp only [cil_step]
-#print axioms high_load_is_lowered
+#print axioms high_load_uses_checked_offset
 
 theorem inner_store_uses_checked_offset (frame : Safety.Frame) (memory : Safety.Memory)
     (stack : List Safety.Value) :

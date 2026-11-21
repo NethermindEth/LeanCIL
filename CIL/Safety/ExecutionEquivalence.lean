@@ -311,7 +311,7 @@ theorem Memory.Equivalent.fieldLoad {m n : Memory} (same : m.Equivalent n) (body
   unfold CIL.Safety.fieldLoad
   split
   · exact same.classFieldLoad _ _ _ _
-  · exact same.instruction _ _
+  · exact same.loadValueField _ _ _ _
   · exact same.loadAggregateField _ _ _
   · exact .error _
 #print axioms Memory.Equivalent.fieldLoad
@@ -324,7 +324,7 @@ theorem Memory.Equivalent.fieldStore {m n : Memory} (same : m.Equivalent n) (bod
   unfold CIL.Safety.fieldStore
   split
   · exact same.classFieldStore _ _ _ _
-  · exact same.instruction _ _
+  · exact same.storeValueField _ _ _
   · exact same.storeAggregateField _ _ _
   · exact .error _
 #print axioms Memory.Equivalent.fieldStore

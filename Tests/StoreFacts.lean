@@ -1,10 +1,12 @@
 import CIL.Safety.MethodContract
 import CIL.Safety.OutcomeContract
 import Tests.Support
+import Tests.WordFields
 
 /-! Store facts stated in their source form, as a carry or borrow helper's proof
     states them, rather than in the form the checked steps compute. -/
 namespace Tests.StoreFacts
+open Tests.WordFields
 
 open CIL.Safety
 
@@ -189,29 +191,29 @@ theorem large_indexed_fact (words : Fin 65536 → Nat) (all : ∀ index, words i
   cil_fact_simp [] [all]
 
 @[cil_code] def fourLimb : CIL.Method :=
-  { code := [.ldarg 0, .fieldAt 0 8, .ldarg 0, .fieldAt 8 8, .ldarg 0, .fieldAt 16 8,
-      .ldarg 0, .fieldAt 24 8, .pop, .pop, .pop, .ret], locals := [], returnsValue := true }
+  { environment := wordsEnvironment, code := [.ldarg 0, .ldfld word0, .ldarg 0, .ldfld word1, .ldarg 0, .ldfld word2,
+      .ldarg 0, .ldfld word3, .pop, .pop, .pop, .ret], locals := [], returnsValue := true }
 
 @[cil_code] def fourLimbProgram : CIL.Program := [fourLimb]
 
 theorem indexed_fields (memory : Memory) (left : Reference) (words : Fin 4 → CIL.W64)
     (formed : form memory left = .ok left)
     (limbs : ∀ (index : Fin 4) rest,
-      instruction (.fieldAt (8 * index.val) 8) (.reference (.address left) :: rest) memory =
+      loadValueField (8 * index.val) 8 false (.reference (.address left) :: rest) memory =
         .ok (memory, .scalar (.i64 (words index)) :: rest)) :
     invoke fourLimbProgram 12 0 [.reference (.address left)] memory =
       .ok (memory, [.scalar (.i64 (words 0))]) := by
   cil_checked_steps [formed, limbs]
 
 @[cil_code] def literalBranch : CIL.Method :=
-  { code := [.ldarg 0, .fieldAt 8 8, .brfalse 5, .ldc_i4 9, .ret, .ldc_i4 0, .ret],
+  { environment := wordsEnvironment, code := [.ldarg 0, .ldfld word1, .brfalse 5, .ldc_i4 9, .ret, .ldc_i4 0, .ret],
     locals := [], returnsValue := true }
 
 @[cil_code] def literalBranchProgram : CIL.Program := [literalBranch]
 
 theorem constructor_index_branch (memory : Memory) (left : Reference) (words : Fin 4 → CIL.W64)
     (bound : 1 < 4) (formed : form memory left = .ok left)
-    (field : ∀ rest, instruction (.fieldAt 8 8) (.reference (.address left) :: rest) memory =
+    (field : ∀ rest, loadValueField 8 8 false (.reference (.address left) :: rest) memory =
       .ok (memory, .scalar (.i64 (words ⟨1, bound⟩)) :: rest))
     (zero : words 1 = 0) :
     invoke literalBranchProgram 7 0 [.reference (.address left)] memory =

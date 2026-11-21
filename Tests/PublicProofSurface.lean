@@ -130,10 +130,25 @@ private def skipWord : CIL.Extraction.MethodRef :=
   { owner := CIL.Extraction.unsafeOwner, name := name!"SkipInit", hasThis := false,
     genericArity := 1, parameters := [.byref word], methodArguments := [word], returnType := .void }
 
+private def pairEnvironment : CIL.LayoutEnvironment :=
+  { rawLayouts := [
+      { identity := "Pair", explicit := false, packing := 0, declaredSize := 0,
+        fields := [{ type := .unsigned64 }, { type := .unsigned64 }] }]
+    layouts := #[⟨⟨16, [⟨0, 8, false⟩, ⟨8, 8, false⟩]⟩, 8⟩] }
+
+private def low : CIL.Extraction.FieldRef :=
+  { owner := .aggregate "Pair" 0, index := 0, name := name!"Low",
+    type := .atom CIL.Extraction.runtimeScope "System.UInt64" }
+
+private def high : CIL.Extraction.FieldRef := { low with index := 1, name := name!"High" }
+
+cil_field_shape pairEnvironment low
+cil_field_shape pairEnvironment high
+
 /-- Both source fields are loaded before any output could overwrite them. -/
 @[cil_code] def readPair : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.ldarg 2, .call skipWord {},
-      .ldarg 0, .fieldAt 0 8, .ldarg 1, .fieldAt 8 8, .add, .ret] }
+  { environment := pairEnvironment, locals := [], returnsValue := true, code := [.ldarg 2, .call skipWord {},
+      .ldarg 0, .ldfld low, .ldarg 1, .ldfld high, .add, .ret] }
 
 cil_instruction_equations Tests.PublicProofSurface.readPair
 cil_runtime_models Tests.PublicProofSurface.readPair

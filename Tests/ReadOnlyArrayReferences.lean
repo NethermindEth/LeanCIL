@@ -76,7 +76,7 @@ theorem view_reference_outside :
 
 /-- Field loads and field addresses through a restricted reference stay readable and restricted. -/
 theorem restricted_field_reads :
-    instruction (.fieldAt 4 4 false) [.readOnlyReference (.address ⟨0, 0⟩)] memory =
+    loadValueField 4 4 false [.readOnlyReference (.address ⟨0, 0⟩)] memory =
       .ok (memory, [.scalar (.i32 0)]) ∧
     structFieldAddress 4 [.readOnlyReference (.address ⟨0, 0⟩)] memory =
       .ok (memory, [.readOnlyReference (.address ⟨0, 4⟩)]) ∧
@@ -87,7 +87,7 @@ theorem restricted_field_reads :
 /-- Field stores through a restricted reference fail, naming the struct reference and field
     width, despite the backing allocation's write authority. -/
 theorem restricted_field_stores_rejected :
-    instruction (.setFieldAt 4 4) [.scalar (.i32 7), .readOnlyReference (.address ⟨0, 0⟩)]
+    storeValueField 4 4 [.scalar (.i32 7), .readOnlyReference (.address ⟨0, 0⟩)]
       memory = .error (.memory .unwritable (.address ⟨0, 0⟩) 4) ∧
     storeAggregateField 4 4
       [.scalar (.aggregate [7, 0, 0, 0]), .readOnlyReference (.address ⟨0, 0⟩)] memory =
@@ -96,7 +96,7 @@ theorem restricted_field_stores_rejected :
 
 /-- A readonly field access through null faults before any field offset is formed. -/
 theorem restricted_null_field :
-    instruction (.fieldAt 4 4 false) [.readOnlyReference .null] memory =
+    loadValueField 4 4 false [.readOnlyReference .null] memory =
       .error (.memory .nullDereference .null 0) ∧
     structFieldAddress 4 [.readOnlyReference .null] memory =
       .error (.memory .nullDereference .null 0) := ⟨rfl, rfl⟩

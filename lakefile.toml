@@ -441,6 +441,9 @@ name = "Tests.WeakestPrecondition"
 name = "Tests.LocalCalls"
 
 [[lean_lib]]
+name = "Tests.WordFields"
+
+[[lean_lib]]
 name = "Tests.CallingFields"
 
 [[lean_lib]]

@@ -20,6 +20,11 @@ private def limbsEnvironment : LayoutEnvironment :=
     [⟨0, 8, false⟩, ⟨8, 8, false⟩, ⟨16, 8, false⟩, ⟨24, 8, false⟩]
   { rawLayouts := [layout], layouts := #[⟨⟨32, fields⟩, 8⟩] }
 
+/-- A UInt64 member of the four-word fixture, selected by its metadata field index. -/
+private def limbField (index : Nat) (name : MetadataName) : Extraction.FieldRef :=
+  { owner := .aggregate "Fixture::Limbs" 0, index, name,
+    type := .atom Extraction.runtimeScope "System.UInt64" }
+
 /-- The readonly limb argument is formed with AsRef before As retypes it as a vector. -/
 private def limbsCall (asVector : Bool) : Instruction :=
   let limbs := Extraction.TypeExpr.aggregate "Fixture::Limbs" 0
@@ -48,22 +53,22 @@ def actual : Method := {
     .word64, .word64, .word64, .word64, .word64, .vector256, .vector256, .vector256, .vector256],
     parameterHomes := [], staticSites := [], code := [
   .ldarg 0,
-  .fieldAt 0 8,
+  .ldfld (limbField 0 name!"Limb0"),
   .stloc 0,
   .ldarg 1,
-  .fieldAt 0 8,
+  .ldfld (limbField 0 name!"Limb0"),
   .stloc 1,
   .ldarg 0,
-  .fieldAt 8 8,
+  .ldfld (limbField 1 name!"Limb1"),
   .stloc 2,
   .ldarg 1,
-  .fieldAt 8 8,
+  .ldfld (limbField 1 name!"Limb1"),
   .stloc 3,
   .ldarg 0,
-  .fieldAt 16 8,
+  .ldfld (limbField 2 name!"Limb2"),
   .stloc 4,
   .ldarg 1,
-  .fieldAt 16 8,
+  .ldfld (limbField 2 name!"Limb2"),
   .stloc 5,
   .feature .avx512DQVL,
   .brfalse 42,
@@ -139,7 +144,7 @@ def actual : Method := {
   .unadmitted 0,
   .ldloc 0,
   .ldarg 1,
-  .fieldAt 24 8,
+  .ldfld (limbField 3 name!"Limb3"),
   .mul,
   .ldloc 2,
   .ldloc 5,
@@ -150,7 +155,7 @@ def actual : Method := {
   .mul,
   .add,
   .ldarg 0,
-  .fieldAt 24 8,
+  .ldfld (limbField 3 name!"Limb3"),
   .ldloc 1,
   .mul,
   .add,
@@ -267,22 +272,22 @@ def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex :
     .word64, .word64, .word64, .word64, .word64, .vector256, .vector256, .vector256, .vector256],
     parameterHomes := [], staticSites := [], code := [
   .ldarg 0,
-  .fieldAt 0 8,
+  .ldfld (limbField 0 name!"Limb0"),
   .stloc 0,
   .ldarg 1,
-  .fieldAt 0 8,
+  .ldfld (limbField 0 name!"Limb0"),
   .stloc 1,
   .ldarg 0,
-  .fieldAt 8 8,
+  .ldfld (limbField 1 name!"Limb1"),
   .stloc 2,
   .ldarg 1,
-  .fieldAt 8 8,
+  .ldfld (limbField 1 name!"Limb1"),
   .stloc 3,
   .ldarg 0,
-  .fieldAt 16 8,
+  .ldfld (limbField 2 name!"Limb2"),
   .stloc 4,
   .ldarg 1,
-  .fieldAt 16 8,
+  .ldfld (limbField 2 name!"Limb2"),
   .stloc 5,
   .feature .avx512DQVL,
   .brfalse 36,
@@ -393,7 +398,7 @@ def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex :
     else .ldloc 0),
   (if profile.avx512DQVL || profile.avx2 then .unadmitted 0
     else .ldarg 1),
-  (if profile.avx512DQVL || profile.avx2 then .unadmitted 0 else .fieldAt 24 8),
+  (if profile.avx512DQVL || profile.avx2 then .unadmitted 0 else .ldfld (limbField 3 name!"Limb3")),
   (if profile.avx512DQVL || profile.avx2 then .unadmitted 0 else .mul),
   (if profile.avx512DQVL || profile.avx2 then .unadmitted 0
     else .ldloc 2),
@@ -409,7 +414,7 @@ def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex :
   (if profile.avx512DQVL || profile.avx2 then .unadmitted 0 else .add),
   (if profile.avx512DQVL || profile.avx2 then .unadmitted 0
     else .ldarg 0),
-  (if profile.avx512DQVL || profile.avx2 then .unadmitted 0 else .fieldAt 24 8),
+  (if profile.avx512DQVL || profile.avx2 then .unadmitted 0 else .ldfld (limbField 3 name!"Limb3")),
   (if profile.avx512DQVL || profile.avx2 then .unadmitted 0
     else .ldloc 1),
   (if profile.avx512DQVL || profile.avx2 then .unadmitted 0 else .mul),

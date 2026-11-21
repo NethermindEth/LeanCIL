@@ -141,16 +141,25 @@ theorem pair_return_exists :
   ⟨_, rfl, by decide⟩
 #print axioms pair_return_exists
 
-/-- `Math.DivRem(sbyte, sbyte).Remainder` in the emitted form over the same environment, whose
+private def remainderField : Extraction.FieldRef :=
+  { owner := .aggregate "SBytePair" 0, index := 1, name := name!"Item2",
+    type := .atom Extraction.runtimeScope "System.SByte" }
+
+/-- `Math.DivRem(sbyte, sbyte).Remainder` over a two-byte struct layout, whose
     narrowing return compares only its runtime scope and primitive name. -/
 private def sbyteRemainder : Method :=
   { pairDivRem with
+    environment := {
+      rawLayouts := [
+        { identity := "SBytePair", explicit := false, packing := 0, declaredSize := 0,
+          fields := [{ type := .signed8 }, { type := .signed8 }] }]
+      layouts := #[⟨⟨2, [⟨0, 1, false⟩, ⟨1, 1, false⟩]⟩, 1⟩] }
     declared := {
       parameters := [.atom Extraction.runtimeScope "System.SByte",
         .atom Extraction.runtimeScope "System.SByte"],
       returnType := .atom Extraction.runtimeScope "System.SByte" }
     code := [.ldarg 0, .ldarg 1,
-      .intrinsic (.scalar (.divRem 8 true)) 2, .fieldAt 1 1 true, .ret] }
+      .intrinsic (.scalar (.divRem 8 true)) 2, .ldfld remainderField, .ret] }
 
 /-- A narrowing return over a non-empty environment is proved by evaluation, and the remainder
     of -7 by 2 comes back sign-extended. -/

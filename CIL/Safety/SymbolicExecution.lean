@@ -1101,6 +1101,19 @@ elab "cil_step_value_size" : tactic => withMainContext do
   replaceMainGoal []
 
 open Lean Elab Tactic Meta in
+/-- A field or size premise of an operation fact follows from the fetched method's checked shape. -/
+elab "cil_step_shape" : tactic => withMainContext do
+  let target ← instantiateMVars (← getMainTarget)
+  let some (_, lhs, _) := target.consumeMData.eq? | throwError "Expected a checked shape equation"
+  if let some #[body, field] := argumentsOf? lhs ``CIL.Method.fieldShape 2 then
+    let some (_, proof) ← fieldShapeKnown? body field | throwError "No checked shape for the field"
+    unless ← withDefault (isDefEq (← inferType proof) target) do
+      throwError "The field has a different checked shape"
+    (← getMainGoal).assign proof
+    replaceMainGoal []
+  else evalTactic (← `(tactic| cil_step_value_size))
+
+open Lean Elab Tactic Meta in
 /-- Close the goal with `fact` after unfolding the named bodies in its type.
     Fails when the supplied normalization does not change the type. -/
 def applyUnfoldedStepFact (unfold : Simp.Context) (simprocs : Simp.SimprocsArray) (fact : Term) :
@@ -1115,7 +1128,7 @@ def applyUnfoldedStepFact (unfold : Simp.Context) (simprocs : Simp.SimprocsArray
   -- Lookup may also unfold a supplied definition inside the body, such as a local initializer.
   let goals ← withDefault <| (← getMainGoal).apply proof
   for goal in goals do
-    let remaining ← Tactic.run goal <| evalTactic (← `(tactic| cil_step_value_size))
+    let remaining ← Tactic.run goal <| evalTactic (← `(tactic| cil_step_shape))
     unless remaining.isEmpty do throwError "The step fact left a premise"
   replaceMainGoal []
 
@@ -1283,7 +1296,7 @@ private def applyCheckedStepFact (facts : Array Term) : TacticM Bool := do
     let saved ← saveState
     try
       evalTactic (← `(tactic| cil_strict
-        ((with_reducible_and_instances apply $fact) <;> cil_step_value_size)))
+        ((with_reducible_and_instances apply $fact) <;> cil_step_shape)))
       return true
     catch _ => saved.restore
   if !candidates.isEmpty then
@@ -1302,15 +1315,27 @@ elab_rules : tactic
   | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
     let initial := (← instantiateMVars (← getMainTarget)).consumeMData
     if let some (_, step, _) := initial.eq? then
-      if step.isAppOfArity ``CIL.Safety.step 7 &&
-          (argument? step 1).any (·.isConstOf ``CIL.Instruction.nop) then
-        evalTactic (← `(tactic| exact step_nop_eq ..))
-        return
+      if step.isAppOfArity ``CIL.Safety.step 7 then
+        let op := step.getArg! 1
+        if op.isConstOf ``CIL.Instruction.nop then
+          evalTactic (← `(tactic| exact step_nop_eq ..))
+          return
     if !facts.getElems.isEmpty && (← applyCheckedStepFact facts.getElems) then return
-    -- A struct field access steps as the lowered access of its shape, which facts are stated over.
     if let some (_, step, result) := initial.eq? then
       if let some #[body, op, pc, args, frame, stack, memory] :=
           argumentsOf? step ``CIL.Safety.step 7 then
+        -- Use the named body's field equation for an address after the caller's step facts.
+        -- A scalar aggregate can retain a symbolic value from its layout's encode equation.
+        if op.isAppOf ``CIL.Instruction.ldfld || op.isAppOf ``CIL.Instruction.stfld then
+          let receiver := (argumentsOf? stack ``List.cons 3).bind fun entries =>
+            if op.isAppOf ``CIL.Instruction.ldfld then entries[1]?
+            else ((argumentsOf? entries[2]! ``List.cons 3).bind (·[1]?))
+          if receiver.any (fun value => value.isAppOf ``Value.reference || value.isAppOf ``Value.readOnlyReference) then
+            let saved ← saveState
+            try
+              evalTactic (← `(tactic| cil_checked_step_equations [$facts,*]))
+              return
+            catch _ => saved.restore
         if op.isAppOfArity ``CIL.Instruction.ldobj 1 then
           let saved ← saveState
           try
@@ -1345,7 +1370,7 @@ elab_rules : tactic
               all_goals simp [cil_guard, cil_checked, referenceAt, checkedAt, $[$facts:term],*] <;> rfl)))
             return
           catch _ => saved.restore
-        if let some (lowered, lowering) ← storageLowering? body op stack then
+        if let some (lowered, lowering) ← typedObjectLowering? body op stack then
           let equation := (mkAppN lowering #[pc, args, frame, memory, stack]).headBeta
           let steppedLowered :=
             mkAppN step.getAppFn #[body, lowered, pc, args, frame, stack, memory]
@@ -1552,6 +1577,26 @@ elab_rules : tactic
             cil_checked_memory_from_fact [CIL.Safety.staticInstruction, $facts:term,*]))
         else
           `(tactic| cil_strict (cil_checked_memory_by_equations [$facts:term,*]))
+      -- A checked field normally steps from its shape and address facts. A caller can also
+      -- supply the byte-level operation that the shape selects.
+      else if operation == ``CIL.Instruction.ldfld then
+        let hasRead ← facts.getElems.anyM fun fact => suppliedFactSatisfies fact fun type => do
+          let some (_, lhs, _) := type.getForallBody.consumeMData.eq? | return false
+          return lhs.isAppOf ``CIL.Safety.loadValueField
+        let equation ← `(tactic| cil_checked_step_equations [$[$stepFacts:term],*])
+        let byRead ← `(tactic| (
+          refine Eq.trans (step_ldfld_value_eq _ _ _ _ _ _ _ _ _
+            (by first | cil_step_shape | assumption | rfl) _) ?_
+          simp only [$[$stepFacts:term],*] <;> rfl))
+        if !hasRead then `(tactic| first | $equation:tactic | $byRead:tactic)
+        else `(tactic| first | $byRead:tactic | $equation:tactic)
+      else if operation == ``CIL.Instruction.stfld then
+        `(tactic| first
+          | cil_checked_step_equations [$[$stepFacts:term],*]
+          | (refine Eq.trans (step_stfld_value_eq _ _ _ _ _ _ _ _ _
+               (by first | assumption | cil_step_shape) _) ?_
+             simp only [storeValueField, cil_guard, cil_checked, checkedAt, ordinaryAccessAlignment,
+               Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, $[$stepFacts:term],*] <;> rfl))
       -- A fact about `instruction` keeps its abstraction only if tried before a per-shape
       -- equation rewrites past it.
       else if !(← dispatchFacts lhs ``CIL.Safety.instruction facts.getElems).isEmpty then
@@ -1920,11 +1965,12 @@ macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max
     cil_stack_cleanup))
 
 open Lean Meta in
-/-- The instruction the fetched `op` steps as: for a struct field access, the lowered instruction
-    of its shape, read from the method `lookup` (`body.code[pc]? = some op`) names; else `op`. -/
+/-- Resolve typed object accesses using the value shape in the fetched method. -/
 def cilSteppedOp (lookup op : Expr) : MetaM Expr := do
+  let head := (← whnfR op).getAppFn
+  unless head.isConstOf ``CIL.Instruction.ldobj || head.isConstOf ``CIL.Instruction.stobj do return op
   let some code := lookup.find? (·.isAppOfArity ``CIL.Method.code 1) | return op
-  let some (lowered, _) ← storageLowering? code.appArg! op | return op
+  let some (lowered, _) ← typedObjectLowering? code.appArg! op | return op
   return lowered
 
 open Lean Elab Tactic Meta in
@@ -2017,7 +2063,7 @@ def cilOnlyInputFacts (operation : Name) (facts : Array Term) : TacticM Bool :=
     if left.isAppOf ``form || left.isAppOf ``read then return true
     let some #[_, op, _, _, _, _, _] := argumentsOf? left ``step 7 | return false
     -- Only known reads are excluded; a generic or custom step retains its priority.
-    return op.isAppOf ``CIL.Instruction.fieldAt && operation != ``CIL.Instruction.fieldAt
+    return op.isAppOf ``CIL.Instruction.ldfld && operation != ``CIL.Instruction.ldfld
 
 open Lean Elab Tactic Meta in
 /-- Materialize a checked output-word write in the outer continuation. Only the fetched store
@@ -2025,9 +2071,14 @@ open Lean Elab Tactic Meta in
 def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
     (facts : Array Term) : TacticM (Array Term) := withMainContext do
   unless [``CIL.Instruction.stind, ``CIL.Instruction.stobj,
-      ``CIL.Instruction.setFieldAt].contains operation do
+      ``CIL.Instruction.stfld].contains operation do
     return facts
   unless (← getEnv).contains `CIL.Safety.ValidCall.store_word do return facts
+  let calls ← ((← getLCtx).decls.toArray.filterMap id).filterMapM fun declaration => do
+    let type ← instantiateMVars declaration.type
+    let some #[callMemory, _, outputs] := argumentsOf? type `CIL.Safety.ValidCall 3 | return none
+    return some (declaration, callMemory, outputs)
+  if calls.isEmpty then return facts
   let some execution := (← instantiateMVars (← getMainTarget)).find?
       (·.isAppOfArity ``run 8) | return facts
   let #[_, _, _, _, _, _, stackTerm, memory] := execution.getAppArgs | return facts
@@ -2058,16 +2109,15 @@ def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
     let some kind := lastArgument? opcode | return facts
     unless (← isDefEq kind (mkConst ``CIL.NumericKind.i8)) ||
         (← isDefEq kind (mkConst ``CIL.NumericKind.i)) do return facts
-  if operation == ``CIL.Instruction.setFieldAt then
-    let some width := lastArgument? opcode | return facts
+  if operation == ``CIL.Instruction.stfld then
+    let some code := instruction.find? (·.isAppOfArity ``CIL.Method.code 1) | return facts
+    let some field := lastArgument? opcode | return facts
+    let some (shape, _) ← fieldShapeKnown? code.appArg! field | return facts
+    let some #[fieldOffset, width, _] := argumentsOf? shape ``CIL.FieldShape.value 3 | return facts
     unless ← isDefEq width (mkNatLit 8) do return facts
-    let some fieldOffset := (appliedFunction? opcode).bind lastArgument? | return facts
     offset := fieldOffset
   let offsetTerm ← Term.exprToSyntax offset
-  let declarations := (← getLCtx).decls.toArray.filterMap id
-  for declaration in declarations do
-    let type ← instantiateMVars declaration.type
-    let some #[callMemory, _, outputs] := argumentsOf? type `CIL.Safety.ValidCall 3 | continue
+  for (declaration, callMemory, outputs) in calls do
     unless ← withNewMCtxDepth <| isDefEq callMemory memory do continue
     for (position, view) in ← listEntries outputs do
       let view ← whnf view

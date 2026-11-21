@@ -391,7 +391,7 @@ structure LoopFacts where
   /-- Each byte home's `form` with `localAddress`, which only taking a local's address reads;
       derived facts are proof terms, asserted by `assertLoopFacts` when first read. -/
   addresses : Array Lean.Syntax.Term := #[]
-  /-- The field reads of remembered structs, which only `fieldAt` reads, as proof terms. -/
+  /-- The field reads of remembered structs, used by `ldfld`, as proof terms. -/
   fields : Array Lean.Syntax.Term := #[]
   /-- The negative sides of case splits, which only instructions testing or computing on data
       read. -/
@@ -677,8 +677,8 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
             let width ← whnf (mkApp (mkConst `CIL.FieldLayout.width) fieldLayout)
             let narrow := (← getNatValue? width) matches some 1 | some 2
             let (base, read, load) := if narrow then
-                (`narrowRead, `step_fieldAt_encode_narrow, `LoopFrame.load_narrow_field)
-              else (`fieldRead, `step_fieldAt_encode, `LoopFrame.load_field)
+                (`narrowRead, `step_ldfld_encode_narrow, `LoopFrame.load_narrow_field)
+              else (`fieldRead, `step_ldfld_encode, `LoopFrame.load_field)
             candidates := candidates.push (base, applied read
               #[valid, numeral field, valuesTerm], subject, memory, #[])
             candidates := candidates.push (base, applied load
