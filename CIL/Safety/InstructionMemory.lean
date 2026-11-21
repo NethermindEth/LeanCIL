@@ -121,7 +121,7 @@ def observerCount : CIL.Instruction → Nat
   | .memory operation => operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
   | .nop | .ldarg _ | .starg _ | .ldarga _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _
-  | .ldc_i8 _ | .ldnull | .dup | .pop | .br _ | .feature _ | .intrinsic ..
+  | .ldc_i8 _ | .ldnull | .dup | .pop | .br _ | .intrinsic ..
   | .throw _ | .unadmitted _ => 0
   -- A linked call checks its method's arguments, and a call's model the operands it observes.
   | .call .. => 0

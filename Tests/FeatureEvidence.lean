@@ -85,7 +85,7 @@ example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) branchRaw .sca
     (branchMask.set 2 false) (branchCode.set 2 (.unadmitted 22)) := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) branchRaw .scalar branchStates
     branchMask
-    (branchCode.set 0 (.feature .avx2)) := by decide
+    (branchCode.set 0 (.call (intrinsic "X86.Avx2" "get_IsSupported").method)) := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) branchRaw .scalar branchStates
     branchMask
     (branchCode.set 1 (.brtrue 5)) := by decide

@@ -68,7 +68,8 @@ object FrameOf(bool returnsValue, params object[] sites) => Create("FrameMetadat
 object MethodIn(string identity, object frame, int[] linked, params object[] ops)
 {
     var sites = ops.Select(Site).ToArray();
-    var features = sites.Any(site => site.Code == ".feature .avx2") ? new[] { Named(Model("Feature"), "Avx2") } : [];
+    var features = sites.Select(site => site.Feature).OfType<string>().Distinct(StringComparer.Ordinal)
+        .Select(feature => Named(Model("Feature"), feature)).ToArray();
     var method = Activator.CreateInstance(emitter.GetNestedType("Method", BindingFlags.NonPublic)!,
         identity, frame, Typed(Model("Feature"), features), new int[sites.Length], linked)!;
     var links = string.Join(", ", sites.Index().Where(pair => pair.Item.Link is not null)
@@ -82,11 +83,13 @@ object MethodIn(string identity, object frame, int[] linked, params object[] ops
 }
 object Method(string identity, params object[] ops) => MethodIn(identity, FrameOf(false), [], ops);
 object Linked(string identity, int target, params object[] ops) => MethodIn(identity, FrameOf(false), [target], ops);
+var avx2Getter = new FixtureSite(".call { owner := .atom Extraction.intrinsicsScope \"System.Runtime.Intrinsics.X86.Avx2\", " +
+    "name := name!\"get_IsSupported\", hasThis := false, genericArity := 0, returnType := .atom Extraction.runtimeScope \"System.Boolean\", parameters := [] }", Feature: "Avx2");
 var variants = new Dictionary<string, object>(StringComparer.Ordinal)
 {
-    [first] = Variant(first, false, [Method("Caller", ".feature .avx2", ".nop", ".ret")]),
+    [first] = Variant(first, false, [Method("Caller", avx2Getter, ".nop", ".ret")]),
     [second] = Variant(second, true,
-        [Method("Helper", ".ret"), Linked("Caller", 0, ".feature .avx2", "call 0", ".ret")])
+        [Method("Helper", ".ret"), Linked("Caller", 0, avx2Getter, "call 0", ".ret")])
 };
 var read = typeof(Program).GetMethod(nameof(ReadVariants), BindingFlags.Static | BindingFlags.NonPublic)!
     .MakeGenericMethod(variantType).Invoke(null, [variants]);
@@ -334,7 +337,7 @@ if (large.TotalMilliseconds > 256 * small.TotalMilliseconds)
 Console.WriteLine("PASS template emission is linear in the instructions " +
     $"({small.TotalMilliseconds:F0} ms, {large.TotalMilliseconds:F0} ms for {iterations} emissions)");
 
-sealed record FixtureSite(string Code, string? Link = null);
+sealed record FixtureSite(string Code, string? Link = null, string? Feature = null);
 
 partial class Program
 {

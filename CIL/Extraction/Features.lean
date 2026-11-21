@@ -451,7 +451,7 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     | 69, .targets x, .switch y => x == y
     | 42, _, .ret => true
     -- No other raw instruction may emit control flow, a feature test or a hole.
-    | _, _, .unadmitted _ | _, _, .throw _ | _, _, .feature _ | _, _, .br _ | _, _, .switch _
+    | _, _, .unadmitted _ | _, _, .throw _ | _, _, .br _ | _, _, .switch _
     | _, _, .brfalse _ | _, _, .brtrue _ => false
     | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 42] ||
         (65025 <= opcode && opcode <= 65029) || (43 <= opcode && opcode <= 69)) &&

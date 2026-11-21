@@ -271,8 +271,6 @@ inductive Instruction where
   | ldflda (field : Extraction.FieldRef)
   /-- `stfld`: pops a value and a receiver below it and stores the value into the field. -/
   | stfld (field : Extraction.FieldRef)
-  /-- Pushes `1` when the method's feature profile has the feature, else `0`. -/
-  | feature (id : Feature)
   | intrinsic (operation : Intrinsic) (argc : Nat)
   | memory (operation : MemoryOp)
   -- Static fields; the descriptor extraction bound to the instruction's pc holds the storage.

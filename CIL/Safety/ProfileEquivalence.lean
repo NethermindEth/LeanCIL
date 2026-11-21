@@ -52,6 +52,7 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.Fe
     cases body.linkAt pc with
     | none => exact modelStep_profile_eq (opcode := .newobj) body constructor p q agrees ..
     | some link => cases link <;> rfl
+  have baseStep := CIL.step_profile_eq body.environment op p q agreement
   unfold step intrinsicCall referenceCompareCall referenceSubtractCall
   simp only [reprofiled]
   split <;> try rfl
@@ -62,7 +63,7 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.Fe
   all_goals try (split <;> first | rfl | exact modelStep_profile_eq _ _ _ _ agreement ..)
   all_goals simp only [CIL.Instruction.ProfileAgreement] at agreement
   all_goals try simp only [agreement]
-  all_goals simp only [CIL.step_profile_eq body.environment op p q agreement]
+  all_goals simp only [baseStep]
 
 /-- Running a reprofiled program gives the same result, fault or success, under any two
     profiles the program agrees on. -/

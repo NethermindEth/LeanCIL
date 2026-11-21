@@ -31,7 +31,6 @@ def RuntimeModel.ProfileAgreement (model : RuntimeModel) (p q : FeatureProfile) 
 def Instruction.ProfileAgreement (environment : LayoutEnvironment) (op : Instruction)
     (p q : FeatureProfile) : Prop :=
   match op with
-  | .feature featureId => p.evaluate featureId = q.evaluate featureId
   | .intrinsic operation _ => operation.available p = operation.available q
   | .call method _ => ∀ model, Extraction.runtimeModel environment .call method = some model →
       model.ProfileAgreement p q
@@ -63,9 +62,6 @@ theorem step_profile_eq (environment : LayoutEnvironment) (op : Instruction)
     step op returns narrow pc stack memory p =
       step op returns narrow pc stack memory q := by
   cases op <;> try rfl
-  case feature id =>
-    change p.evaluate id = q.evaluate id at h
-    rw [step_feature, step_feature, h]
   case intrinsic operation argc =>
     change operation.available p = operation.available q at h
     rw [step_intrinsic, step_intrinsic, h]
@@ -187,7 +183,6 @@ def RuntimeModel.profileReads : RuntimeModel → List Feature
 /-- The profile flags `op` reads: the feature it tests, every feature its intrinsic needs, or
     those of the runtime model a call runs, resolved in `environment`. -/
 def Instruction.profileReads (environment : LayoutEnvironment) : Instruction → List Feature
-  | .feature featureId => [featureId]
   | .intrinsic operation _ => operation.requiredFeatures
   | .call method _ =>
     ((Extraction.runtimeModel environment .call method).map RuntimeModel.profileReads).getD []
@@ -222,7 +217,6 @@ theorem Program.ProfileAgreement.of_flags (program : Program) (p q : FeatureProf
     fun featureId read => agree featureId (List.mem_flatMap.mpr
       ⟨body, member, List.mem_flatMap.mpr ⟨op, instruction, read⟩⟩)
   cases op with
-  | feature featureId => exact reads featureId (List.mem_singleton_self featureId)
   | intrinsic operation _ => exact Intrinsic.available_eq_of_required operation p q reads
   | call method _ | newobj method =>
     intro model found

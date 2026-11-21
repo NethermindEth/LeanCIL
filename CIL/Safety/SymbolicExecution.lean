@@ -1232,16 +1232,28 @@ private partial def exposeStackSpine (stack : Expr) : MetaM Expr := withIncRecDe
   return mkApp withHead (← exposeStackSpine tail)
 
 open Lean Elab Tactic Meta in
+/-- A caller's equation for the exact link or model lookup of the current instruction. -/
+private def suppliedReadFact? (read : Expr) (facts : Array Term) : TacticM (Option Expr) := do
+  for fact in facts do
+    if ← suppliedFactSatisfies fact fun type => do
+      let some (_, lhs, _) := type.consumeMData.eq? | return false
+      unless lhs.getAppFn == read.getAppFn do return false
+      withNewMCtxDepth <| withDefault <| isDefEq lhs read
+    then
+      return some (← Term.withoutErrToSorry (Term.elabTerm fact none))
+  return none
+
+open Lean Elab Tactic Meta in
 /-- A proof of `body.linkAt pc = link`, the link a call-family step reads, with `link` a
     constructor: a literal body's by evaluation, a named body's by its `@[cil_code]` fact and link
     definition, and a named body without one by evaluating its table. Nothing when none decides
     it, so a caller's fact must. -/
-def stepLinkFact? (body pc : Expr) : TacticM (Option Expr) := withMainContext do
+def stepLinkFact? (body pc : Expr) (facts : Array Term := #[]) : TacticM (Option Expr) := withMainContext do
   let read := mkApp2 (mkConst ``CIL.Method.linkAt) body pc
   let byEvaluation (link : Expr) : TacticM Expr := do
     mkExpectedTypeHint (← mkEqRefl read) (← mkEq read link)
   if let some link ← literalLink? read then return some (← byEvaluation link)
-  if (← instantiateMVars body).isAppOf ``CIL.Method.mk then return none
+  if (← instantiateMVars body).isAppOf ``CIL.Method.mk then return ← suppliedReadFact? read facts
   let normalize ← `(tactic| simp only [cil_code])
   let { ctx, simprocs, .. } ← mkSimpContext normalize (eraseLocal := false)
   let (result, _) ← simp read ctx simprocs
@@ -1258,7 +1270,7 @@ def stepLinkFact? (body pc : Expr) : TacticM (Option Expr) := withMainContext do
     unless value.getAppFn.isConst do return none
     return some (← byEvaluation (mkApp2 (mkConst ``Option.some [Level.zero])
       (mkConst ``CIL.Link) value))
-  | _ => return none
+  | _ => suppliedReadFact? read facts
 
 open Lean Meta in
 /-- Whether `fact` is an equation whose right side is `none`: a link fact for a pc with no link,
@@ -1270,7 +1282,7 @@ open Lean Elab Tactic Meta in
 /-- The runtime model of a call of `method` in `body` as a fact: the `cil_runtime_models` fact
     of a named body, or the table's evaluation for a literal one, which may give no model. Nothing
     when neither decides it. -/
-def stepModelFact? (body method : Expr) (opcode := ``CIL.CallOpcode.call) :
+def stepModelFact? (body method : Expr) (opcode := ``CIL.CallOpcode.call) (facts : Array Term := #[]) :
     TacticM (Option Expr) := withMainContext do
   let read := mkApp3 (mkConst ``CIL.Extraction.runtimeModel)
     (mkApp (mkConst ``CIL.Method.environment) body) (mkConst opcode) method
@@ -1278,7 +1290,8 @@ def stepModelFact? (body method : Expr) (opcode := ``CIL.CallOpcode.call) :
   let { ctx, simprocs, .. } ← mkSimpContext normalize (eraseLocal := false)
   let (result, _) ← simp read ctx simprocs
   let model ← whnfR result.expr
-  unless model.isAppOfArity ``Option.some 2 || model.isAppOfArity ``Option.none 1 do return none
+  unless model.isAppOfArity ``Option.some 2 || model.isAppOfArity ``Option.none 1 do
+    return ← suppliedReadFact? read facts
   return some (← mkExpectedTypeHint (← result.getProof) (← mkEq read result.expr))
 
 /-- Opcodes whose step reads the body's link at the step's pc. -/
@@ -1534,7 +1547,7 @@ elab_rules : tactic
     -- would hand a later pc this pc's fact, is not consulted for this step.
     let linkFacts : Array Term ← if linkedOpcodes.contains operation then
         match (← stepLinkFact? (← entryAt "cil_checked_step_normalized" args 0)
-            (← entryAt "cil_checked_step_normalized" args 2)) with
+            (← entryAt "cil_checked_step_normalized" args 2) facts.getElems) with
         | some proof =>
           let (link, goal) ← (← (← getMainGoal).assert (← mkFreshUserName `link)
             (← inferType proof) proof).intro1P
@@ -1546,8 +1559,8 @@ elab_rules : tactic
           let model ← if !unlinked then pure none else
             match argumentsOf? args[1]! ``CIL.Instruction.call 2,
                 argumentsOf? args[1]! ``CIL.Instruction.newobj 1 with
-            | some #[method, _], _ => stepModelFact? body method
-            | _, some #[method] => stepModelFact? body method ``CIL.CallOpcode.newobj
+            | some #[method, _], _ => stepModelFact? body method (facts := facts.getElems)
+            | _, some #[method] => stepModelFact? body method ``CIL.CallOpcode.newobj facts.getElems
             | _, _ => pure none
           match model with
           | none => pure #[linkFact]
@@ -1556,10 +1569,7 @@ elab_rules : tactic
               (← inferType model) model).intro1P
             replaceMainGoal [goal]
             pure #[linkFact, ← goal.withContext (Term.exprToSyntax (mkFVar fact))]
-        -- Without a generated fact, a supplied one states the read, so it rewrites first too.
-        | none => facts.getElems.filterM fun fact => suppliedFactSatisfies fact fun type => do
-            let some (_, read, _) := type.consumeMData.eq? | return false
-            return read.consumeMData.isAppOfArity ``CIL.Method.linkAt 2
+        | none => pure #[]
       else pure #[]
     let stepFacts := facts.getElems ++ linkFacts
     let strategy ← if operation == ``CIL.Instruction.intrinsic then
@@ -1610,7 +1620,9 @@ elab_rules : tactic
           | (apply CIL.Safety.step_call_skipInit_address _ _ _ _ _ $link $model rfl
              assumption)
           | (refine Eq.trans (CIL.Safety.step_call_feature _ _ _ _ _ $link $model rfl) ?_
-             cil_checked_step_equations [$[$stepFacts:term],*])
+             cil_try_simp_only [cil_step, cil_guard, cil_checked, cil_side, $[$facts:term],*,
+               ite_true, ite_false, Bool.true_eq_false, Bool.false_eq_true]
+             all_goals rfl)
           | (refine Eq.trans (CIL.Safety.step_call_intrinsic _ _ _ _ _ $link $model rfl) ?_
              cil_checked_intrinsic [$facts:term,*])
           | (refine Eq.trans (CIL.Safety.step_call_typedTransfer _ _ _ _ _ $link $model rfl _) ?_
@@ -2182,13 +2194,13 @@ def callsCallee (operation : Lean.Name) : Bool :=
 
 open Lean Elab Tactic Meta in
 /-- The link lookup for this instruction proves that it has no callee. -/
-def unlinkedPc (body pc : Expr) : TacticM Bool := withMainContext do
-  let some fact ← stepLinkFact? body pc | return false
+def unlinkedPc (body pc : Expr) (facts : Array Term := #[]) : TacticM Bool := withMainContext do
+  let some fact ← stepLinkFact? body pc facts | return false
   statesNone fact
 
 open Lean Elab Tactic Meta in
 /-- A known empty link selects runtime model lookup for a call or constructor at the fetched pc. -/
-def unlinkedModelSite (operation : Name) (instructionFound : Term) : TacticM Bool :=
+def unlinkedModelSite (operation : Name) (instructionFound : Term) (facts : Array Term) : TacticM Bool :=
     withMainContext do
   unless operation == ``CIL.Instruction.call || operation == ``CIL.Instruction.newobj do
     return false
@@ -2196,7 +2208,7 @@ def unlinkedModelSite (operation : Name) (instructionFound : Term) : TacticM Boo
   let some (_, lookup, _) := found.consumeMData.eq? | return false
   let some (code, pc) := indexedLookup? lookup | return false
   let some #[body] := argumentsOf? code ``CIL.Method.code 1 | return false
-  unlinkedPc body pc
+  unlinkedPc body pc facts
 
 open Lean Elab Tactic Meta in
 /-- One `run` step: prove the method and instruction lookups once, then apply only the
@@ -2223,7 +2235,7 @@ def cilRunStepNodes (facts : Array Term) : TacticM Unit := withMainContext do
   -- A construction under an `.object` link runs its constructor as a call before continuing in
   -- the caller; under an `.aggregate` link it steps on as any other instruction does.
   let constructs := operation == ``CIL.Instruction.newobj
-  let modelled ← unlinkedModelSite operation instructionSyntax
+  let modelled ← unlinkedModelSite operation instructionSyntax facts
   -- These fault before their callee runs: a call site the link table omits, a short heap
   -- budget, a null receiver, or a receiver whose class a dispatch table omits.
   let faultsFirst := constructs || callsCallee operation

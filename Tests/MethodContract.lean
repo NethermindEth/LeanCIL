@@ -322,7 +322,7 @@ theorem selected_widening (signed : Bool) (program : CIL.Program) (index : Nat)
 
 /-- A feature test and a vector load step by their own equations inside a contract proof. -/
 def featureLoadBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := [.feature .avx2, .pop, .ldarg 0,
+  { profile, returnsValue := true, locals := [], code := [.call (Tests.supportedGetter "X86.Avx2"), .pop, .ldarg 0,
       .memory .load128, .ret] }
 
 theorem feature_load_contract (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
@@ -433,7 +433,7 @@ theorem framed_opaque_call {program : CIL.Program} {memory : Memory} (value : CI
 /-- A feature test and a literal each feed a branch, which then continues at a numeral. -/
 @[cil_code] def literalBranchBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := true, locals := [], code :=
-    [.feature .avx2, .brfalse 5, .ldc_i8 1, .brtrue 6, .ret, .ldc_i4 9, .ldc_i4 7, .ret] }
+    [.call (Tests.supportedGetter "X86.Avx2"), .brfalse 5, .ldc_i8 1, .brtrue 6, .ret, .ldc_i4 9, .ldc_i4 7, .ret] }
 
 /-- A branch on a literal operand is decided where it is taken: the lookups after it meet a
     numeral, and so does a continuation stated at the numeral. A conditional left in the

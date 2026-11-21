@@ -9,6 +9,8 @@ import Tests.Support
 import Tests.WordFields
 
 namespace Tests.Automation
+
+attribute [local cil_code] Tests.supportedGetter_avx2_model
 open Tests.WordFields
 
 def candidate : Nat := 7
@@ -576,7 +578,7 @@ theorem permute_then_store_value (a b c d : CIL.W64) (destination : Reference) (
 
 /-- A feature test steps from a fact about the profile field, through a body neither unfolded nor tagged. -/
 def featureTestBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := [.feature .avx2, .ret] }
+  { profile, returnsValue := true, locals := [], code := [.call (Tests.supportedGetter "X86.Avx2"), .ret] }
 
 theorem feature_step_from_fact (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (wide : profile.avx2 = true) (found : program[index]? = some (featureTestBody profile))
@@ -585,16 +587,17 @@ theorem feature_step_from_fact (program : CIL.Program) (index : Nat) (profile : 
   cil_checked_steps [wide]
 
 theorem feature_step_free_body (program : CIL.Program) (index : Nat) (body : CIL.Method)
-    (wide : body.profile.avx2 = false) (code : body.code = [.feature .avx2, .ret])
+    (wide : body.profile.avx2 = false) (unlinked : body.linkAt 0 = none)
+    (code : body.code = [.call (Tests.supportedGetter "X86.Avx2"), .ret])
     (returns : body.returnsValue = true) (found : program[index]? = some body)
     (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
     CIL.Safety.run program 3 index 0 [] frame [] memory =
       .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
-  cases narrow : body.returnNarrow <;> cil_checked_steps [wide, code, returns, narrow]
+  cases narrow : body.returnNarrow <;> cil_checked_steps [unlinked, wide, code, returns, narrow]
 
 -- A literal profile decides the test with no fact.
 theorem feature_step_literal_profile (memory : CIL.Safety.Memory) :
-    CIL.Safety.invoke [{ permuteStoreMethod with code := [.feature .avx2, .ret], returnsValue := true }] 3 0 []
+    CIL.Safety.invoke [{ permuteStoreMethod with code := [.call (Tests.supportedGetter "X86.Avx2"), .ret], returnsValue := true }] 3 0 []
       memory = .ok (memory, [.scalar (.i32 1)]) := by
   cil_checked_steps
 
@@ -663,19 +666,20 @@ theorem feature_step_evaluate_fact (program : CIL.Program) (index : Nat) (profil
   cil_checked_steps [wide]
 
 theorem feature_step_evaluate_free_body (program : CIL.Program) (index : Nat) (body : CIL.Method)
-    (wide : body.profile.evaluate .avx2 = false) (code : body.code = [.feature .avx2, .ret])
+    (wide : body.profile.evaluate .avx2 = false) (unlinked : body.linkAt 0 = none)
+    (code : body.code = [.call (Tests.supportedGetter "X86.Avx2"), .ret])
     (returns : body.returnsValue = true) (found : program[index]? = some body)
     (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
     CIL.Safety.run program 3 index 0 [] frame [] memory =
       .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
-  cases narrow : body.returnNarrow <;> cil_checked_steps [wide, code, returns, narrow]
+  cases narrow : body.returnNarrow <;> cil_checked_steps [unlinked, wide, code, returns, narrow]
 
 -- A supplied proof term, not just a local name, is normalized to the profile field.
 theorem feature_step_evaluate_term (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
-    (wide : body.profile.evaluate .avx2 = true) :
-    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+    (unlinked : body.linkAt 0 = none) (wide : body.profile.evaluate .avx2 = true) :
+    CIL.Safety.step body (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
-  cil_checked_step [(show body.profile.evaluate .avx2 = true from wide)]
+  cil_checked_step [unlinked, (show body.profile.evaluate .avx2 = true from wide)]
 
 theorem feature_steps_evaluate_term (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (wide : profile.evaluate .avx2 = true) (found : program[index]? = some (featureTestBody profile))
@@ -685,28 +689,31 @@ theorem feature_steps_evaluate_term (program : CIL.Program) (index : Nat) (profi
 
 -- A fact over every feature is instantiated at each constructor, so it still decides the field test.
 theorem feature_step_evaluate_forall (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
-    (all : ∀ f, body.profile.evaluate f = true) :
-    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+    (unlinked : body.linkAt 0 = none) (all : ∀ f, body.profile.evaluate f = true) :
+    CIL.Safety.step body (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
-  cil_checked_step [all]
+  cil_checked_step [unlinked, all]
 
 theorem feature_steps_evaluate_forall (program : CIL.Program) (index : Nat) (body : CIL.Method)
-    (all : ∀ f, body.profile.evaluate f = false) (code : body.code = [.feature .avx2, .ret])
+    (all : ∀ f, body.profile.evaluate f = false) (unlinked : body.linkAt 0 = none)
+    (code : body.code = [.call (Tests.supportedGetter "X86.Avx2"), .ret])
     (returns : body.returnsValue = true) (found : program[index]? = some body)
     (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
     CIL.Safety.run program 3 index 0 [] frame [] memory =
       .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
-  cases narrow : body.returnNarrow <;> cil_checked_steps [all, code, returns, narrow]
+  cases narrow : body.returnNarrow <;> cil_checked_steps [unlinked, all, code, returns, narrow]
 
 /-- A fact about a symbolic feature rewrites the pushed test by hand: `cil_step` keeps
     `body.profile.evaluate f` folded instead of splitting on `f`. -/
 theorem feature_step_symbolic_fact (body : CIL.Method) (frame : CIL.Safety.Frame)
-    (memory : CIL.Safety.Memory) (feature : CIL.Feature)
+    (memory : CIL.Safety.Memory) (feature : CIL.Feature) (getter : CIL.Extraction.MethodRef)
+    (unlinked : body.linkAt 0 = none)
+    (model : CIL.Extraction.runtimeModel body.environment .call getter = some (.feature feature))
     (enabled : body.profile.evaluate feature = true) :
-    CIL.Safety.step body (.feature feature) 0 [] frame [] memory =
+    CIL.Safety.step body (.call getter) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
-  simp only [cil_step, enabled, ite_true]
-  rfl
+  rw [CIL.Safety.step_call_feature _ _ _ _ _ unlinked model rfl]
+  simp only [enabled, ite_true]
 
 open Lean Elab Tactic in
 /-- Fails if normalising `facts` restates any of them as a new hypothesis. -/
@@ -719,12 +726,14 @@ elab "expect_facts_already_normal " "[" facts:term,* "]" : tactic => do
 /-- Checked stepping uses the fact as stated: the normaliser leaves a symbolic feature test
     folded, as the step leaves it, rather than restating the fact as a match on `f`. -/
 theorem checked_symbolic_feature_fact (body : CIL.Method) (frame : CIL.Safety.Frame)
-    (memory : CIL.Safety.Memory) (feature : CIL.Feature)
+    (memory : CIL.Safety.Memory) (feature : CIL.Feature) (getter : CIL.Extraction.MethodRef)
+    (unlinked : body.linkAt 0 = none)
+    (model : CIL.Extraction.runtimeModel body.environment .call getter = some (.feature feature))
     (disabled : body.profile.evaluate feature = false) :
-    CIL.Safety.step body (.feature feature) 0 [] frame [] memory =
+    CIL.Safety.step body (.call getter) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 0)] frame memory) := by
   expect_facts_already_normal [disabled]
-  cil_checked_step [disabled]
+  cil_checked_step [unlinked, model, disabled]
 
 /-- info: 'Tests.Automation.feature_step_symbolic_fact' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms feature_step_symbolic_fact
@@ -741,15 +750,15 @@ theorem wideProfile_avx2 : wideProfile.evaluate .avx2 = true := rfl
 attribute [irreducible] wideProfile
 
 theorem feature_step_evaluate_global (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
-    (profile : body.profile = wideProfile) :
-    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+    (unlinked : body.linkAt 0 = none) (profile : body.profile = wideProfile) :
+    CIL.Safety.step body (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
-  cil_checked_step [profile, wideProfile_avx2]
+  cil_checked_step [unlinked, profile, wideProfile_avx2]
 
 -- A fact on a method's profile projection lands where `cil_step` reduces the projection.
 theorem feature_step_projection_fact (profile : CIL.FeatureProfile) (frame : CIL.Safety.Frame)
     (memory : CIL.Safety.Memory) (wide : (featureTestBody profile).profile.evaluate .avx2 = true) :
-    CIL.Safety.step (featureTestBody profile) (.feature .avx2) 0 [] frame [] memory =
+    CIL.Safety.step (featureTestBody profile) (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
   cil_checked_step [wide]
 
@@ -761,16 +770,16 @@ theorem feature_steps_projection_fact (program : CIL.Program) (index : Nat) (pro
 
 theorem feature_step_projection_field (profile : CIL.FeatureProfile) (frame : CIL.Safety.Frame)
     (memory : CIL.Safety.Memory) (wide : (featureTestBody profile).profile.avx2 = true) :
-    CIL.Safety.step (featureTestBody profile) (.feature .avx2) 0 [] frame [] memory =
+    CIL.Safety.step (featureTestBody profile) (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
   cil_checked_step [wide]
 
 -- Quantified feature facts given as proof terms or global theorems are instantiated like local ones.
 theorem feature_step_forall_term (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
-    (all : ∀ f, body.profile.evaluate f = true) :
-    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+    (unlinked : body.linkAt 0 = none) (all : ∀ f, body.profile.evaluate f = true) :
+    CIL.Safety.step body (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
-  cil_checked_step [(show ∀ f, body.profile.evaluate f = true from all)]
+  cil_checked_step [unlinked, (show ∀ f, body.profile.evaluate f = true from all)]
 
 def bareProfile : CIL.FeatureProfile := {}
 
@@ -779,10 +788,10 @@ theorem bareProfile_none : ∀ f, bareProfile.evaluate f = false := by intro f; 
 attribute [irreducible] bareProfile
 
 theorem feature_step_forall_global (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
-    (profile : body.profile = bareProfile) :
-    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+    (unlinked : body.linkAt 0 = none) (profile : body.profile = bareProfile) :
+    CIL.Safety.step body (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 0)] frame memory) := by
-  cil_checked_step [profile, bareProfile_none]
+  cil_checked_step [unlinked, profile, bareProfile_none]
 
 -- Pointer arithmetic in the run loop steps without a `referenceAt` fact.
 @[cil_code] def addBody : CIL.Method :=

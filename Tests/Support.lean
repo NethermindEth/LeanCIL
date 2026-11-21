@@ -18,6 +18,20 @@ def caller : Memory where
 /-- A reference to the start of `caller`'s allocation. -/
 def reference : Value := .reference (.address ⟨0, 0⟩)
 
+/-- The parameterless Boolean getter on a named ISA class in the pinned intrinsics assembly. -/
+def supportedGetter (isa : String) : CIL.Extraction.MethodRef where
+  owner := .atom CIL.Extraction.intrinsicsScope ("System.Runtime.Intrinsics." ++ isa)
+  name := name!"get_IsSupported"
+  hasThis := false
+  genericArity := 0
+  returnType := .atom CIL.Extraction.runtimeScope "System.Boolean"
+  parameters := []
+
+/-- The checked getter table selects AVX2 in every layout environment. -/
+theorem supportedGetter_avx2_model (environment : CIL.LayoutEnvironment) :
+    CIL.Extraction.runtimeModel environment .call (supportedGetter "X86.Avx2") =
+      some (.feature .avx2) := rfl
+
 /-- A static method of `count` parameters, for a body that calls through its link table and
     needs only the call's arity; the owner, name and types are placeholders no check reads. -/
 def callee (count : Nat) : CIL.Extraction.MethodRef where

@@ -34,7 +34,7 @@ abbrev unreachable : Instruction := .unadmitted 0
 /-- One body over two feature flags and a callee, shared by all extraction profiles. -/
 def template (profile : FeatureProfile) (sse42 avx2 : Bool) (callee : Nat) : Method := {
   profile, returnsValue := true, locals := [], links := [(4, .direct callee)], code := [
-    .feature .avx2, .brfalse 6,
+    .call (Tests.supportedGetter "X86.Avx2"), .brfalse 6,
     if avx2 then .ldarg 0 else unreachable,
     if avx2 then .ldarg 1 else unreachable,
     if avx2 then .call (Tests.callee 2) else unreachable,
@@ -45,7 +45,7 @@ def template (profile : FeatureProfile) (sse42 avx2 : Bool) (callee : Nat) : Met
 /-- An extracted layout has two extra dead instructions before the scalar branch target. -/
 def extracted (profile : FeatureProfile) (callee : Nat) : Method := {
   profile, returnsValue := true, locals := [], links := [(4, .direct callee)], code := [
-    .feature .avx2, .brfalse 8,
+    .call (Tests.supportedGetter "X86.Avx2"), .brfalse 8,
     if profile.avx2 then .ldarg 0 else unreachable,
     if profile.avx2 then .ldarg 1 else unreachable,
     if profile.avx2 then .call (Tests.callee 2) else unreachable,

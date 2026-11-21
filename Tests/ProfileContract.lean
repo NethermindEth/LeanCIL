@@ -1,4 +1,5 @@
 import CIL.Safety.ProfileContract
+import Tests.Support
 
 /-! A contract proved once under one feature profile and carried to other profiles by
     `MethodContract.Holds.reprofile` and its outcome forms, with the profile agreement decided
@@ -34,7 +35,7 @@ theorem profiles_valid : avx2Profile.Valid ∧ avx512Profile.Valid ∧ narrowPro
 /-- Method 0 is `IsSupported(Avx2) ? 1 : 0`; method 1 always throws. Both use `avx2Profile`. -/
 @[cil_code] def program : Program :=
   [{ profile := avx2Profile, returnsValue := true, locals := [],
-     code := [.feature .avx2, .ret] },
+     code := [.call (Tests.supportedGetter "X86.Avx2"), .ret] },
    { profile := avx2Profile, returnsValue := false, locals := [],
      code := [.throw .notSupported] }]
 
@@ -66,7 +67,7 @@ theorem narrow_holds : avx2Contract.Holds (reprofile program narrowProfile) 0 :=
 /-- The same bodies written with their own profile, as a per-profile extraction would be. -/
 @[cil_code] def avx512Program : Program :=
   [{ profile := avx512Profile, returnsValue := true, locals := [],
-     code := [.feature .avx2, .ret] },
+     code := [.call (Tests.supportedGetter "X86.Avx2"), .ret] },
    { profile := avx512Profile, returnsValue := false, locals := [],
      code := [.throw .notSupported] }]
 
@@ -79,8 +80,8 @@ theorem extraction_holds : avx2Contract.Holds avx512Program 0 := by
 theorem avx2_family_holds (target : FeatureProfile) (wide : target.avx2 = true) :
     avx2Contract.Holds (reprofile program target) 0 :=
   avx2_holds.reprofile avx2Profile uniform (Program.ProfileAgreement.of_flags _ _ _ (by
-    simp [Program.profileReads, Instruction.profileReads, program, avx2Profile,
-      FeatureProfile.evaluate, wide]))
+    change ∀ f ∈ [Feature.avx2], avx2Profile.evaluate f = target.evaluate f
+    simpa [avx2Profile, FeatureProfile.evaluate] using wide.symm))
 
 /-- The normal-return outcome form carries over: method 0 never raises. -/
 theorem outcome_holds :
@@ -176,7 +177,7 @@ theorem intrinsic_disagrees : ¬ intrinsicProgram.ProfileAgreement avx512Profile
     (by simp)
   simp [Instruction.ProfileAgreement, Intrinsic.available, avx512Profile, avx2Profile] at available
 
-/-- info: 'Tests.ProfileContract.uniform' does not depend on any axioms -/
+/-- info: 'Tests.ProfileContract.uniform' depends on axioms: [propext] -/
 #guard_msgs in #print axioms uniform
 /-- info: 'Tests.ProfileContract.avx2_holds' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms avx2_holds

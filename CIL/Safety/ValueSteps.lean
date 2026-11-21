@@ -6,10 +6,9 @@ import CIL.Safety.ResolutionFacts
 # Value step equations
 
 `@[cil_step]` equations for the value-only ops (arithmetic, comparisons, conversions,
-branches, `switch`, `nop`, explicit throws and feature tests), one per op and i32/i64 operand shape.
+branches, `switch`, `nop` and explicit throws), one per op and i32/i64 operand shape.
 `cil_value_steps` generates them as the library builds by evaluating the dispatcher once, so
-stepping rewrites by constructor instead of unfolding `CIL.step` in every proof. A feature
-test on a known feature is then reduced to the profile field that a caller's fact names.
+stepping rewrites by constructor instead of unfolding `CIL.step` in every proof.
 -/
 
 namespace CIL.Safety
@@ -162,7 +161,6 @@ cil_value_steps [nop] 0
 cil_value_steps (exception : ExceptionType) [throw] 0
 #print axioms step_throw_eq
 
-cil_value_steps (id : CIL.Feature) [feature] 0
 cil_value_steps (target : CIL.ConvTarget) [conv_ovf, conv_ovf_un] 1
 cil_value_steps [div, div_un, rem, rem_un, add_ovf, add_ovf_un, sub_ovf, sub_ovf_un, mul_ovf,
   mul_ovf_un] 2

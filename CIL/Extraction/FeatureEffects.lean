@@ -86,7 +86,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .stsfld _ => some (1, 0)
   -- Local writes, local addresses and control flow must match their raw instruction exactly.
   | .ldloca _ | .stloc .. | .starg _ | .ldarga _
-  | .feature _ | .ret | .throw _ | .unadmitted _ | .br _ | .switch _ | .brfalse _
+  | .ret | .throw _ | .unadmitted _ | .br _ | .switch _ | .brfalse _
   | .brtrue _ | .bgt _ | .ble _ | .ble_un _ | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _
   | .blt _ | .beq _ | .bne_un _ => none
 

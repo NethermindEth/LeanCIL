@@ -1343,18 +1343,6 @@ theorem step_appendLocals_newobj (constructor : Extraction.MethodRef) :
 
 #print axioms step_appendLocals_newobj
 
-/-- `feature` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_feature (id : Feature) :
-    StepAppendLocals (.feature id) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  exact fallback_appendLocals body.profile (.feature id) pc stack frame extra memory
-
-#print axioms step_appendLocals_feature
-
 /-- `intrinsic` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_intrinsic (operation : Intrinsic) (argc : Nat) :
     StepAppendLocals (.intrinsic operation argc) := by
@@ -1714,8 +1702,6 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
     case callvirt method => exact step_appendLocals_callvirt method
     case newobj constructor =>
       exact step_appendLocals_newobj constructor
-    case feature id =>
-      exact step_appendLocals_feature id
     case intrinsic operation argc =>
       exact step_appendLocals_intrinsic operation argc
     case memory operation =>

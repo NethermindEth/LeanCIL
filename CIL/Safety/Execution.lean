@@ -185,7 +185,7 @@ def pureArity : CIL.Instruction → Option Nat
     | .clt | .clt_un | .cgt_un | .ceq => some 2
   | .brfalse _ | .brtrue _ | .switch _ => some 1
   | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _ | .blt _ | .beq _ | .bne_un _ => some 2
-  | .br _ | .feature _ => some 0
+  | .br _ => some 0
   | .intrinsic _ argc => some argc
   -- Faulting arithmetic has its own arms in `step`; `CIL.step` would drop the fault.
   | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un

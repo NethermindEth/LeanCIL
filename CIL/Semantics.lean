@@ -227,9 +227,7 @@ def step (op : Instruction) (returns : Bool)
     return .next (if b ≤ a then target else pc + 1) rest memory
   | .bge_un target, .i64 b :: .i64 a :: rest =>
     return .next (if b ≤ a then target else pc + 1) rest memory
-  -- Hardware features, intrinsics and memory operations.
-  | .feature id, _ =>
-    return .next (pc + 1) (.i32 (if profile.evaluate id then 1 else 0) :: stack) memory
+  -- Intrinsics and memory operations.
   | .intrinsic operation argc, _ =>
     if stack.length < argc || !operation.available profile then none else
       return .next (pc + 1)

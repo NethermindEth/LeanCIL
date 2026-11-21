@@ -315,7 +315,7 @@ checked `read`, `write`, `add` and formation equations instead of evaluator defi
   `add` fact on a known address needs no extra reference-conversion fact.
 - Manual proofs can apply the matching opcode or operation equation directly.
 
-A `.feature f` step pushes `body.profile.evaluate f`. For a known feature,
+A decoded call to a hardware feature getter pushes `1` or `0` according to `body.profile.evaluate f`. For a known feature,
 `cil_step` reduces that expression to the profile field; a symbolic `f` stays
 `body.profile.evaluate f`, so a fact about it applies as stated. `cil_step` unfolds a method
 definition or literal only as far as its profile, so a fact such as `profile.avx2 = true` decides

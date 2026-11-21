@@ -237,10 +237,6 @@ theorem base_relabel_br (t : Nat) : BaseRelabel (.br t) := by
   change some (Action.next t values (fun _ => none)) = _ at h
   cases h
   rfl
-theorem base_relabel_feature (id : Feature) : BaseRelabel (.feature id) :=
-  base_relabel_fallthrough
-    (evaluate := fun stack profile => some (.i32 (if profile.evaluate id then 1 else 0) :: stack))
-    (fun _ _ _ => rfl) (fun _ => rfl) rfl
 
 /-- Relabeling keeps the flags of a division or remainder. -/
 theorem divideKind?_relabel (r : Nat → Nat) (op : Instruction) :

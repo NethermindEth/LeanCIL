@@ -60,7 +60,7 @@ example : runModel body (.intrinsic (.scalar (.rotateLeft 32)) 2) 3 frame
 example : runModel body (.memory (.createSpan 4)) 3 frame [start] staticMemory =
     step body (.memory (.createSpan 4)) 3 [] frame [start] staticMemory := rfl
 example : runModel body (.feature .avx2) 3 frame [start] staticMemory =
-    step body (.feature .avx2) 3 [] frame [start] staticMemory := rfl
+    featureCall body.profile .avx2 3 frame [start] staticMemory := rfl
 example : runModel body (.constant 8) 3 frame [start] staticMemory =
     step body (.ldc_i4 8) 3 [] frame [start] staticMemory := rfl
 example : runModel body (.referenceCompare .same) 3 frame [fourth, start] staticMemory =
@@ -162,7 +162,7 @@ example : (CIL.RuntimeModel.intrinsic (.scalar (.rotateLeft 32)) 2).observerCoun
     observerCount (.intrinsic (.scalar (.rotateLeft 32)) 2) := rfl
 example : (CIL.RuntimeModel.memory (.createSpan 4)).observerCount =
     observerCount (.memory (.createSpan 4)) := rfl
-example : (CIL.RuntimeModel.feature .avx2).observerCount = observerCount (.feature .avx2) := rfl
+example : (CIL.RuntimeModel.feature .avx2).observerCount = 0 := rfl
 example : (CIL.RuntimeModel.constant 8).observerCount = observerCount (.ldc_i4 8) := rfl
 example : (CIL.RuntimeModel.referenceCompare .less).observerCount = observerCount .clt_un := rfl
 example : CIL.RuntimeModel.referenceSubtract.observerCount = observerCount .sub := rfl

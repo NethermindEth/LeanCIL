@@ -917,7 +917,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case bne_un target => exact step_relabel_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
     | conv_u4 | conv_u8 | conv_u | conv_i | not | mul | and | or | xor | shl | shr | shr_un
-    | clt | br | switch | bge | blt | feature =>
+    | clt | br | switch | bge | blt =>
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case ldc_i4
     | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
@@ -968,7 +968,6 @@ theorem step_relabel_br (target : Nat) : StepRelabel (.br target) := step_relabe
 theorem step_relabel_switch (targets : List Nat) : StepRelabel (.switch targets) := step_relabel _
 theorem step_relabel_bge (target : Nat) : StepRelabel (.bge target) := step_relabel _
 theorem step_relabel_blt (target : Nat) : StepRelabel (.blt target) := step_relabel _
-theorem step_relabel_feature (id : Feature) : StepRelabel (.feature id) := step_relabel _
 
 #print axioms step_relabel
 
@@ -1561,7 +1560,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case bne_un target => exact step_raise_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
     | conv_u4 | conv_u8 | conv_u | conv_i | not | mul | and | or | xor | shl | shr | shr_un
-    | clt | br | switch | bge | blt | feature =>
+    | clt | br | switch | bge | blt =>
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case ldc_i4
     | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup

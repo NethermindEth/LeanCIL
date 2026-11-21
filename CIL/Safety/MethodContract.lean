@@ -1001,7 +1001,7 @@ elab_rules : tactic
     let currentFacts := facts.getElems ++ (← cilOutputFacts operation)
     let facts := currentFacts
     withNormalNodes currentFacts do
-    if callsCallee operation && !(← unlinkedModelSite operation instructionFound) then
+    if callsCallee operation && !(← unlinkedModelSite operation instructionFound facts) then
       let saved ← saveState
       try cilContractApply methodFound instructionFound facts
       catch _ =>

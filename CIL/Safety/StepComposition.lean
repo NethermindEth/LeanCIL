@@ -329,13 +329,14 @@ theorem step_call_intrinsic {method : Extraction.MethodRef} {prefixes : CallPref
 
 #print axioms step_call_intrinsic
 
-/-- A kept feature getter evaluates the same profile field as a feature instruction. -/
+/-- A decoded call of a feature getter pushes its profile flag and advances to the next PC. -/
 theorem step_call_feature {method : Extraction.MethodRef} {prefixes : CallPrefixes}
     {feature : CIL.Feature} (link : body.linkAt pc = none)
     (found : Extraction.runtimeModel body.environment .call method = some (.feature feature))
     (direct : prefixes.tail = false) :
     step body (.call method prefixes) pc args frame stack memory =
-      step body (.feature feature) pc args frame stack memory := by
+      .ok (.next (pc + 1) (.scalar (.i32 (if body.profile.evaluate feature then 1 else 0)) :: stack)
+        frame memory) := by
   rw [step_call_model (link := link) (found := found) (direct := direct)]
   rfl
 

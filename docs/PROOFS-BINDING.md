@@ -691,10 +691,16 @@ def helper : CIL.Extraction.MethodRef :=
   { owner := .atom "Doc" "Doc", name := name!"Helper", hasThis := false, genericArity := 0,
     returnType := .atom "Doc" "Word", parameters := [] }
 
+/-- The external AVX2 feature getter that the call resolves in the model. -/
+def avx2Getter : CIL.Extraction.MethodRef :=
+  { owner := .atom CIL.Extraction.intrinsicsScope "System.Runtime.Intrinsics.X86.Avx2",
+    name := name!"get_IsSupported", hasThis := false, genericArity := 0,
+    returnType := .atom CIL.Extraction.runtimeScope "System.Boolean", parameters := [] }
+
 def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [],
     links := [(2, .direct callee)], code := [
-    .feature .avx2, .brfalse 4,
+    .call avx2Getter, .brfalse 4,
     if avx2 then .call helper else unreachable,
     if avx2 then .ret else unreachable,
     if avx2 then unreachable else .ret] }

@@ -22,7 +22,7 @@ abbrev unreachable : CIL.Instruction := .unadmitted 0
 def dispatchBody (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [], links := [(4, .direct callee)],
     code := [
-    .feature .avx2,
+    .call (Tests.supportedGetter "X86.Avx2"),
     .brfalse 6,
     if avx2 then .ldarg 0 else unreachable,
     if avx2 then .ldarg 1 else unreachable,
