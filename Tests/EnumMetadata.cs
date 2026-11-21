@@ -32,16 +32,11 @@ var getter = (MethodReference)owner.Methods.Single(method => method.Name == "Rea
 
 IDisposable Scope() => (IDisposable)begin.Invoke(null, null)!;
 object Describe() => descriptor.Invoke(null, [element, null])!;
-object MemoryCase(object? operation)
-{
-    if (operation?.GetType().Name != "Memory") throw new InvalidOperationException("Not a memory operation");
-    return operation.GetType().GetProperty("Operation")!.GetValue(operation)!;
-}
 // The width of the span item the getter models, read from the operation and not from its rendering.
 int ItemWidth()
 {
-    var item = MemoryCase(span.Invoke(null, [getter, "scalar"]));
-    return item.GetType().Name == "SpanItem" ? (int)item.GetType().GetProperty("Width")!.GetValue(item)!
+    var item = span.Invoke(null, [getter, "scalar"]);
+    return item?.GetType().Name == "SpanItem" ? Width(item)
         : throw new InvalidOperationException("The getter is not a span item");
 }
 int Width(object value) => (int)value.GetType().GetProperty("Width")!.GetValue(value)!;
