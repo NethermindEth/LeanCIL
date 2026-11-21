@@ -244,18 +244,24 @@ theorem names_literals_are_lists :
 def method0Signature : String :=
   "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)"
 
+/-- The platform definition `Add`'s owner relies on: its base `System.Object`. -/
+def method0Platform : PlatformTable := platform_table%
+  [{ scope := runtimeScopeBytes, parts := [bytesOf "System", bytesOf "Object"],
+     kind := .objectRoot }]
+
 def method0Body : Extraction.BodyEvidence :=
   { bytes := method0Bytes, tokens := { operands := [] }, metadata := method0Metadata,
               identities := [assembly0Identity], tables := method0Tables, names := method0Names,
-              pinned := cil_pin_index [assembly0Identity] }
+              pinned := cil_pin_index [assembly0Identity], platform := method0Platform }
 
 /-- The pin of the assembly the method was extracted from. -/
 def pin : AssemblyPin := ⟨"Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"⟩
 
 theorem add_body_decodes :
-    BodyDecodes [pin] pin method0Body method0Original [] method0Signature :=
+    BodyDecodes [pin] method0Platform pin method0Body method0Original [] method0Signature :=
   ⟨AllIdentified.cons assembly0_identified AllIdentified.nil, by decide +kernel,
-    by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by decide +kernel⟩
+    by cil_kernel_rfl, by cil_kernel_rfl, rfl, by cil_kernel_rfl, by cil_kernel_rfl,
+    by decide +kernel⟩
 #print axioms add_body_decodes
 
 set_option maxHeartbeats 20000 in

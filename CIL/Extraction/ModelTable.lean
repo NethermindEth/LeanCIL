@@ -3,7 +3,7 @@ import CIL.Extraction.CallLayouts
 import CIL.Extraction.Generics
 import CIL.Extraction.Lockstep
 import CIL.Extraction.FlowIndex
-import CIL.Extraction.MetadataBytes
+import CIL.Extraction.SearchTreeLiteral
 
 /-!
 # Runtime model tables
@@ -176,17 +176,6 @@ where
     | [] => true
     | entry :: rest => !rest.any (entry.sameSlot ·) && distinct rest
 
-open Lean Meta in
-/-- The literal balanced tree of key-ordered groups, split as `SearchTree.ofSorted` splits. -/
-private partial def literalTree (groups : Array (Nat × Array Expr)) : MetaM Expr := do
-  let valueType := mkApp (mkConst ``List [0]) (mkConst ``ModelEntry)
-  if groups.isEmpty then return mkApp (mkConst ``SearchTree.leaf) valueType
-  let leftCount := groups.size / 2
-  let (key, cells) := groups[leftCount]!
-  return mkApp5 (mkConst ``SearchTree.node) valueType (← literalTree (groups.extract 0 leftCount))
-    (mkNatLit key) (← mkListLit (mkConst ``ModelEntry) cells.toList)
-    (← literalTree (groups.extract (leftCount + 1) groups.size))
-
 open Lean Meta Elab Term in
 /-- `model_table% entries` is `ModelTable.ofEntries entries` written out as a literal tree whose
     leaves hold the entry terms, so the kernel never sorts or splits the list. Entries that share a
@@ -199,35 +188,12 @@ elab "model_table% " entries:term : term => do
   let distinct ← unsafe evalExpr Bool (mkConst ``Bool)
     (mkApp (mkConst ``ModelTable.slotsDistinct) list)
   unless distinct do throwError "model table: two entries share an opcode, owner and name"
-  let mut keyed : Array (Nat × Expr) := #[]
-  for cell in ← literalCells list do
-    keyed := keyed.push
-      (← unsafe evalExpr Nat (mkConst ``Nat) (mkApp (mkConst ``ModelEntry.key) cell), cell)
-  let mut groups : Array (Nat × Array Expr) := #[]
-  for (key, cell) in keyed.toList.mergeSort fun left right => left.1 ≤ right.1 do
-    match groups.back? with
-    | some (last, cells) =>
-      groups := if last = key then groups.pop.push (key, cells.push cell)
-        else groups.push (key, #[cell])
-    | none => groups := groups.push (key, #[cell])
-  literalTree groups
-
-/-- A value `find?` gives is one of the tree's entries. -/
-theorem SearchTree.find?_mem_toList {α : Type} :
-    ∀ (tree : SearchTree α) (key : Nat) (value : α), tree.find? key = some value →
-      (key, value) ∈ tree.toList
-  | .leaf, _, _, found => by simp [SearchTree.find?] at found
-  | .node left root stored right, key, value, found => by
-    simp only [SearchTree.find?] at found
-    simp only [SearchTree.toList, List.mem_append, List.mem_cons]
-    split at found
-    · exact .inl (SearchTree.find?_mem_toList left key value found)
-    · exact .inr (.inr (SearchTree.find?_mem_toList right key value found))
-    · rename_i same
-      cases found
-      exact .inr (.inl (by rw [Nat.compare_eq_eq.mp same]))
-
-#print axioms SearchTree.find?_mem_toList
+  let cells ← literalCells list
+  let mut keys : Array Nat := #[]
+  for cell in cells do
+    let key := mkApp (mkConst ``ModelEntry.key) cell
+    keys := keys.push (← unsafe evalExpr Nat (mkConst ``Nat) key)
+  SearchTree.groupedLiteral (mkConst ``ModelEntry) cells keys
 
 /-- Every model `entry` resolves has `property`. -/
 def ModelEntry.Yields (entry : ModelEntry) (property : RuntimeModel → Prop) : Prop :=

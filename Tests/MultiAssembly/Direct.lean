@@ -39,8 +39,7 @@ theorem step_summary :
 /-- The caller's MemberRef resolves to Step's MethodDef in the referenced library's slice. -/
 theorem direct_member_resolution :
     ∃ env site position,
-      Extracted.method0Body.metadata.environmentWith Extracted.method0Body.identities
-        Extracted.method0Body.tables Extracted.method0Body.pinned = .ok env ∧
+      Extracted.method0Body.environment = .ok env ∧
       env.methodSite Extracted.method0Body.tokens.operands[0].1 = .ok site ∧
       site.definition = some (position, Extracted.method1Original.token) ∧
       Extracted.method0Body.identities[position]? =

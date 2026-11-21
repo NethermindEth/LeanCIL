@@ -14,6 +14,34 @@ namespace Tests.MetadataBuilder
 
 open CIL CIL.Extraction
 
+/-- A type of `System.Runtime`'s `System` namespace as a platform definition of this kind. -/
+def runtimeType (name : String) (kind : PlatformKind) : PlatformDefinition :=
+  { scope := runtimeScopeBytes, parts := [bytesOf "System", bytesOf name], kind }
+
+/-- The platform definition of `System.Object`, the base of a fixture's classes. -/
+def objectPlatform : PlatformTable := platform_table% [runtimeType "Object" .objectRoot]
+
+/-- The table with each definition changed or dropped by `edit`; an edit that keeps the name
+    parts keeps the table's keys right. -/
+def editPlatform (edit : PlatformDefinition → Option PlatformDefinition)
+    (table : PlatformTable) : PlatformTable :=
+  { table with entries := visit table.entries }
+where
+  /-- Keep every key and replace its associated definitions. -/
+  visit : SearchTree (List PlatformDefinition) → SearchTree (List PlatformDefinition)
+    | .leaf => .leaf
+    | .node left key group right => .node (visit left) key (group.filterMap edit) (visit right)
+
+/-- The table without its definitions of types with simple name `name`. -/
+def removing (table : PlatformTable) (name : String) : PlatformTable :=
+  editPlatform (fun entry => if entry.parts.getLastD [] == bytesOf name then none else some entry)
+    table
+
+/-- The table with its definitions of types with simple name `name` stating `kind`. -/
+def restating (table : PlatformTable) (name : String) (kind : PlatformKind) : PlatformTable :=
+  editPlatform (fun entry =>
+    some (if entry.parts.getLastD [] == bytesOf name then { entry with kind } else entry)) table
+
 /-- The entries added so far. -/
 structure Builder where
   rows : List ByteEntry := []

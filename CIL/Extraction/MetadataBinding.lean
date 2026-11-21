@@ -33,7 +33,7 @@ def MetadataEnv.frame (env : MetadataEnv) (arity ownerArity : Nat) :
     Except MetadataError Frame := do
   let index ← env.slice 0 0
   let corlib ← index.corlibIdentity
-  .ok { corlib := corlib, anchor := corlib.getD [], arity := arity, ownerArity := ownerArity }
+  .ok { corlib, anchor := corlib.getD [], arity, ownerArity }
 
 /-- The type of a signature blob read in the slice at `position`. -/
 def MetadataEnv.resolveBlob (env : MetadataEnv) (position token blobOffset : Nat) :
@@ -181,9 +181,45 @@ def MetadataEnv.fieldSite (env : MetadataEnv) (token : Nat) : Except MetadataErr
       | none => .error (.unresolvedMember token)
     .ok { owner, name, declared, definition, valueHead }
 
+/-- The end of a class chain at a base no carried slice defines: `System.Object`, named through
+    a reference to an assembly of a core-library name, whose platform definition states that it
+    is the root class. One lookup reads the definition, refusing as `MetadataEnv.externalNamed`
+    refuses a class before the name and the root kind are checked. -/
+def MetadataEnv.chainRoot (env : MetadataEnv) (token base : Nat) (scope : List Nat)
+    (parts : List (List Nat)) (core : Bool) : Except MetadataError (List (Nat × Nat)) := do
+  if env.pinned.matches scope then throw (.missingSlice base)
+  let kind ← env.platform.require base scope parts (PlatformKind.fitsHint (some false))
+  if !(core && parts == [systemNamespace, objectName]) then throw (.unsupportedBase token)
+  if kind == .objectRoot then .ok [] else .error (.platformKindMismatch base)
+
+/-- A class chain ends outside the carried slices only at a type whose platform definition is
+    the root class `System.Object`. -/
+theorem MetadataEnv.chainRoot_ok {env : MetadataEnv} {token base : Nat} {scope : List Nat}
+    {parts : List (List Nat)} {core : Bool} {chain : List (Nat × Nat)}
+    (ended : env.chainRoot token base scope parts core = .ok chain) :
+    { scope, parts, kind := .objectRoot } ∈ env.platform.definitions ∧
+      parts = [systemNamespace, objectName] ∧ core = true := by
+  unfold MetadataEnv.chainRoot at ended
+  by_cases pinned : env.pinned.matches scope = true
+  · simp [pinned, throw, throwThe, MonadExceptOf.throw, bind, Except.bind] at ended
+  cases required : env.platform.require base scope parts (PlatformKind.fitsHint (some false)) with
+  | error error => simp [pinned, required, bind, Except.bind] at ended
+  | ok kind =>
+    have member := (PlatformTable.require_ok required).1
+    by_cases named : (core && parts == [systemNamespace, objectName]) = true
+    · simp only [Bool.and_eq_true, beq_iff_eq] at named
+      by_cases root : kind = .objectRoot
+      · cases root
+        exact ⟨member, named.2, named.1⟩
+      · simp only [pinned, required, bind, Except.bind] at ended
+        simp [named, root] at ended
+    · simp [pinned, required, named, throw, throwThe, MonadExceptOf.throw, bind, Except.bind]
+        at ended
+
+#print axioms MetadataEnv.chainRoot_ok
+
 /-- The base classes of a class definition, nearest first, as slice positions and `TypeDef`
-    tokens. The chain ends at `System.Object`, named through a reference to an assembly of a
-    core-library name. -/
+    tokens. The chain ends at `System.Object` (`MetadataEnv.chainRoot`). -/
 def MetadataEnv.classChain (env : MetadataEnv) :
     Nat → Nat → Nat → Except MetadataError (List (Nat × Nat))
   | 0, _, token => .error (.unsupportedBase token)
@@ -197,15 +233,14 @@ def MetadataEnv.classChain (env : MetadataEnv) :
         .error (.unsupportedBase token)
       else do .ok ((position, row.extends_) :: (← env.classChain fuel position row.extends_))
     | 0x01 =>
-      let named ← typeRefNamed env position resolveFuel row.extends_ (some false)
-      if named.pinned then
+      match ← typeRefTarget env position resolveFuel row.extends_ with
+      | .inl _ =>
         let some (linked, definition) := index.link linkDefinition row.extends_
           | throw (.unsupportedBase token)
         if (← env.definitionArity position row.extends_) != 0 then throw (.unsupportedBase token)
         .ok ((linked, definition) :: (← env.classChain fuel linked definition))
-      else if (← index.coreLibraryReference row.extends_) &&
-          named.parts == [systemNamespace, objectName] then .ok []
-      else .error (.unsupportedBase token)
+      | .inr (scope, _, parts) =>
+        env.chainRoot token row.extends_ scope parts (← index.coreLibraryReference row.extends_)
     | _ => .error (.unsupportedBase token)
 
 /-- The number of instance fields of the types of a chain. -/
@@ -235,6 +270,109 @@ private def primitiveWidth : Nat → Option Nat
   | 0x08 | 0x09 => some 4
   | 0x0A | 0x0B | 0x18 | 0x19 => some 8
   | _ => none
+
+/-- The `platform` constant field, the one static field of an owner no carried slice defines
+    that a body may name: its index is 0, and its owner's platform definition must state the byte
+    order. -/
+def MetadataEnv.platformConstant (env : MetadataEnv) (token : Nat) (site : FieldSite)
+    (held : ResolvedType) (isStatic platform : Bool) :
+    Except MetadataError (Nat × ResolvedType × Option Bool) :=
+  if !isStatic then .error (.unboundInstanceField token)
+  else if !platform then .error (.unboundStaticField token)
+  else match site.owner.head with
+    | none => .error (.unboundStaticField token)
+    | some head =>
+      (fun _ => (0, held, none)) <$>
+        env.platform.require token head.scope head.parts (· == .byteOrder)
+
+/-- The constant field's owner has a platform definition that states the byte order. -/
+theorem MetadataEnv.platformConstant_ok {env : MetadataEnv} {token : Nat} {site : FieldSite}
+    {held : ResolvedType} {isStatic platform : Bool} {result : Nat × ResolvedType × Option Bool}
+    (found : env.platformConstant token site held isStatic platform = .ok result) :
+    result = (0, held, none) ∧ ∃ head, site.owner.head = some head ∧
+      { scope := head.scope, parts := head.parts, kind := .byteOrder } ∈
+        env.platform.definitions := by
+  unfold MetadataEnv.platformConstant at found
+  split at found
+  · cases found
+  · split at found
+    · cases found
+    · split at found
+      · cases found
+      · rename_i head owned
+        cases required : env.platform.require token head.scope head.parts (· == .byteOrder) with
+        | error error => simp [required, Functor.map, Except.map] at found
+        | ok kind =>
+          simp only [required, Functor.map, Except.map, Except.ok.injEq] at found
+          have ⟨member, fits⟩ := PlatformTable.require_ok required
+          simp only [beq_iff_eq] at fits
+          cases fits
+          exact ⟨found.symm, head, owned, member⟩
+
+#print axioms MetadataEnv.platformConstant_ok
+
+/-- The index and held type of a field whose owner no carried slice defines: an item of the
+    platform pair, whose owner's platform definition must state the pair, read as an instance
+    field, or the `platform` constant field (`MetadataEnv.platformConstant`). -/
+def MetadataEnv.platformField (env : MetadataEnv) (token : Nat) (site : FieldSite)
+    (held : ResolvedType) (isStatic platform : Bool) :
+    Except MetadataError (Nat × ResolvedType × Option Bool) :=
+  -- The pair is known by its own reference, never by the slice's `corlib` number.
+  match site.owner with
+  | .genericInst head arguments =>
+    match arguments.toList with
+    | [first, second] =>
+      if isCorlibScope head.scope && head.parts == [systemNamespace, valueTuplePairName] then
+        match env.platform.require token head.scope head.parts (· == .valuePair) with
+        | .error error => .error error
+        | .ok _ =>
+          if site.name == firstItemName && site.declared == .var 0 then .ok (0, first, some false)
+          else if site.name == secondItemName && site.declared == .var 1 then
+            .ok (1, second, some false)
+          else if site.name == firstItemName || site.name == secondItemName then
+            .error (.operandMismatch token)
+          else .error (.unboundInstanceField token)
+      else env.platformConstant token site held isStatic platform
+    | _ => env.platformConstant token site held isStatic platform
+  | _ => env.platformConstant token site held isStatic platform
+
+/-- A platform pair field reads the argument selected by both its name and declared signature. -/
+theorem MetadataEnv.platformField_pair {env : MetadataEnv} {token : Nat} {site : FieldSite}
+    {held type : ResolvedType} {isStatic platform : Bool} {index : Nat}
+    (found : env.platformField token site held isStatic platform = .ok (index, type, some false)) :
+    ∃ head arguments, site.owner = .genericInst head arguments ∧
+      { scope := head.scope, parts := head.parts, kind := .valuePair } ∈
+        env.platform.definitions ∧ site.declared = .var index ∧
+      arguments.toList[index]? = some type ∧
+      ((index = 0 ∧ site.name = firstItemName) ∨ (index = 1 ∧ site.name = secondItemName)) := by
+  unfold MetadataEnv.platformField at found
+  split at found
+  · rename_i head arguments owner
+    split at found
+    · split at found
+      · split at found
+        · cases found
+        · rename_i required
+          have ⟨member, fits⟩ := PlatformTable.require_ok required
+          simp only [beq_iff_eq] at fits
+          cases fits
+          refine ⟨head, arguments, owner, member, ?_⟩
+          split at found
+          · rename_i selected
+            simp only [Bool.and_eq_true, beq_iff_eq] at selected
+            cases found
+            simp_all
+          · split at found
+            · rename_i selected
+              simp only [Bool.and_eq_true, beq_iff_eq] at selected
+              cases found
+              simp_all
+            · split at found <;> cases found
+      · cases (MetadataEnv.platformConstant_ok found).1
+    · cases (MetadataEnv.platformConstant_ok found).1
+  · cases (MetadataEnv.platformConstant_ok found).1
+
+#print axioms MetadataEnv.platformField_pair
 
 /-- The index a field operand must carry, and the type it must hold. A field signature's `!n`
     names the declaring type's parameter, so the held type reads it as the declaring instance's
@@ -274,19 +412,9 @@ def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSit
             pure ((← index.assemblyRefName scope runtimeAssembly) == some runtimeAssembly)
           else pure false
       | _, _ => pure false
-    -- With no carried row, the reference's own signature is the item's only declaration.
-    if pair then
-      if site.name == firstItemName then
-        if site.declared != .var 0 then throw (.operandMismatch token)
-        else .ok (0, held, some false)
-      else if site.name == secondItemName then
-        if site.declared != .var 1 then throw (.operandMismatch token)
-        else .ok (1, held, some false)
-      else throw (.unboundInstanceField token)
-    else
-      if !isStatic then throw (.unboundInstanceField token)
-      else if platform then .ok (0, held, none)
-      else throw (.unboundStaticField token)
+    if pair || (isStatic && platform) then env.platformField token site held isStatic platform
+    else if isStatic then throw (.unboundStaticField token)
+    else throw (.unboundInstanceField token)
 
 /-- Check a `.field` operand: the owner, the field's model index, the type it holds and the
     name, which must spell the name of the row the token names. -/
@@ -355,8 +483,18 @@ def MetadataEnv.methodDefinition (env : MetadataEnv) (token : Nat) (owner : Name
     throw (.unresolvedMember token)
   .ok (some (position, definition))
 
-/-- Read a `MethodDef` or `MemberRef` token as a method. -/
-def MetadataEnv.memberSite (env : MetadataEnv) (token : Nat) :
+/-- Only a missing external TypeRef at the declaring position can name an opaque owner. -/
+private def MetadataEnv.callOwner (env : MetadataEnv) (token : Nat) (linked : Bool) :
+    Except MetadataError ResolvedType := do
+  if !linked then return <- { env with publishedLayouts := #[] }.resolveToken 0 token
+  if metadataTableOf token != Table.typeRef then throw (.unresolvedMember token)
+  let (scope, name, parts) <- typeRefQualified env 0 resolveFuel token
+  if env.identities.contains scope || env.pinned.matches scope ||
+      (env.platform.kindOf scope parts).isSome then throw (.unresolvedMember token)
+  return .named { scope, name, parts, kind := .importedOwner, pinned := false }
+
+/-- Read a definition or member reference, resolving an opaque owner only for a linked call. -/
+private def MetadataEnv.readMemberSite (env : MetadataEnv) (token : Nat) (linked : Bool) :
     Except MetadataError MethodSite := do
   let index ← env.slice 0 token
   match metadataTableOf token with
@@ -368,7 +506,7 @@ def MetadataEnv.memberSite (env : MetadataEnv) (token : Nat) :
           parameters := signature.2.2.2, definition := some (0, token), methodArguments := none }
   | 0x0A =>
     let row ← index.memberRef token
-    let owner ← env.resolveToken 0 row.parent
+    let owner <- env.callOwner row.parent linked
     let name ← index.string row.name
     let signature ← env.resolveMethod 0 (← index.blob row.signature)
     let definition ← match owner.head with
@@ -381,17 +519,21 @@ def MetadataEnv.memberSite (env : MetadataEnv) (token : Nat) :
 
 /-- Read a `MethodDef`, `MemberRef` or `MethodSpec` token as a method; a specification adds the
     method arguments of its instantiation blob. -/
-def MetadataEnv.methodSite (env : MetadataEnv) (token : Nat) :
+private def MetadataEnv.readMethodSite (env : MetadataEnv) (token : Nat) (linked : Bool) :
     Except MetadataError MethodSite := do
   if metadataTableOf token == Table.methodSpec then
     let index ← env.slice 0 token
     let row ← index.methodSpec token
-    let site ← env.memberSite row.method
+    let site <- env.readMemberSite row.method linked
     let arguments ← decodeMethodSpec (← index.blob row.instantiation)
     if arguments.isEmpty || arguments.length != site.genericArity then
       throw (.genericMismatch token)
     .ok { site with methodArguments := some (← env.resolveAll 0 arguments) }
-  else env.memberSite token
+  else env.readMemberSite token linked
+
+/-- A method reference with a declaring type resolved from carried or platform metadata. -/
+def MetadataEnv.methodSite (env : MetadataEnv) (token : Nat) : Except MetadataError MethodSite :=
+  env.readMethodSite token false
 
 /-- Cecil's full name of a method, `result Owner::name(parameters)`, from the full names of its
     parts. -/
@@ -452,6 +594,17 @@ theorem MethodSite.externalMatches_contract (site : MethodSite) (frame : Frame)
   simp [MethodSite.externalMatches, matched]
 #print axioms MethodSite.externalMatches_contract
 
+/-- A static import resolves only under the exact ordinary or closed generic export identity. -/
+def MetadataEnv.importMethodSite (env : MetadataEnv) (token : Nat) (frame : Frame)
+    (identity : String) : Except MetadataError MethodSite := do
+  let site <- env.readMethodSite token true
+  let .named owner := site.owner | throw (.unresolvedMember token)
+  if owner.kind != .importedOwner || site.definition.isSome then throw (.unresolvedMember token)
+  let expected := if site.methodArguments.isSome then site.contractName frame
+    else if site.convention == 0 && site.genericArity == 0 then site.externalName else none
+  if expected != some (bytesOf identity) then throw (.operandMismatch token)
+  return site
+
 /-- The claimed parameter list names every parameter of the member, in order. -/
 private def parametersAdmitted (frame : Frame) : List ResolvedType → List TypeExpr → Bool
   | [], [] => true
@@ -491,7 +644,10 @@ def checkCallReference (env : MetadataEnv) (frame : Frame) (token : Nat) (site :
   if call.declaringType.explicitHeadScope.any (bytesOf · != head.scope) then
     throw (.scopeMismatch token)
   let located := { frame with anchor := head.scope }
-  if !(located.admits site.owner call.declaringType) then throw (.operandMismatch token)
+  if head.kind == .importedOwner then
+    let .atom scope name := call.declaringType | throw (.operandMismatch token)
+    if bytesOf scope != head.scope || bytesOf name != head.name then throw (.operandMismatch token)
+  else if !(located.admits site.owner call.declaringType) then throw (.operandMismatch token)
   let declared := call.declared
   if declared.convention != site.convention ||
       call.hasThis != (declared.convention / hasThisFlag % 2 == 1) ||
@@ -513,10 +669,22 @@ def checkCallReference (env : MetadataEnv) (frame : Frame) (token : Nat) (site :
   then throw (.operandMismatch token)
   return ()
 
+/-- Resolve the token through the selected import, or through the ordinary metadata environment. -/
+def resolveCallMember (env : MetadataEnv) (frame : Frame) (token : Nat) (call : CallSite)
+    (slot : Option ImportSlot) : Except MetadataError MethodSite :=
+  match slot, call.target with
+    | some binding, .external identity => do
+      if binding.hasThis || binding.identity != identity || !importSignatureMatches binding call ||
+          binding.parameterCount != call.parameterCount || binding.returnsValue != call.returnsValue then
+        throw (.operandMismatch token)
+      env.importMethodSite token frame identity
+    | some _, _ => throw (.unresolvedMember token)
+    | none, _ => env.methodSite token
+
 /-- The operand target and typed reference both name the method at the token. -/
-def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : CallSite) :
-    Except MetadataError TokenFacts := do
-  let site ← env.methodSite token
+def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : CallSite)
+    (slot : Option ImportSlot := none) : Except MetadataError TokenFacts := do
+  let site ← resolveCallMember env frame token call slot
   checkCallReference env frame token site call
   match call.target with
   | .managed target =>
@@ -539,6 +707,7 @@ theorem checkCallOperand_managed {env : MetadataEnv} {frame : Frame} {token targ
       checkCallReference env frame token site call = .ok () ∧
       site.definition = some (position, target) := by
   unfold checkCallOperand at checked
+  simp only [resolveCallMember] at checked
   cases resolved : env.methodSite token with
   | error fault => simp [resolved, bind, Except.bind] at checked
   | ok site =>
@@ -558,16 +727,16 @@ theorem checkCallOperand_managed {env : MetadataEnv} {frame : Frame} {token targ
 
 /-- The same member binds the typed reference and both permitted external identity spellings. -/
 theorem checkCallOperand_external {env : MetadataEnv} {frame : Frame} {token : Nat}
-    {call : CallSite} {identity : String} {facts : TokenFacts}
-    (checked : checkCallOperand env frame token call = .ok facts)
+    {call : CallSite} {identity : String} {facts : TokenFacts} {slot : Option ImportSlot}
+    (checked : checkCallOperand env frame token call slot = .ok facts)
     (externalTarget : call.target = .external identity) :
-    ∃ site, env.methodSite token = .ok site ∧
+    ∃ site, resolveCallMember env frame token call slot = .ok site ∧
       checkCallReference env frame token site call = .ok () ∧ site.definition = none ∧
       (site.externalName = some (bytesOf identity) ∨
         site.contractName frame = some (bytesOf identity)) := by
   unfold checkCallOperand at checked
   simp only [externalTarget, bind, Except.bind] at checked
-  cases resolved : env.methodSite token with
+  cases resolved : resolveCallMember env frame token call slot with
   | error fault => simp [resolved] at checked
   | ok site =>
     refine ⟨site, rfl, ?_⟩
@@ -784,13 +953,13 @@ def instanceSignature (owner name : List Nat) (constructor : Bool) (arity : Nat)
 
 /-- Check the method definition against its `MethodDef` row: flags, name, signature, generic
     parameters, owner and class layout facts, and return the names it resolves, which the caller
-    ties to the extractor's strings. A generic instance names its type arguments in
-    `instantiation`, which must be the types `arguments` name. The row's relative virtual
+    ties to the extractor's strings. Each closed argument resolves from `sources` and must
+    admit the corresponding type in `arguments`. The row's relative virtual
     address, which the extractor zeroes in the rows it carries, and its parameter list are not
     read: where a body sits in the image is the strict audit's to confirm. A modified return or
     parameter is refused, except an `init` accessor's void and an `in` reference. -/
 def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
-    (instantiation : List ResolvedType) (arguments : List TypeExpr) :
+    (sources : List InstanceArgument) (arguments : List TypeExpr) :
     Except MetadataError MethodNames := do
   let index ← env.slice 0 method.token
   if metadataTableOf method.token != Table.methodDef then
@@ -830,6 +999,7 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
         (fun (type, claimed) => frame.admits (declaredParameter type) claimed) then
     throw (.methodMismatch method.token)
   -- A row with generic parameters is extracted only as an instance naming an argument for each.
+  let instantiation ← sources.mapM (InstanceArgument.resolve env method.token resolveFuel)
   if instantiation.length != arguments.length ||
       instantiation.length != methodParameters.length + ownerParameters.length ||
       !(instantiation.zip arguments).all (fun (type, claimed) => frame.admits type claimed) then
@@ -844,7 +1014,7 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
       match owner.kind with
       | .classType => method.objectReceiver
       | .valueType | .enumType _ => !method.objectReceiver
-      | .interfaceType | .external _ => false
+      | .interfaceType | .importedOwner | .external _ => false
     else !method.objectReceiver
   if !receiverMatches then throw (.methodMismatch method.token)
   if method.objectReceiver then

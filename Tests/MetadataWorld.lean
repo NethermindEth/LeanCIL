@@ -197,6 +197,16 @@ def lib : MetadataSlice :=
 
 def tokens : OwnTokens := own.2
 
+/-- The platform definitions of the `System.Runtime` types the world and the fixtures built on
+    it name. -/
+def worldPlatform : PlatformTable := platform_table%
+  [runtimeType "Object" .objectRoot, runtimeType "Console" .classType,
+   runtimeType "ValueType" .valueTypeRoot, runtimeType "Enum" .enumRoot,
+   runtimeType "Lazy`1" (.genericClass 1), runtimeType "String" .classType,
+   runtimeType "ValueTuple`2" .valuePair, runtimeType "Math" .classType,
+   runtimeType "G`1" (.genericClass 1),
+   ⟨runtimeScopeBytes, [bytesOf "System.Runtime.CompilerServices", bytesOf "Unsafe"], .classType⟩]
+
 /-- The 32-bit and 64-bit unsigned types as the extractor writes them. -/
 def int32 : TypeExpr := .atom runtimeScope "System.Int32"
 def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"

@@ -120,6 +120,12 @@ private def world (carried : Bool) (result : List Nat) : Step Tokens := do
 private def slice (carried : Bool) (result : List Nat) : MetadataSlice × Tokens :=
   build (world carried result) (bytesOf "T") pin.identity
 
+/-- The platform definitions the world names: `Ext.Point` as a class and `BitConverter`, whose
+    `IsLittleEndian` is the platform's byte order. -/
+private def sitePlatform : PlatformTable := platform_table%
+  [runtimeType "Object" .objectRoot, runtimeType "BitConverter" .byteOrder,
+   { scope := bytesOf extScope, parts := [bytesOf "Ext", bytesOf "Point"], kind := .classType }]
+
 /-- The static operand of `field`. -/
 private def operandOf (field : FieldRef) : RawOperand :=
   .field field.owner field.index field.type field.name true
@@ -145,6 +151,7 @@ private def body (opcode : Nat) (field : FieldRef) (returnType : TypeExpr) (worl
     else if opcode == ldtoken then [7 * 4 + 2, ldtoken] ++ encoded ++ [0x26, 0x2A]
     else [6 * 4 + 2, opcode] ++ encoded ++ [0x2A]
   evidenceOf bytes [(token, operandOf field)] { own := world } (raw opcode field returnType)
+    sitePlatform
 
 /-- The result type of the method using `opcode` on an `int`. -/
 private def returnType (opcode : Nat) : TypeExpr :=
@@ -213,7 +220,7 @@ private def withY (carried : Bool) (opcode : Nat) : Method :=
 /-- Whether the extraction of one method accessing `Y`, its evidence recording the emitted
     method's static sites, is a valid translation. -/
 private abbrev valid (carried : Bool) (opcode : Nat) (emitted : Method) : Prop :=
-  TranslationValid [] #[] [] [evidence carried opcode emitted.staticSites] [] [emitted]
+  TranslationValid [] #[] [] sitePlatform [evidence carried opcode emitted.staticSites] [] [emitted]
 
 /-! ## A carried owner -/
 
@@ -267,11 +274,12 @@ private def endianReturn (opcode : Nat) : TypeExpr :=
 private def endianResult (opcode : Nat) : List Nat :=
   if opcode == ldsfld then [0x02] else if opcode == ldsflda then [0x10, 0x02] else [0x01]
 
-/-- The decoding of the body accessing `IsLittleEndian` with `opcode`. -/
-private def endianDecoding (opcode : Nat) : Option BodyError :=
+/-- The decoding of the body accessing `IsLittleEndian` with `opcode` under `platform`. -/
+private def endianDecoding (opcode : Nat) (platform := sitePlatform) : Option BodyError :=
   let world := slice false (endianResult opcode)
-  match checkBody (body opcode littleEndianField (endianReturn opcode) world.1 world.2.endian)
-      (raw opcode littleEndianField (endianReturn opcode)) [] with
+  let decoded := body opcode littleEndianField (endianReturn opcode) world.1 world.2.endian
+  match checkBody { decoded with platform } (raw opcode littleEndianField (endianReturn opcode))
+      [] with
   | .ok _ => none
   | .error found => some found
 
@@ -284,6 +292,20 @@ theorem endian_field_only_loaded :
       | _ => false) = true := by
   decide +kernel
 #print axioms endian_field_only_loaded
+
+/-- The reference to `BitConverter`, the third of the world. -/
+private def converterRef : Nat := 0x01000003
+
+/-- `IsLittleEndian` binds only under a definition of `BitConverter` that states the byte order:
+    without the definition its owner's reference is refused, and as a plain class its token. -/
+theorem endian_field_needs_the_byte_order_definition :
+    endianDecoding ldsfld = none ∧
+    endianDecoding ldsfld (removing sitePlatform "BitConverter") =
+      some (.metadata (.missingPlatformDefinition converterRef)) ∧
+    endianDecoding ldsfld (restating sitePlatform "BitConverter" .classType) =
+      some (.metadata (.platformKindMismatch (slice false (endianResult ldsfld)).2.endian)) := by
+  decide +kernel
+#print axioms endian_field_needs_the_byte_order_definition
 
 /-- The evidence of `ldsfld IsLittleEndian; ret`. -/
 private def endianEvidence : MethodEvidence :=
@@ -299,7 +321,7 @@ private def endianEvidence : MethodEvidence :=
 /-- The same body emitted as the profile's endianness constant, the form the feature check
     admits, is a valid translation. -/
 theorem endian_field_as_constant_accepted :
-    TranslationValid [] #[] [] [endianEvidence] []
+    TranslationValid [] #[] [] sitePlatform [endianEvidence] []
       [{ locals := [], returnsValue := true,
          declared := DeclaredSignature.ofRaw endianEvidence.original,
          code := [.ldc_i4 1, .ret] }] := by
@@ -314,7 +336,7 @@ private def endianDescriptor : StaticDescriptor :=
 /-- `ldsfld IsLittleEndian` emitted as a static load, its site carrying a descriptor of the
     field that holds 0, is no valid translation: the feature check admits only the constant. -/
 theorem endian_field_as_static_load_rejected :
-    ¬ TranslationValid [] #[] [] [endianEvidence] []
+    ¬ TranslationValid [] #[] [] sitePlatform [endianEvidence] []
       [{ locals := [], returnsValue := true,
          declared := DeclaredSignature.ofRaw endianEvidence.original,
          code := [.ldsfld littleEndianField, .ret],
@@ -364,7 +386,8 @@ private def compareBody : BodyEvidence :=
   let encoded := MetadataBuilder.littleEndian 4
   let bytes := [13 * 4 + 2, ldsflda] ++ encoded x ++ [ldsflda] ++ encoded y ++ [0xFE, 0x01, 0x2A]
   let table := [(x, operandOf (xField true)), (y, operandOf (yField true))]
-  { evidenceOf bytes table { own := intWorld.1 } compareRaw with statics := [(0, x), (1, y)] }
+  { evidenceOf bytes table { own := intWorld.1 } compareRaw sitePlatform with
+    statics := [(0, x), (1, y)] }
 
 /-- The emitted comparison, with the sites of `X` and `Y` keyed by the given identities. -/
 private def compareMethod (xIdentity yIdentity : Nat) : Method :=
@@ -390,8 +413,8 @@ private def compareEvidence (xIdentity yIdentity : Nat) : MethodEvidence :=
     would compare equal; the evidence check refuses that, and accepts two identities. -/
 theorem shared_identity_in_one_method_rejected :
     ¬ StaticIdentitiesValid [compareMethod 1 1] [compareBody] ∧
-    ¬ TranslationValid [] #[] [] [compareEvidence 1 1] [] [compareMethod 1 1] ∧
-    TranslationValid [] #[] [] [compareEvidence 1 2] [] [compareMethod 1 2] := by
+    ¬ TranslationValid [] #[] [] sitePlatform [compareEvidence 1 1] [] [compareMethod 1 1] ∧
+    TranslationValid [] #[] [] sitePlatform [compareEvidence 1 2] [] [compareMethod 1 2] := by
   decide +kernel
 #print axioms shared_identity_in_one_method_rejected
 
@@ -430,7 +453,7 @@ private def loadMethod (field : FieldRef) (identity : Nat) : Method :=
 
 /-- A program of one load method per entry: the field, its token and the identity of its site. -/
 private abbrev loadsValid (loads : List (FieldRef × Nat × Nat)) : Prop :=
-  TranslationValid [] #[] []
+  TranslationValid [] #[] [] sitePlatform
     (loads.map fun (field, token, identity) => loadEvidence field token identity) []
     (loads.map fun (field, _, identity) => loadMethod field identity)
 

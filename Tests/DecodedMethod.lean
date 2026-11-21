@@ -358,10 +358,10 @@ theorem tail_result_mismatch_refused :
 /-- Refusal by the closed method shape excludes every full evidence record for these bodies. -/
 theorem dead_call_evidence_refused (item : MethodEvidence) (emitted : Method)
     (layouts : List RawLayout) (computed : Array ComputedLayout) (pins : List AssemblyPin)
-    (items : List MethodEvidence) (imports : List ImportSlot)
+    (platform : PlatformTable) (items : List MethodEvidence) (imports : List ImportSlot)
     (body : item.closed = ordinaryStaticRaw ∨ item.closed = wrongTailRaw ∨
       item.closed = wrongIndirectTailRaw) :
-    ¬ MethodEvidenceValid layouts computed pins items imports item emitted := by
+    ¬ MethodEvidenceValid layouts computed pins platform items imports item emitted := by
   intro valid
   have prefixes := valid.2.2.2.2.2.2.1.2.2.2.2
   rcases body with invalid | invalid | invalid <;> rw [invalid] at prefixes <;>
@@ -369,9 +369,10 @@ theorem dead_call_evidence_refused (item : MethodEvidence) (emitted : Method)
 #print axioms dead_call_evidence_refused
 
 /-- Bytes that decode to either invalid body cannot construct a method. -/
-theorem dead_call_bytes_refused {pins : List AssemblyPin} {assembly : AssemblyPin}
+theorem dead_call_bytes_refused {pins : List AssemblyPin} {platform : PlatformTable}
+    {assembly : AssemblyPin} {imports : BodyImports}
     {body : BodyEvidence} {raw : RawMethod} {signature : String}
-    (decodes : BodyDecodes pins assembly body raw [] signature)
+    (decodes : BodyDecodes pins platform assembly body raw [] signature imports)
     (invalid : raw = ordinaryStaticRaw ∨ raw = wrongTailRaw) :
     Method.ofBody? .scalar {} [] (raw.code.mapIdx fun pc _ => pc == 0) body raw [] = none := by
   rw [Method.ofBody?_of_decodes decodes]

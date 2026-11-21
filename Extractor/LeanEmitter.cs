@@ -234,6 +234,14 @@ internal static class LeanEmitter
         inputs?.AppendLine(environment);
         // The shape facts are written here once every method has been translated, so admission reports its own
         // refusals first, and every method's components see them.
+        IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
+        var slots = string.Join(", ", importBindings.Select(ImportResolution.LeanSlot));
+        lean.AppendLine($"""def imports : List ImportSlot := [{slots}]""");
+        if (importBindings.Count != 0)
+            lean.AppendLine("""
+                /-- The package's checked call slots and published layout identities. -/
+                def importIndex : Extraction.ImportSlotIndex := .ofList imports
+                """);
         var shapeFactsAt = lean.Length;
         var operandShapes = new OperandShapes(layoutEvidence);
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
@@ -311,7 +319,7 @@ internal static class LeanEmitter
                 staticInput = $"staticFields := {table}, ";
             }
             inputs?.Append(lean, inputStart, lean.Length - inputStart);
-            genericEvidence.EmitMethod(lean, m, n, reachable, staticInput, inputs);
+            genericEvidence.EmitMethod(lean, m, n, reachable, methods.Length, staticInput, inputs);
             // A field access names its operand's definition, so stepping reads that operand's shape fact.
             var (naming, objectProof) = operandShapes.RecordMethod(m, n, reachable, genericEvidence);
             if (GenericEvidence.FirstDecodeRefusal(m, reachable, callSites, importResolution) is { } refusal)
@@ -369,10 +377,10 @@ internal static class LeanEmitter
             if (reachable.Any(callSites.IsModel)) lean.AppendLine($"cil_runtime_models method{n}");
             lean.AppendLine($"cil_resolution_facts method{n}");
         }
+        // The platform definitions sit after the shape facts' position, so they go in first.
+        genericEvidence.InsertPlatformDefinitions(lean);
         lean.Insert(shapeFactsAt, operandShapes.Lean());
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
-        IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
-        lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
         // Whole-program data, so it stays after the `specializedMethods` boundary of per-method components;
         // feature obligations read callee certificates through it.
         var records = Enumerable.Range(0, methods.Length).Select(n =>
@@ -424,7 +432,8 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_declared_validated : " +
                 $"Extraction.DeclaredValid method{n}Closed method{n} := rfl");
             lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts " +
-                $"computedLayouts assemblies methodEvidence imports methodEvidence[{n}] method{n} :=");
+                $"computedLayouts assemblies platformDefinitions methodEvidence imports methodEvidence[{n}] " +
+                $"method{n} :=");
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, " +
                 $"method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, " +
                 $"method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, " +
@@ -440,7 +449,7 @@ internal static class LeanEmitter
         lean.AppendLine("theorem attribution_validated : " +
             "Extraction.AttributionValid (Extraction.bodyOwners methodEvidence) = true := " + Decide);
         lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
-            "assemblies methodEvidence imports program := by");
+            "assemblies platformDefinitions methodEvidence imports program := by");
         lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated");
         lean.AppendLine("    statics_validated static_identities_validated import_layouts_validated");
         lean.AppendLine("    imported_locals_validated attribution_validated");

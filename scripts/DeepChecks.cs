@@ -459,18 +459,41 @@ partial class Program
         return publication;
     }
 
-    /// <summary>
-    /// The facts and images of a complete, stable joint deep audit, read from the subjects of the requests that
-    /// audit passed: each subject is reconfirmed by its request's theorem, and every fact no request names is not
-    /// covered for its recorded reason.
-    /// </summary>
+    /// <summary>Read the completeness constructor in the jointly audited enum theorem's type.</summary>
+    static bool EnumStorageComplete(AuditedTheorem theorem)
+    {
+        // The structural audit binds the proposition and every extraction and image constant.
+        // Read only its final argument from the replayed statement.
+        if (theorem.term is not { } term || theorem.termError is not null)
+            throw new InvalidDataException("Missing audited enum coverage argument");
+        var nodes = term.GetProperty("nodes");
+        var application = nodes[term.GetProperty("root").GetInt32()];
+        if (application[0].GetString() == "app")
+        {
+            var argument = nodes[application[2].GetInt32()];
+            if (argument.GetArrayLength() == 4 && argument[0].GetString() == "const" &&
+                argument[2].GetArrayLength() == 2 && argument[2][0].GetString() == "Bool")
+                return argument[2][1].GetString() switch
+                {
+                    "true" => true,
+                    "false" => false,
+                    _ => throw new InvalidDataException("Invalid enum coverage constructor")
+                };
+        }
+        throw new InvalidDataException("Expected a literal enum coverage argument");
+    }
+
+    /// <summary>Report each fact and image from the requests that passed the joint audit.</summary>
     static BindingSection DeepBindingSection(DeepCheckInputs inputs, IReadOnlyList<DeepCheckInputs.Pin> pins,
-        IReadOnlyList<BindingRequest> audited, StatementSources sources)
+        IReadOnlyList<BindingRequest> audited, StatementSources sources, AuditedOleans oleanAudit)
     {
         Dictionary<BindingFact, string> factTheorems = [];
         Dictionary<Sha256Digest, string> imageTheorems = [];
         foreach (var request in audited)
         {
+            if (request.Audit.name == EnumStorageTheorem &&
+                !EnumStorageComplete(oleanAudit.theorems.Single(result => result.name == EnumStorageTheorem)))
+                continue;
             var distinct = request.Subject switch
             {
                 BindingSubject.Fact { Complete: true } fact => factTheorems.TryAdd(fact.Value, request.Audit.name),
@@ -510,7 +533,7 @@ partial class Program
         BindingFact.MetadataRows =>
             "no checked theorem binds the carried metadata rows and heap entries to the pinned images",
         BindingFact.PlatformTypeKinds => "no check reads platform type kinds from an image",
-        BindingFact.EnumUnderlyingTypes => "no check reads platform enum underlying types from an image",
+        BindingFact.EnumUnderlyingTypes => "the extraction selects no enum or a defining or forwarding image is missing",
         BindingFact.ValueTupleFieldOrder => "the supplied images do not cover a selected System.ValueTuple pair",
         BindingFact.ObjectFields => "the supplied images do not cover the extraction's platform definition of System.Object",
         BindingFact.LayoutContent => "no check reads field offsets, sizes or attributes from the image",
@@ -523,6 +546,8 @@ partial class Program
     };
 
     const string ImagesModule = "BindingAudit.Images";
+    const string EnumStorageModule = "BindingAudit.EnumStorage";
+    const string EnumStorageTheorem = "BindingAudit.enumStorage";
     const string PublicKeysModule = "BindingAudit.PublicKeys";
     const string TupleFieldsModule = "BindingAudit.TupleFields";
     const string ObjectFieldsModule = "BindingAudit.ObjectFields";
@@ -697,6 +722,27 @@ partial class Program
         foreach (var image in plan.Images.DistinctBy(image => image.Digest))
             File.WriteAllText(ModuleSource(plan.Output, image.Module), ImageModuleSource(image));
         File.WriteAllText(ModuleSource(plan.Output, ImagesModule), ImagesModuleSource(plan));
+        File.WriteAllText(ModuleSource(plan.Output, EnumStorageModule), """
+            import BindingAudit.Images
+            import Extracted
+            import StrictBinding.EnumStorage
+            import Lean
+
+            namespace BindingAudit
+
+            open Lean Elab Term in
+            elab "enumCoverage%" : term => do
+              return toExpr ((StrictBinding.checkEnumStorage images Extracted.platformDefinitions
+                Extracted.methodEvidence).toOption == some true)
+
+            set_option debug.skipKernelTC true in
+            /-- Every supplied enum is checked; the last argument records completeness. -/
+            theorem enumStorage : StrictBinding.EnumStorageChecked images Extracted.platformDefinitions
+                Extracted.methodEvidence enumCoverage% := by decide +kernel
+
+            end BindingAudit
+
+            """);
         File.WriteAllText(ModuleSource(plan.Output, StaticDataModule), """
             import BindingAudit.Images
             import Extracted
@@ -960,6 +1006,10 @@ partial class Program
         [
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
             new(ImagesModule, new("BindingAudit.images_eq", imagesEq, ApprovedAxioms)),
+            new(EnumStorageModule, new(EnumStorageTheorem, App(Const("StrictBinding.EnumStorageChecked"),
+                Const("BindingAudit.images"), Const("Extracted.platformDefinitions"),
+                Const("Extracted.methodEvidence"), "_"), ApprovedAxioms, term: true),
+                new BindingSubject.Fact(BindingFact.EnumUnderlyingTypes)),
             .. PagedFacts.Select(fact => (Fact: fact, Paged: PagedFact(fact))).Select(item => new BindingRequest(
                 item.Paged.Module, new("BindingAudit." + item.Paged.Theorem, App(Const(item.Paged.Proposition),
                     Const("BindingAudit.images"), Const("Extracted.methodEvidence")), ApprovedAxioms),
@@ -995,7 +1045,7 @@ partial class Program
         if (plan.Images.Any(image => failures.ContainsKey(image.Module)))
             failures[ImagesModule] = "build: an image module did not build";
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
-        var facts = PagedFacts.Select(fact => PagedFact(fact).Module).Append(StaticDataModule);
+        var facts = PagedFacts.Select(fact => PagedFact(fact).Module).Append(StaticDataModule).Append(EnumStorageModule);
         if (plan.ObjectFields.HasValue) facts = facts.Append(ObjectFieldsModule);
         if (plan.TupleFields.HasValue) facts = facts.Append(TupleFieldsModule);
         if (plan.PublicKeys.HasValue) facts = facts.Append(PublicKeysModule);

@@ -4,8 +4,9 @@
 
 ## Independently checked extraction evidence
 
-`TranslationValid rawLayouts computedLayouts assemblies methodEvidence imports program` checks one
-record per emitted method in program order, each body against the one list of pinned assemblies. The verifier kernel-replays and structurally audits
+`TranslationValid rawLayouts computedLayouts assemblies platformDefinitions methodEvidence imports
+program` checks one record per emitted method in program order, each body against the one list of
+pinned assemblies and the one list of [platform definitions](#platform-definitions). The verifier kernel-replays and structurally audits
 `Extracted.translation_valid`; an unrelated theorem, non-theorem or different program/import table
 cannot substitute for it.
 
@@ -15,7 +16,7 @@ cannot substitute for it.
 | Specialization | Substitute closed method/owner arguments through signatures, locals, operands and calls, including the owner segment of an external call identity (`scope::result owner::member`, open owners spelled `!!n`/`!n`); preserve control flow | Faithful raw definitions and admitted constraints |
 | Feature flow | Entry, transfers, joins, required successors, reachable mask and feature-dependent operations | No complete concrete CLI simulation for every opcode |
 | Method body decoding | Decode the bytes the extractor emitted for a body (tiny or fat header, every standard opcode, branch targets as instruction indices) through the token table and compare `maxStack`, `initLocals`, the locals and every instruction with the original definition | That the bytes are the method's body in the image (reconfirmed by the opt-in [deep verification](CLI.md#deep-verification)) and the PE container stay trusted; bodies with exception sections are rejected |
-| Metadata binding | Decode the table rows, heap entries and signature blobs each method carries and check every token-table entry, every local type and the method's own definition against them, including generic import descriptors and their open signatures and closed arguments | That the carried bytes are the image's, platform definitions, public key tokens, imported implementation definitions, raw layout content, dispatch catalogs, static data and generic parameter constraints |
+| Metadata binding | Decode the table rows, heap entries and signature blobs each method carries and check every token-table entry, every local type and the method's own definition against them, including generic import descriptors and their open signatures and closed arguments | That the carried bytes are the image's, that each platform definition states its type as the platform assembly defines it, public key tokens, imported implementation definitions, raw layout content, dispatch catalogs, static data and generic parameter constraints |
 | Scalar flow | Complete stack kinds, raw maximum stack, joins/backedges, call arguments/results, homes and returns | Unknown types remain opaque |
 | Scalar translations | Exact literal values, arithmetic, comparisons, conversion flags and branch targets | Other operations require specialized checks or retain stack-effect fallback |
 | Managed/imported calls | Target slot, scoped identity, full signature, argument count, receiver and result | An import slot does not prove its implementation contract |
@@ -322,6 +323,10 @@ What `MetadataResolution` and `MetadataBinding` check:
   result its signature states as a task. An `EXPLICITTHIS` method is refused because the model
   requires an implicit receiver outside the parameter list. Instantiation also refuses this
   flag, including for methods decoded directly from raw definitions.
+  Each named component of a closed type argument resolves from an exactly pinned definition
+  or a scoped platform entry with the required generic arity. An instance receiver or inherited field
+  still requires a class chain with a supported layout. Constructed aggregate identities include
+  the scope of each argument. Runtime scalars and strings retain their fixed storage.
   The `RVA` and `ParamList` columns are not read.
 - Generic parameter counts come from `GenericParam` rows. An owner's carried rows must form its
   whole zero-based run. An owner with none carried must be shown to have none by its neighbours in
@@ -364,6 +369,10 @@ against each platform image's public key, and checks that every field the root c
 static. For the selected `System.ValueTuple<T1,T2>` layout, the audit follows its own scoped
 TypeRef and forwarding chain. It checks the defining TypeDef's two generic parameters and
 the names and signatures of its two instance fields in physical declaration order.
+For enums, Lean checks the physical TypeDef and its instance field `value__` against the
+storage code from the certified method environment. A nested enum is identified by its
+enclosing TypeDefs. An external enum may reach its definition through several forwarding
+assemblies. Each must be supplied for complete coverage.
 With all direct reference images supplied, the audit checks each AssemblyRef against its target's
 full publisher key or unsigned definition. It also compares each carried AssemblyRef token with
 the physical row in its source assembly. Generic import identities remain uncovered. `check` hashes

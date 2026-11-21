@@ -16,6 +16,7 @@ import StrictBinding.StaticData
 import StrictBinding.ObjectFields
 import StrictBinding.TupleFields
 import StrictBinding.PublicKeys
+import StrictBinding.EnumStorageEvidence
 
 /-!
 # Deep verification

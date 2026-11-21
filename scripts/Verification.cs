@@ -3566,7 +3566,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
           | _ => throwError "Expected extraction certificate theorem"
         theorem ExtractionAudit.valid :
             CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts Extracted.assemblies
-              Extracted.methodEvidence Extracted.imports Extracted.program := Extracted.translation_valid
+              Extracted.platformDefinitions Extracted.methodEvidence Extracted.imports Extracted.program :=
+              Extracted.translation_valid
         #print Extracted.imports
         """;
 
@@ -3674,7 +3675,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     // The certificate must prove the validator for exactly the emitted tables and program.
     static AuditRequest ExtractionCertificate(string theorem, string prefix = "") => new(theorem,
         new { app = new[] { AuditConstant("CIL.Extraction.TranslationValid") }.Concat(
-            new[] { "rawLayouts", "computedLayouts", "assemblies", "methodEvidence", "imports", "program" }
+            new[] { "rawLayouts", "computedLayouts", "assemblies", "platformDefinitions", "methodEvidence", "imports",
+                "program" }
                 .Select(name => AuditConstant(prefix + "Extracted." + name))) },
         ApprovedAxioms);
 
@@ -5232,7 +5234,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             var report = new Report(CertificateSchema, Sha(assembly), identityHash, theorem, axioms, audit, before,
                 deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
                     deep!.Requests, new(bindingSourcesKey!,
-                        File.ReadAllText(Path.Combine(session, "lean-toolchain")).Trim(), Sha(LeanExecutable))),
+                        File.ReadAllText(Path.Combine(session, "lean-toolchain")).Trim(), Sha(LeanExecutable)), audited),
                 libraryKey, libraryBuild, extractionAudit, initializedTypes,
                 staticValues: StaticValueAssumptions(extraction.Root),
                 opaqueStaticValues: OpaqueStaticValues(extraction.Root),

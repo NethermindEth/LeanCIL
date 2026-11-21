@@ -178,7 +178,13 @@ private def castBinding (writable : Bool) : Bool := Id.run do
   let span := if writable then "Span`1" else "ReadOnlySpan`1"
   let (metadata, token) := castToken span
   let .ok index := metadata.index | return false
-  let env := MetadataEnv.ofSlices [index]
+  let platform : PlatformTable := platform_table%
+    [Tests.MetadataBuilder.runtimeType "Object" .objectRoot,
+     Tests.MetadataBuilder.runtimeType "Span`1" (.genericValue 1),
+     Tests.MetadataBuilder.runtimeType "ReadOnlySpan`1" (.genericValue 1),
+     ⟨runtimeScopeBytes, [bytesOf "System.Runtime.InteropServices", bytesOf "MemoryMarshal"],
+       .classType⟩]
+  let env := MetadataEnv.ofSlices [index] (platform := platform)
   let .ok frame := env.frame 0 0 | return false
   let findCast := fun capability => scalarSites.find? fun (fixture, _) =>
     fixture.name == "Cast" && fixture.parameters == [view capability int32Type]

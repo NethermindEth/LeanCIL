@@ -167,7 +167,8 @@ File.WriteAllText(proofSource, """
     import Extracted
     /-- The extracted program has the certificate checked in this same environment. -/
     theorem certificate : CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
-        Extracted.assemblies Extracted.methodEvidence Extracted.imports Extracted.program :=
+        Extracted.assemblies Extracted.platformDefinitions Extracted.methodEvidence Extracted.imports
+        Extracted.program :=
       Extracted.translation_valid
     #print axioms certificate
     """);
@@ -182,6 +183,8 @@ var requests = contribution.Requests.Select(request => request.Audit).Append(Pro
 string[] jointModules = [.. contribution.Modules, "Proof"];
 var audited = verification.AuditOleans(search, jointModules, requests, replayTargets: jointModules);
 contribution.RequireAudited(audited);
+if (EnumStorageComplete(audited.theorems.Single(theorem => theorem.name == EnumStorageTheorem)))
+    throw new InvalidOperationException("The scalar-only fixture reported complete enum coverage");
 RequireAuditedModule(audited, "Proof", Path.ChangeExtension(proofSource, ".olean"));
 foreach (var theorem in audited.theorems) AuditedAxioms(theorem);
 Console.WriteLine("PASS deep modules and proof share the existing extraction with retained image bytes");

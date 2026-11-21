@@ -310,7 +310,7 @@ RejectedExtract("pinned type without definition", "Unresolved class: MultiFixtur
     var collect = slices.GetType().GetMethod("Method", Internal)!;
     try
     {
-        collect.Invoke(slices, [take, Array.Empty<uint>(), false]);
+        collect.Invoke(slices, [take, Array.Empty<uint>(), false, Array.Empty<Mono.Cecil.TypeDefinition>()]);
         throw new InvalidOperationException("The metadata slice accepted a pinned type with no definition.");
     }
     catch (System.Reflection.TargetInvocationException refusal) when (

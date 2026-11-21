@@ -130,6 +130,9 @@ name = "Tests.ReturnOpcode"
 name = "Tests.ReturnMetadataBinding"
 
 [[lean_lib]]
+name = "Tests.PlatformDefinitions"
+
+[[lean_lib]]
 name = "Tests.Automation"
 
 [[lean_lib]]

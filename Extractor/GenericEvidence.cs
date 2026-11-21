@@ -17,6 +17,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     readonly ExternalIdentityEvidence externalIdentities = new();
     readonly MetadataSlices? metadata = pinned is null ? null : new(pinned);
     readonly Dictionary<MethodReference, string> declaredSignatures = new();
+    readonly List<TypeReference> statedTypes = [];
+    int platformAt;
     int methodParameterCount;
     // Closed type operands are shared by the decoder, template descriptors and proof outlines.
     readonly Dictionary<Instruction, string> closedTypes = [];
@@ -382,7 +384,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     internal static string ConstraintType(TypeReference type) => type is RequiredModifierType modifier
         ? LayoutEvidence.Identity(modifier.ModifierType) + "!" + LayoutEvidence.Identity(modifier.ElementType)
-        : LayoutEvidence.InterfaceIdentity(type);
+        : LayoutEvidence.Identity(type);
 
     static readonly string ValueTypeConstraint = TypeTests.RuntimeScope + "::System.ValueType";
     static readonly string UnmanagedTypeConstraint = TypeTests.RuntimeScope +
@@ -478,7 +480,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,
-        IReadOnlySet<Instruction> reachable, string staticInput, StringBuilder? decoderInputs = null)
+        IReadOnlySet<Instruction> reachable, int methodCount, string staticInput, StringBuilder? decoderInputs = null)
     {
         var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
         var originalEvidence = Method(original, original, method, reachable, staticInput);
@@ -491,6 +493,14 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         lean.AppendLine(body.Bytes);
         if (body.Slices.Length > 0)
             foreach (var line in body.Slices.Split('\n')) lean.AppendLine(line);
+        var hasImports = imports?.Bindings.Count > 0;
+        var bodyImports = hasImports ? $""" method{number}BodyImports""" : "";
+        if (hasImports)
+            lean.AppendLine($"""
+                /-- The imported calls selected by this method's direct links. -/
+                def method{number}BodyImports : Extraction.BodyImports :=
+                  importIndex.forLinks {methodCount} method{number}Links
+                """);
         lean.AppendLine(body.Definition);
         lean.AppendLine($"def method{number}TypeArgumentsRaw : List Extraction.TypeExpr := {List(MethodSpecialization.Arguments(method).Select(Type))}");
         var closed = $"def method{number}Closed : Extraction.RawMethod := {closedEvidence}";
@@ -498,14 +508,17 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         decoderInputs?.AppendLine(closed);
         lean.AppendLine($"def method{number}DispatchTypes : List Extraction.DispatchType := {DispatchTypes(method)}");
         // Direct equality proofs avoid a separate structural decision over the raw metadata.
-        lean.AppendLine($"theorem method{number}_specialization_validated :" +
-            $" Extraction.SpecializationValid rawLayouts method{number}Original method{number}TypeArgumentsRaw" +
-            $" method{number}Closed method{number}RawArguments := by constructor <;> rfl");
-        lean.AppendLine($"theorem method{number}_body_validated :" +
-            $" Extraction.BodyDecodes assemblies ⟨{Quote(PinIdentity(method.Module))}⟩ method{number}Body" +
-            $" method{number}Original method{number}TypeArgumentsRaw method{number}Signature :=" +
-            $" ⟨{body.Identified}, {body.TablesValid}, by cil_kernel_rfl, pinned_identities_spelled," +
-            " by cil_kernel_rfl, by cil_kernel_rfl, by cil_body_decodes⟩");
+        lean.AppendLine(string.Join(" ",
+            $"""theorem method{number}_specialization_validated : Extraction.SpecializationValid rawLayouts""",
+            $"""method{number}Original method{number}TypeArgumentsRaw method{number}Closed""",
+            $"""method{number}RawArguments := by constructor <;> cil_kernel_rfl"""));
+        var assembly = $"\u27e8{Quote(PinIdentity(method.Module))}\u27e9";
+        var proofs = string.Join(", ", body.Identified, body.TablesValid, "by cil_kernel_rfl",
+            "pinned_identities_spelled", "rfl", "by cil_kernel_rfl", "by cil_kernel_rfl", "by cil_body_decodes");
+        lean.AppendLine(string.Join(" ",
+            $"""theorem method{number}_body_validated : Extraction.BodyDecodes assemblies platformDefinitions""",
+            $"""{assembly} method{number}Body method{number}Original method{number}TypeArgumentsRaw""",
+            $"""method{number}Signature{bodyImports} :=""", $"\u27e8{proofs}\u27e9"));
     }
 
     /// <summary>The decoded value opcodes whose operands need no storage, model or target resolution.</summary>
@@ -668,12 +681,16 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Each closed instantiation carries its own bytes and metadata slice, built from the open definition and the
         // assembly, so a method's component names no other method and does not depend on which instantiations the
         // extraction holds or in which order.
-        var data = MetadataSlices.Bytes(bytes);
+        var data = ByteLiterals.Of(bytes);
         var classOwner = original.HasThis && ObjectTypes.Is(original.DeclaringType);
+        var arguments = MethodSpecialization.Arguments(admitted);
+        var definitions = new HashSet<TypeDefinition>();
+        var instantiation = arguments.Count == 0 ? "" :
+            $", instantiation := {List(arguments.Select(argument => InstanceArgument(argument, definitions)))}";
         var (rows, tables, assemblies) = (metadata ?? throw new InvalidOperationException(
             "Method evidence requires the pinned assemblies.")).Method(original,
             operands.Select(entry => entry.Token).Append(original.Body.LocalVarToken.ToUInt32())
-                .Where(token => token != 0), classOwner);
+                .Where(token => token != 0), classOwner, definitions);
         // The kernel decides once that the literal tables are the decoder's; the body check reads them by name.
         var slices = $"def method{number}Metadata : Extraction.MethodMetadata := {rows}\n" +
             $"def method{number}Tables : List Extraction.IndexTables := {tables}\n" +
@@ -684,18 +701,20 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var identities = List(assemblies.Select(index => $"assembly{index}Identity"));
         var identified = assemblies.Reverse().Aggregate("Extraction.AllIdentified.nil",
             (rest, index) => $"(Extraction.AllIdentified.cons assembly{index}_identified {rest})");
-        var arguments = MethodSpecialization.Arguments(admitted);
-        var instantiation = arguments.Count == 0 ? "" : $", instantiation := {List(arguments.Select(Resolved))}";
+
+        var bodyImports = imports?.Bindings.Count > 0 ? $""", imports := method{number}BodyImports""" : "";
         var staticTokens = statics.Count == 0 ? "" : $", statics := {List(statics)}";
-        return ($"def method{number}Bytes : List Nat := {data}", slices,
-            $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
-            $"tokens := {{ operands := {table} }}, metadata := method{number}Metadata, " +
-            $"identities := {identities}, tables := method{number}Tables, names := method{number}Names, " +
-            $"pinned := pinnedIndex{instantiation}{staticTokens} }}",
-            identified, $"method{number}_tables_valid");
+        var platform = $"""platformDefinitions{instantiation}{staticTokens}{bodyImports}""";
+        var definition = string.Join(" ",
+            $$"""def method{{number}}Body : Extraction.BodyEvidence := { bytes := method{{number}}Bytes,""",
+            $$"""tokens := { operands := {{table}} }, metadata := method{{number}}Metadata,""",
+            $"""identities := {identities}, tables := method{number}Tables, names := method{number}Names,""",
+            $$"""pinned := pinnedIndex, platform := {{platform}} }""");
+        return ($"""def method{number}Bytes : List Nat := {data}""", slices, definition,
+            identified, $"""method{number}_tables_valid""");
     }
 
-    static string Utf8(string text) => MetadataSlices.Bytes(Encoding.UTF8.GetBytes(text));
+    static string Utf8(string text) => ByteLiterals.Of(Encoding.UTF8.GetBytes(text));
 
     /// <summary>
     /// The owner and base class names the method's metadata spells and the signature the extraction selects it by,
@@ -712,28 +731,39 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $"signature := {Utf8(signature)} }}";
     }
 
-    // A type argument of a generic instance as the resolved type the instance's signature names. Lean admits it
-    // against the argument's type expression and spells the instance's full name from it, so only the element type
-    // code or the scope and name, and of a generic head its value-type marker and scoped spelling, are stated.
-    static string Resolved(TypeReference type) => type switch
+    // Closed arguments name a carried definition row or a platform entry. Lean resolves their kinds.
+    string InstanceArgument(TypeReference type, HashSet<TypeDefinition> definitions) => type switch
     {
         _ when type.IsPrimitive || type.MetadataType is MetadataType.String or MetadataType.Object =>
             $".primitive {(int)type.MetadataType}",
-        ArrayType { IsVector: true } array => $".szarray ({Resolved(array.ElementType)})",
-        GenericInstanceType generic => $".genericInst {ResolvedHead(generic)} " +
-            generic.GenericArguments.Reverse().Aggregate(".nil",
-                (rest, argument) => $"(.cons ({Resolved(argument)}) {rest})"),
-        _ => $".named {Named(type, false, null)}"
+        ArrayType { IsVector: true } array => $".szarray ({InstanceArgument(array.ElementType, definitions)})",
+        GenericInstanceType generic => $"""
+            .genericInst {ArgumentHead(generic.ElementType, definitions)} {InstanceArguments(generic, definitions)}
+            """,
+        _ => $".named {ArgumentHead(type, definitions)}"
     };
 
-    // A generic head states the value-type marker of the signature that names the instance.
-    static string ResolvedHead(GenericInstanceType generic) =>
-        Named(generic.ElementType, GenericStructs.Is(generic), generic.ElementType.IsValueType);
+    string InstanceArguments(GenericInstanceType generic, HashSet<TypeDefinition> definitions)
+    {
+        var chain = new StringBuilder();
+        foreach (var argument in generic.GenericArguments)
+            chain.Append($"(.cons ({InstanceArgument(argument, definitions)}) ");
+        return chain.Append(".nil").Append(')', generic.GenericArguments.Count).ToString();
+    }
 
-    static string Named(TypeReference type, bool scopedArguments, bool? valueType) =>
-        $"{{ scope := {Utf8(LayoutEvidence.Scope(type))}, name := {Utf8(type.FullName)}, parts := [], " +
-        $"kind := .external {(valueType is { } marker ? $"(some {Bool(marker)})" : "none")}, " +
-        $"pinned := {Bool(scopedArguments)} }}";
+    string ArgumentHead(TypeReference type, HashSet<TypeDefinition> definitions)
+    {
+        if (type.Scope is AssemblyNameReference reference && Pinned.IsPlatform(reference))
+        {
+            statedTypes.Add(type);
+            var parts = PlatformDefinitions.NameParts(type).Select(Utf8);
+            return $"(.platform {Utf8(reference.FullName)} {List(parts)})";
+        }
+        var definition = type.Resolve() ?? throw new InvalidDataException($"Unresolved type argument {type.FullName}");
+        definitions.Add(definition);
+        var scope = Utf8(definition.Module.Assembly.Name.FullName);
+        return $"(.definition {scope} {definition.MetadataToken.ToUInt32()})";
+    }
 
     static uint TokenOperand(MethodDefinition original, MethodBodyBytes.Body body, Instruction instruction)
     {
@@ -757,7 +787,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             lean.AppendLine($"def assembly{index}Metadata : Extraction.AssemblyMetadata := " +
                 slices.AssemblyBlock(module));
             lean.AppendLine($"def assembly{index}Identity : List Nat := " +
-                MetadataSlices.Bytes(Encoding.UTF8.GetBytes(identity)));
+                ByteLiterals.Of(Encoding.UTF8.GetBytes(identity)));
             // The assembly's header bytes decode to the stated header, its bytes spell this identity, and it is the
             // string the block states: one proof for every method of the assembly.
             lean.AppendLine($"theorem assembly{index}_identified : Extraction.AssemblyIdentified " +
@@ -776,8 +806,41 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             List(Pinned.Modules.Select((_, index) => $"assembly{index}Identity")));
         lean.AppendLine("def pinnedIndex : Extraction.PinnedIndex := cil_pin_index pinnedIdentities");
         lean.AppendLine("#print axioms pinnedIndex");
+        // The platform definitions go here once every method's slices are known; see InsertPlatformDefinitions.
+        platformAt = lean.Length;
         lean.AppendLine("theorem pinned_identities_spelled : pinnedIdentities.mapM Extraction.spelled? = " +
             "some (assemblies.map (·.identity)) := by cil_kernel_rfl");
+    }
+
+    /// <summary>
+    /// Inserts the platform definitions where <see cref="EmitAssemblyMetadata"/> left room, once every method's
+    /// evidence is written: every body is checked against this one list, and Lean refuses a reliance on a platform
+    /// type it does not state.
+    /// </summary>
+    internal void InsertPlatformDefinitions(StringBuilder lean)
+    {
+        var platform = Platform();
+        lean.Insert(platformAt, $"""
+            set_option maxRecDepth {platform.Depth} in
+            def platformDefinitions : Extraction.PlatformTable := platform_table% {platform.Lean(ByteLiterals.Of)}
+
+            """);
+    }
+
+    // The platform types the carried TypeRef rows and the stated type arguments name, under the core library the
+    // entry module's System.Object resolves to.
+    PlatformDefinitions Platform()
+    {
+        var slices = metadata ??
+            throw new InvalidOperationException("Method evidence requires the pinned assemblies.");
+        var coreLibrary = Pinned.Original(Pinned.Modules.First()).TypeSystem.Object.Resolve()?.Module ??
+            throw new InvalidDataException("System.Object does not resolve for the platform definitions.");
+        var definitions = new PlatformDefinitions(coreLibrary);
+        foreach (var group in slices.TypeReferences.GroupBy(reference => reference.Module))
+            definitions.Add(group.Key, Pinned.Metadata(group.Key).Reader, group.Select(reference => reference.Handle),
+                Pinned.IsPlatform);
+        foreach (var type in statedTypes) definitions.Add(type, Pinned.IsPlatform);
+        return definitions;
     }
 
     string DispatchTypes(MethodDefinition method)

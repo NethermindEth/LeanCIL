@@ -143,7 +143,8 @@ partial class Program
                 // As the extractor decides it for a method's evidence: an instance method of a class.
                 var classOwner = method.HasThis && (bool)objectType.Invoke(null, [method.DeclaringType])!;
                 var (metadata, _, _) =
-                    ((string, string, int[]))collect.Invoke(slices, [method, tokens, classOwner])!;
+                    ((string, string, int[]))collect.Invoke(slices,
+                        [method, tokens, classOwner, Array.Empty<Mono.Cecil.TypeDefinition>()])!;
                 methods.Add($"(\"{method.FullName}\", {metadata})");
             }
             string[] paths = [selected, .. references];

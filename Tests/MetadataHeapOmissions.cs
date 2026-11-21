@@ -154,7 +154,8 @@ double Check(byte[] bytes, int width, bool proof = true)
     var selected = (ModuleDefinition)pinnedType.GetProperty("Selected", Internal)!.GetValue(pinned)!;
     var original = (ModuleDefinition)pinnedType.GetMethod("Original", Internal)!.Invoke(pinned, [selected])!;
     var owner = original.GetType("Fields");
-    var collection = Activator.CreateInstance(collectionType, Internal, null, [pinned], null)!;
+    var collection = Activator.CreateInstance(collectionType, Internal, null,
+        [pinned, new HashSet<(ModuleDefinition, uint)>()], null)!;
     var slice = collectionType.GetMethod("SliceOf", Internal)!.Invoke(collection, [original])!;
     var sliceType = slice.GetType();
     sliceType.GetMethod("Method", Internal)!.Invoke(slice, [owner.Methods.Single(), false]);

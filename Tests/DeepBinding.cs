@@ -105,6 +105,12 @@ partial class Program
         Mutation("body theorem about other evidence", BodiesModule, source => ReplaceBodies(source,
             "theorem bodies : StrictBinding.BodiesBound images [] := by decide +kernel"),
             "Theorem statement mismatch", BindingFact.BodyBytes);
+        Mutation("enum theorem about other evidence", EnumStorageModule, source => source.Replace(
+            "Extracted.methodEvidence enumCoverage% :=", "[] false :=", StringComparison.Ordinal),
+            "Theorem statement mismatch", BindingFact.EnumUnderlyingTypes);
+        Mutation("enum coverage claimed for an empty selection", EnumStorageModule, source => source.Replace(
+            "Extracted.methodEvidence enumCoverage% :=", "Extracted.methodEvidence true :=", StringComparison.Ordinal),
+            "replay", BindingFact.EnumUnderlyingTypes);
         const string statement = "StrictBinding.BodiesBound images Extracted.methodEvidence";
         Mutation("body theorem with extra axiom", BodiesModule, source => ReplaceBodies(source,
             $"axiom cheat : {statement}\ntheorem bodies : {statement} := cheat"),

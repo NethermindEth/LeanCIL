@@ -89,9 +89,21 @@ private def world : Step Tokens := do
 
 private def slice : MetadataSlice × Tokens := build world (bytesOf "T") pin.identity
 
+/-- A type of `System.Runtime`'s `System.Collections.Generic` namespace of this kind. -/
+private def collectionType (name : String) (kind : PlatformKind) : PlatformDefinition :=
+  { scope := runtimeScopeBytes, parts := [bytesOf "System.Collections.Generic", bytesOf name],
+    kind }
+
+/-- The platform definitions of the types the fields and the classes' base name. -/
+private def fieldPlatform : PlatformTable := platform_table%
+  [runtimeType "Object" .objectRoot, collectionType "List`1" (.genericClass 1),
+   collectionType "IList`1" (.genericInterface 1), runtimeType "Func`1" (.genericClass 1),
+   runtimeType "ValueTuple`2" .valuePair]
+
 /-- The error binding `token` to `operand` gives, or `none` when it is accepted. -/
 private def check (token : Nat) (operand : RawOperand) : Option MetadataError :=
-  match (do checkEntry (MetadataEnv.ofSlices [← slice.1.index]) 0 token operand) with
+  let env := (MetadataEnv.ofSlices [·] (platform := fieldPlatform)) <$> slice.1.index
+  match (do checkEntry (← env) 0 token operand) with
   | .ok _ => none
   | .error found => some found
 

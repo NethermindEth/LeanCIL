@@ -181,9 +181,16 @@ Console.WriteLine("PASS a base-only family's certified session companion is reje
 if (args is ["--prepared-inventory"]) return;
 
 var subjects = BindingRequests(new("", [new("Identity", inputs.Images[0].Digest, [])], 1));
+// Exercise report projection and scaling with the same literal term shape as the joint audit.
+AuditedOleans coverageAudit = new(new(), [new(EnumStorageTheorem, null, [], null, null,
+    JsonSerializer.SerializeToElement(new { root = 2, nodes = new object[] {
+        new object[] { "const", 0, new[] { "StrictBinding", "EnumStorageChecked" }, Array.Empty<object>() },
+        new object[] { "const", 0, new[] { "Bool", "false" }, Array.Empty<object>() },
+        new object[] { "app", 0, 1 } } }))], []);
 var withoutRows = DeepBindingSection(inputs, [new("Identity", inputs.Images[0])],
-    [.. subjects.Where(request => request.Module != MetadataRowsModule)], report.binding.sources!);
-if (withoutRows.facts.Single(fact => fact.id == BindingFact.MetadataRows).status != BindingStatus.NotCovered ||
+    [.. subjects.Where(request => request.Module != MetadataRowsModule)], report.binding.sources!, coverageAudit);
+if (withoutRows.facts.Single(fact => fact.id == BindingFact.EnumUnderlyingTypes).status != BindingStatus.NotCovered ||
+    withoutRows.facts.Single(fact => fact.id == BindingFact.MetadataRows).status != BindingStatus.NotCovered ||
     withoutRows.facts.Single(fact => fact.id == BindingFact.BodyBytes).theorem != "BindingAudit.bodies")
     throw new InvalidOperationException("A fact without an audited request was reported as reconfirmed");
 Console.WriteLine("PASS the deep report reconfirms exactly the subjects of its audited requests");
@@ -199,7 +206,7 @@ foreach (var count in new[] { 64, 512, 4096 })
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
         for (var repetition = 0; repetition < 64; repetition++)
         {
-            var section = DeepBindingSection(inputs, pins, subjects, report.binding.sources!);
+            var section = DeepBindingSection(inputs, pins, subjects, report.binding.sources!, coverageAudit);
             if (section.images.Length != count + 1)
                 throw new InvalidOperationException("Deep report lost an image association");
         }

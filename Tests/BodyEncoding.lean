@@ -172,17 +172,18 @@ def methodMetadata (pin : AssemblyPin) (method : RawMethod) : Option (MetadataSl
   some (build step assemblyName pin.identity)
 
 /-- The evidence for body bytes and token claims over `metadata`: the identities, tables and
-    names the decoder derives from the metadata for `method`, which a body that does not
-    resolve leaves empty so the check refuses it. -/
+    names the decoder derives from the metadata for `method` under the `platform` definitions,
+    which a body that does not resolve leaves empty so the check refuses it. -/
 def evidenceOf (bytes : List Nat) (operands : List (Nat × RawOperand)) (metadata : MethodMetadata)
-    (method : RawMethod) : BodyEvidence :=
+    (method : RawMethod) (platform : PlatformTable := objectPlatform) : BodyEvidence :=
   let identities := metadata.slices.map fun slice => (slice.assembly.spelling).toOption.getD []
   let tables := metadata.tables.toOption.getD []
-  let names := match metadata.environmentWith identities tables (PinnedIndex.ofIdentities []) with
+  let names :=
+    match metadata.environmentWith identities tables (PinnedIndex.ofIdentities []) platform with
     | .ok env => (methodIdentityValid env method [] []).toOption.getD {}
     | .error _ => {}
   { bytes := bytes, tokens := { operands := operands }, metadata, identities, tables, names,
-    pinned := PinnedIndex.ofIdentities [] }
+    pinned := PinnedIndex.ofIdentities [], platform }
 
 /-- A body that decodes to the method: a tiny header when the method has no locals, the fixed
     stack depth and no init flag, and a fat header otherwise, with the metadata the method's
@@ -222,6 +223,6 @@ def withBody (item : MethodEvidence) : MethodEvidence :=
 /-- The body of evidence that `withBody` has not yet filled in; it never decodes. -/
 def noBody : BodyEvidence :=
   { bytes := [], tokens := { operands := [] }, metadata := {}, identities := [], tables := [],
-    names := {}, pinned := PinnedIndex.ofIdentities [] }
+    names := {}, pinned := PinnedIndex.ofIdentities [], platform := objectPlatform }
 
 end Tests.BodyEncoding

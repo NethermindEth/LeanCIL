@@ -12,6 +12,7 @@ Each conjunction retains its positive and negative obligations.
 
 namespace Tests.ScalarEvidence
 open CIL CIL.Extraction Tests.BodyEncoding
+open Tests.MetadataBuilder (objectPlatform)
 
 /-- The primitive assembly identity with its checked byte representation. -/
 private def runtime := runtimeScope
@@ -179,12 +180,13 @@ private def addEvidence : MethodEvidence := withBody {
 private def addMethod : Method :=
   { locals := [], returnsValue := true, declared := wordPair, code := addCode }
 
-example : TranslationValid [] #[] [] [addEvidence] [] [addMethod] := by decide +kernel
-example : ¬ TranslationValid [] #[] [] [addEvidence] []
+example : TranslationValid [] #[] [] objectPlatform [addEvidence] [] [addMethod] := by
+  decide +kernel
+example : ¬ TranslationValid [] #[] [] objectPlatform [addEvidence] []
     [{ addMethod with code := addCode.set 2 .sub }] := by decide +kernel
 /-- A method with the adder’s code and an extra home cannot be the result of its body decode. -/
 theorem addition_rejects_extra_home :
-    ¬ MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence
+    ¬ MethodEvidenceValid [] #[] [] objectPlatform [addEvidence] [] addEvidence
       { addMethod with parameterHomes := [(0, .word64)] } := by
   intro valid
   have body := valid.ofBody?
@@ -198,11 +200,12 @@ theorem addition_rejects_extra_home :
 
 -- The declared signature and the layout environment are conjuncts of their own.
 example : ¬ DeclaredValid addRaw { addMethod with declared := {} } := by decide
-example : ¬ TranslationValid [] #[] [] [addEvidence] [] [{ addMethod with declared := {} }] := by
+example : ¬ TranslationValid [] #[] [] objectPlatform [addEvidence] []
+    [{ addMethod with declared := {} }] := by
   decide +kernel
 example : ¬ MethodEnvironmentValid [] #[]
     { addMethod with environment := { layouts := #[⟨⟨4, []⟩, 4⟩] } } := by decide
-example : ¬ TranslationValid [] #[] [] [addEvidence] []
+example : ¬ TranslationValid [] #[] [] objectPlatform [addEvidence] []
     [{ addMethod with environment := { layouts := #[⟨⟨4, []⟩, 4⟩] } }] := by decide +kernel
 
 /-- `addMethod` declaring `signature` instead of the `wordPair` its metadata implies. -/
@@ -211,7 +214,7 @@ private def declaring (signature : DeclaredSignature) : Method :=
 /-- A changed declaration passes the shape check and fails the signature and evidence checks. -/
 private def wrongDeclarationRejected (signature : DeclaredSignature) : Prop :=
   MethodShapeValid addRaw (declaring signature) ∧ ¬ DeclaredValid addRaw (declaring signature) ∧
-    ¬ MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence (declaring signature)
+    ¬ MethodEvidenceValid [] #[] [] objectPlatform [addEvidence] [] addEvidence (declaring signature)
 instance (signature : DeclaredSignature) : Decidable (wrongDeclarationRejected signature) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
@@ -222,7 +225,7 @@ example : wrongDeclarationRejected { wordPair with parameters := [word, intType]
 example : wrongDeclarationRejected { wordPair with receiver := some .reference } := by decide +kernel
 example : wrongDeclarationRejected { wordPair with parameters := [word] } := by decide +kernel
 
-example : ¬ TranslationValid [] #[] []
+example : ¬ TranslationValid [] #[] [] objectPlatform
     [{ addEvidence with scalarStates := addStates.set 2 (some [.native, .word32]) }] []
     [addMethod] := by decide +kernel
 example : ¬ ScalarFlowValid { addRaw with maxStack := 1 } addFeatures addStates addCode := by decide
@@ -240,10 +243,10 @@ private def arithmeticFlagCases : List (Nat × Instruction) := [
   (91, .div), (92, .div_un), (93, .rem), (94, .rem_un), (214, .add_ovf), (215, .add_ovf_un),
   (216, .mul_ovf), (217, .mul_ovf_un), (218, .sub_ovf), (219, .sub_ovf_un)]
 example : arithmeticFlagCases.all (fun (opcode, operation) =>
-    decide (TranslationValid [] #[] [] [binaryEvidence opcode] []
+    decide (TranslationValid [] #[] [] objectPlatform [binaryEvidence opcode] []
       [binaryMethod operation])) = true := by decide +kernel
 example : arithmeticFlagMutations.all (fun (opcode, operation) =>
-    decide (¬ TranslationValid [] #[] [] [binaryEvidence opcode] []
+    decide (¬ TranslationValid [] #[] [] objectPlatform [binaryEvidence opcode] []
       [binaryMethod operation])) = true := by decide +kernel
 
 private def literalRaw := raw [i 33 (.integer (-9223372036854775808)), i 42] []
@@ -256,8 +259,9 @@ private def literalEvidence : MethodEvidence := withBody {
 private def literalMethod : Method := {
   locals := [], returnsValue := true, declared := { returnType := word },
   code := [.ldc_i8 9223372036854775808, .ret] }
-example : TranslationValid [] #[] [] [literalEvidence] [] [literalMethod] := by decide +kernel
-example : ¬ TranslationValid [] #[] [] [literalEvidence] []
+example : TranslationValid [] #[] [] objectPlatform [literalEvidence] [] [literalMethod] := by
+  decide +kernel
+example : ¬ TranslationValid [] #[] [] objectPlatform [literalEvidence] []
     [{ literalMethod with code := [.ldc_i8 9223372036854775809, .ret] }] := by decide +kernel
 
 private def convertRaw := raw [i 2, i 133, i 42] [word]
@@ -270,14 +274,15 @@ private def convertEvidence : MethodEvidence := withBody {
 private def convertMethod : Method := {
   locals := [], returnsValue := true, declared := { parameters := [word], returnType := word },
   code := [.ldarg 0, .conv_ovf_un .i8, .ret] }
-example : TranslationValid [] #[] [] [convertEvidence] [] [convertMethod] := by decide +kernel
-example : ¬ TranslationValid [] #[] [] [convertEvidence] []
+example : TranslationValid [] #[] [] objectPlatform [convertEvidence] [] [convertMethod] := by
+  decide +kernel
+example : ¬ TranslationValid [] #[] [] objectPlatform [convertEvidence] []
     [{ convertMethod with code := [.ldarg 0, .conv_ovf_un .u8, .ret] }] := by decide +kernel
-example : ¬ TranslationValid [] #[] [] [convertEvidence] []
+example : ¬ TranslationValid [] #[] [] objectPlatform [convertEvidence] []
     [{ convertMethod with code := [.ldarg 0, .conv_ovf .i8, .ret] }] := by decide +kernel
-example : ¬ TranslationValid [] #[] [] [convertEvidence] []
+example : ¬ TranslationValid [] #[] [] objectPlatform [convertEvidence] []
     [{ convertMethod with code := [.ldarg 0, .conv_ovf_un .i, .ret] }] := by decide +kernel
-example : ¬ TranslationValid [] #[] [] [convertEvidence] []
+example : ¬ TranslationValid [] #[] [] objectPlatform [convertEvidence] []
     [{ convertMethod with code := [.ldarg 0, .conv_i8, .ret] }] := by decide +kernel
 
 private def floatRaw (opcode : Nat) := raw [i 23, i opcode, i 106, i 42] []
@@ -296,8 +301,10 @@ example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) (floatRaw 108) .s
     (List.replicate 4 true) floatMethod.code := by decide
 example : scalarTransfer (floatRaw 107) (i 107) [.word32] = some [.other] := by decide
 example : scalarTransfer (floatRaw 108) (i 108) [.word32] = some [.other] := by decide
-example : ¬ TranslationValid [] #[] [] [floatEvidence 107] [] [floatMethod] := by decide +kernel
-example : ¬ TranslationValid [] #[] [] [floatEvidence 108] [] [floatMethod] := by decide +kernel
+example : ¬ TranslationValid [] #[] [] objectPlatform [floatEvidence 107] [] [floatMethod] := by
+  decide +kernel
+example : ¬ TranslationValid [] #[] [] objectPlatform [floatEvidence 108] [] [floatMethod] := by
+  decide +kernel
 -- The scalar flow itself rejects them, since the declared signature is right.
 example : ¬ ScalarFlowValid (floatRaw 107) floatFeatures floatStates floatMethod.code := by
   decide
@@ -341,7 +348,7 @@ private def localMethod : Method := {
   code := [.ldc_i4 1, .neg, .stloc 0, .ldloc 0, .conv_i8, .ret] }
 example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) localRaw .scalar localFeatures
     (List.replicate 6 true) localMethod.code := by decide
-example : ¬ TranslationValid [] #[] [] [localEvidence] [] [localMethod] := by decide +kernel
+example : ¬ TranslationValid [] #[] [] objectPlatform [localEvidence] [] [localMethod] := by decide +kernel
 example : ¬ ScalarFlowValid localRaw localFeatures localStates localMethod.code := by decide
 example : MethodShapeValid localRaw localMethod := by decide
 
@@ -357,7 +364,7 @@ private def argumentMethod : Method := {
   code := [.ldc_i4 1, .neg, .starg 0, .ldarg 0, .conv_i8, .ret] }
 example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) argumentRaw .scalar argumentFeatures
     (List.replicate 6 true) argumentMethod.code := by decide
-example : ¬ TranslationValid [] #[] [] [argumentEvidence] [] [argumentMethod] := by decide +kernel
+example : ¬ TranslationValid [] #[] [] objectPlatform [argumentEvidence] [] [argumentMethod] := by decide +kernel
 example : ¬ ScalarFlowValid argumentRaw argumentFeatures localStates argumentMethod.code := by
   decide
 example : MethodShapeValid argumentRaw argumentMethod := by decide
@@ -482,7 +489,8 @@ private def faultLocalMethod : Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true,
   declared := { parameters := [word], returnType := intType },
   code := [.ldarg 0, .stloc 0, .ldloc 0, .ret] }
-example : TranslationValid [] #[] [] [faultLocalEvidence] [] [faultLocalMethod] := by
+example : TranslationValid [] #[] [] objectPlatform [faultLocalEvidence] []
+    [faultLocalMethod] := by
   decide +kernel
 example : scalarTransfer faultLocalRaw (i 10) [.word64] = none := by decide
 example : scalarStoreFault faultLocalRaw (i 10) [.word64] (.stloc 0) = true := by decide
@@ -496,7 +504,7 @@ example :
   decide
 example : ¬ ScalarFlowValid faultLocalRaw faultLocalFeatures faultLocalStates
     (faultLocalMethod.code.set 1 (.stloc 1)) := by decide
-example : ¬ TranslationValid [] #[] [] [faultLocalEvidence] []
+example : ¬ TranslationValid [] #[] [] objectPlatform [faultLocalEvidence] []
     [{ faultLocalMethod with code := faultLocalMethod.code.set 1 .pop }] := by decide
 example (memory : Safety.Memory) (reference : Safety.Reference) (bits : W64) :
     Safety.storeLocal memory (.bytes .word32 reference) (.scalar (.i64 bits)) = .error .invalidState := rfl
@@ -514,7 +522,8 @@ private def nativeHomeMethod : Method := {
   locals := [], parameterHomes := [(0, .word64)], returnsValue := true,
   declared := { parameters := [nativeType, word], returnType := word },
   code := [.ldarg 1, .starg 0, .ldarg 0, .conv_u8, .ret] }
-example : TranslationValid [] #[] [] [nativeHomeEvidence] [] [nativeHomeMethod] := by
+example : TranslationValid [] #[] [] objectPlatform [nativeHomeEvidence] []
+    [nativeHomeMethod] := by
   decide +kernel
 example : scalarTransfer nativeHomeRaw (i 16 (.argument 0)) [.word64] = some [] := by decide
 example : scalarTransfer nativeHomeRaw (i 16 (.argument 0)) [.other] = none := by decide
@@ -533,7 +542,8 @@ private def nativeReturnMethod : Method := {
   locals := [], returnsValue := true,
   declared := { parameters := [.byref word], returnType := word },
   code := [.ldarg 0, .ldind .i, .ret] }
-example : TranslationValid [] #[] [] [nativeReturnEvidence] [] [nativeReturnMethod] := by
+example : TranslationValid [] #[] [] objectPlatform [nativeReturnEvidence] []
+    [nativeReturnMethod] := by
   decide +kernel
 example : scalarTransfer nativeReturnRaw (i 42) [.native] = some [] := by decide
 example : scalarTransfer { nativeReturnRaw with returnType := nativeType } (i 42) [.word64] = some [] := by decide
@@ -834,9 +844,11 @@ private def holeMethod (emitted : Instruction) : Method :=
   { locals := [], returnsValue := true, declared := wordPair, code := holeCode emitted }
 /-- A scalar opcode cannot be replaced by an unrelated instruction with the same stack effect. -/
 private theorem scalar_opcode_cases :
-    (TranslationValid [] #[] [] [holeEvidence 88 (holeStates.set 3 (some [.word64]))] []
+    (TranslationValid [] #[] [] objectPlatform
+      [holeEvidence 88 (holeStates.set 3 (some [.word64]))] []
       [holeMethod .add]) ∧
-    (¬ TranslationValid [] #[] [] [holeEvidence 149 holeStates] [] [holeMethod .add]) := by
+    (¬ TranslationValid [] #[] [] objectPlatform [holeEvidence 149 holeStates] []
+      [holeMethod .add]) := by
   decide +kernel
 
 #print axioms scalar_opcode_cases
@@ -939,7 +951,8 @@ private def IndirectCase.window (access : IndirectCase) : Bool :=
     access.access access.emitted
 /-- Whether every check of the method's evidence accepts it. -/
 private def IndirectCase.translates (access : IndirectCase) : Bool :=
-  decide (MethodEvidenceValid [] #[] [] [access.evidence] [] access.evidence access.method)
+  decide (MethodEvidenceValid [] #[] [] objectPlatform [access.evidence]
+    [] access.evidence access.method)
 
 private def load (opcode : Nat) (emitted : Instruction) (kind : ScalarKind := .word32)
     (prefixes : List RawInstruction := []) (operand : RawOperand := .none) : IndirectCase :=
@@ -1123,7 +1136,7 @@ private def reachableEvidence (raw : RawMethod) : MethodEvidence :=
 
 /-- The evidence of `raw`, every pc reachable, refuses a method emitting `code`. -/
 private def EvidenceRefuses (raw : RawMethod) (code : List Instruction) : Prop :=
-  ¬ MethodEvidenceValid [] #[] [] [reachableEvidence raw] [] (reachableEvidence raw)
+  ¬ MethodEvidenceValid [] #[] [] objectPlatform [reachableEvidence raw] [] (reachableEvidence raw)
     { addMethod with code }
 
 /-- Code other than the decoding of `raw` is refused by the code equation conjunct alone. -/
@@ -1550,18 +1563,20 @@ refuses at once, within a small heartbeat budget, and `decide +kernel` decides. 
 set_option maxHeartbeats 20000 in
 /-- error: Tactic `decide` failed to reduce -/
 #guard_msgs (substring := true) in
-example : BodyDecodes [] scope addEvidence.body addEvidence.original [] addEvidence.signature := by
+example : BodyDecodes [] objectPlatform scope addEvidence.body addEvidence.original
+    [] addEvidence.signature := by
   decide
 
 set_option maxHeartbeats 20000 in
 /-- error: Tactic `decide` failed to reduce -/
 #guard_msgs (substring := true) in
-example : TranslationValid [] #[] [] [addEvidence] [] [addMethod] := by decide
+example : TranslationValid [] #[] [] objectPlatform [addEvidence] [] [addMethod] := by decide
 
 set_option maxHeartbeats 20000 in
 /-- error: Tactic `decide` failed to reduce -/
 #guard_msgs (substring := true) in
-example : MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence addMethod := by decide
+example : MethodEvidenceValid [] #[] [] objectPlatform [addEvidence] [] addEvidence addMethod := by
+  decide
 
 /-- A method with eight times the parameters and four times the locals of `addRaw`. -/
 private def wideRaw : RawMethod :=
@@ -1574,9 +1589,12 @@ example : (encodeBody scope addRaw).isSome = true := by decide
 set_option maxHeartbeats 100000 in
 example : (encodeBody scope wideRaw).isSome = true := by decide
 example : (encodeBody scope addRaw).isSome = true := by decide +kernel
-example : BodyDecodes [] scope addEvidence.body addEvidence.original [] addEvidence.signature := by
+example : BodyDecodes [] objectPlatform scope addEvidence.body addEvidence.original
+    [] addEvidence.signature := by
   decide +kernel
-example : MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence addMethod := by decide +kernel
+example : MethodEvidenceValid [] #[] [] objectPlatform [addEvidence] [] addEvidence addMethod := by
+  decide +kernel
+example : MethodEvidenceValid [] #[] [] objectPlatform [addEvidence] [] addEvidence addMethod := by decide +kernel
 
 /-- A method that fills a block through its byref argument with an unprefixed `initblk`. -/
 private def blockInit : RawMethod :=
@@ -1607,16 +1625,16 @@ theorem decoded_block_init_valid :
 theorem addition_rejects_extra_static_site :
     let site : StaticDescriptor := { identity := 1, field := value, bytes := [] }
     let altered := { addMethod with staticSites := [(0, site)] }
-    ¬ MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence altered := by
+    ¬ MethodEvidenceValid [] #[] [] objectPlatform [addEvidence] [] addEvidence altered := by
   decide +kernel
 #print axioms addition_rejects_extra_static_site
 
 /-- Valid evidence gives the full scalar encoding check at every reachable pc, from its scalar
     check and its code equation conjunct. -/
 theorem checked_method_encodings {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
-    {pins : List AssemblyPin} {all : List MethodEvidence} {imports : List ImportSlot}
+    {pins : List AssemblyPin} {platform : PlatformTable} {all : List MethodEvidence} {imports : List ImportSlot}
     {item : MethodEvidence} {method : Method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method)
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
     {stack : List ScalarKind} {emitted : Instruction}
     (rawAt : item.closed.code[pc]? = some instruction)
@@ -1638,7 +1656,7 @@ theorem wrong_decoded_owner_refused (item : MethodEvidence) :
     let source := raw [i 123 (.field owner 0 intType (name!"Field") false)]
     let evidence := { item with closed := source }
     let field : FieldRef := ⟨.aggregate "Fixture" 1, 0, intType, name!"Field"⟩
-    ¬ MethodEvidenceValid [] #[] [] [evidence] [] evidence
+    ¬ MethodEvidenceValid [] #[] [] objectPlatform [evidence] [] evidence
       { addMethod with code := [.ldfld field] } := by
   intro owner source evidence field valid
   have different : [Instruction.ldfld field] ≠

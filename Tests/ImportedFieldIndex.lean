@@ -82,9 +82,32 @@ private def slice (classOwner : Bool) (opcode : Nat) (parameterless := false) :
     MetadataSlice × Nat × Nat :=
   build (world classOwner opcode parameterless) (bytesOf "T") pin.identity
 
-/-- The error checking `operand` against `token` gives, or `none` when it is accepted. -/
+/-- `Ext.Point` as a platform definition of this kind. -/
+private def pointDefinition (kind : PlatformKind) : PlatformDefinition :=
+  { scope := bytesOf extScope, parts := [bytesOf "Ext", bytesOf "Point"], kind }
+
+/-- The field owner has value storage. -/
+private def structPlatform : PlatformTable := platform_table%
+  [runtimeType "Object" .objectRoot, pointDefinition .valueType]
+
+/-- The field owner has reference storage. -/
+private def classPlatform : PlatformTable := platform_table%
+  [runtimeType "Object" .objectRoot, pointDefinition .classType]
+
+/-- The platform definitions of a world: `Ext.Point` is the class or the struct its signature
+    reads it as. -/
+private def pointPlatform (classOwner : Bool) : PlatformTable :=
+  if classOwner then classPlatform else structPlatform
+
+/-- The error checking `operand` against `token` gives, or `none` when it is accepted, with
+    `Ext.Point` defined as the kind the operand's owner names. -/
 private def check (token : Nat) (operand : RawOperand) : Option MetadataError :=
-  match (do checkEntry (MetadataEnv.ofSlices [← (slice false ldfld).1.index]) 0 token operand) with
+  let platform := match operand with
+    | .field owner .. => pointPlatform (owner == pointClass)
+    | _ => structPlatform
+  match (do
+    let env := MetadataEnv.ofSlices [← (slice false ldfld).1.index] (platform := platform)
+    checkEntry env 0 token operand) with
   | .ok _ => none
   | .error found => some found
 
@@ -135,7 +158,7 @@ private def body (owner : TypeExpr) (opcode index : Nat) (flagged parameterless 
     if opcode == stfld then [8 * 4 + 2, receiver, 0x17, stfld] ++ token ++ [0x2A]
     else [7 * 4 + 2, receiver, opcode] ++ token ++ [0x2A]
   evidenceOf bytes [(world.2.2, .field owner index int32 name!"Y" flagged)] { own := world.1 }
-    (raw owner opcode index flagged parameterless)
+    (raw owner opcode index flagged parameterless) (pointPlatform (owner == pointClass))
 
 /-- Whether decoding the body fails on exactly the refusal of its `Y` token. -/
 private def refusedAtY (owner : TypeExpr) (opcode index : Nat) (parameterless := false) : Bool :=
@@ -218,10 +241,11 @@ private def classMethod (opcode index : Nat) : Method :=
     translation. -/
 theorem struct_access_of_y_at_offset_of_x_rejected :
     ([ldfld, ldflda, stfld].all fun opcode => refusedAtY point opcode 0) = true ∧
-    ¬ TranslationValid rawLayouts layouts [] [evidence point ldfld 0] [] [structMethod ldfld 0] ∧
-    ¬ TranslationValid rawLayouts layouts [] [evidence point ldflda 0] []
+    ¬ TranslationValid rawLayouts layouts [] structPlatform [evidence point ldfld 0] []
+      [structMethod ldfld 0] ∧
+    ¬ TranslationValid rawLayouts layouts [] structPlatform [evidence point ldflda 0] []
       [structMethod ldflda 0] ∧
-    ¬ TranslationValid rawLayouts layouts [] [evidence point stfld 0] []
+    ¬ TranslationValid rawLayouts layouts [] structPlatform [evidence point stfld 0] []
       [structMethod stfld 0] := by
   decide +kernel
 #print axioms struct_access_of_y_at_offset_of_x_rejected
@@ -230,9 +254,12 @@ theorem struct_access_of_y_at_offset_of_x_rejected :
     its method and is no valid translation. -/
 theorem class_access_of_y_at_slot_of_x_rejected :
     ([ldfld, ldflda, stfld].all fun opcode => refusedAtSignature opcode 0) = true ∧
-    ¬ TranslationValid [] #[] [] [evidence pointClass ldfld 0] [] [classMethod ldfld 0] ∧
-    ¬ TranslationValid [] #[] [] [evidence pointClass ldflda 0] [] [classMethod ldflda 0] ∧
-    ¬ TranslationValid [] #[] [] [evidence pointClass stfld 0] [] [classMethod stfld 0] := by
+    ¬ TranslationValid [] #[] [] classPlatform [evidence pointClass ldfld 0] []
+      [classMethod ldfld 0] ∧
+    ¬ TranslationValid [] #[] [] classPlatform [evidence pointClass ldflda 0] []
+      [classMethod ldflda 0] ∧
+    ¬ TranslationValid [] #[] [] classPlatform [evidence pointClass stfld 0] []
+      [classMethod stfld 0] := by
   decide +kernel
 #print axioms class_access_of_y_at_slot_of_x_rejected
 
@@ -250,15 +277,18 @@ theorem static_flagged_access_of_y_rejected :
     ([ldfld, ldflda, stfld].all fun opcode =>
       flaggedRefused point opcode && refusedAtSignature opcode 0 true &&
         flaggedRefused pointClass opcode true) = true ∧
-    ¬ TranslationValid rawLayouts layouts [] [evidence point ldfld 0 true] []
+    ¬ TranslationValid rawLayouts layouts [] structPlatform [evidence point ldfld 0 true] []
       [structMethod ldfld 0] ∧
-    ¬ TranslationValid rawLayouts layouts [] [evidence point ldflda 0 true] []
+    ¬ TranslationValid rawLayouts layouts [] structPlatform [evidence point ldflda 0 true] []
       [structMethod ldflda 0] ∧
-    ¬ TranslationValid rawLayouts layouts [] [evidence point stfld 0 true] []
+    ¬ TranslationValid rawLayouts layouts [] structPlatform [evidence point stfld 0 true] []
       [structMethod stfld 0] ∧
-    ¬ TranslationValid [] #[] [] [evidence pointClass ldfld 0 true] [] [classMethod ldfld 0] ∧
-    ¬ TranslationValid [] #[] [] [evidence pointClass ldflda 0 true] [] [classMethod ldflda 0] ∧
-    ¬ TranslationValid [] #[] [] [evidence pointClass stfld 0 true] [] [classMethod stfld 0] := by
+    ¬ TranslationValid [] #[] [] classPlatform [evidence pointClass ldfld 0 true] []
+      [classMethod ldfld 0] ∧
+    ¬ TranslationValid [] #[] [] classPlatform [evidence pointClass ldflda 0 true] []
+      [classMethod ldflda 0] ∧
+    ¬ TranslationValid [] #[] [] classPlatform [evidence pointClass stfld 0 true] []
+      [classMethod stfld 0] := by
   decide +kernel
 #print axioms static_flagged_access_of_y_rejected
 
@@ -305,10 +335,13 @@ private def pairSlice : MetadataSlice × Nat × Nat × Nat :=
 private def pair : TypeExpr :=
   .aggregate (runtimeScope ++ "::System.ValueTuple`2<System.Int32,System.Int32>") 0
 
+/-- The platform definition of the pair. -/
+private def pairPlatform : PlatformTable := platform_table% [runtimeType "ValueTuple`2" .valuePair]
+
 /-- The error checking `operand` against `token` of the pair world gives, if any. -/
-private def checkPair (token : Nat) (operand : RawOperand) (slice := pairSlice.1) :
+private def checkPair (token : Nat) (operand : RawOperand) (slice := pairSlice.1) (platform := pairPlatform) :
     Option MetadataError :=
-  match (do checkEntry (MetadataEnv.ofSlices [← slice.index]) 0 token operand) with
+  match (do checkEntry (MetadataEnv.ofSlices [← slice.index] (platform := platform)) 0 token operand) with
   | .ok _ => none
   | .error found => some found
 
@@ -348,11 +381,12 @@ theorem pair_second_item_reads_its_own_declaration :
 #print axioms pair_second_item_reads_its_own_declaration
 
 /-- The field reference at the requested item position, checked against its claimed type. -/
-private def itemError (world : PairWorld) (index : Nat) (owner held : TypeExpr) :
+private def itemError (world : PairWorld) (index : Nat) (owner held : TypeExpr)
+    (platform := pairPlatform) :
     Option MetadataError :=
   let (slice, first, second, _) := build world (bytesOf "T") pin.identity
-  if index == 0 then checkPair first (.field owner index held name!"Item1" false) slice
-  else checkPair second (.field owner index held name!"Item2" false) slice
+  if index == 0 then checkPair first (.field owner index held name!"Item1" false) slice platform
+  else checkPair second (.field owner index held name!"Item2" false) slice platform
 
 /-- A member reference declaring the first int32 item as int64 fails signature binding. -/
 theorem refuses_int64_first_item :
@@ -417,14 +451,20 @@ theorem binds_equal_width_items :
 theorem refuses_class_marked_pair :
     let owner := TypeExpr.objectConstructor runtimeScope "System.ValueTuple`2"
     itemError (pairWorldWith [8, 8] (marker := 0x12)) 0 (.apply (.apply owner int32) int32)
-      int32 = some (.unboundInstanceField 0x0A000001) := by decide +kernel
+      int32 = some (.platformKindMismatch 0x01000001) ∧
+    itemError (pairWorldWith [8, 8] (marker := 0x12)) 0 (.apply (.apply owner int32) int32)
+      int32 (restating pairPlatform "ValueTuple`2" (.genericClass 2)) =
+      some (.unboundInstanceField 0x0A000001) := by decide +kernel
 #print axioms refuses_class_marked_pair
 
 /-- The first item with the same assembly scope in its reference and its operand. -/
-private def scopedItem (assembly : AssemblyName) : Option MetadataError :=
-  let scope := assembly.display
+private def scopedItem (assembly : AssemblyName) (scope := assembly.display) : Option MetadataError :=
+  let claimed : PlatformDefinition :=
+    ⟨bytesOf scope, [bytesOf "System", bytesOf "ValueTuple`2"], .valuePair⟩
+  let platform : PlatformTable :=
+    { includesScope := false, entries := SearchTree.ofSorted [(platformKey claimed.parts, [claimed])] }
   itemError (pairWorldWith [8, 8] (assembly := assembly)) 0
-    (tupleOwner "System.Int32" "System.Int32" scope) (.atom scope "System.Int32")
+    (tupleOwner "System.Int32" "System.Int32" scope) (.atom scope "System.Int32") platform
 
 /-- An unsigned reference cannot name the platform pair. -/
 theorem refuses_unsigned_pair :
@@ -441,15 +481,17 @@ theorem refuses_other_signed_pair :
 
 /-- A different reference assembly version cannot name the platform pair. -/
 theorem refuses_other_version_pair :
-    scopedItem { runtimeAssembly with version.revision := 1 } =
-      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+    scopedItem { runtimeAssembly with version.revision := 1 }
+      "System.Runtime, Version=11.0.0.1, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" =
+      some (.unboundInstanceField 0x0A000001) := by cil_kernel_rfl
 #print axioms refuses_other_version_pair
 
 /-- A different core library cannot name the supported pair. -/
 theorem refuses_mscorlib_pair :
     scopedItem { runtimeAssembly with
-      name := name!"mscorlib", publicKeyToken := some 0xb77a5c561934e089 } =
-      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+      name := name!"mscorlib", publicKeyToken := some 0xb77a5c561934e089 }
+      "mscorlib, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" =
+      some (.unboundInstanceField 0x0A000001) := by cil_kernel_rfl
 #print axioms refuses_mscorlib_pair
 
 /-- A literal culture named neutral shares the empty culture's display spelling. -/
@@ -463,14 +505,33 @@ theorem refuses_literal_neutral_culture :
 theorem refuses_three_item_tuple :
     itemError (pairWorldWith [8, 8, 8] (arity := 3)) 0
       (.aggregate (runtimeScope ++ "::System.ValueTuple`2<System.Int32,System.Int32,System.Int32>")
-        0) int32 = some (.unboundInstanceField 0x0A000001) := by decide +kernel
+        0) int32 = some (.genericMismatch 0x01000001) := by decide +kernel
 #print axioms refuses_three_item_tuple
 
 /-- Two arguments cannot give the three-item head a pair layout. -/
 theorem refuses_three_item_head :
     itemError (pairWorldWith [8, 8] (headArity := 3)) 0
       (.aggregate (runtimeScope ++ "::System.ValueTuple`3<System.Int32,System.Int32>") 0) int32 =
-      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+      some (.missingPlatformDefinition 0x01000001) ∧
+    itemError (pairWorldWith [8, 8] (headArity := 3)) 0
+      (.aggregate (runtimeScope ++ "::System.ValueTuple`3<System.Int32,System.Int32>") 0) int32
+      (platform_table% [runtimeType "ValueTuple`3" (.genericValue 3)]) =
+      some (.genericMismatch 0x01000001) := by decide +kernel
 #print axioms refuses_three_item_head
+
+/-- The pair's reference to `System.ValueTuple`2`, the first in its world. -/
+private def tupleRef : Nat := 0x01000001
+
+/-- `Item1` is bound only under a definition that states the pair: without the definition the
+    pair's reference is refused, and under one that states a plain value type the item is. -/
+theorem pair_items_need_the_pair_definition :
+    checkPair pairSlice.2.1 (.field pair 0 int32 name!"Item1" false) = none ∧
+    checkPair pairSlice.2.1 (.field pair 0 int32 name!"Item1" false)
+        (platform := removing pairPlatform "ValueTuple`2") =
+      some (.missingPlatformDefinition tupleRef) ∧
+    checkPair pairSlice.2.1 (.field pair 0 int32 name!"Item1" false)
+        (platform := restating pairPlatform "ValueTuple`2" (.genericValue 2)) =
+      some (.platformKindMismatch pairSlice.2.1) := by decide +kernel
+#print axioms pair_items_need_the_pair_definition
 
 end Tests.ImportedFieldIndex

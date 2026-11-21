@@ -290,6 +290,14 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
             Resolve(name);
     }
 
+    /// <summary>Whether <paramref name="name"/> resolves to a platform assembly and no pinned assembly has its simple
+    /// name, which Lean reads from a carried slice or refuses, never as a platform type.</summary>
+    internal bool IsPlatform(AssemblyNameReference name)
+    {
+        AssemblyName identity = IdentityOf(name);
+        return Platform(identity) && !byName.ContainsKey(identity.Name);
+    }
+
     /// <summary>Whether <see cref="Resolve(AssemblyNameReference)"/> answers the reference rather than rejecting it.
     /// </summary>
     internal bool Resolves(AssemblyNameReference name)

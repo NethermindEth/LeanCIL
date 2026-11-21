@@ -33,7 +33,7 @@ def method (maxStack : Nat) (initLocals : Bool) (locals : List TypeExpr)
     names are those of every test method, which all sit in `Main`'s class. -/
 private def evidence (bytes : List Nat) (operands : List (Nat × RawOperand) := []) :
     BodyEvidence :=
-  evidenceOf bytes operands { own := own.1, others := [lib] } (method 8 false [] [])
+  evidenceOf bytes operands { own := own.1, others := [lib] } (method 8 false [] []) worldPlatform
 
 /-- One decoded instruction. -/
 def instr (offset opcode : Nat) (operand : RawOperand := .none) : RawInstruction :=
@@ -450,7 +450,8 @@ theorem rejects_a_method_with_other_attributes :
     assembly its rows came from. -/
 theorem rejects_a_pin_of_another_version (pins : List AssemblyPin) (method : RawMethod)
     (arguments : List TypeExpr) (signature : String) :
-    ¬ BodyDecodes pins { identity := "T, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" }
+    ¬ BodyDecodes pins {}
+      { identity := "T, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" }
       (evidence tinyBytes) method arguments signature :=
   fun decodes => absurd decodes.2.2.1 (by decide)
 #print axioms rejects_a_pin_of_another_version
@@ -571,8 +572,8 @@ theorem operand_kinds_agree_with_cecil :
     extraction's pins when they are left out or name another assembly. -/
 theorem rejects_pinned_identities_other_than_the_pins (method : RawMethod)
     (arguments : List TypeExpr) (signature : String) :
-    ¬ BodyDecodes [pin] pin (evidence tinyBytes) method arguments signature ∧
-    ¬ BodyDecodes [pin] pin
+    ¬ BodyDecodes [pin] {} pin (evidence tinyBytes) method arguments signature ∧
+    ¬ BodyDecodes [pin] {} pin
       { evidence tinyBytes with pinned := PinnedIndex.ofIdentities [bytesOf "U"] } method arguments
       signature :=
   ⟨fun decodes => absurd decodes.2.2.2.1 (by decide),

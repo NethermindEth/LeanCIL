@@ -4,6 +4,10 @@
 #:include ../scripts/BindingImage.cs
 
 using System.Diagnostics;
+using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -66,6 +70,29 @@ try
         }
     }
 
+    var consumer = Image("Consumer", reference: "Facade");
+    var facade = Image("Facade", forward: "Middle", other: "Unrelated");
+    var middle = Image("Middle", forward: "Destination");
+    var destination = Image("Destination");
+    var unrelated = Image("Unrelated");
+    var request = Identity(Hash(File.ReadAllBytes(consumer)), [], AssemblyName.GetAssemblyName(consumer).FullName);
+    string[] Selected(params string[] paths) =>
+        Read(string.Concat(paths.Select(path => Hash(File.ReadAllBytes(path)) + "  " + path + "\n")))
+            .MatchPins(request).Select(pin => Path.GetFileNameWithoutExtension(pin.Image.Path)).ToArray();
+
+    Require(Selected(unrelated, destination, consumer, middle, facade)
+        .SequenceEqual(["Consumer", "Facade", "Middle", "Destination"]), "Matching type across two forwards");
+    Require(Selected(consumer, facade, destination, unrelated).SequenceEqual(["Consumer", "Facade"]),
+        "A destination without the intervening forwarding image cannot be selected");
+    Image("Middle", forward: "Facade");
+    Require(Selected(consumer, facade, middle, destination).SequenceEqual(["Consumer", "Facade", "Middle"]),
+        "A forwarding cycle terminates without selecting an unrelated destination");
+
+    var shortChain = MeasureForwarding(8);
+    var longChain = MeasureForwarding(64);
+    Console.WriteLine($"Forwarding selection: 8={shortChain:F3} ms, 64={longChain:F3} ms");
+    Require(longChain < shortChain * 24, "Forwarding selection must scale below quadratic growth");
+
     var small = Measure(512);
     var large = Measure(4096);
     Console.WriteLine($"Pin matching: 512={small.Match:F3} ms, 4096={large.Match:F3} ms");
@@ -78,6 +105,55 @@ try
     {
         File.WriteAllText(file, text, new UTF8Encoding(false));
         return DeepCheckInputs.Read(file);
+    }
+
+    string Image(string name, string? reference = null, string? forward = null, string? other = null)
+    {
+        var rows = new MetadataBuilder();
+        var version = new Version(1, 0, 0, 0);
+        var fileName = name + ".dll";
+        rows.AddModule(0, rows.GetOrAddString(fileName), rows.GetOrAddGuid(Guid.Empty), default, default);
+        rows.AddAssembly(rows.GetOrAddString(name), version, default, default, 0, AssemblyHashAlgorithm.Sha1);
+        rows.AddTypeDefinition(0, default, rows.GetOrAddString("<Module>"), default,
+            MetadataTokens.FieldDefinitionHandle(1), MetadataTokens.MethodDefinitionHandle(1));
+        var ns = rows.GetOrAddString("Example");
+        var item = rows.GetOrAddString("Item");
+        AssemblyReferenceHandle AssemblyRef(string target) =>
+            rows.AddAssemblyReference(rows.GetOrAddString(target), version, default, default, 0, default);
+        if (reference is not null) rows.AddTypeReference(AssemblyRef(reference), ns, item);
+        const TypeAttributes forwarder = (TypeAttributes)0x00200000;
+        if (forward is not null) rows.AddExportedType(forwarder, ns, item, AssemblyRef(forward), 0);
+        if (other is not null)
+            rows.AddExportedType(forwarder, rows.GetOrAddString("Other"), item, AssemblyRef(other), 0);
+        var pe = new ManagedPEBuilder(PEHeaderBuilder.CreateLibraryHeader(), new MetadataRootBuilder(rows),
+            new BlobBuilder());
+        var bytes = new BlobBuilder();
+        pe.Serialize(bytes);
+        var path = Path.Combine(root, fileName);
+        File.WriteAllBytes(path, bytes.ToArray());
+        return path;
+    }
+
+    double MeasureForwarding(int links)
+    {
+        var first = Image("ChainConsumer", reference: "Link0");
+        var paths = new List<string> { first };
+        for (var index = 0; index < links; index++)
+            paths.Add(Image("Link" + index, forward: "Link" + (index + 1)));
+        paths.Add(Image("Link" + links));
+        var manifest = Read(string.Concat(paths.Select(path => Hash(File.ReadAllBytes(path)) + "  " + path + "\n")));
+        var identity = Identity(Hash(File.ReadAllBytes(first)), [], AssemblyName.GetAssemblyName(first).FullName);
+        Require(manifest.MatchPins(identity).Select(pin => pin.Image.Path).SequenceEqual(paths),
+            "Every hop resolves the same qualified type through its assembly reference");
+        List<double> samples = [];
+        for (var sample = 0; sample < 7; sample++)
+        {
+            var timer = Stopwatch.StartNew();
+            for (var repeat = 0; repeat < 12; repeat++) manifest.MatchPins(identity);
+            samples.Add(timer.Elapsed.TotalMilliseconds);
+        }
+        samples.Sort();
+        return samples[samples.Count / 2];
     }
 
     (double Read, double Match) Measure(int count)

@@ -31,9 +31,11 @@ private def methodCheck (pinned : PinnedIndex) (position : Nat) : Bool :=
     { rows := .leaf, strings := .leaf, blobs := .leaf,
       userStrings := .leaf, links := .leaf, instanceBefore := .leaf, instanceTotal := .leaf,
       genericOwners := .leaf }
-  match metadata.environmentWith [[88]] [tables] pinned with
+  match metadata.environmentWith [[88]] [tables] pinned {} with
   | .error _ => false
-  | .ok env => env.pinned.matches [65, 0, 0, 44, 99]
+  | .ok env =>
+    env.pinned.matches [65, 0, 0, 44, 99] && env.exactPins.contains [65, 0, 0, 44] &&
+      !env.exactPins.contains [65, 0, 0, 44, 99]
 
 /-- Each batch repeats complete package construction and independent method checks. -/
 private def runtimeCost (pinCount methodCount repetitions : Nat) : IO (Nat × Nat) := do

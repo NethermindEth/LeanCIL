@@ -110,7 +110,7 @@ var sliceType = extractor.GetType("Nethermind.LeanCIL.MetadataSlices", throwOnEr
 var collector = Activator.CreateInstance(sliceType, pinned)!;
 var collect = sliceType.GetMethod("Method", Internal)!;
 (string Metadata, string Tables, int[] Assemblies) Collect(params uint[] tokens) =>
-    ((string, string, int[]))collect.Invoke(collector, [run, tokens, false])!;
+    ((string, string, int[]))collect.Invoke(collector, [run, tokens, false, Array.Empty<TypeDefinition>()])!;
 
 uint[] FieldRows(string metadata)
 {
@@ -124,7 +124,8 @@ uint[] FieldRows(string metadata)
 var partial = Collect(cells[2]);
 Require(FieldRows(partial.Metadata).SequenceEqual(cells[..3]), "Partial field evidence includes the wrong rows.");
 // The extractor's own byte literal, so a carried entry matches whatever form the extractor writes it in.
-var bytesLiteral = sliceType.GetMethod("Bytes", BindingFlags.Static | BindingFlags.NonPublic)!;
+var bytesLiteral = extractor.GetType("Nethermind.LeanCIL.ByteLiterals", throwOnError: true)!
+    .GetMethod("Of", BindingFlags.Static | BindingFlags.NonPublic)!;
 string Bytes(byte[] values) => (string)bytesLiteral.Invoke(null, [values])!;
 bool HasName(string metadata, string name) =>
     metadata.Contains(Bytes([.. System.Text.Encoding.UTF8.GetBytes(name), 0]), StringComparison.Ordinal);
@@ -188,7 +189,7 @@ foreach (var count in new[] { 256, 1024, 4096 })
     uint[] tokens = [.. fieldsType.Fields.Select(field => field.MetadataToken.ToUInt32())];
     var watch = System.Diagnostics.Stopwatch.StartNew();
     var result = ((string Metadata, string Tables, int[] Assemblies))collect.Invoke(inputCollector,
-        [fieldsType.Methods.Single(), tokens, false])!;
+        [fieldsType.Methods.Single(), tokens, false, Array.Empty<TypeDefinition>()])!;
     watch.Stop();
     Require(FieldRows(result.Metadata).SequenceEqual(tokens), "Field collection lost a row.");
     Console.WriteLine($"Collected {count} fields in {watch.Elapsed.TotalMilliseconds:F1} ms");

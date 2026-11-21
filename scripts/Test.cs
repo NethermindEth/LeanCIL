@@ -247,7 +247,7 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.ReturnOpcode", "Tests.ReturnMetadataBinding", "Tests.ReferenceArrays", "Tests.ArrayFields",
     "Tests.RetainedNumericLocals", "Tests.ProfileEmbedding", "Tests.FullTransfer", "Tests.Crypto",
     "Tests.MetadataAssemblies", "Tests.PinnedIndexScaling", "Tests.FieldRef", "Tests.FieldShape",
-    "Tests.RuntimeModels", "Tests.BitModels", "Tests.UnsafeModels", "Tests.UnsafeOffsets",
+    "Tests.RuntimeModels", "Tests.PlatformDefinitions", "Tests.BitModels", "Tests.UnsafeModels", "Tests.UnsafeOffsets",
     "Tests.UnsafeTransferModels", "Tests.UnsafeBlocks", "Tests.UnsafeReinterpretations", "Tests.SpanModels",
     "Tests.MarshalModels", "Tests.ImportedFieldIndex", "Tests.OpaqueClassFields", "Tests.StaticFieldSites"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");

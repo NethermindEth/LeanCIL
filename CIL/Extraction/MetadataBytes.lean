@@ -67,6 +67,10 @@ inductive MetadataError where
   /-- A runtime-async method, whose body the model does not read. -/
   | runtimeAsync (token : Nat)
   | tablesMismatch
+  /-- A type no carried slice defines whose platform definition the checks do not hold. -/
+  | missingPlatformDefinition (token : Nat)
+  /-- A platform definition of another kind than the reading of the token relies on. -/
+  | platformKindMismatch (token : Nat)
   deriving DecidableEq, Repr
 
 
@@ -723,6 +727,29 @@ def MetadataIndex.typeDef (index : MetadataIndex) (token : Nat) :
     .ok { flags, name, namespace_, extends_ := ← decodeCoded typeDefOrRefTags 2 extends_,
           fieldList, methodList }
   | _ => .error (.unsupportedTable token)
+
+/-- A decoded TypeDef used bytes at its exact token in the carried row index. -/
+theorem MetadataIndex.typeDef_bytes {index : MetadataIndex} {token : Nat} {row : TypeDefRow}
+    (decoded : index.typeDef token = .ok row) :
+    metadataTableOf token = Table.typeDef ∧ ∃ bytes, index.rows.find? token = some bytes := by
+  cases cols : index.columnsOf Table.typeDef token with
+  | error fault => simp [MetadataIndex.typeDef, cols, bind, Except.bind] at decoded
+  | ok values =>
+    unfold MetadataIndex.columnsOf at cols
+    split at cols <;> try contradiction
+    rename_i typed
+    refine ⟨by simpa using typed, ?_⟩
+    cases read : index.row token with
+    | error fault => simp [MetadataIndex.columns, read, bind, Except.bind] at cols
+    | ok bytes =>
+      unfold MetadataIndex.row at read
+      cases stored : index.rows.find? token with
+      | some value => exact ⟨value, rfl⟩
+      | none =>
+        simp only [stored] at read
+        split at read <;> try contradiction
+        split at read <;> contradiction
+#print axioms MetadataIndex.typeDef_bytes
 
 /-- The `Field` row of a token. -/
 def MetadataIndex.field (index : MetadataIndex) (token : Nat) :

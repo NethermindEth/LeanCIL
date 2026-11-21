@@ -353,6 +353,12 @@ and reads the instance fields in declaration order: `Item1` has type `T1` and `I
 type `T2`. The object and pair can have different forwarding destinations. A missing pair
 destination leaves this fact uncovered. Runtime byte offsets remain a layout assumption.
 
+For `enum-underlying-types`, supply the assemblies that define the selected enums and any
+facades that forward them. Lean follows the scoped name, including the enclosing type for a
+nested enum, and reads the integer signature of the defining row's instance field `value__`.
+An extraction with no enum or a missing destination reports `not covered`. A supplied
+definition with the wrong storage code fails verification.
+
 For `public-key-tokens`, include the image for each direct assembly reference of the selected
 assembly and its pinned references. Lean reads each physical AssemblyRef, compares the tokens
 carried by the extraction with those rows, and computes each publisher token from the full key

@@ -46,7 +46,7 @@ private def acceptsSignature (result : List Nat) (claimed : TypeExpr)
         explicitThis := false, callingConvention := 0, attributes := 0x96,
         implementation := 0, returnType := claimed, parameters := claimedParameters, locals := [],
         initLocals := false, maxStack := 8, genericParameters := [], code := [] }
-    let env := MetadataEnv.ofSlices [← fixture.1.index]
+    let env := MetadataEnv.ofSlices [← fixture.1.index] (platform := objectPlatform)
     methodIdentityValid env method [] []).isOk
 
 /-- Bind a parameterless method's declared return to its actual signature bytes. -/
@@ -142,22 +142,5 @@ theorem enum_underlying_codes :
     ([2, 3, 12, 13, 0x18, 0x19].any acceptsEnum) = false := by decide +kernel
 
 #print axioms enum_underlying_codes
-
-/-- External enum claims use exactly the same eight integer runtime atoms. -/
-theorem external_enum_atoms :
-    let frame : Frame :=
-      { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes,
-        arity := 0, ownerArity := 0 }
-    let named : NamedType :=
-      { scope := bytesOf "E", name := bytesOf "Number", parts := [], kind := .external none,
-        pinned := false }
-    let admits := fun name => frame.admits (.named named)
-      (.enum "E::Number" (.atom runtimeScope name))
-    (["System.SByte", "System.Byte", "System.Int16", "System.UInt16", "System.Int32",
-      "System.UInt32", "System.Int64", "System.UInt64"].all admits) = true ∧
-    (["System.Boolean", "System.Char", "System.Single", "System.Double", "System.IntPtr",
-      "System.UIntPtr"].any admits) = false := by decide +kernel
-
-#print axioms external_enum_atoms
 
 end Tests.ReturnMetadataBinding

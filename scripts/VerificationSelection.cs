@@ -143,7 +143,7 @@ internal static class VerificationSelection
             "Tests/RetainedNumericLocals.lean", "Tests/ProfileEmbedding.lean", "Tests/FullTransfer.lean",
             "Tests/Crypto.lean", "Tests/MetadataAssemblies.lean", "Tests/PinnedIndexScaling.lean",
             "Tests/FieldRef.lean", "Tests/FieldShape.lean", "Tests/RuntimeModels.lean",
-            "Tests/BitModels.lean", "Tests/SpanHomes.lean"
+            "Tests/PlatformDefinitions.lean", "Tests/BitModels.lean", "Tests/SpanHomes.lean"
         };
         inputs["core"].UnionWith(new[] { "Add", "AddModel", "DecodedAdd", "Choose", "Calls", "CallsSummary",
             "CountCallsSummary", "IdentitySummary", "RepeatedSummary", "VectorSummary", "Alias", "Struct",

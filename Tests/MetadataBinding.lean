@@ -22,6 +22,7 @@ private def passes (ownSlice libSlice : MetadataSlice) (token : Nat) (operand : 
     (arity : Nat := 0) : Bool :=
   match (do
     let env := MetadataEnv.ofSlices [← ownSlice.index, ← libSlice.index]
+      (platform := worldPlatform)
     checkEntry env arity token operand) with
   | .ok _ => true
   | .error _ => false
@@ -31,6 +32,7 @@ private def rejects (ownSlice libSlice : MetadataSlice) (token : Nat) (operand :
     (error : MetadataError) (arity : Nat := 0) : Bool :=
   match (do
     let env := MetadataEnv.ofSlices [← ownSlice.index, ← libSlice.index]
+      (platform := worldPlatform)
     checkEntry env arity token operand) with
   | .error found => found == error
   | .ok _ => false
@@ -277,14 +279,14 @@ theorem rejects_a_static_field_claimed_as_an_instance_field :
 private def localsFail (slice : MetadataSlice) (locals : List TypeExpr) (error : MetadataError) :
     Bool :=
   match (do
-    let env := MetadataEnv.ofSlices [← slice.index, ← lib.index]
+    let env := MetadataEnv.ofSlices [← slice.index, ← lib.index] (platform := worldPlatform)
     checkLocals env 0 tokens.localsSignature locals) with
   | .error found => found == error
   | .ok _ => false
 
 theorem accepts_the_locals_the_signature_names :
     (match (do
-      let env := MetadataEnv.ofSlices [← own.1.index, ← lib.index]
+      let env := MetadataEnv.ofSlices [← own.1.index, ← lib.index] (platform := worldPlatform)
       checkLocals env 0 tokens.localsSignature [uint64]) with
     | .ok _ => true
     | .error _ => false) = true := by decide +kernel
@@ -315,7 +317,7 @@ private def arrayLocal (element : List Nat) : MetadataSlice :=
 /-- Whether the locals check accepts these local types. -/
 private def localsPass (slice : MetadataSlice) (locals : List TypeExpr) : Bool :=
   match (do
-    let env := MetadataEnv.ofSlices [← slice.index, ← lib.index]
+    let env := MetadataEnv.ofSlices [← slice.index, ← lib.index] (platform := worldPlatform)
     checkLocals env 0 tokens.localsSignature locals) with
   | .ok _ => true
   | .error _ => false
@@ -532,7 +534,7 @@ theorem rejects_a_definition_whose_namespace_and_name_only_join_to_the_reference
 private def rejectsWithoutLibSlice (token : Nat) (operand : RawOperand) (error : MetadataError) :
     Bool :=
   match (do
-    let env := MetadataEnv.ofSlices [← own.1.index]
+    let env := MetadataEnv.ofSlices [← own.1.index] (platform := worldPlatform)
       (({} : AssemblyPrefixes).insert (bytesOf libScope))
     checkEntry env 0 token operand) with
   | .error found => found == error
@@ -590,7 +592,7 @@ private def libWithOtherPublisher : MetadataSlice :=
 /-- Resolve the value-type marker of the caller's signature through its link to Lib.Pair. -/
 private def pairSignatureKind (slice : MetadataSlice) :
     Except MetadataError Extraction.TypeKind := do
-  let env := MetadataEnv.ofSlices [← own.1.index, ← slice.index]
+  let env := MetadataEnv.ofSlices [← own.1.index, ← slice.index] (platform := worldPlatform)
   return (← namedOf env 0 tokens.pairRef (some true)).kind
 
 /-- A different publisher's System.ValueType cannot satisfy a value-type signature or serve
@@ -789,8 +791,8 @@ private def receiverWorld (baseName : String) (interfaceType hasThis generic : B
   let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtime, 0, 0]
   modify fun builder => { builder with corlib := 1 }
   let parent ← row Table.typeRef [6, parentName, system]
-  let owner ← row Table.typeDef
-    [if interfaceType then 0x21 else 1, program, 0, (parent - 0x01000000) * 4 + 1, 1, 1]
+  let base := if interfaceType then 0 else (parent - 0x01000000) * 4 + 1
+  let owner <- row Table.typeDef [if interfaceType then 0x21 else 1, program, 0, base, 1, 1]
   if baseName == "Enum" then
     let valueName ← string "value__"
     let fieldSignature ← blob [0x06, 0x08]
@@ -809,7 +811,8 @@ private def receiverWorld (baseName : String) (interfaceType hasThis generic : B
 /-- The complete receiver binding result for a metadata owner and a claimed receiver bit. -/
 private def receiverIdentity (baseName : String) (interfaceType hasThis objectReceiver : Bool)
     (generic : Bool := false) (omitLink omitParameters : Bool := false)
-    (argument : ResolvedType := .primitive 8) (claimed : TypeExpr := int32) :
+    (argument : InstanceArgument := .primitive 8) (claimed : TypeExpr := int32)
+    (platform := worldPlatform) :
     Except MetadataError MethodNames := do
   let fixture := build (receiverWorld baseName interfaceType hasThis generic)
     (bytesOf "T") ownIdentity
@@ -823,7 +826,8 @@ private def receiverIdentity (baseName : String) (interfaceType hasThis objectRe
   let metadata := if omitLink then
       { fixture.1 with links := fixture.1.links.filter (·.kind != linkGenericParams) }
     else fixture.1
-  let env := MetadataEnv.ofSlices [← metadata.index]
+  let env := MetadataEnv.ofSlices [← metadata.index, ← lib.index] (platform := platform)
+    (exactPins := indexPins [bytesOf ownIdentity, bytesOf libScope])
   methodIdentityValid env method (if generic && !omitParameters then [argument] else [])
     (if generic && !omitParameters then [claimed] else [])
 
@@ -836,20 +840,26 @@ theorem binds_generic_owner_without_link :
 #guard_msgs in
 #print axioms binds_generic_owner_without_link
 
-/-- `Lib.Box` resolved as a carried type of the given kind. -/
-private def carriedBox (kind : Extraction.TypeKind) : ResolvedType :=
-  .named { scope := bytesOf libScope, name := bytesOf "Lib.Box", parts := [], kind := kind,
-           pinned := true }
-
-/-- An owner's generic argument named as an object binds a carried class only, so no
-    substitution forms an array of interfaces. -/
+/-- The carried class admits object storage. The carried interface refuses that same storage. -/
 theorem instantiates_owners_with_only_carried_classes_as_objects :
-    (receiverIdentity "Object" false false false true (argument := carriedBox .classType)
+    (receiverIdentity "Object" false false false true
+      (argument := .named (.definition (bytesOf libScope) 0x02000002))
       (claimed := .object libScope "Lib.Box")).isOk = true ∧
-    (receiverIdentity "Object" false false false true (argument := carriedBox .interfaceType)
-      (claimed := .object libScope "Lib.Box")).isOk = false := by
+    (receiverIdentity "Object" false false false true
+      (argument := .named (.definition (bytesOf libScope) 0x02000005))
+      (claimed := .object libScope "Lib.IShape")).isOk = false := by
   decide +kernel
 #print axioms instantiates_owners_with_only_carried_classes_as_objects
+
+/-- A closed owner argument names a platform enum with the storage its entry supplies. -/
+theorem binds_closed_enum_argument :
+    (receiverIdentity "Object" false false false true
+      (argument := .named (.platform runtimeScopeBytes [systemNamespace, bytesOf "DayOfWeek"]))
+      (claimed := .enum (runtimeScope ++ "::System.DayOfWeek") int32)
+      (platform := platform_table%
+        [runtimeType "Object" .objectRoot, runtimeType "DayOfWeek" (.enumType 8)])).isOk =
+      true := by decide +kernel
+#print axioms binds_closed_enum_argument
 
 /-- A parameter table whose entries give a parameter number and its coded owner. -/
 private def parameterWorld (parameters : List (Nat × Nat)) : MetadataSlice :=
@@ -977,7 +987,7 @@ private def plainValue : Nat := arity.2.2.2.2
 
 /-- Whether a step over the environment of the arity slice succeeds. -/
 private def arityAccepts {α : Type} (step : MetadataEnv → Except MetadataError α) : Bool :=
-  match (do step (MetadataEnv.ofSlices [← arity.1.index])) with
+  match (do step (MetadataEnv.ofSlices [← arity.1.index] (platform := objectPlatform))) with
   | .ok _ => true
   | .error _ => false
 
@@ -1040,7 +1050,7 @@ private def mainMethod : RawMethod :=
 /-- Whether the method definition is accepted, or refused with this error. -/
 private def identity (slice : MetadataSlice) (method : RawMethod) :
     Except MetadataError MethodNames := do
-  let env := MetadataEnv.ofSlices [← slice.index, ← lib.index]
+  let env := MetadataEnv.ofSlices [← slice.index, ← lib.index] (platform := worldPlatform)
   methodIdentityValid env method [] []
 
 private def identityFails (slice : MetadataSlice) (method : RawMethod) (error : MetadataError) :
@@ -1157,6 +1167,10 @@ example :
 
 /-- `System.Int32` of the primitive assembly. -/
 private def int32Atom : TypeExpr := .atom "C" "System.Int32"
+
+/-- The resolved platform enum `L::E` has 32-bit signed storage. -/
+private def platformEnum : NamedType :=
+  { namedIn "L" "E" (.enumType 8) with parts := [[], bytesOf "E"] }
 
 /-- `L.G<int>`, with `L.G` of the given kind and pinning. -/
 private def instanceOf (kind : Extraction.TypeKind) (pinned := false) : ResolvedType :=
@@ -1289,28 +1303,27 @@ private def acceptedPairings : List (ResolvedType × TypeExpr) := [
   (.primitive 0x0E, .atom "C" "System.String"), (.primitive 0x1C, .atom "C" "System.Object"),
   (.primitive 0x0E, .object "C" "System.String"),
   -- Named types: an atom unless a carried enum, an object if a carried class or the runtime's
-  -- string, an aggregate if value-like, and an enum over the carried underlying type or,
-  -- outside, any integer atom.
+  -- string, an aggregate if value-like, and an enum over the underlying type its carried row
+  -- or its platform definition states.
   (.named (namedIn "L" "N" .valueType), .atom "L" "N"),
   (.named (namedIn "L" "N" .classType), .atom "L" "N"),
   (.named (namedIn "L" "N" (.external none)), .atom "L" "N"),
   (.named (namedIn "L" "N" .classType true), .object "L" "N"),
-  (.named (namedIn runtimeScope "System.String" (.external none)),
+  (.named (namedIn runtimeScope "System.String" (.external (some false))),
     .object runtimeScope "System.String"),
   (.named (namedIn "L" "N" .valueType), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external (some true))), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external none)), .aggregate "L::N" 0),
-  (.named (namedIn "L" "E" (.enumType 8)), .enum "L::E" int32Atom),
-  (.named (namedIn "L" "E" (.external none)), .enum "L::E" (.atom "C" "System.Byte")),
-  (.named (namedIn "L" "E" (.external none)), .enum "L::E" int32Atom),
+  (.named (namedIn "L" "E" (.enumType 8) true), .enum "L::E" int32Atom),
+  (.named platformEnum, .enum "L::E" int32Atom),
   -- Generic parameters: the method's first, then the owner's.
   (.mvar 0, .parameter 0), (.var 0, .parameter 1),
   -- Element types, element by element.
   (.byref (.primitive 8), .byref int32Atom), (.pointer (.primitive 8), .pointer int32Atom),
   (.szarray (.primitive 8), .array int32Atom),
   (.szarray (.named (namedIn "L" "N" .classType true)), .array (.object "L" "N")),
-  -- Instances: a value-like one as an aggregate, its arguments scoped when the head is
-  -- carried, and any instance as an `apply` chain over a head of its kind.
+  -- Instances: a value-like one as an aggregate, with its scoped arguments
+  -- in declaration order, and any instance as an `apply` chain over a head of its kind.
   (instanceOf .valueType, .aggregate "L::G`1<System.Int32>" 0),
   (instanceOf .valueType true, .aggregate "L::G`1<C::System.Int32>" 0),
   (instanceOf .classType, .apply (.objectConstructor "L" "G`1") int32Atom),
@@ -1350,8 +1363,9 @@ private def refusedPairings : List (ResolvedType × TypeExpr) := [
   (.named (namedIn "L" "N" .classType), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external (some false))), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" .valueType), .aggregate "L::M" 0),
-  (.named (namedIn "L" "E" (.enumType 8)), .enum "L::E" (.atom "C" "System.Int64")),
-  (.named (namedIn "L" "E" (.external none)), .enum "L::E" (.atom "C" "System.Single")),
+  (.named (namedIn "L" "E" (.enumType 8) true), .enum "L::E" (.atom "C" "System.Int64")),
+  (.named platformEnum, .enum "L::E" (.atom "C" "System.Byte")),
+  (.named (namedIn "L" "E" (.external none)), .enum "L::E" int32Atom),
   (.named (namedIn "L" "E" .classType), .enum "L::E" int32Atom),
   (.named (namedIn "L" "E" (.external (some false))), .enum "L::E" int32Atom),
   (.named (namedIn "L" "N" .valueType), .constructor "L" "N"),
@@ -1576,12 +1590,12 @@ private def runtimeInt32 (kind : Extraction.TypeKind) : ResolvedType :=
   .named (namedIn runtimeScope "System.Int32" kind)
 
 /-- A type that cannot be a value type is never admitted as the runtime's primitive atom, which
-    would give it value storage; a type that may be one still is, and a class keeps its atom. -/
+    uses fixed value storage. An ordinary class keeps its atom. -/
 theorem refuses_a_class_named_as_a_primitive :
     !pairFrame.admits (runtimeInt32 (.external (some false))) int32 &&
       !pairFrame.admits (runtimeInt32 .classType) int32 &&
       !pairFrame.admits (runtimeInt32 .interfaceType) int32 &&
-      pairFrame.admits (runtimeInt32 (.external none)) int32 &&
+      !pairFrame.admits (runtimeInt32 (.external none)) int32 &&
       pairFrame.admits (runtimeInt32 (.external (some true))) int32 &&
       pairFrame.admits (.named (namedIn runtimeScope "System.Console" .classType))
         (.atom runtimeScope "System.Console") := by

@@ -26,8 +26,8 @@ identity stands for exactly one field, import
 layouts agree, every body is owned by the pinned assembly its evidence names, and every method
 definition is what its body bytes and carried metadata say. It is not a simulation proof for
 every raw opcode; general instruction translation, that the carried metadata rows are the image's,
-definitions in platform assemblies and the PE container stay trusted, as `docs/SOUNDNESS.md`
-describes.
+that the `platform` definitions every body is checked against are the platform's, and the PE
+container stay trusted, as `docs/SOUNDNESS.md` describes.
 
 Generated modules prove each method's evidence separately and assemble it with
 `translation_of_methods`, so no validator is reduced twice.
@@ -367,7 +367,8 @@ instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout) (method 
     order generated modules supply their proofs. `pins` are the assemblies the extraction pins,
     shared by every method. -/
 def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
+    (pins : List AssemblyPin) (platform : PlatformTable) (all : List MethodEvidence)
+    (imports : List ImportSlot)
     (item : MethodEvidence) (method : Method) : Prop :=
   SpecializationValid rawLayouts item.original item.arguments item.closed item.parameterInput ∧
   ParameterHomesValid layouts item.parameterInput item.reachable method ∧
@@ -388,28 +389,30 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
       methodCode method.profile method.environment method.links item.reachable item.closed) ∧
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
     method ∧
-  BodyDecodes pins item.assembly item.body item.original item.arguments item.signature ∧
+  BodyDecodes pins platform item.assembly item.body item.original item.arguments item.signature
+    ((ImportSlotIndex.ofList imports).forLinks all.length method.links) /\
   MethodEnvironmentValid rawLayouts layouts method ∧
   DeclaredValid item.closed method ∧ item.links = method.links
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
+    (pins : List AssemblyPin) (platform : PlatformTable) (all : List MethodEvidence)
+    (imports : List ImportSlot)
     (item : MethodEvidence) (method : Method) :
-    Decidable (MethodEvidenceValid rawLayouts layouts pins all imports item method) :=
+    Decidable (MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧
     _))
 
 /-- The record supplies exactly the executable links checked for its method. -/
-theorem MethodEvidenceValid.links_eq {rawLayouts layouts pins all imports item method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+theorem MethodEvidenceValid.links_eq {rawLayouts layouts pins platform all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :
     item.links = method.links := by
   obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, links⟩ := valid
   exact links
 #print axioms MethodEvidenceValid.links_eq
 
 /-- Validated evidence decodes at its own links and mask to the complete executable method. -/
-theorem MethodEvidenceValid.decoded {rawLayouts layouts pins all imports item method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+theorem MethodEvidenceValid.decoded {rawLayouts layouts pins platform all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :
     Method.ofClosed? method.profile method.environment item.links item.reachable item.closed
       item.parameterInput = .ok method := by
   obtain ⟨-, -, -, -, -, -, -, -, decoded, -⟩ := valid
@@ -419,16 +422,16 @@ theorem MethodEvidenceValid.decoded {rawLayouts layouts pins all imports item me
 
 /-- A validated method retains the identities, bytes and initializers of its checked static
     sites. -/
-theorem MethodEvidenceValid.staticSites_eq {rawLayouts layouts pins all imports item method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+theorem MethodEvidenceValid.staticSites_eq {rawLayouts layouts pins platform all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :
     method.staticSites = item.closed.staticDescriptors := by
   exact (Method.ofClosed?_fields valid.decoded).2
 
 #print axioms MethodEvidenceValid.staticSites_eq
 
 /-- Validated evidence runs under a valid feature profile, which its shape check states. -/
-theorem MethodEvidenceValid.profile_valid {rawLayouts layouts pins all imports item method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+theorem MethodEvidenceValid.profile_valid {rawLayouts layouts pins platform all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :
     method.profile.Valid := by
   obtain ⟨-, -, -, -, -, -, shape, -⟩ := valid
   exact shape.1
@@ -438,7 +441,7 @@ theorem MethodEvidenceValid.profile_valid {rawLayouts layouts pins all imports i
 theorem MethodEvidenceValid.code_eq {rawLayouts : List RawLayout}
     {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
     {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) : method.code =
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) : method.code =
       methodCode method.profile method.environment method.links item.reachable item.closed := by
   obtain ⟨_, _, _, _, _, _, _, _, _, _, _, ⟨_, same⟩, _⟩ := valid
   exact same
@@ -446,8 +449,8 @@ theorem MethodEvidenceValid.code_eq {rawLayouts : List RawLayout}
 #print axioms MethodEvidenceValid.code_eq
 
 /-- The runtime catalog agrees with every call of a validated method. -/
-theorem MethodEvidenceValid.modelsAgree {rawLayouts layouts pins all imports item method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+theorem MethodEvidenceValid.modelsAgree {rawLayouts layouts pins platform all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :
     RuntimeModelsAgree item.closed item.reachable method := by
   have decoded := valid.decoded
   rw [valid.links_eq] at decoded
@@ -460,7 +463,7 @@ theorem MethodEvidenceValid.modelsAgree {rawLayouts layouts pins all imports ite
 theorem MethodEvidenceValid.siteClaimTotal {rawLayouts : List RawLayout}
     {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
     {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method)
     {pc : Nat} {raw : RawInstruction} (atRaw : item.closed.code[pc]? = some raw)
     (atLive : item.reachable[pc]? = some true) :
     SiteClaimTotal method.environment (method.linkAt pc) raw true
@@ -473,7 +476,7 @@ theorem MethodEvidenceValid.siteClaimTotal {rawLayouts : List RawLayout}
 theorem MethodEvidenceValid.foldOwnedSite {rawLayouts : List RawLayout}
     {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
     {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method)
     {pc : Nat} {raw : RawInstruction} {emitted : Instruction}
     (atRaw : item.closed.code[pc]? = some raw) (atLive : item.reachable[pc]? = some true)
     (atCode : method.code[pc]? = some emitted)
@@ -486,16 +489,18 @@ theorem MethodEvidenceValid.foldOwnedSite {rawLayouts : List RawLayout}
 
 /-- `MethodEvidenceValid` for a program lookup; a missing method fails. -/
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
+    (pins : List AssemblyPin) (platform : PlatformTable) (all : List MethodEvidence)
+    (imports : List ImportSlot)
     (item : MethodEvidence) (method : Option Method) : Prop :=
   match method with
   | none => False
-  | some value => MethodEvidenceValid rawLayouts layouts pins all imports item value
+  | some value => MethodEvidenceValid rawLayouts layouts pins platform all imports item value
 
 private instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
+    (pins : List AssemblyPin) (platform : PlatformTable) (all : List MethodEvidence)
+    (imports : List ImportSlot)
     (item : MethodEvidence) (method : Option Method) :
-    Decidable (MethodAtValid rawLayouts layouts pins all imports item method) := by
+    Decidable (MethodAtValid rawLayouts layouts pins platform all imports item method) := by
   cases method <;> dsimp [MethodAtValid] <;> infer_instance
 
 /-- The architecture layouts are computed for: the first method's profile, or `.scalar` for
@@ -504,14 +509,15 @@ abbrev programArchitecture (program : Program) : Architecture :=
   ((program.head?).map fun method => method.profile.architecture).getD .scalar
 
 /-- The certificate covers the entire emitted program, with no optional method list; calls
-    past it must match `imports`, and every body is checked against the one list of `pins`. -/
+    past it must match `imports`, and every body is checked against the one list of `pins` and
+    the one list of `platform` definitions. -/
 def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (pins : List AssemblyPin) (evidence : List MethodEvidence) (imports : List ImportSlot)
-    (program : Program) : Prop :=
+    (pins : List AssemblyPin) (platform : PlatformTable) (evidence : List MethodEvidence)
+    (imports : List ImportSlot) (program : Program) : Prop :=
   LayoutsValid rawLayouts layouts (programArchitecture program) ∧
     evidence.length = program.length ∧
   (∀ index : Fin evidence.length,
-    MethodAtValid rawLayouts layouts pins evidence imports evidence[index]
+    MethodAtValid rawLayouts layouts pins platform evidence imports evidence[index]
       program[index.val]?) ∧
   StaticValuesValid program ∧
   StaticIdentitiesValid program (evidence.map (·.body)) ∧
@@ -520,24 +526,27 @@ def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayo
   AttributionValid (bodyOwners evidence) = true
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (pins : List AssemblyPin) (evidence : List MethodEvidence) (imports : List ImportSlot)
-    (program : Program) :
-    Decidable (TranslationValid rawLayouts layouts pins evidence imports program) :=
+    (pins : List AssemblyPin) (platform : PlatformTable) (evidence : List MethodEvidence)
+    (imports : List ImportSlot) (program : Program) :
+    Decidable (TranslationValid rawLayouts layouts pins platform evidence imports program) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Compose independently checked methods without reducing their validators again. -/
 inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot) :
+    (pins : List AssemblyPin) (platform : PlatformTable) (all : List MethodEvidence)
+    (imports : List ImportSlot) :
     List MethodEvidence → Program → Prop where
-  | nil : MethodsChecked rawLayouts layouts pins all imports [] []
+  | nil : MethodsChecked rawLayouts layouts pins platform all imports [] []
   | cons {item rest method program} :
-      MethodEvidenceValid rawLayouts layouts pins all imports item method →
-      MethodsChecked rawLayouts layouts pins all imports rest program →
-      MethodsChecked rawLayouts layouts pins all imports (item :: rest) (method :: program)
+      MethodEvidenceValid rawLayouts layouts pins platform all imports item method →
+      MethodsChecked rawLayouts layouts pins platform all imports rest program →
+      MethodsChecked rawLayouts layouts pins platform all imports (item :: rest)
+        (method :: program)
 
 /-- Assembles `TranslationValid` from the program-wide checks and per-method proofs. -/
 theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
-    {pins : List AssemblyPin} {evidence : List MethodEvidence} {imports : List ImportSlot}
+    {pins : List AssemblyPin} {platform : PlatformTable} {evidence : List MethodEvidence}
+    {imports : List ImportSlot}
     {program : Program}
     (layout : LayoutsValid rawLayouts layouts (programArchitecture program))
     (statics : StaticValuesValid program)
@@ -545,12 +554,12 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
     (importLayouts : ImportedLayoutsValid imports (programArchitecture program))
     (importedLocals : ImportedLocalLayoutsBound rawLayouts layouts imports)
     (attribution : AttributionValid (bodyOwners evidence) = true)
-    (methods : MethodsChecked rawLayouts layouts pins evidence imports evidence program) :
-    TranslationValid rawLayouts layouts pins evidence imports program := by
+    (methods : MethodsChecked rawLayouts layouts pins platform evidence imports evidence program) :
+    TranslationValid rawLayouts layouts pins platform evidence imports program := by
   have compose {items code}
-      (checked : MethodsChecked rawLayouts layouts pins evidence imports items code) :
+      (checked : MethodsChecked rawLayouts layouts pins platform evidence imports items code) :
       items.length = code.length ∧ ∀ index : Fin items.length,
-        MethodAtValid rawLayouts layouts pins evidence imports items[index]
+        MethodAtValid rawLayouts layouts pins platform evidence imports items[index]
           code[index.val]? := by
     induction checked with
     | nil => exact ⟨rfl, fun index => Fin.elim0 index⟩
@@ -565,10 +574,13 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
 
 /-- Each method of a valid translation passes every per-method validator. -/
 theorem translation_method_checked {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
-    {pins : List AssemblyPin} {evidence : List MethodEvidence} {imports : List ImportSlot}
-    {program : Program} (valid : TranslationValid rawLayouts layouts pins evidence imports program)
+    {pins : List AssemblyPin} {platform : PlatformTable} {evidence : List MethodEvidence}
+    {imports : List ImportSlot}
+    {program : Program}
+    (valid : TranslationValid rawLayouts layouts pins platform evidence imports program)
     (index : Fin evidence.length) (method : Method) (found : program[index.val]? = some method) :
-    MethodEvidenceValid rawLayouts layouts pins evidence imports evidence[index] method := by
+    MethodEvidenceValid rawLayouts layouts pins platform evidence imports evidence[index]
+      method := by
   have checked := valid.2.2.1 index
   simpa [MethodAtValid, found] using checked
 

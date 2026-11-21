@@ -100,7 +100,8 @@ double Measure(int count)
         .CreateDelegate<Func<ModuleDefinition, int>>(pinned);
     var rejectMismatch = pinnedType.GetMethod("RejectMismatch", Internal)!
         .CreateDelegate<Action<AssemblyNameReference>>(pinned);
-    var collection = Activator.CreateInstance(collectionType, Internal, null, [pinned], null)!;
+    var collection = Activator.CreateInstance(collectionType, Internal, null,
+        [pinned, new HashSet<(ModuleDefinition, uint)>()], null)!;
     var getSlice = collectionType.GetMethod("SliceOf", Internal)!
         .CreateDelegate<Func<ModuleDefinition, object>>(collection);
     var copies = modules.Select(original).ToArray();

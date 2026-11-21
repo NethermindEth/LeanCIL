@@ -106,7 +106,8 @@ theorem decodedProgram?_maskValid {profile : FeatureProfile} {environment : Layo
 
 /-- The body's metadata and bytes certify this record's assembly, raw method and signature. -/
 def _root_.CIL.Extraction.MethodEvidence.BodyBound (item : MethodEvidence) : Prop :=
-  ∃ pins, BodyDecodes pins item.assembly item.body item.original item.arguments item.signature
+  ∃ pins, BodyDecodes pins item.body.platform item.assembly item.body item.original item.arguments
+    item.signature item.body.imports
 
 /-- Record `index` of `evidence` is the method with metadata token `token` of assembly `pin`
     at type arguments `arguments`, its closed body instantiates that definition, and its pinned
@@ -140,7 +141,7 @@ theorem DecodedAt.of_decoded {program : CIL.Program} {evidence : List MethodEvid
 
 /-- A validated translation binds the method at the selected index to its pinned record. -/
 theorem DecodedAt.of_translation {program : CIL.Program} {evidence : List MethodEvidence}
-    {rawLayouts layouts pins imports} (valid : TranslationValid rawLayouts layouts pins evidence
+    {rawLayouts layouts pins platform imports} (valid : TranslationValid rawLayouts layouts pins platform evidence
       imports program) (index : Fin evidence.length) {method : Method}
     (present : program[index.val]? = some method) :
     DecodedAt program evidence method.profile method.environment index evidence[index].assembly
@@ -149,7 +150,8 @@ theorem DecodedAt.of_translation {program : CIL.Program} {evidence : List Method
   have mask := checked.maskValid
   have body : evidence[index].BodyBound := by
     obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, certified, _⟩ := checked
-    exact ⟨pins, certified⟩
+    obtain ⟨assemblies, tables, identity, pinned, _, binding⟩ := certified
+    exact ⟨pins, assemblies, tables, identity, pinned, rfl, binding⟩
   exact ⟨evidence[index], List.getElem?_eq_getElem index.isLt, rfl, rfl, rfl, mask.2.1, body,
     method, present, checked.ofBody?, mask⟩
 
@@ -187,8 +189,8 @@ theorem DecodedSummary.of_decoded {Input Output : Type} {contract : MethodContra
 
 /-- A contract proved over a validated translation is a summary of its method's pinned record. -/
 theorem DecodedSummary.of_translation {Input Output : Type} {contract : MethodContract Input Output}
-    {program : CIL.Program} {evidence : List MethodEvidence} {rawLayouts layouts pins imports}
-    (valid : TranslationValid rawLayouts layouts pins evidence imports program)
+    {program : CIL.Program} {evidence : List MethodEvidence} {rawLayouts layouts pins platform imports}
+    (valid : TranslationValid rawLayouts layouts pins platform evidence imports program)
     (index : Fin evidence.length) {method : Method} (present : program[index.val]? = some method)
     (holds : contract.Holds program index) :
     DecodedSummary program evidence method.profile method.environment index evidence[index].assembly
@@ -212,7 +214,7 @@ structure DecodedOutcomeSummary {Input Output : Type} (program : CIL.Program)
 theorem DecodedOutcomeSummary.of_translation {Input Output : Type}
     {contract : OutcomeContract Input Output} {program : CIL.Program}
     {evidence : List MethodEvidence}
-    {rawLayouts layouts pins imports} (valid : TranslationValid rawLayouts layouts pins evidence
+    {rawLayouts layouts pins platform imports} (valid : TranslationValid rawLayouts layouts pins platform evidence
       imports program) (index : Fin evidence.length) {method : Method}
     (present : program[index.val]? = some method) (holds : contract.Holds program index) :
     DecodedOutcomeSummary program evidence method.profile method.environment index

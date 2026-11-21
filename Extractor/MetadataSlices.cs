@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
-using System.Text;
 using Mono.Cecil;
 using MemberReference = Mono.Cecil.MemberReference;
 using TypeReference = Mono.Cecil.TypeReference;
@@ -19,6 +18,13 @@ namespace Nethermind.LeanCIL;
 /// </summary>
 internal sealed class MetadataSlices(PinnedAssemblies pinned)
 {
+    HashSet<(ModuleDefinition Module, uint Token)>? typeReferences;
+
+    /// <summary>The carried type references checked against definitions, with their source modules.</summary>
+    internal IEnumerable<(ModuleDefinition Module, TypeReferenceHandle Handle)> TypeReferences =>
+        typeReferences?.Select(reference =>
+            (reference.Module, MetadataTokens.TypeReferenceHandle((int)(reference.Token & 0x00FFFFFF)))) ?? [];
+
     /// <summary>The identity block of a pinned module: its table stream header and <c>Assembly</c> row.</summary>
     internal string AssemblyBlock(ModuleDefinition module)
     {
@@ -63,9 +69,9 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         var token = identity[(identity.LastIndexOf(TokenMarker, StringComparison.Ordinal) + TokenMarker.Length)..];
         var hasKey = !assembly.PublicKey.IsNil && reader.GetBlobBytes(assembly.PublicKey).Length > 0;
         var keyToken = !hasKey ? ""
-            : $"keyToken := {Bytes(System.Text.Encoding.ASCII.GetBytes(token))}, ";
-        var headers = $"tableHeader := {Bytes(image.TableHeader())}, header := {image.DecodedHeader()}";
-        var tables = $"assemblyRow := {Bytes(row)}, strings := {Entries(ranked[0])}, blobs := {Entries(ranked[1])}";
+            : $"keyToken := {ByteLiterals.Of(System.Text.Encoding.ASCII.GetBytes(token))}, ";
+        var headers = $"tableHeader := {ByteLiterals.Of(image.TableHeader())}, header := {image.DecodedHeader()}";
+        var tables = $"assemblyRow := {ByteLiterals.Of(row)}, strings := {Entries(ranked[0])}, blobs := {Entries(ranked[1])}";
         return $$"""{ identity := {{IdentityText.Quote(identity)}}, {{keyToken}}{{headers}}, {{tables}} }""";
     }
 
@@ -75,28 +81,21 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
     /// carried, so the method's evidence is a function of the method and its assemblies alone.
     /// </summary>
     internal (string Metadata, string Tables, int[] Assemblies) Method(MethodDefinition original,
-        IEnumerable<uint> tokens, bool classOwner)
+        IEnumerable<uint> tokens, bool classOwner, IEnumerable<Mono.Cecil.TypeDefinition> arguments)
     {
-        var collection = new Collection(pinned);
+        var collection = new Collection(pinned, typeReferences ??= []);
         var own = collection.SliceOf(original.Module);
         own.Method(original, classOwner);
         foreach (var token in tokens) own.Operand(token);
+        foreach (var argument in arguments)
+        {
+            var target = collection.SliceOf(argument.Module);
+            var token = argument.MetadataToken.ToUInt32();
+            target.Token(token);
+            target.Arity(token);
+        }
         var metadata = collection.Lean();
         return (metadata, collection.Tables(), collection.Assemblies());
-    }
-
-    /// <summary>
-    /// A Lean byte list as one <c>CIL.Extraction.fixedBytes</c> literal: its length and its big-endian code, as
-    /// <see cref="NumeralCode.Append"/> writes it. The elaborator reads numerals where a list literal costs a numeral
-    /// and a constructor per byte; the qualified names resolve wherever the text is pasted.
-    /// </summary>
-    internal static string Bytes(IEnumerable<byte> bytes)
-    {
-        var data = bytes.ToArray();
-        if (data.Length == 0) return "[]";
-        var text = new StringBuilder($"(CIL.Extraction.fixedBytes {data.Length} ");
-        NumeralCode.Append(text, data);
-        return text.Append(')').ToString();
     }
 
     /// <summary>The reserved offset for a heap entry omitted from the carried evidence.</summary>
@@ -117,15 +116,19 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
 
     internal static string Entries<TKey>(SortedDictionary<TKey, byte[]> entries) where TKey : notnull =>
         "[" + string.Join(", ", entries.Select(entry =>
-            $"({Convert.ToString(entry.Key, CultureInfo.InvariantCulture)}, {Bytes(entry.Value)})")) + "]";
+            $"({Convert.ToString(entry.Key, CultureInfo.InvariantCulture)}, {ByteLiterals.Of(entry.Value)})")) + "]";
 
     /// <summary>The slices of the pinned modules one method reaches, its own first.</summary>
-    sealed class Collection(PinnedAssemblies pinned)
+    sealed class Collection(PinnedAssemblies pinned, HashSet<(ModuleDefinition Module, uint Token)> typeReferences)
     {
         readonly List<Slice> slices = [];
         readonly Dictionary<ModuleDefinition, Slice> byModule = [];
 
         internal PinnedAssemblies Pinned => pinned;
+
+        /// <summary>Records that a slice of <paramref name="module"/> carries the <c>TypeRef</c> row
+        /// <paramref name="token"/>.</summary>
+        internal void CarriedTypeReference(ModuleDefinition module, uint token) => typeReferences.Add((module, token));
 
         internal Slice SliceOf(ModuleDefinition module)
         {
@@ -168,6 +171,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         readonly List<(int Kind, uint Source, int Slice, uint Target)> links = [];
         readonly Dictionary<(int Kind, uint Source), (int Slice, uint Target)> linked = [];
         readonly HashSet<uint> visited = [];
+        readonly HashSet<uint> namedDefinitions = [];
+        readonly HashSet<uint> baseReferences = [];
         readonly HashSet<uint> modifierVisited = [];
         readonly HashSet<uint> fieldsAdded = [];
         readonly Dictionary<uint, MetadataFieldPrefix> fieldPrefixes = [];
@@ -354,9 +359,16 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Blob(reference.PublicKeyOrToken);
         }
 
-        void TypeRef(uint token, bool linked)
+        void BaseReference(uint token)
+        {
+            if (!visited.Contains(token) && baseReferences.Add(token)) TypeRef(token, linked: true, baseOnly: true);
+        }
+
+        void TypeRef(uint token, bool linked, bool baseOnly = false)
         {
             Row(token);
+            var typeReference = (TypeReference)module.LookupToken(new MetadataToken(token));
+            if (!baseOnly || IsStorageRoot(typeReference)) collection.CarriedTypeReference(module, token);
             var reference = Reader.GetTypeReference(MetadataTokens.TypeReferenceHandle(RowOf(token)));
             Text(reference.Name);
             Text(reference.Namespace);
@@ -364,8 +376,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             if (scope.Kind == HandleKind.ModuleReference)
                 throw new InvalidDataException("Unsupported type scope: " + Reader.GetString(reference.Name) +
                     " is resolved through a module reference.");
-            if (!scope.IsNil && scope.Kind != HandleKind.ModuleDefinition) Token(TokenOf(scope));
-            var typeReference = (TypeReference)module.LookupToken(new MetadataToken(token));
+            if (baseOnly && scope.Kind == HandleKind.TypeReference) BaseReference(TokenOf(scope));
+            else if (!scope.IsNil && scope.Kind != HandleKind.ModuleDefinition) Token(TokenOf(scope));
             if (!linked || !IsPinned(typeReference)) return;
             var definition = typeReference.Resolve();
             if (definition is null)
@@ -376,7 +388,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                     " is defined in " + definedIn + ", not in the assembly that names it.");
             var target = collection.SliceOf(definition.Module);
             Link(0, token, target.PositionOf, definition.MetadataToken.ToUInt32());
-            target.Token(definition.MetadataToken.ToUInt32());
+            if (baseOnly) target.DefinitionName(definition.MetadataToken.ToUInt32());
+            else target.Token(definition.MetadataToken.ToUInt32());
         }
 
         /// <summary>
@@ -386,11 +399,19 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             ? collection.Pinned.Contains(collection.Pinned.Working(scope))
             : collection.Pinned.ModuleOf(type) is not null;
 
+        static bool CoreScope(IMetadataScope scope) =>
+            (scope is ModuleDefinition image ? image.Assembly.Name.Name : scope.Name)
+                is "System.Runtime" or "mscorlib" or "System.Private.CoreLib" or "netstandard";
+
+        static bool IsStorageRoot(TypeReference type) =>
+            type.DeclaringType is null && type.Namespace == "System" && type.Name is "ValueType" or "Enum" &&
+            CoreScope(type.Scope);
+
         bool Extends(SrmTypeDefinition definition, string name)
         {
-            if (definition.BaseType.Kind != HandleKind.TypeReference) return false;
-            var parent = Reader.GetTypeReference((TypeReferenceHandle)definition.BaseType);
-            return Reader.GetString(parent.Namespace) == "System" && Reader.GetString(parent.Name) == name;
+            if (definition.BaseType.IsNil || definition.BaseType.Kind == HandleKind.TypeSpecification) return false;
+            var parent = (TypeReference)module.LookupToken(new MetadataToken(TokenOf(definition.BaseType)));
+            return parent.Name == name && IsStorageRoot(parent);
         }
 
         bool IsClass(SrmTypeDefinition definition) =>
@@ -399,19 +420,32 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
 
         void TypeDef(uint token)
         {
+            DefinitionName(token);
+            var definition = Reader.GetTypeDefinition(MetadataTokens.TypeDefinitionHandle(RowOf(token)));
+            if (RowOf(token) < image.Count(0x02)) Row(token + 1);
+            if (definition.BaseType.IsNil || (definition.Attributes & System.Reflection.TypeAttributes.Interface) != 0)
+                return;
+            if (definition.BaseType.Kind == HandleKind.TypeReference)
+                BaseReference(TokenOf(definition.BaseType));
+            else if (definition.BaseType.Kind == HandleKind.TypeDefinition && CoreScope(module))
+                DefinitionName(TokenOf(definition.BaseType));
+            if (Extends(definition, "Enum")) FieldRows(token, definition, signatures: true);
+        }
+
+        /// <summary>The declaring name and nesting rows, independently of the definition's base.</summary>
+        void DefinitionName(uint token)
+        {
+            if (!namedDefinitions.Add(token)) return;
             Row(token);
             var definition = Reader.GetTypeDefinition(MetadataTokens.TypeDefinitionHandle(RowOf(token)));
             Text(definition.Name);
             Text(definition.Namespace);
-            if (RowOf(token) < image.Count(0x02)) Row(token + 1);
-            if (!definition.BaseType.IsNil) Token(TokenOf(definition.BaseType));
-            if (Extends(definition, "Enum")) FieldRows(token, definition, signatures: true);
             var enclosing = definition.GetDeclaringType();
             if (enclosing.IsNil) return;
             var nesting = NestedClassRow(token);
             Row(nesting);
             Link(2, token, position, nesting);
-            Token(TokenOf(enclosing));
+            DefinitionName(TokenOf(enclosing));
         }
 
         /// <summary>The <c>NestedClass</c> row that names a nested type.</summary>
@@ -802,7 +836,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         }
 
         static (ulong, string) Entry<TKey>(KeyValuePair<TKey, byte[]> entry) where TKey : struct, IConvertible =>
-            (Convert.ToUInt64(entry.Key, CultureInfo.InvariantCulture), Bytes(entry.Value));
+            (Convert.ToUInt64(entry.Key, CultureInfo.InvariantCulture), ByteLiterals.Of(entry.Value));
 
         /// <summary>
         /// The instance field counts Lean derives from the carried rows: for each field of a carried type whose

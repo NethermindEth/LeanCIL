@@ -58,13 +58,13 @@ abbrev MethodEvidence.MaskValid (item : MethodEvidence) (all : List MethodEviden
     item.closed method.profile item.featureStates item.reachable method.code
 
 /-- A validated record checks the mask against the method and its pinned, specialized body. -/
-theorem MethodEvidenceValid.maskValid {rawLayouts layouts pins all imports item method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+theorem MethodEvidenceValid.maskValid {rawLayouts layouts pins platform all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :
     item.MaskValid all method := by
   obtain ⟨specialized, -, -, features, -, -, -, -, -, -, -, -, -, body, environment, -⟩ := valid
   unfold MethodEvidence.MaskValid
   rw [show method.environment = _ from environment]
-  exact ⟨body.2.2.2.2.2.2, specialized.1, features⟩
+  exact ⟨body.2.2.2.2.2.2.2, specialized.1, features⟩
 
 #print axioms MethodEvidenceValid.maskValid
 
@@ -80,8 +80,8 @@ def programBindingsValid (evidence : List MethodEvidence) (program : Program)
         ConstrainedCallsValid item.dispatchTypes methods item.closed item.reachable method)
 
 /-- A validated translation checks each mask and call binding against the pinned, closed body. -/
-theorem TranslationValid.programBindingsValid {rawLayouts layouts pins evidence imports program}
-    (valid : TranslationValid rawLayouts layouts pins evidence imports program) :
+theorem TranslationValid.programBindingsValid {rawLayouts layouts pins platform evidence imports program}
+    (valid : TranslationValid rawLayouts layouts pins platform evidence imports program) :
     programBindingsValid evidence program imports = true := by
   apply Bool.and_eq_true_iff.mpr
   refine ⟨decide_eq_true ⟨valid.2.2.2.1, valid.2.2.2.2.1⟩, ?_⟩
@@ -115,12 +115,14 @@ theorem decodedProgram?_statics {profile : FeatureProfile} {environment : Layout
 #print axioms decodedProgram?_statics
 
 /-- A body that decodes to `method` passes `checkBody` with the method's own code and init flag. -/
-theorem BodyDecodes.code {pins : List AssemblyPin} {pin : AssemblyPin} {body : BodyEvidence}
+theorem BodyDecodes.code {pins : List AssemblyPin} {platform : PlatformTable}
+    {pin : AssemblyPin} {body : BodyEvidence}
     {method : RawMethod} {arguments : List TypeExpr} {signature : String}
-    (decodes : BodyDecodes pins pin body method arguments signature) :
+    {calls : BodyImports}
+    (decodes : BodyDecodes pins platform pin body method arguments signature calls) :
     ∃ decoded, checkBody body method arguments = .ok decoded ∧
       decoded.code = method.code ∧ decoded.initLocals = method.initLocals := by
-  have matched := decodes.2.2.2.2.2.2
+  have matched := decodes.2.2.2.2.2.2.2
   unfold bodyMatches at matched
   split at matched
   · next decoded checks =>
@@ -131,9 +133,11 @@ theorem BodyDecodes.code {pins : List AssemblyPin} {pin : AssemblyPin} {body : B
 #print axioms BodyDecodes.code
 
 /-- No branch of a method whose body decodes enters the instruction after a prefix. -/
-theorem BodyDecodes.prefixEntryFree {pins : List AssemblyPin} {pin : AssemblyPin}
+theorem BodyDecodes.prefixEntryFree {pins : List AssemblyPin} {platform : PlatformTable}
+    {pin : AssemblyPin}
     {body : BodyEvidence} {method : RawMethod} {arguments : List TypeExpr} {signature : String}
-    (decodes : BodyDecodes pins pin body method arguments signature) :
+    {calls : BodyImports}
+    (decodes : BodyDecodes pins platform pin body method arguments signature calls) :
     PrefixEntryFree method.code := by
   obtain ⟨decoded, checks, sameCode, _⟩ := BodyDecodes.code decodes
   exact sameCode ▸ checkBody_prefixEntryFree checks
@@ -143,9 +147,10 @@ theorem BodyDecodes.prefixEntryFree {pins : List AssemblyPin} {pin : AssemblyPin
 /-- The closed code of a method's evidence has no branch into the instruction after a prefix:
     its body decodes, and instantiation keeps every opcode and branch destination. -/
 theorem MethodEvidenceValid.prefixEntryFree {rawLayouts : List RawLayout}
-    {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
+    {layouts : Array ComputedLayout} {pins : List AssemblyPin} {platform : PlatformTable}
+    {all : List MethodEvidence}
     {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :
     PrefixEntryFree item.closed.code := by
   obtain ⟨specialized, -, -, -, -, -, -, -, -, -, -, -, -, decodes, -, -⟩ := valid
   exact instantiateMethod_prefixEntryFree specialized.1 decodes.prefixEntryFree
@@ -167,11 +172,13 @@ theorem checkBody_instantiated_prefixEntryFree {layouts : List RawLayout} {body 
 
 /-- For a body that decodes to `original`, the method of the bytes is the method of the
     definition. -/
-theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : AssemblyPin}
+theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {platform : PlatformTable}
+    {pin : AssemblyPin}
     {body : BodyEvidence} {original : RawMethod} {arguments : List TypeExpr}
     {signature : String} {profile : FeatureProfile} {environment : LayoutEnvironment}
     {links : List (Nat × Link)} {reachable : List Bool}
-    (decodes : BodyDecodes pins pin body original arguments signature) :
+    {calls : BodyImports}
+    (decodes : BodyDecodes pins platform pin body original arguments signature calls) :
     Method.ofBody? profile environment links reachable body original arguments =
       Method.ofRaw? profile environment links reachable original arguments := by
   obtain ⟨decoded, checks, sameCode, sameInit⟩ := BodyDecodes.code decodes
@@ -184,8 +191,8 @@ theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : As
 #print axioms Method.ofBody?_of_decodes
 
 /-- The pinned body and metadata of a validated record decode to the entire executable method. -/
-theorem MethodEvidenceValid.ofBody? {rawLayouts layouts pins all imports item method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+theorem MethodEvidenceValid.ofBody? {rawLayouts layouts pins platform all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :
     Method.ofBody? method.profile method.environment item.links item.reachable item.body
       item.original item.arguments = some method := by
   have decoded := valid.decoded

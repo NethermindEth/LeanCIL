@@ -157,6 +157,19 @@ Each doubling permits up to 1.15 times the preceding median cost per instruction
 times the preceding median cost per tuple query. Run these rows alone with
 `dotnet run --file Tests/LookupScaling.cs -- --model-table-only`.
 
+The platform lookup benchmark measures the kernel cost of resolving a reference, admitting an
+enum, checking a pair field, ending a class chain, checking the byte-order constant and
+classifying a base. Each table contains the six definitions these checks use and 16, 128 or
+1,024 filler definitions. Separate rows look up an absent type and a simple name that occurs
+in several namespaces. A further row looks up identical name parts in distinct assembly scopes.
+It checks two entries with different kinds and a third, absent scope. The three lookups together
+cost about 82,000, 90,000 and 101,000 heartbeats at the three sizes.
+
+When names repeat across scopes, the literal index includes scope bytes in the key. The suite
+compares each lookup at consecutive table sizes and allows up to 1.15 times the previous cost.
+The same growth limit applies to elaboration heartbeats per definition. Run these rows with
+`dotnet run --file Tests/LookupScaling.cs -- --platform-table-only`.
+
 The suite also measures `cil_kernel_rfl` on `CIL.Safety.indirectTarget`, the selection of a
 `calli` body, for a pointer whose owner is 64, 256 or 1,024 bytes long and a catalog whose second
 entry holds the same owner, less the same statement closed with `sorry`. The kernel compares

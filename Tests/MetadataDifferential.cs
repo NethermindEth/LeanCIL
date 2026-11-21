@@ -7,6 +7,8 @@
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include GeneratedEvidence.cs
+#:include ../Extractor/PlatformDefinitions.cs
+#:include ../Extractor/ByteLiterals.cs
 #:package Mono.Cecil
 
 using System.Reflection.Metadata;
@@ -15,6 +17,7 @@ using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Text.Json;
 using Mono.Cecil;
+using Nethermind.LeanCIL;
 using ModuleDefinition = Mono.Cecil.ModuleDefinition;
 using TypeReference = Mono.Cecil.TypeReference;
 using TypeSpecification = Mono.Cecil.TypeSpecification;
@@ -29,10 +32,45 @@ using TypeSpecification = Mono.Cecil.TypeSpecification;
 const int ReferencesPerTheorem = 128;
 // The cost per added reference may grow at most this much from half to all of one theorem's references.
 const double AllowedIncrementRatio = 1.25;
+var imports = new HashSet<string>(StringComparer.Ordinal);
+var exports = new HashSet<string>(StringComparer.Ordinal);
+foreach (var sidecar in args.Skip(1))
+{
+    using var contract = JsonDocument.Parse(File.ReadAllText(sidecar));
+    imports.Add(contract.RootElement.GetProperty("assemblyIdentity").GetString()!);
+    foreach (var export in contract.RootElement.GetProperty("exports").EnumerateArray())
+        exports.Add(export.GetProperty("identity").GetString()!);
+}
 var assembly = args.Length > 0 ? args[0] : At("Examples/Assembly/bin/Examples.dll");
 var name = Path.GetFileNameWithoutExtension(assembly);
 var output = At("artifacts/MetadataDifferential");
 Directory.CreateDirectory(output);
+if (args.Length == 0)
+{
+    Run(["dotnet", "build", At("Tests/ContractImports/App/App.csproj"), "-c", "Release"]);
+    var fixture = At("Tests/ContractImports/App/bin/ImportFixture.App.dll");
+    using var compiled = ModuleDefinition.ReadModule(fixture);
+    void CheckOwner(string image, Mono.Cecil.MethodDefinition method, string owner)
+    {
+        var destination = Path.Combine(output, owner, method.Name);
+        Run(["dotnet", ExtractorPath, "extract", image, method.FullName, destination]);
+        Run(["lake", "env", "lean", Path.Combine(destination, "Extracted.lean")], cwd: FixturePackage());
+        Console.WriteLine($"""PASS extracted and checked {method.FullName}.""");
+    }
+    string[] owners = ["MetadataDerived", "MetadataRecursive", "Depth8", "Depth10", "Depth12", "Depth14"];
+    foreach (var owner in owners)
+        foreach (var method in compiled.GetType($"""ImportFixture.{owner}""").Methods.Where(method => method.IsStatic))
+            CheckOwner(fixture, method, owner);
+
+    // C# emits methods in named types. A global method belongs to the module's first TypeDef.
+    var named = compiled.GetType("ImportFixture.MetadataDerived");
+    var global = named.Methods.Single(method => method.Name == "Run");
+    named.Methods.Remove(global);
+    compiled.Types[0].Methods.Add(global);
+    var globalImage = Path.Combine(output, Path.GetFileName(fixture));
+    compiled.Write(globalImage);
+    CheckOwner(globalImage, global, "Module");
+}
 using var pe = new PEReader(File.OpenRead(assembly));
 var reader = pe.GetMetadataReader();
 var meta = pe.GetMetadata().GetContent();
@@ -149,6 +187,7 @@ static bool GeneralArray(TypeReference type) => type switch
     TypeSpecification specification => GeneralArray(specification.ElementType),
     _ => false
 };
+var importedReferences = new List<(int Token, string Identity)>();
 var expected = new List<(int Token, string Name)>();
 var refused = new List<int>();
 var skipped = 0;
@@ -179,7 +218,13 @@ foreach (var handle in reader.MemberReferences)
     }
     Defined(token, method);
     var scope = owner.Scope is AssemblyNameReference reference ? reference.FullName : module.Assembly.Name.FullName;
-    expected.Add((token, scope + "::" + method.FullName));
+    var identity = $"""{scope}::{method.FullName}""";
+    if (imports.Contains(scope) && exports.Contains(identity))
+    {
+        importedReferences.Add((token, identity));
+        Console.WriteLine($"Comparing imported method {identity} at 0x{token:X8}");
+    }
+    expected.Add((token, identity));
 }
 // The tables above refer to each other through coded indices, so every table row that a row names is carried too.
 var core = (module.TypeSystem.CoreLibrary as AssemblyNameReference)!;
@@ -192,6 +237,19 @@ Blob(assemblyDefinition.PublicKey);
 var assemblyRowAt = reader.GetTableMetadataOffset(TableIndex.Assembly);
 var assemblyRow = meta.AsSpan(assemblyRowAt, reader.GetTableRowSize(TableIndex.Assembly)).ToArray();
 var identityText = JsonSerializer.Serialize(module.Assembly.Name.FullName);
+// The runtime directory supplies platform identities; the caller identifies contract libraries separately.
+var runtimeDirectory = Path.GetDirectoryName(typeof(object).Assembly.Location);
+var trusted = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") ??
+    throw new InvalidOperationException("The runtime did not supply its trusted assembly paths.");
+var platformScopes = trusted.Split(Path.PathSeparator)
+    .Where(path => string.Equals(Path.GetDirectoryName(path), runtimeDirectory, StringComparison.Ordinal))
+    .Select(path => System.Reflection.AssemblyName.GetAssemblyName(path).FullName)
+    .ToHashSet(StringComparer.Ordinal);
+var coreLibrary = module.TypeSystem.Object.Resolve()?.Module ??
+    throw new InvalidDataException("System.Object does not resolve for the platform definitions.");
+var platform = new PlatformDefinitions(coreLibrary);
+platform.Add(module, reader, reader.TypeReferences,
+    scope => !imports.Contains(scope.FullName) && platformScopes.Contains(scope.FullName));
 var linkList = string.Join(", ", links.Select(link => $"⟨{link.Kind}, {(uint)link.Source}, 0, {link.Target}⟩"));
 // Each compared reference with the UTF-8 bytes of Cecil's name, then each general-array reference with none. The
 // names are written as bytes because encoding a string literal in the kernel costs more than reading the reference.
@@ -200,6 +258,22 @@ var checks = expected.Select(entry => (entry.Token, Name: (string?)entry.Name))
 string Check((int Token, string? Name) entry) =>
     $"({(uint)entry.Token}, {(entry.Name is null ? "none" : "some " + Bytes(Encoding.UTF8.GetBytes(entry.Name)))})";
 string Checks(IEnumerable<(int Token, string? Name)> entries) => "[" + string.Join(", ", entries.Select(Check)) + "]";
+var resolver = "env.methodSite token";
+var declaration = "";
+if (importedReferences.Count != 0)
+{
+    var cases = importedReferences.Select(entry =>
+        $"""| {entry.Token} => env.importMethodSite token frame {JsonSerializer.Serialize(entry.Identity)}""");
+    resolver = "readSite env token";
+    declaration = $"""
+        /-- Only fixture exports have an imported declaring name. -/
+        def readSite (env : MetadataEnv) (token : Nat) : Except MetadataError MethodSite := do
+          let frame <- env.frame 0 0
+          match token with
+          {string.Join("\n  ", cases)}
+          | _ => env.methodSite token
+        """;
+}
 var prefix = $$"""
     import CIL.Extraction.MetadataBinding
 
@@ -217,6 +291,11 @@ var prefix = $$"""
         rows :={{Entries(rows)}}, strings := {{Entries(strings)}}, blobs := {{Entries(blobs)}}, corlib := {{corlib}},
         links := [{{linkList}}] }
 
+    /-- Scoped definitions supplied by the runtime libraries referenced by this assembly. -/
+    def platform : PlatformTable := platform_table% {{platform.Lean(ByteLiterals.Of)}}
+
+    {{declaration}}
+
     /-- The references among `entries` that Lean reads otherwise than Cecil: one Lean spells otherwise
         than the bytes of Cecil's `FullName` or cannot read, or one to a general array (no name) that
         Lean reads. -/
@@ -224,9 +303,9 @@ var prefix = $$"""
       match slice.index with
       | .error _ => [0]
       | .ok index =>
-        let env := MetadataEnv.ofSlices [index]
+        let env := MetadataEnv.ofSlices [index] (platform := platform)
         entries.filterMap fun (token, name) =>
-          match env.methodSite token, name with
+          match {{resolver}}, name with
           | .ok site, some name => if site.externalName == some name then none else some token
           | .error _, some _ => some token
           | .ok _, none => some token
@@ -242,12 +321,15 @@ var theorems = chunks.Select((chunk, number) => $"""
     """);
 var path = Path.Combine(output, name + ".lean");
 File.WriteAllText(path, (prefix + string.Concat(theorems) + "end\nend Differential\n").ReplaceLineEndings("\n"));
-Console.WriteLine($"{name}: {expected.Count} method references compared with Cecil, {refused.Count} on general " +
-    $"arrays refused, {skipped} open or modified ones skipped, {chunks.Count} " +
-    "theorems");
+Console.WriteLine($"""
+    {name}: comparing {expected.Count} references ({importedReferences.Count} imported) in {chunks.Count} theorems.
+    Refusing {refused.Count} general arrays. Skipping {skipped} open or modified references.
+    """);
+if (imports.Count != 0 && importedReferences.Count == 0)
+    throw new InvalidOperationException("The import fixture has no compared references to its contract library.");
 Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-Console.WriteLine($"PASS Lean spells every compared method reference of {name} as Cecil does and refuses " +
-    "general arrays");
+Console.WriteLine($"PASS Lean agrees with Cecil on every compared method reference of {name}.");
+if (imports.Count != 0) return;
 
 // The decision over nested samples of the compared references: each sample holds every other reference of the
 // next, so the samples mix references alike, and the cost per added reference must not grow with the sample.
@@ -276,6 +358,13 @@ if (incrementRatio > AllowedIncrementRatio)
         FormattableString.Invariant($"{sampleSizes[2]} references; the limit is {AllowedIncrementRatio}."));
 Console.WriteLine(FormattableString.Invariant(
     $"PASS the cost per added reference grows {incrementRatio:F2} times, within {AllowedIncrementRatio}"));
+
+if (args.Length == 0)
+{
+    var app = At("Tests/ContractImports/App/bin/ImportFixture.App.dll");
+    var sidecar = At("Tests/ContractImports/Lib.leancil.contracts");
+    Run(["dotnet", typeof(Program).Assembly.Location, app, sidecar], streamOutput: true);
+}
 
 // The table stream header: the bytes from the reserved word through the last row count.
 static byte[] DifferentialHeader(MetadataReader reader, System.Collections.Immutable.ImmutableArray<byte> meta)

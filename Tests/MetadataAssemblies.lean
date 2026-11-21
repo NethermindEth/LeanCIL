@@ -39,9 +39,16 @@ theorem version_stems :
     assemblyStem [65, 44, 66] = [65, 44, 66] := by decide +kernel
 #print axioms version_stems
 
+/-- `System.Object`, the base of `Lib.Box`, and `Lib.Box` as the platform class it is when no
+    slice carries `Lib`. -/
+private def libraryPlatform : PlatformTable := platform_table%
+  [runtimeType "Object" .objectRoot,
+   { scope := bytesOf libScope, parts := [bytesOf "Lib", bytesOf "Box"], kind := .classType }]
+
 /-- Resolve the library type with the supplied assembly order and pins. -/
 private def resolveLibrary (others : List MetadataSlice) (pins : List (List Nat) := []) := do
   let env := MetadataEnv.ofSlices (← (own.1 :: others).mapM MetadataSlice.index)
+    (platform := libraryPlatform)
     (pins.foldl AssemblyPrefixes.insert {})
   typeRefNamed env 0 resolveFuel tokens.boxRef none
 

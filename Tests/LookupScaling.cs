@@ -9,10 +9,14 @@
 #:include GeneratedEvidence.cs
 #:include ../Extractor/ProgramLookupFacts.cs
 #:include ../Extractor/ObjectOperandProof.cs
+#:include ../Extractor/PlatformDefinitions.cs
+#:include ../Extractor/ByteLiterals.cs
+#:package Mono.Cecil
 
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using Nethermind.LeanCIL;
 
 if (args.Contains("--object-admission-only", StringComparer.Ordinal))
 {
@@ -108,6 +112,16 @@ if (args.Contains("--metadata-name-only", StringComparer.Ordinal))
 if (args.Contains("--model-table-only", StringComparer.Ordinal))
 {
     ModelTableCosts();
+    return;
+}
+if (args.Contains("--import-links-only", StringComparer.Ordinal))
+{
+    ImportLinkCosts();
+    return;
+}
+if (args.Contains("--platform-table-only", StringComparer.Ordinal))
+{
+    PlatformTableCosts();
     return;
 }
 if (args.Contains("--indirect-target-only", StringComparer.Ordinal))
@@ -1975,6 +1989,176 @@ if (!instructionEquationsOnly)
     }
     MetadataNameCosts();
     ModelTableCosts();
+    PlatformTableCosts();
+    ImportLinkCosts();
+}
+
+// Each input quadruples the number of distinct exports, links and call instructions together.
+void ImportLinkCosts()
+{
+    int[] sizes = [12, 48, 192];
+    var directory = At("artifacts/LookupScaling/ImportLinks");
+    Directory.CreateDirectory(directory);
+    var path = Path.Combine(directory, "ImportLinks.lean");
+    var samples = sizes.Select(size => $"""#kernel_cost "import links {size}" (checkLinks {size} = true)""");
+    File.WriteAllText(path, $$"""
+        import CIL.Extraction.BodyDecoding
+        open CIL CIL.Extraction Lean Elab Command
+        {{KernelCostCommand}}
+        /-- Distinct static exports with a scalar call shape. -/
+        def slot (index : Nat) : ImportSlot :=
+          { identity := toString index, closureDigest := "", parameterCount := 0,
+            hasThis := false, returnsValue := false }
+        /-- Every direct call uses its own export at the matching instruction index. -/
+        def checkLinks (count : Nat) : Bool :=
+          let indices := List.range count
+          let imports := ImportSlotIndex.ofList (indices.map slot)
+          let bound := imports.forLinks 1 (indices.map fun i => (i, .direct (i + 1)))
+          let sites := indices.map fun i =>
+            let method := { MethodRef.arity 0 with hasThis := false }
+            let site : CallSite :=
+              { method, declared := method.signature 0, target := .external (toString i),
+                typeArguments := [], parameterCount := 0, returnsValue := false }
+            ({ offset := i, opcode := 0x28, operand := .call site } : RawInstruction)
+          let names := bound.calls.foldl (fun acc (_, entry) => acc.insert entry.identity entry)
+            ({} : Std.TreeMap String ImportSlot)
+          bound.calls.length == count && bound.checkUses names sites
+        {{string.Join("\n", samples)}}
+        """);
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.ImportLinkCost.Matches(output).ToDictionary(
+        match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
+        match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != sizes.Length || costs.Values.Any(cost => cost < KernelDecisionFloor))
+        throw new InvalidOperationException($"""Missing import link costs: {output}""");
+    var measured = string.Join(", ", sizes.Select(size => $"""{costs[size]} at {size}"""));
+    if (sizes.Zip(sizes.Skip(1)).Any(pair => costs[pair.Second] > 2 * costs[pair.First] * pair.Second / pair.First))
+        throw new InvalidOperationException($"""Import lookup cost per call more than doubled: {measured}""");
+    Console.WriteLine($"""PASS import link checks cost {measured} heartbeats""");
+}
+
+// Compare each lookup at three table sizes, including identical names scoped by different assemblies.
+void PlatformTableCosts()
+{
+    var tableDirectory = At("artifacts/LookupScaling/PlatformTables");
+    Directory.CreateDirectory(tableDirectory);
+    int[] sizes = [16, 128, 1024];
+    string[] sites = ["reference", "enum", "pair", "chain", "constant", "base", "shared", "scoped", "missing"];
+    static string Bytes(string text) => $"""[{string.Join(", ", Encoding.UTF8.GetBytes(text))}]""";
+    static string Parts(string space, string name) => $"[{Bytes(space)}, {Bytes(name)}]";
+    // Table names in the literal form an extraction writes, so the literal costs what an extraction's does.
+    static string Literal(string text) => ByteLiterals.Of(Encoding.UTF8.GetBytes(text));
+    // The text of `runtimeScopeBytes`, which the checks pass as the scope of the types they read.
+    const string runtimeScope = "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a";
+    static string Definition(string space, string name, string kind, string scope = runtimeScope) =>
+        $$"""{ scope := {{Literal(scope)}}, parts := [{{Literal(space)}}, {{Literal(name)}}], kind := {{kind}} }""";
+    // The depth an extraction sets for its list, so a list it would refuse to compile fails here.
+    static string Depth(int count) => $"set_option maxRecDepth {PlatformDefinitions.RecursionDepth(count)} in";
+    string[] relied =
+    [
+        Definition("System", "Console", ".classType"), Definition("System", "Object", ".objectRoot"),
+        Definition("System", "ValueType", ".valueTypeRoot"), Definition("System", "ValueTuple`2", ".valuePair"),
+        Definition("System", "BitConverter", ".byteOrder"), Definition("", "Number", ".enumType 8"),
+    ];
+    string Table(int size) => $$"""
+        #elab_cost "platform elaboration {{size}}"
+        {{Depth(size + relied.Length)}}
+        /-- The definitions the sites rely on among {{size}} others of distinct names. -/
+        def table{{size}} : PlatformTable := platform_table% [
+          {{string.Join(",\n  ", relied.Concat(Enumerable.Range(0, size).Select(index =>
+              Definition("Filler", $"Type{index:D5}", ".classType"))))}}]
+        {{Depth(size)}}
+        /-- {{size}} classes named `Enumerator`, each in a namespace of its own. -/
+        def shared{{size}} : PlatformTable := platform_table% [
+          {{string.Join(",\n  ", Enumerable.Range(0, size).Select(index =>
+              Definition($"Shared{index:D5}", "Enumerator", ".classType")))}}]
+        {{Depth(size)}}
+        /-- Identical names alternate between class and value storage in distinct scopes. -/
+        def scopes{{size}} : PlatformTable := platform_table% [
+          {{string.Join(",\n  ", Enumerable.Range(0, size).Select(index =>
+              Definition("Shared", "Enumerator", index % 2 == 0 ? ".classType" : ".valueType", $"Scope{index:D5}")))}}]
+        /-- The environment of no slices under the table. -/
+        def env{{size}} : MetadataEnv := MetadataEnv.ofSlices [] (platform := table{{size}})
+        #kernel_cost "platform reference {{size}}"
+          ((env{{size}}.externalNamed 0 runtimeScopeBytes (bytesOf "System.Console")
+            {{Parts("System", "Console")}} (some false)).isOk = true)
+        #kernel_cost "platform enum {{size}}"
+          ((do
+            let head <- env{{size}}.externalNamed 0 runtimeScopeBytes (bytesOf "Number")
+              {{Parts("", "Number")}} (some true)
+            let frame : Frame :=
+              { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
+            return frame.admits (.named head)
+              (.enum (runtimeScope ++ "::Number") (.atom runtimeScope "System.Int32"))).toOption = some true)
+        #kernel_cost "platform pair {{size}}"
+          ((env{{size}}.platformField 0
+            { owner := .genericInst (named "System.ValueTuple`2" {{Parts("System", "ValueTuple`2")}})
+                (.cons (.primitive 8) (.cons (.primitive 10) .nil)),
+              name := bytesOf "Item2", declared := .var 1, definition := none }
+            (.primitive 10) false false).isOk = true)
+        #kernel_cost "platform chain {{size}}"
+          ((env{{size}}.chainRoot 0 0 runtimeScopeBytes {{Parts("System", "Object")}} true).isOk = true)
+        #kernel_cost "platform constant {{size}}"
+          ((env{{size}}.platformConstant 0
+            { owner := .named (named "System.BitConverter" {{Parts("System", "BitConverter")}}),
+              name := bytesOf "IsLittleEndian", declared := .primitive 2, definition := none }
+            (.primitive 2) true true).isOk = true)
+        #kernel_cost "platform base {{size}}"
+          ((table{{size}}.require 0 runtimeScopeBytes {{Parts("System", "ValueType")}}
+            (baseFits true {{Parts("System", "ValueType")}})).isOk = true)
+        #kernel_cost "platform shared {{size}}"
+          (shared{{size}}.kindOf runtimeScopeBytes {{Parts($"Shared{size / 2:D5}", "Enumerator")}} =
+            some .classType)
+        #kernel_cost "platform scoped {{size}}"
+          (scopes{{size}}.kindOf {{Bytes($"Scope{size - 2:D5}")}} {{Parts("Shared", "Enumerator")}} =
+              some .classType /\
+            scopes{{size}}.kindOf {{Bytes($"Scope{size - 1:D5}")}} {{Parts("Shared", "Enumerator")}} =
+              some .valueType /\
+            scopes{{size}}.kindOf {{Bytes($"Scope{size:D5}")}} {{Parts("Shared", "Enumerator")}} = none)
+        #kernel_cost "platform missing {{size}}"
+          (table{{size}}.kindOf runtimeScopeBytes {{Parts("System", "Absent")}} = none)
+        """;
+    var path = Path.Combine(tableDirectory, "PlatformTables.lean");
+    File.WriteAllText(path, $$"""
+        import CIL.Extraction.MetadataBinding
+        open CIL CIL.Extraction Lean Elab Command
+        {{KernelCostCommand}}
+        /-- Logs what elaborating a command costs. -/
+        elab "#elab_cost " label:str command:command : command => do
+          let before <- IO.getNumHeartbeats
+          elabCommand command
+          let after <- IO.getNumHeartbeats
+          logInfo m!"{label.getString} {after - before} heartbeats"
+        /-- A runtime type outside the carried slices, as a reference resolves it. -/
+        def named (name : String) (parts : List (List Nat)) : NamedType :=
+          { scope := runtimeScopeBytes, name := bytesOf name, parts, kind := .external (some false),
+            pinned := false }
+        {{string.Join("\n", sizes.Select(Table))}}
+        """);
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.PlatformTableCost.Matches(output).ToDictionary(
+        match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
+        match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != (sites.Length + 1) * sizes.Length ||
+        sites.Any(site => sizes.Any(size => costs[(site, size)] < KernelDecisionFloor)))
+        throw new InvalidOperationException($"""Missing platform table costs: {output}""");
+    var perDefinition = sizes.Select(size => (double)costs[("elaboration", size)] / (size + relied.Length)).ToArray();
+    var rates = string.Join(", ", sizes.Zip(perDefinition).Select(pair =>
+        string.Create(CultureInfo.InvariantCulture, $"{pair.Second:F0} at {pair.First}")));
+    if (perDefinition.Zip(perDefinition.Skip(1)).Any(pair => pair.Second > pair.First * AllowedGrowth))
+        throw new InvalidOperationException($"Platform elaboration exceeds {AllowedGrowth} times: {rates}");
+    Console.WriteLine($"Elaborating a platform table costs {rates} heartbeats per definition");
+    foreach (var site in sites)
+    {
+        var measured = string.Join(", ", sizes.Select(size =>
+            string.Create(CultureInfo.InvariantCulture, $"{costs[(site, size)]} at {size}")));
+        var grows = sizes.Zip(sizes.Skip(1))
+            .Any(pair => costs[(site, pair.Second)] > costs[(site, pair.First)] * AllowedGrowth);
+        if (grows)
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"""Platform {site} costs {measured} heartbeats, exceeding the growth limit of {AllowedGrowth}."""));
+        Console.WriteLine($"PASS the platform {site} check costs {measured} heartbeats at that many definitions");
+    }
 }
 
 // The heartbeats `decide +kernel` adds to the name clause of the call and field operand checks, which reads a typed
@@ -2899,7 +3083,9 @@ string MethodNumber(string extracted, string method, string name)
         parts.Add(proof.Value);
         start = proof.Index + proof.Length;
     }
-    parts.Add(narrowed[start..]);
+    // Audit each measured proof; later declarations cannot contribute to its elaboration cost.
+    parts.Add(string.Join('\n', obligations.Select(obligation =>
+        $"#print axioms {obligation.Proof.Groups["name"].Value}")) + "\nend Extracted\n");
     var costs = PartHeartbeats(Path.Combine(output, "BodyChecked.lean"), parts);
     long Cost(string kind) => costs[readAt[kind]] - costs[readAt[kind] - 1];
     return (Cost("body"), tablesMethod is null ? 0 : Cost("tables"));
@@ -3618,6 +3804,13 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"\bmodel (lookup (?:first|middle|last)|agreement|calls) ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex ModelTableCost { get; }
+
+    [GeneratedRegex(@"\bplatform ([a-z]+) ([0-9]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex PlatformTableCost { get; }
+
+    /// <summary>The cost of selecting and checking distinct imported calls.</summary>
+    [GeneratedRegex(@"import links (\d+) (\d+) heartbeats")]
+    internal static partial Regex ImportLinkCost { get; }
 
     [GeneratedRegex(@"\b((?:thrownEqual|thrownUnequal|clrUnequal|raisesEqual) [A-Za-z]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex ExceptionDecision { get; }

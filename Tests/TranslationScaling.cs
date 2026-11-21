@@ -40,7 +40,7 @@ var start = extracted.IndexOf("theorem translation_valid :", StringComparison.Or
 var end = extracted.IndexOf("def programLength", start, StringComparison.Ordinal);
 var monolithicSource = extracted[..start] +
     "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
-    "methodEvidence imports program := by decide\n" + extracted[end..];
+    "platformDefinitions methodEvidence imports program := by decide\n" + extracted[end..];
 void RequireElaboratorRefusal(string path, int code, string diagnostic)
 {
     var theoremLine = File.ReadLines(path).TakeWhile(line =>
@@ -104,7 +104,8 @@ Console.WriteLine("PASS six-method compiled fixture: the elaborator refuses the 
     var kernelFile = Path.Combine(work, "Monolithic.lean");
     File.WriteAllText(kernelFile, NarrowEvidence(full[..from] +
         "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
-        "methodEvidence imports program := by decide +kernel\n" + full[to..], "translation_valid") +
+        "platformDefinitions methodEvidence imports program := by decide +kernel\n" + full[to..],
+        "translation_valid") +
         "\n#eval show IO Nat from IO.getNumHeartbeats\n");
     var (peak, output) = MeasurePeakGigabytes(["lake", "env", "lean", "-DElab.async=false", kernelFile],
         FixturePackage());
@@ -183,7 +184,8 @@ File.WriteAllText(proof, """
 import Extracted
 namespace ExampleProof
 theorem correctness : CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
-    Extracted.assemblies Extracted.methodEvidence Extracted.imports Extracted.program :=
+    Extracted.assemblies Extracted.platformDefinitions Extracted.methodEvidence Extracted.imports
+    Extracted.program :=
   Extracted.translation_valid
 #print axioms correctness
 end ExampleProof

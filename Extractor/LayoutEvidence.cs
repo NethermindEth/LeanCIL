@@ -140,7 +140,7 @@ internal sealed class LayoutEvidence
             if (rawTypes[index] is not GenericInstanceType) continue;
             var identity = Identity(rawTypes[index]);
             var name = $"layoutIdentity{index}";
-            var bytes = MetadataSlices.Bytes(IdentityText.Utf8(identity));
+            var bytes = ByteLiterals.Of(IdentityText.Utf8(identity));
             var spelling = IdentityText.Quote(identity);
             lean.AppendLine($"def {name} : String := Extraction.byteString {bytes} {spelling} (by cil_kernel_rfl)");
             rowIdentities[index] = name;

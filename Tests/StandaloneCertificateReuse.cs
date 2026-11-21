@@ -24,7 +24,8 @@ import Extracted
 namespace ExampleProof
 /-- The emitted program satisfies its complete translation evidence. -/
 theorem correctness : CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
-    Extracted.assemblies Extracted.methodEvidence Extracted.imports Extracted.program :=
+    Extracted.assemblies Extracted.platformDefinitions Extracted.methodEvidence Extracted.imports
+    Extracted.program :=
   Extracted.translation_valid
 #print axioms correctness
 end ExampleProof

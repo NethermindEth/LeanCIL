@@ -155,6 +155,7 @@ internal sealed class DeepCheckInputs
         var sourceCount = pins.Count;
         AddPlatformImages(pins, identity);
         AddReferenceImages(pins, sourceCount);
+        AddForwardedTypeImages(pins, sourceCount);
         return pins.AsReadOnly();
 
         void Add(JsonElement record, string digestProperty)
@@ -213,6 +214,74 @@ internal sealed class DeepCheckInputs
         }
         if (matched.Count > 0 || malformed)
             pins[0] = pins[0] with { KeyCoverage = !malformed && matched.Count == required.Count };
+    }
+
+    /// <summary>Follow top-level TypeRefs from extraction pins through supplied forwarding images.
+    /// The Lean audit checks each candidate path against the actual scoped declaration.</summary>
+    void AddForwardedTypeImages(List<Pin> pins, int sourceCount)
+    {
+        if (pins.Select(pin => pin.Image.Digest).Distinct().Count() == byDigest.Count) return;
+        var available = byDigest.Values.Select(image => (Image: image, Identity: ReadAssemblyName(image)?.FullName))
+            .Where(item => item.Identity is not null)
+            .ToLookup(item => item.Identity!, item => item.Image, StringComparer.Ordinal);
+        var selected = pins.Select(pin => pin.Identity).ToHashSet(StringComparer.Ordinal);
+        Queue<(string Scope, string Namespace, string Name)> pending = new();
+        foreach (var pin in pins.Take(sourceCount).DistinctBy(pin => pin.Image.Digest))
+        {
+            try
+            {
+                using var pe = pin.Image.OpenPe();
+                var metadata = pe.GetMetadataReader();
+                foreach (var handle in metadata.TypeReferences)
+                {
+                    var type = metadata.GetTypeReference(handle);
+                    if (type.ResolutionScope.Kind != HandleKind.AssemblyReference) continue;
+                    var assembly = metadata.GetAssemblyReference((AssemblyReferenceHandle)type.ResolutionScope);
+                    if (!InvalidTokenWidth(metadata, assembly))
+                        pending.Enqueue((assembly.GetAssemblyName().FullName,
+                            metadata.GetString(type.Namespace), metadata.GetString(type.Name)));
+                }
+            }
+            catch (BadImageFormatException) { } // The image and row audits diagnose malformed extraction pins.
+        }
+        HashSet<(string, string, string)> visited = [];
+        Dictionary<string, ILookup<(string, string), string>> forwarders = new(StringComparer.Ordinal);
+        while (pending.TryDequeue(out var type))
+        {
+            if (!visited.Add(type) || !available.Contains(type.Scope)) continue;
+            if (!forwarders.TryGetValue(type.Scope, out var index))
+            {
+                var candidates = available[type.Scope].ToArray();
+                if (candidates.Length != 1)
+                    throw new InvalidDataException("Multiple supplied images for " + type.Scope);
+                if (selected.Add(type.Scope)) pins.Add(new(type.Scope, candidates[0], Reference: true));
+                index = ReadForwarders(candidates[0]);
+                forwarders.Add(type.Scope, index);
+            }
+            foreach (var target in index[(type.Namespace, type.Name)])
+                pending.Enqueue((target, type.Namespace, type.Name));
+        }
+    }
+
+    static ILookup<(string, string), string> ReadForwarders(Image image)
+    {
+        List<((string, string) Type, string Target)> rows = [];
+        try
+        {
+            using var pe = image.OpenPe();
+            var metadata = pe.GetMetadataReader();
+            foreach (var handle in metadata.ExportedTypes)
+            {
+                var type = metadata.GetExportedType(handle);
+                if (!type.IsForwarder || type.Implementation.Kind != HandleKind.AssemblyReference) continue;
+                var assembly = metadata.GetAssemblyReference((AssemblyReferenceHandle)type.Implementation);
+                if (!InvalidTokenWidth(metadata, assembly))
+                    rows.Add(((metadata.GetString(type.Namespace), metadata.GetString(type.Name)),
+                        assembly.GetAssemblyName().FullName));
+            }
+        }
+        catch (BadImageFormatException) { } // The kernel still checks every selected name in the supplied source.
+        return rows.ToLookup(row => row.Type, row => row.Target);
     }
 
     static bool InvalidTokenWidth(MetadataReader reader, AssemblyReference reference) =>
@@ -303,7 +372,10 @@ internal sealed class DeepCheckInputs
         }
     }
 
-    static string? PlatformIdentity(Image image)
+    static string? PlatformIdentity(Image image) =>
+        ReadAssemblyName(image) is { } name && CoreLibrary(name) ? name.FullName : null;
+
+    static AssemblyName? ReadAssemblyName(Image image)
     {
         try
         {
@@ -311,8 +383,7 @@ internal sealed class DeepCheckInputs
             if (!pe.HasMetadata) return null;
             var metadata = pe.GetMetadataReader();
             if (!metadata.IsAssembly) return null;
-            var assembly = metadata.GetAssemblyDefinition().GetAssemblyName();
-            return CoreLibrary(assembly) ? assembly.FullName : null;
+            return metadata.GetAssemblyDefinition().GetAssemblyName();
         }
         catch (BadImageFormatException) { return null; } // A digest list can include arbitrary unused files.
     }

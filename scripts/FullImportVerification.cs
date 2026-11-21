@@ -1081,6 +1081,7 @@ run_cmd do
             library.ExpectedModule + ".Extracted.rawLayouts " +
             library.ExpectedModule + ".Extracted.computedLayouts " +
             library.ExpectedModule + ".Extracted.assemblies " +
+            library.ExpectedModule + ".Extracted.platformDefinitions " +
             library.ExpectedModule + ".Extracted.methodEvidence " +
             library.ExpectedModule + ".Extracted.imports " + program + " := " +
             library.ExpectedModule + ".Extracted.translation_valid");

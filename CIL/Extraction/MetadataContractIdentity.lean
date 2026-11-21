@@ -22,6 +22,7 @@ def contractHex (bytes : List Nat) : List Nat :=
 def contractValueKind : TypeKind → Option Bool
   | .valueType | .enumType _ => some true
   | .classType | .interfaceType => some false
+  | .importedOwner => none
   | .external hint => hint
 
 /-- The scoped named component and its signature class/value marker. -/

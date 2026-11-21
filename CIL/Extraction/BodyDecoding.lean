@@ -15,8 +15,10 @@ definition cannot differ from the bytes it was read from.
 A `TokenTable` says which decoded operand each metadata token resolves to in this method. The
 decoder ties every operand to the four token bytes in the body, and `MetadataBinding` checks
 each table entry, the local variable types the header's signature token names and the method's
-own definition against the metadata rows the body carries. That the carried rows are the image's
-rows, the PE container and definitions in platform assemblies stay trusted.
+own definition against the metadata rows the body carries, and reads what it relies on about a
+type no carried slice defines from the body's platform definitions, which `BodyDecodes` equates
+with the extraction's one list. That the carried rows are the image's rows and the PE container
+stay trusted.
 
 Opcodes use the numbering of `RawInstruction`: one-byte opcodes keep their byte and two-byte
 opcodes `0xFE nn` are `0xFE00 + nn`. Branch operands become instruction indices, and a branch may
@@ -160,6 +162,69 @@ structure TokenTable where
   operands : List (Nat × RawOperand)
   deriving DecidableEq, Repr
 
+/-- The extraction's import slots and the sorted names of their published layouts. -/
+structure ImportSlotIndex where
+  slots : FlowIndex ImportSlot
+  layouts : Array (List Nat)
+
+/-- Index the verified slots by program position and their published layouts by full identity. -/
+def ImportSlotIndex.ofList (imports : List ImportSlot) : ImportSlotIndex :=
+  let names := imports.flatMap fun slot =>
+    slot.layouts.published.map fun row => bytesOf row.identity
+  { slots := FlowIndex.ofList imports, layouts := names.mergeSort.toArray }
+
+/-- Static call slots at their direct-link pcs and the value layouts published by the imports. -/
+structure BodyImports where
+  calls : List (Prod Nat ImportSlot) := []
+  layouts : Array (List Nat) := #[]
+  deriving DecidableEq, Repr
+
+/-- Only direct links into the import part of the program grant a call its export identity. -/
+def ImportSlotIndex.forLinks (imports : ImportSlotIndex) (methodCount : Nat)
+    (links : List (Prod Nat Link)) : BodyImports :=
+  match imports.slots with
+  | .empty => {}
+  | slots =>
+    let calls := links.filterMap fun (pc, link) => do
+      let .direct target := link | none
+      guard (methodCount <= target)
+      return (pc, <- slots.get? (target - methodCount))
+    { calls, layouts := imports.layouts }
+
+/-- Each mention of an imported method in the instruction stream is a call at its linked pc. -/
+def BodyImports.checkUses (bound : BodyImports)
+    (identities : Std.TreeMap String ImportSlot) (code : List RawInstruction) : Bool :=
+  let positions := Std.TreeMap.ofList bound.calls
+  code.zipIdx.all fun (instruction, pc) =>
+    match instruction.operand, positions[pc]? with
+    | .call site, expected =>
+      match site.target, expected with
+      | .external name, some slot => instruction.opcode == 0x28 && slot.identity == name
+      | .external name, none => !identities.contains name
+      | .managed _, slot => slot.isNone
+    | _, slot => slot.isNone
+
+/-- Every use of a registered import identity has its own direct call at its linked pc. -/
+theorem BodyImports.checked_call_has_link {bound : BodyImports}
+    {identities : Std.TreeMap String ImportSlot} {code : List RawInstruction}
+    {instruction : RawInstruction} {pc : Nat} {site : CallSite} {identity : String}
+    (checked : bound.checkUses identities code = true)
+    (atPc : Membership.mem code.zipIdx (instruction, pc))
+    (operand : instruction.operand = .call site)
+    (target : site.target = .external identity)
+    (registered : identities.contains identity = true) :
+    Exists fun slot => (Std.TreeMap.ofList bound.calls)[pc]? = some slot /\
+      instruction.opcode = 0x28 /\ slot.identity = identity := by
+  unfold BodyImports.checkUses at checked
+  have accepted := List.all_eq_true.mp checked (instruction, pc) atPc
+  cases entry : (Std.TreeMap.ofList bound.calls)[pc]? with
+  | none => simp [operand, target, entry, registered] at accepted
+  | some slot =>
+    refine Exists.intro slot (And.intro rfl ?_)
+    simpa [operand, target, entry] using accepted
+
+#print axioms BodyImports.checked_call_has_link
+
 /-- The exact bytes of one method body, its header and code but not its extra sections, each
     byte a `Nat` below 256, with the token table its operands resolve through, the metadata
     those tokens are checked against and the lookup tables of that metadata. -/
@@ -177,9 +242,14 @@ structure BodyEvidence where
   /-- The identity of every assembly the extraction pins, as bytes; `BodyDecodes` ties them to
       the pins. A reference into one of them needs its slice among `metadata`. -/
   pinned : PinnedIndex
+  /-- The platform definitions the checks read a type outside the carried slices from;
+      `BodyDecodes` equates them with the extraction's. -/
+  platform : PlatformTable := {}
+  /-- The direct import links and published layout names bound by the translation certificate. -/
+  imports : BodyImports := {}
   /-- The type arguments of a generic instance, method arguments first, as the types its
       signature names; empty for a method that is not an instance. -/
-  instantiation : List ResolvedType := []
+  instantiation : List InstanceArgument := []
   /-- The instruction index and token of each static field access and field `ldtoken` whose
       field a carried `Field` row defines, in code order; the decoder records the same list. -/
   statics : List (Nat × Nat) := []
@@ -425,23 +495,37 @@ private def decodeHeader : List Nat → Except BodyError (BodyHeader × List Nat
       | _ => .error .truncatedHeader
     else .error (.unsupportedHeader first)
 
+/-- Look up the slot authorized for an external target by the method's links. -/
+def callImportSlot (imports : Std.TreeMap String ImportSlot) (call : CallSite) : Option ImportSlot :=
+  match call.target with
+  | .external name => imports[name]?
+  | .managed _ => none
+
+/-- Index the slots for all imported calls in a body. -/
+def BodyImports.byIdentity (imports : BodyImports) : Std.TreeMap String ImportSlot :=
+  imports.calls.foldl (fun slots (_, entry) => slots.insert entry.identity entry) {}
+
 /-- The checked table of a body: every entry is checked against the metadata, and no token has
     two entries. -/
-private def checkTable (env : MetadataEnv) (frame : Frame) :
+private def checkTable (env : MetadataEnv) (frame : Frame)
+    (imports : Std.TreeMap String ImportSlot) :
     List (Nat × RawOperand) → Std.TreeMap Nat (RawOperand × TokenFacts) →
       Except BodyError (Std.TreeMap Nat (RawOperand × TokenFacts))
   | [], table => .ok table
   | (token, operand) :: rest, table => do
     if table.contains token then throw (.duplicateToken token)
-    let facts ← (checkEntryIn env frame token operand).mapError BodyError.metadata
-    checkTable env frame rest (table.insert token (operand, facts))
+    let checked := match operand with
+      | .call site => checkCallOperand env frame token site (callImportSlot imports site)
+      | _ => checkEntryIn env frame token operand
+    let facts <- checked.mapError BodyError.metadata
+    checkTable env frame imports rest (table.insert token (operand, facts))
 
 /-- Every call in an accepted token table passed the operand check in the same metadata frame. -/
-private theorem checkTable_calls {env : MetadataEnv} {frame : Frame}
+private theorem checkTable_calls {env : MetadataEnv} {frame : Frame} {imports}
     {entries : List (Nat × RawOperand)} {start result : Std.TreeMap Nat (RawOperand × TokenFacts)}
-    (checked : checkTable env frame entries start = .ok result)
+    (checked : checkTable env frame imports entries start = .ok result)
     {token : Nat} {call : CallSite} (listed : (token, .call call) ∈ entries) :
-    ∃ facts, checkCallOperand env frame token call = .ok facts := by
+    ∃ facts, checkCallOperand env frame token call (callImportSlot imports call) = .ok facts := by
   induction entries generalizing start with
   | nil => simp at listed
   | cons head rest induction =>
@@ -454,7 +538,7 @@ private theorem checkTable_calls {env : MetadataEnv} {frame : Frame}
     rename_i facts accepted
     rcases List.mem_cons.mp listed with first | later
     · cases first
-      cases bound : checkCallOperand env frame token call with
+      cases bound : checkCallOperand env frame token call (callImportSlot imports call) with
       | error fault => simp [checkEntryIn, bound, Except.mapError] at accepted
       | ok value => exact ⟨value, rfl⟩
     · exact induction checked later
@@ -464,20 +548,21 @@ private theorem checkTable_calls {env : MetadataEnv} {frame : Frame}
 /-- The metadata of a body as an environment of indexed slices, its own first, over the given
     identities and tables: independent of the number of rows. -/
 def MethodMetadata.environmentWith (metadata : MethodMetadata) (identities : List (List Nat))
-    (tables : List IndexTables) (pinned : PinnedIndex) : Except MetadataError MetadataEnv :=
+    (tables : List IndexTables) (pinned : PinnedIndex) (platform : PlatformTable) :
+    Except MetadataError MetadataEnv :=
   if tables.length != metadata.others.length + 1 || identities.length != tables.length then
     .error .tablesMismatch
   else do
     let indexed ← (metadata.slices.zip (identities.zip tables)).mapM
       fun (slice, identity, sliceTables) => slice.indexWith sliceTables identity
-    .ok (MetadataEnv.ofSlices indexed pinned.prefixes)
+    .ok (MetadataEnv.ofSlices indexed pinned.prefixes platform pinned.exact)
 
 /-- The metadata of a body as an environment of indexed slices, built from its bytes alone. -/
 def MethodMetadata.environment (metadata : MethodMetadata)
     (pinned : PinnedIndex := PinnedIndex.ofIdentities []) :
     Except MetadataError MetadataEnv := do
   .ok (MetadataEnv.ofSlices (← metadata.slices.mapM MetadataSlice.index)
-    pinned.prefixes)
+    pinned.prefixes (exactPins := pinned.exact))
 
 /-- Decode a method body: its header and its instructions, with branch operands as instruction
     indices and every token operand checked against the metadata. `arity` is the number of
@@ -490,20 +575,27 @@ def decodeBody (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence
   if code.length != header.codeSize then
     throw (.codeSizeMismatch header.codeSize code.length)
   let frame ← (env.frame arity ownerArity).mapError BodyError.metadata
-  let tokens ← checkTable env frame body.tokens.operands ∅
+  let imports := body.imports.byIdentity
+  let tokens <- checkTable env frame imports body.tokens.operands {}
   let (raw, statics) ← decodeInstructions tokens code.length 0 0 code
-  let starts := indexStarts raw 0 false ∅
+  if !body.imports.calls.isEmpty && !body.imports.checkUses imports raw then
+    throw (.metadata (.operandMismatch 0))
+  let starts := indexStarts raw 0 false {}
   let instructions ← raw.mapM (resolveBranches starts code.length)
   .ok { maxStack := header.maxStack, initLocals := header.initLocals,
         localSignature := header.localSignature, code := instructions, statics := statics }
+
+/-- The metadata environment and imported layouts used to check the body's own tokens. -/
+def BodyEvidence.environment (body : BodyEvidence) : Except MetadataError MetadataEnv := do
+  let env ← body.metadata.environmentWith body.identities body.tables body.pinned body.platform
+  return { env with publishedLayouts := body.imports.layouts }
 
 /-- The method's definition, its locals and its body, each checked against the metadata the
     body carries: the decoded body, when everything agrees with the method instantiated at
     `arguments`. -/
 def checkBody (body : BodyEvidence) (method : RawMethod) (arguments : List TypeExpr) :
     Except BodyError DecodedBody := do
-  let env ← (body.metadata.environmentWith body.identities body.tables body.pinned).mapError
-    BodyError.metadata
+  let env ← body.environment.mapError BodyError.metadata
   let names ← (methodIdentityValid env method body.instantiation arguments).mapError
     BodyError.metadata
   if names != body.names then throw (.metadata (.methodMismatch method.token))
@@ -532,16 +624,20 @@ def checkBody (body : BodyEvidence) (method : RawMethod) (arguments : List TypeE
     `maxStack`, `initLocals` and `code` are what the body bytes and the metadata say, through the
     body's token table. Names are tied to bytes by equations, so no decision evaluates a string:
     each slice's assembly spells the identity the body lists, the method's own assembly is the
-    pin, the pinned identities the body lists are those of the extraction's pins, the owner and
-    base class names the metadata resolves are the ones the method states, and `signature`, the
-    string a proof selects the method by, is Cecil's full name of the method the row defines,
-    instantiated at `arguments`. -/
-abbrev BodyDecodes (pins : List AssemblyPin) (pin : AssemblyPin) (body : BodyEvidence)
-    (method : RawMethod) (arguments : List TypeExpr) (signature : String) : Prop :=
+    pin, the pinned identities the body lists are those of the extraction's pins, its platform
+    definitions are the extraction's `platform`, its imported calls and layouts are those of
+    the verified links and slots, the owner and base class names the metadata
+    resolves are the ones the method states, and `signature`, the string a proof selects the
+    method by, is Cecil's full name of the method the row defines, instantiated at
+    `arguments`. -/
+abbrev BodyDecodes (pins : List AssemblyPin) (platform : PlatformTable) (pin : AssemblyPin)
+    (body : BodyEvidence) (method : RawMethod) (arguments : List TypeExpr) (signature : String)
+    (imports : BodyImports := {}) : Prop :=
   AssembliesIdentified body.metadata body.identities ∧
     tablesMatch body.metadata body.tables = true ∧
     body.metadata.own.assembly.identity = pin.identity ∧
     body.pinned.identities.mapM spelled? = some (pins.map (·.identity)) ∧
+    (body.platform, body.imports) = (platform, imports) /\
     body.names.Spell method ∧ body.names.Selects signature ∧
     bodyMatches body method arguments = true
 
@@ -723,7 +819,7 @@ private theorem decodeBody_checkedTable {env : MetadataEnv} {arity ownerArity : 
     {body : BodyEvidence} {decoded : DecodedBody} (ok : decodeBody env arity ownerArity body =
       .ok decoded) :
     ∃ frame table, env.frame arity ownerArity = .ok frame ∧
-      checkTable env frame body.tokens.operands ∅ = .ok table := by
+      checkTable env frame body.imports.byIdentity body.tokens.operands ∅ = .ok table := by
   unfold decodeBody at ok
   simp only [bind, Except.bind] at ok
   repeat' split at ok
@@ -736,14 +832,14 @@ private theorem decodeBody_checkedTable {env : MetadataEnv} {arity ownerArity : 
 #print axioms decodeBody_checkedTable
 
 /-- A bound body validates every call reference listed in its token table in its own type frame. -/
-private theorem BodyDecodes.checkedCall {pins pin body method arguments signature}
-    (decodes : BodyDecodes pins pin body method arguments signature) {token : Nat} {call : CallSite}
+private theorem BodyDecodes.checkedCall {pins platform pin body method arguments signature imports}
+    (decodes : BodyDecodes pins platform pin body method arguments signature imports) {token : Nat} {call : CallSite}
     (listed : (token, RawOperand.call call) ∈ body.tokens.operands) :
     ∃ env frame facts,
-      body.metadata.environmentWith body.identities body.tables body.pinned = .ok env ∧
+      body.environment = .ok env ∧
       env.frame method.genericParameters.length method.ownerParameters.length = .ok frame ∧
-      checkCallOperand env frame token call = .ok facts := by
-  have matched := decodes.2.2.2.2.2.2
+      checkCallOperand env frame token call (callImportSlot body.imports.byIdentity call) = .ok facts := by
+  have matched := decodes.2.2.2.2.2.2.2
   unfold bodyMatches at matched
   split at matched
   · rename_i checked
@@ -756,7 +852,7 @@ private theorem BodyDecodes.checkedCall {pins pin body method arguments signatur
            (show decodeBody _ _ _ body = .ok _ from by assumption)
          obtain ⟨facts, accepted⟩ := checkTable_calls tableEq listed
          refine ⟨_, frame, facts, ?_, frameEq, accepted⟩
-         cases envEq : body.metadata.environmentWith body.identities body.tables body.pinned <;>
+         cases envEq : body.environment <;>
            simp_all [Except.mapError])
   · contradiction
 
@@ -764,15 +860,16 @@ private theorem BodyDecodes.checkedCall {pins pin body method arguments signatur
 
 /-- A bound body checks each token's call reference and external identity against one member. -/
 theorem BodyDecodes.externalTarget {pins : List AssemblyPin} {pin : AssemblyPin}
+    {platform : PlatformTable} {imports : BodyImports}
     {body : BodyEvidence} {method : RawMethod} {arguments : List TypeExpr} {signature : String}
-    (decodes : BodyDecodes pins pin body method arguments signature) {token : Nat}
+    (decodes : BodyDecodes pins platform pin body method arguments signature imports) {token : Nat}
     {call : CallSite} {identity : String} (listed : (token, .call call) ∈ body.tokens.operands)
     (externalTarget : call.target = .external identity) :
     ∃ env frame site,
-      body.metadata.environmentWith body.identities body.tables body.pinned = .ok env ∧
+      body.environment = .ok env ∧
       env.frame method.genericParameters.length method.ownerParameters.length = .ok frame ∧
-      env.methodSite token = .ok site ∧ checkCallReference env frame token site call = .ok () ∧
-      site.definition = none ∧ (site.externalName = some (bytesOf identity) ∨
+      resolveCallMember env frame token call (callImportSlot body.imports.byIdentity call) = .ok site ∧
+      checkCallReference env frame token site call = .ok () ∧ site.definition = none ∧ (site.externalName = some (bytesOf identity) ∨
         site.contractName frame = some (bytesOf identity)) := by
   obtain ⟨env, frame, _, built, localFrame, checked⟩ := decodes.checkedCall listed
   obtain ⟨site, target⟩ := checkCallOperand_external checked externalTarget
@@ -781,9 +878,9 @@ theorem BodyDecodes.externalTarget {pins : List AssemblyPin} {pin : AssemblyPin}
 #print axioms BodyDecodes.externalTarget
 
 /-- The checked table contains only supplied token operands or operands already in its input. -/
-private theorem checkTable_origin {env : MetadataEnv} {frame : Frame}
+private theorem checkTable_origin {env : MetadataEnv} {frame : Frame} {imports}
     {entries : List (Nat × RawOperand)} {start result : Std.TreeMap Nat (RawOperand × TokenFacts)}
-    (checked : checkTable env frame entries start = .ok result) {key operand facts}
+    (checked : checkTable env frame imports entries start = .ok result) {key operand facts}
     (found : result[key]? = some (operand, facts)) :
     (key, operand) ∈ entries ∨ start[key]? = some (operand, facts) := by
   induction entries generalizing start with
@@ -884,12 +981,12 @@ private theorem decodeBody_call {env arity ownerArity body decoded}
 #print axioms decodeBody_call
 
 /-- Each call instruction of the decoded method reads an operand from this body's token table. -/
-private theorem BodyDecodes.callOperand {pins pin body method arguments signature}
-    (decodes : BodyDecodes pins pin body method arguments signature)
+private theorem BodyDecodes.callOperand {pins platform pin body method arguments signature imports}
+    (decodes : BodyDecodes pins platform pin body method arguments signature imports)
     {pc : Nat} {instruction : RawInstruction} {call : CallSite}
     (fetched : method.code[pc]? = some instruction) (called : instruction.operand = .call call) :
     ∃ token, (token, RawOperand.call call) ∈ body.tokens.operands := by
-  have matched := decodes.2.2.2.2.2.2
+  have matched := decodes.2.2.2.2.2.2.2
   unfold bodyMatches at matched
   split at matched
   · rename_i decoded checked
@@ -907,17 +1004,17 @@ private theorem BodyDecodes.callOperand {pins pin body method arguments signatur
 #print axioms BodyDecodes.callOperand
 
 /-- Every decoded external call names the metadata member of its own reference. -/
-theorem BodyDecodes.callExternalTarget {pins pin body method arguments signature}
-    (decodes : BodyDecodes pins pin body method arguments signature)
+theorem BodyDecodes.callExternalTarget {pins platform pin body method arguments signature imports}
+    (decodes : BodyDecodes pins platform pin body method arguments signature imports)
     {pc : Nat} {instruction : RawInstruction} {call : CallSite} {identity : String}
     (fetched : method.code[pc]? = some instruction) (called : instruction.operand = .call call)
     (externalTarget : call.target = .external identity) :
     ∃ token env frame site,
       (token, RawOperand.call call) ∈ body.tokens.operands ∧
-      body.metadata.environmentWith body.identities body.tables body.pinned = .ok env ∧
+      body.environment = .ok env ∧
       env.frame method.genericParameters.length method.ownerParameters.length = .ok frame ∧
-      env.methodSite token = .ok site ∧ checkCallReference env frame token site call = .ok () ∧
-      site.definition = none ∧ (site.externalName = some (bytesOf identity) ∨
+      resolveCallMember env frame token call (callImportSlot body.imports.byIdentity call) = .ok site ∧
+      checkCallReference env frame token site call = .ok () ∧ site.definition = none ∧ (site.externalName = some (bytesOf identity) ∨
         site.contractName frame = some (bytesOf identity)) := by
   obtain ⟨token, listed⟩ := decodes.callOperand fetched called
   obtain ⟨env, frame, site, resolved⟩ := decodes.externalTarget listed externalTarget
@@ -927,19 +1024,20 @@ theorem BodyDecodes.callExternalTarget {pins pin body method arguments signature
 
 /-- Each managed call in the decoded body resolves its operand to a MethodDef in a particular
     metadata slice. A MemberRef in the caller may have a different token from that definition. -/
-theorem BodyDecodes.callManagedTarget {pins pin body method arguments signature}
-    (decodes : BodyDecodes pins pin body method arguments signature)
+theorem BodyDecodes.callManagedTarget {pins platform pin body method arguments signature imports}
+    (decodes : BodyDecodes pins platform pin body method arguments signature imports)
     {pc target : Nat} {instruction : RawInstruction} {call : CallSite}
     (fetched : method.code[pc]? = some instruction) (called : instruction.operand = .call call)
     (managed : call.target = .managed target) :
     ∃ token env frame site position,
       (token, RawOperand.call call) ∈ body.tokens.operands ∧
-      body.metadata.environmentWith body.identities body.tables body.pinned = .ok env ∧
+      body.environment = .ok env ∧
       env.frame method.genericParameters.length method.ownerParameters.length = .ok frame ∧
       env.methodSite token = .ok site ∧ checkCallReference env frame token site call = .ok () ∧
       site.definition = some (position, target) := by
   obtain ⟨token, listed⟩ := decodes.callOperand fetched called
   obtain ⟨env, frame, _, built, localFrame, checked⟩ := decodes.checkedCall listed
+  simp only [callImportSlot, managed] at checked
   obtain ⟨site, position, resolved⟩ := checkCallOperand_managed checked managed
   exact ⟨token, env, frame, site, position, listed, built, localFrame, resolved⟩
 

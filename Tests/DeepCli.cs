@@ -20,6 +20,12 @@ preparation.EnsureExtractorBuilt();
 MultiAssemblyFixture fixture = new("DeepCli");
 var cli = args is [var executable] && !executable.StartsWith("--", StringComparison.Ordinal)
     ? new[] { Path.GetFullPath(executable) } : fixture.Cli;
+if (args is ["--enums"])
+{
+    CheckEnumStorage();
+    return;
+}
+
 const string libName = "DeepCli.Library";
 var lib = fixture.Build("Library", libName,
     "namespace MultiFixture; public static class Mix { public static ulong Step(ulong x) => x * 3 + 1; }");
@@ -229,6 +235,31 @@ void CheckPlatformPair()
     Console.WriteLine("PASS tuple forwarding, missing destination and swapped physical generic field signatures");
 }
 
+void CheckEnumStorage()
+{
+    var assembly = fixture.Build("Enums", "DeepCli.Enums", """
+        namespace EnumFixture;
+        public enum Flags : ulong { One = 1 }
+        public static class Operations
+        {
+            public static Flags Set(Flags input) => input | Flags.One;
+        }
+        """);
+    var extracted = fixture.Artifact("EnumExtraction");
+    Run([.. cli, "extract", assembly, "EnumFixture.Operations::Set(EnumFixture.Flags)", extracted]);
+    var pins = Path.Combine(fixture.Root, "enum.sha256");
+    File.WriteAllText(pins, Sha(assembly) + "  " + assembly + Environment.NewLine);
+    var verified = Execute([.. cli, "verify", extracted, "--proof", At("Examples/Proofs/EnumFlags.lean"),
+        "--theorem", "ExampleProof.correctness", "--deep-checks", pins, "--format", "json"]);
+    if (verified.Code != 0) throw new InvalidOperationException(verified.Output);
+    using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(extracted, "verified.json")));
+    var fact = report.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+        .Single(item => item.GetProperty("id").GetString() == "enum-underlying-types");
+    if (fact.GetProperty("status").GetString() != "reconfirmed" ||
+        fact.GetProperty("theorem").GetString() != "BindingAudit.enumStorage")
+        throw new InvalidOperationException("Incorrect enum storage report: " + fact);
+}
+
 void CheckPublisherKey()
 {
     var identity = JsonSerializer.SerializeToElement(new
@@ -410,6 +441,7 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
     CheckPlatformObject();
     CheckPlatformPair();
     CheckPublisherKey();
+    CheckEnumStorage();
 
     var tables = fixture.Build("Table", "DeepCli.Table", """
         public static class Table {
