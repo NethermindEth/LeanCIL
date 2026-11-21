@@ -271,7 +271,7 @@ using (var module = ModuleDefinition.ReadModule(assembly))
         var invalidLocal = Path.Combine(root, "Rejected-local-layout.lean");
         File.WriteAllText(invalidLocal,
             local.Replace(signature.Value, signature.Groups[1].Value + "999999", StringComparison.Ordinal));
-        rejected.Add(invalidLocal, "PASS raw callable local layout binding", "SpecializationValid");
+        rejected.Add(invalidLocal, "PASS raw callable local layout binding", ClosedArgumentsMismatch);
     }
 }
 evidence.Check();
@@ -296,6 +296,6 @@ static partial class ManagedPatterns
     [GeneratedRegex($"""(typeArguments := \[\.aggregate {ScopedIdentity} )\d+""")]
     internal static partial Regex TypeArgumentLayout { get; }
 
-    [GeneratedRegex($"""(\.functionPointer \(\.aggregate {ScopedIdentity} )\d+""")]
+    [GeneratedRegex($"""(locals := \[\.functionPointer \(\.aggregate {ScopedIdentity} )\d+""")]
     internal static partial Regex FunctionPointerLayout { get; }
 }
