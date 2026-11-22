@@ -1890,6 +1890,7 @@ partial class Program
                 CheckGroup(members, session, names, bound, first, share);
                 return;
             }
+            Dictionary<string, AuditedClosure>? checkedClosures = deepChecks is null ? null : [];
             if (interfaceModules.Length > 0)
             {
                 Stage(members, "contract interface validation");
@@ -1904,7 +1905,7 @@ partial class Program
                 string InterfaceArtifact(string module) =>
                     Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean");
                 if (!TryReplayContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
-                        InterfaceArtifact))
+                        InterfaceArtifact, checkedClosures))
                 {
                     Dictionary<string, string> interfaceFailures =
                         ReplayConsumerModules(session, interfaceModules, interfaceLeanPath);
@@ -1914,7 +1915,7 @@ partial class Program
                             string.Join("\n", interfaceFailures.Values));
                     RequireInterfaceArtifacts();
                     CheckContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
-                        InterfaceArtifact);
+                        InterfaceArtifact, checkedClosures: checkedClosures);
                 }
                 RequireInterfaceArtifacts();
             }
@@ -2156,7 +2157,7 @@ partial class Program
                 leanPath += Path.PathSeparator + deepRoot;
                 deep = BuildDeepSession(deepRoot, leanPath, extractedPaths[0],
                     extractions[members[0]], matchedPins!, () => Stage(proceeding, "deep-check sources"),
-                    ConsumerDeepEnvironment());
+                    ConsumerDeepEnvironment(), checkedClosures);
                 if (deep.Restored)
                 {
                     deepCacheHits++;

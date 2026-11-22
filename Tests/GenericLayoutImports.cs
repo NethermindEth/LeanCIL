@@ -322,13 +322,35 @@ foreach ((string name, string selector, string proof) in new[]
     string artifact = Path.Combine(root, "App-" + name);
     Run([.. cli, "extract", app, selector, artifact, .. Import(sidecar, interfaceDigest)]);
     string author = Path.Combine(callerPackage, proof + ".lean");
-    Run([.. cli, "verify", artifact, "--proof", author, "--theorem", proof + ".correctness", "--proof-root", callerPackage]);
-    Run([.. cli, "verify", artifact, "--proof", author, "--theorem", proof + ".correctness", "--proof-root", callerPackage, "--force-full-verify"]);
+    string[] verify = [.. cli, "verify", artifact, "--proof", author, "--theorem", proof + ".correctness",
+        "--proof-root", callerPackage];
+    if (name == "Identity")
+    {
+        string pins = Path.Combine(root, "generic-imports.sha256");
+        void CheckImportBinding(string[] images, string expected, string? theorem, params string[] options)
+        {
+            File.WriteAllLines(pins, images.Select(image => Sha(image) + "  " + image));
+            Run([.. verify, "--deep-checks", pins, .. options]);
+            using var certificate = JsonDocument.Parse(File.ReadAllText(Path.Combine(artifact, "verified.json")));
+            var fact = certificate.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+                .Single(entry => entry.GetProperty("id").GetString() == "import-identities");
+            if (fact.GetProperty("status").GetString() != expected || fact.GetProperty("theorem").GetString() != theorem)
+                throw new InvalidOperationException("Incorrect physical import evidence: " + fact);
+        }
+        CheckImportBinding([app], "not covered", null);
+        CheckImportBinding([app, lib], "reconfirmed", "BindingAudit.genericImports", "--force-full-verify");
+    }
+    else
+    {
+        Run(verify);
+        Run([.. verify, "--force-full-verify"]);
+    }
     JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
     JsonElement imported = report.GetProperty("imports")[0];
     if (imported.GetProperty("acceptedVia").GetString() != "independently-verified" ||
         imported.GetProperty("implementationSha256").GetString() != Sha(lib) || !imported.TryGetProperty("typedSignature", out _))
         throw new InvalidOperationException("Full verification omitted typed import or exact implementation evidence.");
+
     Console.WriteLine("PASS typed imported " + name + ": actual SDK DLL, exact contract and independent linked proof");
 }
 Console.WriteLine("PASS typed layout metadata, closed instances, modifier rejection and canonical sidecar digest");

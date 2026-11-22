@@ -10,6 +10,7 @@ import Tests.StrictBinding.PlatformKinds
 import Tests.StrictBinding.StaticData
 import Tests.StrictBinding.LayoutContent
 import Tests.StrictBinding.DispatchCatalogs
+import Tests.StrictBinding.GenericImports
 
 /-!
 # Strict binding tests: digests

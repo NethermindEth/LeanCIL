@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Numerics;
+using System.Text;
 using System.Text.Json;
 
 // Deep verification checks that the method bodies and carried metadata rows of an extraction are
@@ -120,8 +121,8 @@ partial class Program
         internal sealed record Image(Sha256Digest Digest) : BindingSubject;
     }
 
-    /// <summary>An assembly file the extraction read, with the digest the caller must confirm.</summary>
-    sealed record BindingImagePin(string Identity, Sha256Digest Digest, byte[] Bytes)
+    /// <summary>Exact bytes and the digest independently checked by their generated module.</summary>
+    record BindingData(Sha256Digest Digest, byte[] Bytes)
     {
         /// <summary>The generated module that holds the file's bytes, named by its full digest.</summary>
         internal string Module => "BindingAudit.I" + Digest;
@@ -129,9 +130,24 @@ partial class Program
         internal string Theorem => Module + ".digest";
     }
 
+    sealed record BindingImagePin(string Identity, Sha256Digest Digest, byte[] Bytes) : BindingData(Digest, Bytes);
+
+    sealed record BindingPublication(string Identity, BindingImagePin Producer, string InterfaceDigest,
+        string Profile, string Contract, BindingData Sidecar, BindingData Closure)
+    {
+        internal string[] Fields => [Identity, Producer.Identity, Producer.Digest.ToString(), InterfaceDigest,
+            Profile, Contract, Closure.Digest.ToString()];
+    }
+
     /// <summary>What a run audits: the extraction, the files it pinned and where the generated modules go.</summary>
     sealed record BindingPlan(string Output, BindingImagePin[] Images, int Methods,
-        bool? ObjectFields = null, bool? TupleFields = null, bool? PublicKeys = null);
+        bool? ObjectFields = null, bool? TupleFields = null, bool? PublicKeys = null,
+        BindingPublication[]? Imports = null)
+    {
+        internal IEnumerable<BindingData> Files => Images.Cast<BindingData>()
+            .Concat((Imports ?? []).SelectMany(import => new[] { import.Sidecar, import.Closure }))
+            .DistinctBy(file => file.Digest);
+    }
 
     /// <summary>
     /// Artifacts and requests that must join the caller's extraction and proof audit. A contribution with a result
@@ -253,7 +269,7 @@ partial class Program
     /// </summary>
     DeepSessionContribution BuildDeepSession(string session, string leanPath, string extractedOlean,
         ExtractionIdentity identity, IReadOnlyList<DeepCheckInputs.Pin> matchedPins, Action? sourcesReady = null,
-        string? environment = null)
+        string? environment = null, Dictionary<string, AuditedClosure>? checkedClosures = null)
     {
         session = Path.GetFullPath(session);
         extractedOlean = Path.GetFullPath(extractedOlean);
@@ -270,7 +286,7 @@ partial class Program
             identity.Root.GetProperty("methods").GetArrayLength(), matchedPins.FirstOrDefault(pin =>
                 pin.ObjectCoverage.HasValue)?.ObjectCoverage, matchedPins.FirstOrDefault(pin =>
                 pin.TupleCoverage.HasValue)?.TupleCoverage, matchedPins.FirstOrDefault(pin =>
-                pin.KeyCoverage.HasValue)?.KeyCoverage);
+                pin.KeyCoverage.HasValue)?.KeyCoverage, ReadPublishedImports(identity, pins, checkedClosures));
         var directory = Path.Combine(session, "BindingAudit");
         if (Directory.Exists(directory))
             throw new InvalidOperationException("Deep-check modules already exist in the session: " + directory);
@@ -545,13 +561,15 @@ partial class Program
         BindingFact.GenericConstraints =>
             "no generic parameter was selected, or a declaration, layout or import lacks physical coverage",
         BindingFact.PublicKeyTokens => "the supplied images do not cover the extraction pins' AssemblyRef targets",
-        BindingFact.ImportIdentities => "no check recomputes an import identity from its image",
+        BindingFact.ImportIdentities => "no complete check binds every generic call to its pinned producer and published contract",
         _ => throw new InvalidOperationException("Missing binding fact reason: " + fact)
     };
 
     const string ImagesModule = "BindingAudit.Images";
     const string LayoutContentModule = "BindingAudit.LayoutContent";
     const string LayoutContentTheorem = "BindingAudit.layoutContent";
+    const string ImportsModule = "BindingAudit.GenericImports";
+    const string ImportsTheorem = "BindingAudit.genericImports";
     const string DispatchCatalogsModule = "BindingAudit.DispatchCatalogs";
     const string DispatchCatalogsTheorem = "BindingAudit.dispatchCatalogs";
     const string GenericConstraintsModule = "BindingAudit.GenericConstraints";
@@ -730,13 +748,14 @@ partial class Program
 
     /// <summary>Derives a coverage bit from the physical checks and proves its value for the selected methods.</summary>
     static string CoverageSource(string check, string proposition, string theorem, string macro, string module,
-        string arguments = "Extracted.platformDefinitions Extracted.methodEvidence") => $$"""
+        string arguments = "Extracted.platformDefinitions Extracted.methodEvidence",
+        string additionalImports = "", string declarations = "") => $$"""
             import BindingAudit.Images
             import Extracted
             import StrictBinding.{{module}}
-            import Lean
+            import Lean{{additionalImports}}
 
-            namespace BindingAudit
+            namespace BindingAudit{{declarations}}
 
             open Lean Elab Term in
             elab "{{macro}}%" : term => do
@@ -753,7 +772,7 @@ partial class Program
     /// <summary>Writes one image module per digest and retains every pinned identity association.</summary>
     static void WriteBindingSources(BindingPlan plan)
     {
-        foreach (var image in plan.Images.DistinctBy(image => image.Digest))
+        foreach (var image in plan.Files)
             File.WriteAllText(ModuleSource(plan.Output, image.Module), ImageModuleSource(image));
         File.WriteAllText(ModuleSource(plan.Output, ImagesModule), ImagesModuleSource(plan));
         File.WriteAllText(ModuleSource(plan.Output, EnumStorageModule), CoverageSource(
@@ -832,9 +851,75 @@ partial class Program
                 end BindingAudit
 
                 """);
+        if (plan.Imports is { } publications)
+            File.WriteAllText(ModuleSource(plan.Output, ImportsModule), PublishedImportsSource(publications));
         foreach (var fact in PagedFacts)
             File.WriteAllText(ModuleSource(plan.Output, PagedFact(fact).Module), PagedFactModuleSource(fact,
                 plan.Methods, BindingPageSize(plan.Methods)));
+    }
+
+    /// <summary>Only a selected physical producer and a replayed interface can supply a publication.</summary>
+    static BindingPublication[]? ReadPublishedImports(ExtractionIdentity identity, BindingImagePin[] pins,
+        Dictionary<string, AuditedClosure>? closures)
+    {
+        var imports = identity.Imports;
+        if (imports.Length == 0 || closures is null) return null;
+        List<BindingPublication> publications = [];
+        Dictionary<string, BindingData> sidecars = new(LocationComparer);
+        foreach (var import in imports.OrderBy(entry => entry.GetProperty("slot").GetInt32()))
+        {
+            if (!import.TryGetProperty("typeArguments", out var arguments) ||
+                arguments.ValueKind != JsonValueKind.Array || arguments.GetArrayLength() == 0 ||
+                import.GetProperty("profile").GetString() != "scalar" ||
+                !import.TryGetProperty("typedSignature", out var signature) ||
+                signature.ValueKind != JsonValueKind.Object) return null;
+            string Field(string name) => import.GetProperty(name).GetString()!;
+            string constant = Field("contractConstant");
+            if (!signature.TryGetProperty("owner", out var owner) || owner.ValueKind != JsonValueKind.Object ||
+                !owner.TryGetProperty("scope", out var scopeName)) return null;
+            var scope = scopeName.GetString();
+            var producer = pins.SingleOrDefault(pin => pin.Identity == scope &&
+                pin.Digest.ToString() == Field("implementationSha256"));
+            if (producer is null || !closures.TryGetValue(constant, out var closure)) return null;
+            string path = ExtractionIdentity.Resolve(identity.Output, Field("sidecarPath"));
+            if (!sidecars.TryGetValue(path, out var sidecar))
+            {
+                if (!File.Exists(path)) return null;
+                byte[] bytes = File.ReadAllBytes(path);
+                sidecars.Add(path, sidecar = new(Sha256Digest.Of(bytes), bytes));
+            }
+            if (sidecar.Digest.ToString() != Field("sidecarSha256"))
+                throw new InvalidDataException("Published contracts sidecar digest mismatch: " + path);
+            var canonical = Encoding.UTF8.GetBytes(closure.canonical!);
+            var digest = Sha256Digest.Of(canonical);
+            if (digest.ToString() != Field("closureDigest"))
+                throw new InvalidDataException("Published closure digest mismatch: " + constant);
+            publications.Add(new(Field("identity"), producer, Field("interfaceDigest"), Field("profile"),
+                constant, sidecar, new(digest, canonical)));
+        }
+        return [.. publications];
+    }
+
+    static string PublishedImportsSource(BindingPublication[] imports)
+    {
+        var modules = string.Join("\n", imports.Select(item => item.Sidecar.Module).Distinct()
+            .Select(module => "import " + module));
+        var entries = string.Join(",\n      ", imports.Select(item =>
+            "mkAppN (mkConst ``StrictBinding.GenericImports.Publication.mk) #[" +
+            string.Join(", ", item.Fields.Select(field => "mkStrLit " + LeanString(field))) +
+            ", mkConst ``" + item.Sidecar.Module + ".image]"));
+        var declarations = "\n\n" + $$"""
+            open Lean in
+            elab "publications%" : term => do
+              let type := mkConst ``StrictBinding.GenericImports.Publication
+              let entries : Array Expr := #[
+                {{entries}}]
+              return entries.foldr (mkApp3 (mkConst ``List.cons [.zero]) type)
+                (mkApp (mkConst ``List.nil [.zero]) type)
+            """;
+        return CoverageSource("GenericImports.check", "GenericImportsChecked", "genericImports",
+            "genericImportCoverage", "GenericImports", "Extracted.profile Extracted.methodEvidence Extracted.imports publications%",
+            "\n" + modules, declarations);
     }
 
     static string KeyProposition(bool complete) => complete ? "PublicKeysBound" : "SuppliedPublicKeysValid";
@@ -846,7 +931,7 @@ partial class Program
     static string ModuleSource(string directory, string module) =>
         Path.Combine(directory, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
 
-    static string ImageModuleSource(BindingImagePin image) => $$"""
+    static string ImageModuleSource(BindingData image) => $$"""
         import StrictBinding.Sha256
         import CIL.Extraction.FixedDigits
 
@@ -1037,6 +1122,17 @@ partial class Program
             platform.Add(new(PublicKeysModule, new("BindingAudit.publicKeyTokens", statement, ApprovedAxioms),
                 new BindingSubject.Fact(BindingFact.PublicKeyTokens, keysComplete)));
         }
+        if (plan.Imports is { } publications)
+        {
+            object Publication(BindingPublication input) => App([Const("StrictBinding.GenericImports.Publication.mk"),
+                .. input.Fields.Select(field => (object)new { str = field }), Const(input.Sidecar.Module + ".image")]);
+            var expected = new { list = new { type = Const("StrictBinding.GenericImports.Publication"), level = 0,
+                items = publications.Select(Publication).ToArray() } };
+            var statement = App(Const("StrictBinding.GenericImportsChecked"), Const("BindingAudit.images"),
+                Const("Extracted.profile"), Const("Extracted.methodEvidence"), Const("Extracted.imports"), expected, "_");
+            platform.Add(new(ImportsModule, new(ImportsTheorem, statement, ApprovedAxioms, term: true),
+                new BindingSubject.Fact(BindingFact.ImportIdentities), "GenericImportsChecked"));
+        }
         return
         [
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
@@ -1059,10 +1155,10 @@ partial class Program
                 Const("BindingAudit.images"), Const("Extracted.methodEvidence")), ApprovedAxioms),
                 new BindingSubject.Fact(BindingFact.StaticData)),
             .. platform,
-            .. plan.Images.DistinctBy(image => image.Digest).Select(image => new BindingRequest(image.Module,
+            .. plan.Files.Select(image => new BindingRequest(image.Module,
                 new(image.Theorem,
                 App(Const("StrictBinding.DigestIs"), Const(image.Module + ".image"), Nat(image.Digest)),
-                ApprovedAxioms), new BindingSubject.Image(image.Digest)))
+                ApprovedAxioms), image is BindingImagePin ? new BindingSubject.Image(image.Digest) : null))
         ];
     }
 
@@ -1081,14 +1177,15 @@ partial class Program
             return result.Code == 0 ? null : BindingDiagnostic(result.Output);
         }
         Dictionary<string, string> failures = new(StringComparer.Ordinal);
-        foreach (var image in plan.Images.DistinctBy(image => image.Digest))
+        foreach (var image in plan.Files)
             if (Build(image.Module) is { } error) failures[image.Module] = "build: " + error;
-        if (plan.Images.Any(image => failures.ContainsKey(image.Module)))
+        if (plan.Files.Any(image => failures.ContainsKey(image.Module)))
             failures[ImagesModule] = "build: an image module did not build";
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
         var facts = PagedFacts.Select(fact => PagedFact(fact).Module)
             .Append(StaticDataModule).Append(EnumStorageModule).Append(PlatformKindsModule)
             .Append(GenericConstraintsModule).Append(LayoutContentModule).Append(DispatchCatalogsModule);
+        if (plan.Imports is not null) facts = facts.Append(ImportsModule);
         if (plan.ObjectFields.HasValue) facts = facts.Append(ObjectFieldsModule);
         if (plan.TupleFields.HasValue) facts = facts.Append(TupleFieldsModule);
         if (plan.PublicKeys.HasValue) facts = facts.Append(PublicKeysModule);

@@ -20,6 +20,7 @@ import StrictBinding.EnumStorageEvidence
 import StrictBinding.PlatformKinds
 import StrictBinding.LayoutContent
 import StrictBinding.DispatchCatalogs
+import StrictBinding.GenericImports
 
 /-!
 # Deep verification

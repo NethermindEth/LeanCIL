@@ -114,6 +114,26 @@ heartbeats for each layout. With that cost included, checking the contract once 
 it twice uses fewer kernel heartbeats than reducing two reads for either layout. The table
 gives command-level measurements after extraction. Image hashing and layout replay run separately.
 
+A second fixture, `LayoutProbe.Reader`, compares the historical `CIL.Op` interpreter at
+`27953edb` with canonical execution at `4d72d8c3`. The .NET 10 and .NET 11 builds produce
+identical eight-byte method bodies for each reader, including the field token and tiny header.
+Both interpreters use the same positive contract proof and consumer sources.
+
+| Layout | Proof | CIL.Op kernel heartbeats | Canonical kernel heartbeats | Proof objects in both |
+| --- | --- | ---: | ---: | ---: |
+| Explicit | Universal contract | 62,159 | 1,276,911 | 49 |
+| Explicit | Direct consumer | 64,722 | 1,279,438 | 91 |
+| Explicit | Consumer using contract | 7,700 | 7,700 | 371 |
+| Sequential | Universal contract | 62,159 | 1,261,729 | 49 |
+| Sequential | Direct consumer | 64,722 | 1,264,256 | 91 |
+| Sequential | Consumer using contract | 7,695 | 7,695 | 371 |
+
+Direct reduction costs 19.8 times as many kernel heartbeats for the explicit field and 19.5
+times as many for the sequential field. The universal proof incurs a comparable increase once
+per layout. Applying it to the same caller memory costs exactly the same in both models.
+The direct consumers took 24 and 25 ms to elaborate with `CIL.Op` and 291 and 279 ms with
+canonical execution in single runs. The explicit contract application took 6 ms with each.
+
 ## Reusing the compiled Countdown loop contract
 
 `Examples.Loops.Countdown(uint)` returns zero for every UInt32 input from empty entry memory.

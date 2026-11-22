@@ -416,8 +416,13 @@ interfaces, explicit overrides, additional metadata modules and unsupported sign
 fact uncovered.
 With all direct reference images supplied, the audit checks each AssemblyRef against its target's
 full publisher key or unsigned definition. It also compares each carried AssemblyRef token with
-the physical row in its source assembly. Generic import identities remain uncovered. `check` hashes
-each assembly and regenerates the extraction from those inputs.
+the physical row in its source assembly. For scalar static generic calls on top-level classes with
+primitive type arguments, supply both the caller and the producer images. Lean reads the call
+operand, follows its MethodSpec, MemberRef, TypeRef and AssemblyRef, and requires a unique
+matching MethodDef in the producer. Each selected export in the pinned contracts sidecar must
+match the imported slot and the independently audited declaration closure. Every slot must have a
+physical call site. Missing images, unsupported signatures and ambiguous targets leave
+`import-identities` uncovered. `check` hashes each assembly and regenerates the extraction.
 ### Folded instruction patterns
 
 A fold applies only to its recognized raw sequence with checked entry edges. Different compiler

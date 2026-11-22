@@ -3947,13 +3947,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     // Validation and closures come from leancil-audit on replayed oleans, so interface code cannot forge them.
     bool TryReplayContractInterfaces(ExtractionIdentity extraction, string[] modules, string leanPath,
-        Func<string, string> artifact)
+        Func<string, string> artifact, Dictionary<string, AuditedClosure>? checkedClosures = null)
     {
         if (!modules.Any(module => module != "ExtractedImports") ||
             Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") == "true") return false;
         try
         {
-            CheckContractInterfaces(extraction, modules, leanPath, artifact, replayTargets: modules);
+            CheckContractInterfaces(extraction, modules, leanPath, artifact, modules, checkedClosures);
             return true;
         }
         // Duplicate declarations and replay failures retain the independent checker diagnostics.
@@ -3961,7 +3961,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     void CheckContractInterfaces(ExtractionIdentity extraction, string[] modules, string leanPath,
-        Func<string, string> artifact, string[]? replayTargets = null)
+        Func<string, string> artifact, string[]? replayTargets = null, Dictionary<string, AuditedClosure>? checkedClosures = null)
     {
         string[] interfaces = modules.Where(module => module != "ExtractedImports").ToArray();
         JsonElement[] imports = extraction.Imports;
@@ -3983,6 +3983,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (closure.kind != import.GetProperty("contractKind").GetString())
                 throw new InvalidDataException("Published contract canonical type mismatch: " + constant);
         }
+        if (checkedClosures is not null)
+            foreach (var (name, closure) in closures) checkedClosures.Add(name, closure);
     }
 
     static JsonElement[] ImportedBindings(string output) => ExtractionIdentity.Read(output).Imports;
@@ -4910,23 +4912,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 extractionPublication = publication;
             }
             var bound = OleanHashes(fresh, session);
-            DeepSessionContribution? deep = null;
-            if (deepChecks is not null)
-            {
-                stage?.Invoke("deep checks");
-                deep = BuildDeepSession(fresh, leanPath, Path.Combine(fresh, "Extracted.olean"),
-                    extraction, matchedPins!, () => stage?.Invoke("deep-check sources"), extractedKey);
-                if (deep.Restored)
-                {
-                    deepCacheHits++;
-                    CacheProgress("certified deep checks: " + entry);
-                }
-                var next = OleanHashes(fresh, session);
-                RequireOnlyAdded(bound, next,
-                    [.. deep.Modules.Where(module => module != "Extracted")
-                        .Select(module => module.Replace('.', '/'))]);
-                bound = next;
-            }
+            Dictionary<string, AuditedClosure>? checkedClosures = deepChecks is null ? null : [];
             // Interfaces, symbols and the proof each run code when built: each build may add only its own oleans.
             // A keyed module only re-exports its plain one, which is what the audits below read.
             void BuildSelected(bool symbolsModules)
@@ -4968,15 +4954,32 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             {
                 stage?.Invoke("kernel replay");
                 string InterfaceArtifact(string module) => Path.Combine(fresh, module.Replace('.', '/') + ".olean");
-                if (!TryReplayContractInterfaces(extraction, importModules, leanPath, InterfaceArtifact))
+                if (!TryReplayContractInterfaces(extraction, importModules, leanPath, InterfaceArtifact, checkedClosures))
                 {
                     ReplayCheckedModules(importModules, leanPath,
                         "Kernel replay of published contract interfaces and App import assumptions");
-                    CheckContractInterfaces(extraction, importModules, leanPath, InterfaceArtifact);
+                    CheckContractInterfaces(extraction, importModules, leanPath, InterfaceArtifact, checkedClosures: checkedClosures);
                 }
                 if (!Same(bound, OleanHashes(fresh, session)))
                     throw new InvalidOperationException("Compiled artifacts changed during verification");
                 RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
+            }
+            DeepSessionContribution? deep = null;
+            if (deepChecks is not null)
+            {
+                stage?.Invoke("deep checks");
+                deep = BuildDeepSession(fresh, leanPath, Path.Combine(fresh, "Extracted.olean"),
+                    extraction, matchedPins!, () => stage?.Invoke("deep-check sources"), extractedKey, checkedClosures);
+                if (deep.Restored)
+                {
+                    deepCacheHits++;
+                    CacheProgress("certified deep checks: " + entry);
+                }
+                var next = OleanHashes(fresh, session);
+                RequireOnlyAdded(bound, next,
+                    [.. deep.Modules.Where(module => module != "Extracted")
+                        .Select(module => module.Replace('.', '/'))]);
+                bound = next;
             }
             if (File.Exists(stagedProof))
                 throw new InvalidOperationException("Proof sources changed during verification: Proof.lean");
