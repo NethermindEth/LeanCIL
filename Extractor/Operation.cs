@@ -177,9 +177,6 @@ internal static class NumericKinds
     internal static string Term(this NumericKind kind) => "." + kind.ToString().ToLowerInvariant();
 }
 
-/// <summary>An intrinsic of the scalar, vector or hardware families over the given number of operands.</summary>
-internal abstract record Intrinsic(int Arguments) : Operation;
-
 internal enum ScalarFunction
 {
     BigMul32, DivRem, Min, Max, Clamp, Abs, Sign, RotateLeft, RotateRight, PopCount, LeadingZeroCount,
@@ -191,7 +188,7 @@ internal enum ScalarFunction
 /// word a bit count returns.
 /// </summary>
 internal sealed record ScalarIntrinsic(ScalarFunction Function, int Width, bool Signed, int Result, int Arguments)
-    : Intrinsic(Arguments)
+    : Operation
 {
     /// <summary>The function counts bits, which the instruction semantics treats as pure word arithmetic.</summary>
     internal bool CountsBits => Function is ScalarFunction.PopCount or ScalarFunction.LeadingZeroCount or
@@ -211,6 +208,3 @@ internal sealed record ScalarIntrinsic(ScalarFunction Function, int Width, bool 
 
     public override int GetHashCode() => HashCode.Combine(Function, Arguments, OperandTypes);
 }
-
-/// <summary>The x86 64-bit division with remainder.</summary>
-internal sealed record X86BaseDivRem64() : Intrinsic(3);

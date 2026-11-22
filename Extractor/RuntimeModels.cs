@@ -31,7 +31,8 @@ internal static class RuntimeModels
     private const string V256Double = $"{Intrinsics}.Vector256`1<System.Double>";
     private const string V256Single = $"{Intrinsics}.Vector256`1<System.Single>";
     private const string V512UInt64 = $"{Intrinsics}.Vector512`1<System.UInt64>";
-    private const string UInt64Pair = "System.ValueTuple`2<System.UInt64,System.UInt64>";
+    internal const string X86DivRemSignature = "System.ValueTuple`2<System.UInt64,System.UInt64> " +
+        $"{X86}.X86Base/X64::DivRem(System.UInt64,System.UInt64,System.UInt64)";
     private const string Unsafe = "System.Runtime.CompilerServices.Unsafe";
 
     /// <summary>Whether a scope is the row that names <paramref name="platform"/>, column for column.</summary>
@@ -372,11 +373,11 @@ internal static class RuntimeModels
     private static Operation? HardwareModel(string signature, FeatureProfile profile)
     {
         if (PortableVectorSignatures.Contains(signature)) return Unoutlined.Site;
-        Operation Require(Feature feature, Operation? operation = null)
+        Operation Require(Feature feature)
         {
             if (!profile.Get(feature))
                 throw new InvalidDataException($"Reachable intrinsic lacks {feature}: {signature}");
-            return operation ?? Unoutlined.Site;
+            return Unoutlined.Site;
         }
         if (signature == $"{V256UInt64} {Avx2}::And({V256UInt64},{V256UInt64})")
             return Require(Feature.Avx2);
@@ -498,8 +499,7 @@ internal static class RuntimeModels
                 Require(Feature.Bmi2),
             $"System.UInt64 {Intrinsics}.Arm.ArmBase/Arm64::MultiplyHigh(System.UInt64,System.UInt64)" =>
                 Require(Feature.ArmBase64),
-            $"{UInt64Pair} {X86}.X86Base/X64::DivRem(System.UInt64,System.UInt64,System.UInt64)" =>
-                Require(Feature.X86Base64, new X86BaseDivRem64()),
+            X86DivRemSignature => Require(Feature.X86Base64),
             _ => null
         };
     }

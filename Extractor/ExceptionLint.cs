@@ -135,7 +135,7 @@ internal static partial class ExceptionLint
         return RuntimeModels.CallModel(reference, profile) switch
         {
             ScalarIntrinsic { Function: ScalarFunction.Abs } => FaultKind.Overflow,
-            X86BaseDivRem64 => FaultKind.DivideByZeroAndOverflow,
+            Unoutlined when reference.FullName == RuntimeModels.X86DivRemSignature => FaultKind.DivideByZeroAndOverflow,
             Unoutlined when Spans.MemberWidth(instruction, "get_Item", 1, profile.Architecture) is not null =>
                 FaultKind.IndexOutOfRange,
             _ => null
