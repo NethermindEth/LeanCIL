@@ -259,6 +259,59 @@ verification.VerifyContractVariant(assembly, "Examples", selectors["And"], Path.
     """, profile: "x64-v3", imports: "import CIL.Safety.IntrinsicExecution");
 Console.WriteLine("PASS AVX2 AND contract and certified OR replacement at (1, 2)");
 
+foreach (var (name, width, zero, highBit) in new (string, int, object, object)[]
+{
+    ("EqualBytes256", 256, Vector256<byte>.Zero, Vector256<byte>.Zero.WithElement(31, (byte)0x80)),
+    ("EqualSigned512", 512, Vector512<long>.Zero, Vector512<long>.Zero.WithElement(7, long.MinValue))
+})
+{
+    var folder = Path.Combine(root, name + "LeftTwice");
+    Directory.CreateDirectory(folder);
+    var image = Path.Combine(folder, "Examples.dll");
+    using (var variant = ModuleDefinition.ReadModule(assembly))
+    {
+        var method = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(method => method.Name == name);
+        method.Body.Instructions.Single(site => site.OpCode.Code == Code.Ldarg_1).OpCode = OpCodes.Ldarg_0;
+        variant.Write(image);
+    }
+    var original = runtime.GetMethod(name)!;
+    var changed = Assembly.Load(File.ReadAllBytes(image)).GetType("Examples.DivisionIntrinsics")!.GetMethod(name)!;
+    if (original.Invoke(null, [zero, zero]) is not true || original.Invoke(null, [zero, highBit]) is not false ||
+        changed.Invoke(null, [zero, highBit]) is not true)
+        throw new InvalidOperationException($"Unexpected CLR equality result for {name}");
+    verification.VerifyContractVariant(assembly, "Examples", selectors[name], Path.Combine(root, name + "Contract"),
+        image, selectors[name], folder, $$"""
+        /-- Equality compares every bit of the two vectors and preserves caller memory. -/
+        def equalVectors : MethodContract (BitVec {{width}} × BitVec {{width}}) Bool where
+          args pair := [.scalar (.v{{width}} pair.1), .scalar (.v{{width}} pair.2)]
+          results equal := [.scalar (.i32 (if equal then 1 else 0))]
+          pre _ _ := True
+          footprint _ := []
+          post pair before after equal := after = before ∧ equal = (pair.1 == pair.2)
+        """, """
+        set_option maxRecDepth 8192 in
+        theorem correctness : equalVectors.Holds Extracted.program 0 := by
+          rintro ⟨left, right⟩ memory -
+          apply MethodContract.Holds.intro (c := equalVectors) (input := (left, right)) memory
+            (left == right) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+          refine ⟨16, ?_⟩
+          change Except.ok (memory, [Value.scalar (.i32
+            (CIL.NarrowKind.unsigned8.extend (if left == right then 1 else 0)))]) =
+            Except.ok (memory, [Value.scalar (.i32 (if left == right then 1 else 0))])
+          rw [CIL.NarrowKind.extend_ite_one_zero]
+        """, $$"""
+        set_option maxRecDepth 8192 in
+        theorem correctness : equalVectors.Refuted Extracted.program 0 := by
+          apply MethodContract.Refuted.of_return (c := equalVectors) (program := Extracted.program)
+            (method := 0) (input := (0, 1 <<< {{width - 1}})) (initial := Memory.empty)
+            (fuel := 16) (values := [.scalar (.i32 1)]) trivial rfl
+          rintro ⟨_, value, encoded, _, rfl⟩
+          revert encoded
+          decide
+        """);
+    Console.WriteLine($"PASS {name}: the top bit distinguishes the original from the repeated-operand variant");
+}
+
 // Keep the broadcasts, vector local and MoveMask while reversing the unsigned comparison.
 var wrongLess = Path.Combine(root, "GreaterInsteadOfLess");
 Directory.CreateDirectory(wrongLess);
