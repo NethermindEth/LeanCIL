@@ -69,6 +69,28 @@ private def sizeCall (arity : Nat) (arguments : List TypeExpr) : CallSite :=
     "System.Int32 System.Runtime.CompilerServices.Unsafe::SizeOf()" arity arguments
     { convention := 0x10, returnType := int32 } int32 []
 
+/-- The first parameter of Object.ReferenceEquals as claimed before and after substitution. -/
+private def referenceEqualsCall (declared closed : TypeExpr) : CallSite :=
+  let root := TypeExpr.object runtimeScope "System.Object"
+  let result := TypeExpr.atom runtimeScope "System.Boolean"
+  memberCall (.atom runtimeScope "System.Object") name!"ReferenceEquals" "ReferenceEquals"
+    "System.Boolean System.Object::ReferenceEquals(System.Object,System.Object)" 0 []
+    { convention := 0, returnType := result, parameters := [declared, root] } result [closed, root]
+
+/-- An object parameter must name System.Object in the signature's primitive scope in both
+    the open declaration and the closed call. -/
+theorem binds_root_object_parameters :
+  let member := memberFixture "System" "Object" "ReferenceEquals" [0, 2, 2, 0x1C, 0x1C] none
+  let root := TypeExpr.object runtimeScope "System.Object"
+  let wrongScope := TypeExpr.object libScope "System.Object"
+  let wrongName := TypeExpr.object runtimeScope "System.String"
+  passes member.1 lib member.2 (.call (referenceEqualsCall root root)) = true ∧
+    [(wrongScope, root), (root, wrongScope), (wrongName, root), (root, wrongName)].all
+      (fun (openType, closedType) => rejects member.1 lib member.2
+        (.call (referenceEqualsCall openType closedType)) (.operandMismatch member.2)) = true
+  := by decide +kernel
+#print axioms binds_root_object_parameters
+
 /-- An absent instantiation is valid for Min. A present instantiation must have positive arity. -/
 private def minCall : CallSite :=
   memberCall (.atom runtimeScope "System.Math") name!"Min" "Min"
@@ -1064,6 +1086,16 @@ theorem accepts_the_method_definition_its_row_gives :
       | .ok _ => true
       | .error _ => false) = true := by decide +kernel
 #print axioms accepts_the_method_definition_its_row_gives
+
+/-- A MethodDef taking ELEMENT_TYPE_OBJECT binds the root's scope and full name. -/
+theorem binds_method_definition_object_parameter :
+  let slice := mutateBlob own.1 (blobOffset own.1 [0, 0, 1]) fun _ => [4, 0, 1, 1, 0x1C]
+  let claim := fun scope name => { mainMethod with parameters := [.object scope name] }
+  (identity slice (claim runtimeScope "System.Object")).isOk = true ∧
+    identityFails slice (claim libScope "System.Object") (.methodMismatch tokens.main) = true ∧
+    identityFails slice (claim runtimeScope "System.String") (.methodMismatch tokens.main) = true
+  := by decide +kernel
+#print axioms binds_method_definition_object_parameter
 
 theorem rejects_a_method_definition_that_differs_from_its_row :
     identityFails own.1 { mainMethod with attributes := 0x97 }

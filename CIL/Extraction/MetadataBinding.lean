@@ -625,7 +625,7 @@ def MetadataEnv.importMethodSite (env : MetadataEnv) (token : Nat) (frame : Fram
 private def parametersAdmitted (frame : Frame) : List ResolvedType → List TypeExpr → Bool
   | [], [] => true
   | type :: types, claim :: claims =>
-    frame.admits type claim && parametersAdmitted frame types claims
+    frame.admitsParameter type claim && parametersAdmitted frame types claims
   | _, _ => false
 
 /-- The reference and open declaration describe the same metadata member in its type frame. -/
@@ -679,10 +679,7 @@ def checkCallReference (env : MetadataEnv) (frame : Frame) (token : Nat) (site :
   then throw (.operandMismatch token)
   let some parameters := site.parameters.mapM (siteParameter site.methodArguments ownerArguments)
     | throw (.operandMismatch token)
-  if call.parameterTypes.length != parameters.length ||
-      !(parameters.zip call.parameterTypes).all
-        (fun (type, claimed) => located.admits type claimed)
-  then throw (.operandMismatch token)
+  if !parametersAdmitted located parameters call.parameterTypes then throw (.operandMismatch token)
   return ()
 
 /-- Resolve the token through the selected import, or through the ordinary metadata environment. -/
@@ -1010,9 +1007,7 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
   if parameters.any (hasModifier resolveFuel ∘ declaredParameter) then
     throw (.methodMismatch method.token)
   if !(frame.admits normalizedReturn method.returnType) ||
-      parameters.length != method.parameters.length ||
-      !(parameters.zip method.parameters).all
-        (fun (type, claimed) => frame.admits (declaredParameter type) claimed) then
+      !parametersAdmitted frame (parameters.map declaredParameter) method.parameters then
     throw (.methodMismatch method.token)
   -- A row with generic parameters is extracted only as an instance naming an argument for each.
   let instantiation ← sources.mapM (InstanceArgument.resolve env method.token resolveFuel)

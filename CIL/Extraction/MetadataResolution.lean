@@ -1400,18 +1400,24 @@ end
 def Frame.admits (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : Bool :=
   typeAdmits frame (resolveFuel + 2) type expr
 
+/-- A method parameter can carry a root object reference when its signature spells
+    ELEMENT_TYPE_OBJECT in the frame's core library. -/
+def Frame.admitsParameter (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : Bool :=
+  match type, expr with
+  | .primitive 0x1C, .object scope name =>
+    frame.corlib == some (bytesOf scope) && bytesOf name == systemObjectName
+  | _, _ => frame.admits type expr
+
 /-- Whether the extractor's type names the type a class instance field holds: as `admits` does,
     or as an object for any class or interface, since the slot keeps a reference never read
     through. -/
 def Frame.admitsHeld (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : Bool :=
-  frame.admits type expr ||
+  frame.admitsParameter type expr ||
     match type, expr with
     | .named named, .object scope name =>
       named.scope == bytesOf scope && named.name == bytesOf name && classLike named.kind &&
         (!named.fixedStorage || (named.kind.reference? == some true &&
           (named.name == systemStringName || named.name == systemObjectName)))
-    | .primitive 0x1C, .object scope name =>
-      frame.corlib == some (bytesOf scope) && bytesOf name == systemObjectName
     | _, _ => false
 
 /-- An admitted platform enum has the name and integer storage of its scoped definition. -/
