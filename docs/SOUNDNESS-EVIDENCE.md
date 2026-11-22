@@ -373,10 +373,14 @@ copy cannot be detected without the whole stream; every row must still have the 
 widths give, every blob its length prefix and every string one terminating zero), the PE container
 where a body sits in the image and the mapping of its address to its bytes, definitions in platform assemblies (so whether a
 platform type is an enum, the field order of `ValueTuple`, and that `System.Object` declares no
-instance fields), public key tokens of referenced assemblies, the
-implementation, interface and closure digests that a generic import identity carries (no check
-recomputes them from the library image), imported implementation definitions, raw layout
-content, dispatch catalog completeness, static data bytes and generic parameter constraints.
+instance fields), public key tokens of referenced assemblies, imported implementation definitions,
+raw layout content, dispatch catalog completeness, static data bytes and generic parameter constraints.
+For a generic contract import, Lean reconstructs the open definition key from the caller's
+metadata, encodes its bytes in uppercase hexadecimal and checks the closed arguments and
+signature. The implementation and interface digests belong to the deployment record.
+The import slot carries the contract closure digest separately. The verifier hashes the audited
+canonical closure and compares it with that digest. The deep audit does not yet bind the selected
+generic MethodDef in the imported implementation and its published contract to the import slot.
 [Deep verification](CLI.md#deep-verification) reconfirms each body at its RVA and each carried
 row and heap entry, under one numbering of the `#Strings` and `#Blob` offsets per heap and with
 MethodDef RVAs zeroed; the assembly identity, key token, core library, links, `#GUID` heap,
