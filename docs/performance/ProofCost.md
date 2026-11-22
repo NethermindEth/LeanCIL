@@ -114,6 +114,41 @@ heartbeats for each layout. With that cost included, checking the contract once 
 it twice uses fewer kernel heartbeats than reducing two reads for either layout. The table
 gives command-level measurements after extraction. Image hashing and layout replay run separately.
 
+## Reusing the compiled Countdown loop contract
+
+`Examples.Loops.Countdown(uint)` returns zero for every UInt32 input from empty entry memory.
+Its proof uses the remaining unsigned count as a strictly decreasing measure. The consumer
+proves normal return for inputs 4 and 16, either by reducing the compiled method or by
+instantiating that universal theorem. The same consumer source runs against both models.
+[Loop proof](../../Examples/Proofs/Countdown.lean) · [Consumer](../../Tests/LoopVariants/CountdownReuse.lean.in)
+
+The baseline uses the `Op` interpreter from commit `27953edb` with its .NET 10 Release assembly. The
+canonical extractor uses .NET 11. The two DLLs have identical 25-byte Countdown method bodies,
+including all 13 instruction bytes, and identical local signature blobs. Each extractor selected
+its own DLL. Lean 4.35.0 and the same proof-cost frontend measured both runs. Times below are
+single-run elaboration times in milliseconds.
+
+| Proof | Baseline kernel heartbeats | Canonical kernel heartbeats | Baseline proof objects | Canonical proof objects | Baseline ms | Canonical ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Universal loop theorem | 265,854 | 206,646 | 8,066 | 8,693 | 773 | 900 |
+| Shared consumer lemma | 3,773 | 3,773 | 352 | 352 | 7 | 6 |
+| Direct reduction, input 4 | 485,216 | 643,032 | 94 | 94 | 154 | 200 |
+| Contract application, input 4 | 145 | 145 | 18 | 18 | 1 | 2 |
+| Direct reduction, input 16 | 1,530,394 | 1,783,100 | 94 | 94 | 467 | 519 |
+| Contract application, input 16 | 145 | 145 | 18 | 18 | 1 | 1 |
+
+Direct canonical reduction costs 33% more kernel heartbeats at input 4 and 17% more at input
+16. Each contract application costs 145 in either model. Including the entry and loop-header
+facts, the universal proof module takes 344,696 kernel heartbeats on the baseline and 270,141
+with canonical CIL. Its compiled size is 408,960 and 433,776 bytes respectively. The consumer
+module is 25,808 bytes in both. Standalone kernel replay checked each extraction, proof and
+consumer together.
+
+To reproduce the comparison, extract `Examples.Loops::Countdown(uint)` under the scalar
+profile in each checkout, use its loop proof as `Proof.lean` and the consumer above as
+`Consumer.lean`. Use the frontend below to measure `Proof` and `Consumer` with that checkout's
+compiled library and extraction on the Lean search path.
+
 ## Measuring one module of another package
 
 The frontend runs without the C# driver, from any Lake package that depends on LeanCIL. From the
