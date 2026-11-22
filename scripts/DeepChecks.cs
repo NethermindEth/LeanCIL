@@ -492,7 +492,7 @@ partial class Program
         Dictionary<Sha256Digest, string> imageTheorems = [];
         foreach (var request in audited)
         {
-            if (request.Audit.name is EnumStorageTheorem or PlatformKindsTheorem &&
+            if (request.Audit.name is EnumStorageTheorem or PlatformKindsTheorem or GenericConstraintsTheorem &&
                 !CoverageComplete(oleanAudit.theorems.Single(result => result.name == request.Audit.name)))
                 continue;
             var distinct = request.Subject switch
@@ -540,13 +540,16 @@ partial class Program
         BindingFact.LayoutContent => "no check reads field offsets, sizes or attributes from the image",
         BindingFact.DispatchCatalogs => "no check reads the types of an image",
         BindingFact.StaticData => "no checked theorem binds the static field data to the pinned images",
-        BindingFact.GenericConstraints => "no check reads constraints from the image",
+        BindingFact.GenericConstraints =>
+            "no generic parameter was selected, or a declaration, layout or import lacks physical coverage",
         BindingFact.PublicKeyTokens => "the supplied images do not cover the extraction pins' AssemblyRef targets",
         BindingFact.ImportIdentities => "no check recomputes an import identity from its image",
         _ => throw new InvalidOperationException("Missing binding fact reason: " + fact)
     };
 
     const string ImagesModule = "BindingAudit.Images";
+    const string GenericConstraintsModule = "BindingAudit.GenericConstraints";
+    const string GenericConstraintsTheorem = "BindingAudit.genericConstraints";
     const string PlatformKindsModule = "BindingAudit.PlatformKinds";
     const string PlatformKindsTheorem = "BindingAudit.platformKinds";
     const string EnumStorageModule = "BindingAudit.EnumStorage";
@@ -720,7 +723,8 @@ partial class Program
     }
 
     /// <summary>Derives a coverage bit from the physical checks and proves its value for the selected methods.</summary>
-    static string CoverageSource(string check, string proposition, string theorem, string macro, string module) => $$"""
+    static string CoverageSource(string check, string proposition, string theorem, string macro, string module,
+        string arguments = "Extracted.platformDefinitions Extracted.methodEvidence") => $$"""
             import BindingAudit.Images
             import Extracted
             import StrictBinding.{{module}}
@@ -730,13 +734,11 @@ partial class Program
 
             open Lean Elab Term in
             elab "{{macro}}%" : term => do
-              return toExpr ((StrictBinding.{{check}} images Extracted.platformDefinitions
-                Extracted.methodEvidence).toOption == some true)
+              return toExpr ((StrictBinding.{{check}} images {{arguments}}).toOption == some true)
 
             set_option debug.skipKernelTC true in
             /-- Supplied definitions pass the physical check. The last argument records completeness. -/
-            theorem {{theorem}} : StrictBinding.{{proposition}} images Extracted.platformDefinitions
-                Extracted.methodEvidence {{macro}}% := by decide +kernel
+            theorem {{theorem}} : StrictBinding.{{proposition}} images {{arguments}} {{macro}}% := by decide +kernel
 
             end BindingAudit
 
@@ -750,6 +752,9 @@ partial class Program
         File.WriteAllText(ModuleSource(plan.Output, ImagesModule), ImagesModuleSource(plan));
         File.WriteAllText(ModuleSource(plan.Output, EnumStorageModule), CoverageSource(
             "checkEnumStorage", "EnumStorageChecked", "enumStorage", "enumCoverage", "EnumStorage"));
+        File.WriteAllText(ModuleSource(plan.Output, GenericConstraintsModule), CoverageSource(
+            "checkGenericConstraints", "GenericConstraintsChecked", "genericConstraints", "constraintCoverage",
+            "GenericConstraints", "Extracted.methodEvidence Extracted.rawLayouts Extracted.imports"));
         File.WriteAllText(ModuleSource(plan.Output, PlatformKindsModule), CoverageSource(
             "checkPlatformKinds", "PlatformKindsChecked", "platformKinds", "kindCoverage", "PlatformKinds"));
         File.WriteAllText(ModuleSource(plan.Output, StaticDataModule), """
@@ -1015,6 +1020,11 @@ partial class Program
         [
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
             new(ImagesModule, new("BindingAudit.images_eq", imagesEq, ApprovedAxioms)),
+            new(GenericConstraintsModule, new(GenericConstraintsTheorem,
+                App(Const("StrictBinding.GenericConstraintsChecked"),
+                Const("BindingAudit.images"), Const("Extracted.methodEvidence"), Const("Extracted.rawLayouts"),
+                Const("Extracted.imports"), "_"), ApprovedAxioms, term: true),
+                new BindingSubject.Fact(BindingFact.GenericConstraints)),
             new(PlatformKindsModule, new(PlatformKindsTheorem, App(Const("StrictBinding.PlatformKindsChecked"),
                 Const("BindingAudit.images"), Const("Extracted.platformDefinitions"),
                 Const("Extracted.methodEvidence"), "_"), ApprovedAxioms, term: true),
@@ -1059,7 +1069,8 @@ partial class Program
             failures[ImagesModule] = "build: an image module did not build";
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
         var facts = PagedFacts.Select(fact => PagedFact(fact).Module)
-            .Append(StaticDataModule).Append(EnumStorageModule).Append(PlatformKindsModule);
+            .Append(StaticDataModule).Append(EnumStorageModule).Append(PlatformKindsModule)
+            .Append(GenericConstraintsModule);
         if (plan.ObjectFields.HasValue) facts = facts.Append(ObjectFieldsModule);
         if (plan.TupleFields.HasValue) facts = facts.Append(TupleFieldsModule);
         if (plan.PublicKeys.HasValue) facts = facts.Append(PublicKeysModule);

@@ -388,6 +388,10 @@ against each platform image's public key, and checks that every field the root c
 static. For the selected `System.ValueTuple<T1,T2>` layout, the audit follows its own scoped
 TypeRef and forwarding chain. It checks the defining TypeDef's two generic parameters and
 the names and signatures of its two instance fields in physical declaration order.
+For a supported generic selection, Lean reads the GenericParam and GenericParamConstraint
+rows of each MethodDef and its declaring TypeDef. It resolves the constraint identities,
+including the primitive arguments of a closed local interface, and compares the InterfaceImpl
+rows of concrete value-type arguments against the extraction's layout declarations.
 For each external type selected in a method's platform table, Lean follows the scoped
 definition and checks its flags, base and the ordinals of its generic parameters. The
 platform-kind theorem binds these checks to each certified method's metadata environment.

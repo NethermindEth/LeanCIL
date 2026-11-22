@@ -20,6 +20,11 @@ preparation.EnsureExtractorBuilt();
 MultiAssemblyFixture fixture = new("DeepCli");
 var cli = args is [var executable] && !executable.StartsWith("--", StringComparison.Ordinal)
     ? new[] { Path.GetFullPath(executable) } : fixture.Cli;
+if (args is ["--constraints"])
+{
+    CheckGenericConstraints();
+    return;
+}
 if (args is ["--enums"])
 {
     CheckEnumStorage();
@@ -254,6 +259,43 @@ void CheckPlatformPair()
     Console.WriteLine("PASS tuple forwarding, missing destination and swapped physical generic field signatures");
 }
 
+void CheckGenericConstraints()
+{
+    var assembly = fixture.Build("Constraints", "DeepCli.Constraints", """
+        namespace Gates;
+        public interface IClosed<T> { }
+        public struct Both : IClosed<int>, IClosed<long> { public int Value; }
+        public static class Counter
+        {
+            public static int Read<T>(int n) where T : struct, IClosed<int> => n + 1;
+            public static int ReadWide<T>(int n) where T : struct, IClosed<long> => n + 1;
+            public static int Entry(int n) => ReadWide<Both>(Read<Both>(n));
+        }
+        """);
+    var extracted = fixture.Artifact("GenericExtraction");
+    Run([.. cli, "extract", assembly, "Gates.Counter::Entry(System.Int32)", extracted]);
+    var pins = Path.Combine(fixture.Root, "constraints.sha256");
+    File.WriteAllText(pins, Sha(assembly) + "  " + assembly + Environment.NewLine);
+    var proof = Path.Combine(fixture.Root, "Constraints.lean");
+    File.WriteAllText(proof, """
+        import Extracted
+        open CIL
+        set_option maxRecDepth 16384 in
+        theorem twice (value : W32) (memory : Safety.Memory) :
+            Safety.invoke Extracted.program 32 0 [.scalar (.i32 value)] memory =
+              .ok (memory, [.scalar (.i32 ((value + 1) + 1))]) := rfl
+        #print axioms twice
+        """);
+    Run([.. cli, "verify", extracted, "--proof", proof, "--theorem", "twice",
+        "--deep-checks", pins, "--format", "json"]);
+    using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(extracted, "verified.json")));
+    var fact = report.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+        .Single(item => item.GetProperty("id").GetString() == "generic-constraints");
+    if (fact.GetProperty("status").GetString() != "reconfirmed" ||
+        fact.GetProperty("theorem").GetString() != "BindingAudit.genericConstraints")
+        throw new InvalidOperationException("Incorrect generic constraint report: " + fact);
+}
+
 void CheckEnumStorage()
 {
     var assembly = fixture.Build("Enums", "DeepCli.Enums", """
@@ -461,6 +503,7 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
     CheckPlatformPair();
     CheckPublisherKey();
     CheckEnumStorage();
+    CheckGenericConstraints();
 
     var tables = fixture.Build("Table", "DeepCli.Table", """
         public static class Table {

@@ -118,6 +118,10 @@ inductive AuditError where
   | headerMismatch (identity : String)
   /-- The carried row of the token is not the image's row under the carried heap numbering. -/
   | rowMismatch (token : Nat)
+  /-- The generic parameter declarations or direct interfaces differ from the physical rows. -/
+  | constraintMismatch (token : Nat)
+  /-- The constraint uses a type form whose physical identity is not covered. -/
+  | uncoveredConstraint
   /-- The carried entry with this key is not the entry of the image at the offset the key names. -/
   | heapMismatch (heap key : Nat)
   /-- Two row cells of one offset hold different keys, two of different offsets hold one key, a

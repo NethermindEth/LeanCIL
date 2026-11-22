@@ -367,6 +367,13 @@ nested enum, and reads the integer signature of the defining row's instance fiel
 An extraction with no enum or a missing destination reports `not covered`. A supplied
 definition with the wrong storage code fails verification.
 
+For `generic-constraints`, Lean locates each selected method and its declaring type in the
+pinned image. It compares each parameter's ordinal, flags and complete constraint list,
+including the argument types of locally defined generic interfaces instantiated with primitive
+types. For concrete value-type layouts it also compares the direct interface implementations.
+A conflicting declaration fails the check. An extraction with no generic selection, an import,
+a generic layout or an unsupported constraint signature reports `not covered`.
+
 For `public-key-tokens`, include the image for each direct assembly reference of the selected
 assembly and its pinned references. Lean reads each physical AssemblyRef, compares the tokens
 carried by the extraction with those rows, and computes each publisher token from the full key

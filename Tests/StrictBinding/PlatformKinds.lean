@@ -1,4 +1,4 @@
-import StrictBinding.PlatformKinds
+import StrictBinding.GenericConstraints
 import Tests.StrictBinding.Fixture
 import Tests.StrictBinding.Mutation
 
@@ -19,7 +19,7 @@ theorem compiled_type_shapes :
 
 /-- The fixture has one final AssemblyRef row. Give its table slot to GenericParam and
     set the ordinal and TypeOrMethodDef owner in the resulting physical row. -/
-private def withParameter (ordinal owner : Nat) : Except AuditError Nat := do
+private def parameterImage (ordinal owner flags : Nat) : Except AuditError PreparedImage := do
   let start := StrictFixture.expectedFacts.findSome? fun fact => match fact with
     | .stream "tables" offset _ => some offset
     | _ => none
@@ -29,9 +29,13 @@ private def withParameter (ordinal owner : Nat) : Except AuditError Nat := do
   let some tables := start | throw (.typeDefMismatch 6 .kind)
   let some field := last | throw (.typeDefMismatch 6 .kind)
   let bytes := flipBytes StrictFixture.image
-    [(tables + 12, 0x08), (tables + 13, 0x04), (field, 11 ^^^ ordinal), (field + 4, owner)]
-  let image ← prepareOne ⟨StrictFixture.identity, bytes⟩
-  physicalTypeArity image 6
+    [(tables + 12, 0x08), (tables + 13, 0x04), (field, 11 ^^^ ordinal),
+     (field + 2, flags), (field + 4, owner)]
+  prepareOne ⟨StrictFixture.identity, bytes⟩
+
+/-- The physical arity of the sixth TypeDef after assigning the parameter row. -/
+private def withParameter (ordinal owner : Nat) : Except AuditError Nat := do
+  physicalTypeArity (← parameterImage ordinal owner 0) 6
 
 /-- Only the target TypeDef's parameter contributes to its arity. A gap in its ordinals fails. -/
 theorem type_parameter_ownership :
@@ -59,5 +63,24 @@ theorem physical_kind_and_partial_coverage :
     failsWith (checkKinds [overlay (.genericValue 1), absent]) (.typeDefMismatch 3 .kind) = true := by
   decide +kernel
 #print axioms physical_kind_and_partial_coverage
+
+/-- The first MethodDef's declaration in an image with one physical generic parameter. -/
+private def methodParameter (ordinal owner flags : Nat) (claims : List GenericConstraint) :
+    Except AuditError Unit := do
+  let image ← parameterImage ordinal owner flags
+  parameterDeclarations image (_root_.StrictBinding.tokenOf Table.methodDef 1) claims
+
+/-- Moving a parameter to the owning type, altering its flags or ordinal, adding a constraint,
+    or omitting the parameter cannot reconfirm the original method declaration. -/
+theorem method_parameter_declaration :
+    let present : GenericConstraint := ⟨24, [], []⟩
+    let mismatch := AuditError.constraintMismatch (_root_.StrictBinding.tokenOf Table.methodDef 1)
+    (methodParameter 0 3 24 [present]).toOption = some () ∧
+    failsWith (methodParameter 0 2 24 [present]) mismatch = true ∧
+    failsWith (methodParameter 0 3 8 [present]) mismatch = true ∧
+    failsWith (methodParameter 1 3 24 [present]) mismatch = true ∧
+    failsWith (methodParameter 0 3 24 [{present with types := ["IForged"]}]) mismatch = true ∧
+    failsWith (methodParameter 0 3 24 []) mismatch = true := by decide +kernel
+#print axioms method_parameter_declaration
 
 end Tests.StrictBinding.PlatformKinds

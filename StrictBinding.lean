@@ -18,6 +18,7 @@ import StrictBinding.TupleFields
 import StrictBinding.PublicKeys
 import StrictBinding.EnumStorageEvidence
 import StrictBinding.PlatformKinds
+import StrictBinding.GenericConstraints
 
 /-!
 # Deep verification

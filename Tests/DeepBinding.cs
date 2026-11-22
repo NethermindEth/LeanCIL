@@ -111,6 +111,12 @@ partial class Program
         Mutation("platform kind coverage claimed for an empty selection", PlatformKindsModule, source => source.Replace(
             "Extracted.methodEvidence kindCoverage% :=", "Extracted.methodEvidence true :=", StringComparison.Ordinal),
             "replay", BindingFact.PlatformTypeKinds);
+        Mutation("generic constraints about other imports", GenericConstraintsModule, source => source.Replace(
+            "Extracted.imports constraintCoverage% :=", "[] false :=", StringComparison.Ordinal),
+            "Theorem statement mismatch", BindingFact.GenericConstraints);
+        Mutation("generic constraint coverage for an empty selection", GenericConstraintsModule, source => source.Replace(
+            "Extracted.imports constraintCoverage% :=", "Extracted.imports true :=", StringComparison.Ordinal),
+            "replay", BindingFact.GenericConstraints);
         Mutation("enum theorem about other evidence", EnumStorageModule, source => source.Replace(
             "Extracted.methodEvidence enumCoverage% :=", "[] false :=", StringComparison.Ordinal),
             "Theorem statement mismatch", BindingFact.EnumUnderlyingTypes);
