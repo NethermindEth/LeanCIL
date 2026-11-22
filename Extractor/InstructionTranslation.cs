@@ -69,7 +69,7 @@ internal static class InstructionTranslation
             ? new Local(slot) : new Arg(index);
         Operation LoadLocal(int index) => new Local(index);
         Operation StoreLocal(int index) => new SetLocal(index);
-        Operation AddressLocal(int index) => new LocalAddress(index);
+        if (InstructionOperands.AddressSlot(m, i, parameterHomes).HasValue) return Unoutlined.Site;
         Operation Field(FieldAccess access)
         {
             var field = (FieldReference)i.Operand;
@@ -129,7 +129,6 @@ internal static class InstructionTranslation
             Code.Unaligned => StackOperation.Nop,
             Code.Localloc or Code.Switch => Unoutlined.Site,
             Code.Starg or Code.Starg_S => StoreLocal(InstructionOperands.ArgumentHomeSlot(m, i, parameterHomes)),
-            Code.Ldarga or Code.Ldarga_S => AddressLocal(InstructionOperands.ArgumentHomeSlot(m, i, parameterHomes)),
             Code.Ldsfld when FeatureProfile.PlatformField((FieldReference)i.Operand) is int constant =>
                 new Constant(32, constant, true),
             Code.Ldsfld or Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference =>
@@ -145,7 +144,6 @@ internal static class InstructionTranslation
             Code.Ldloc_2 => LoadLocal(2),
             Code.Ldloc_3 => LoadLocal(3),
             Code.Ldloc or Code.Ldloc_S => LoadLocal(LocalIndex()),
-            Code.Ldloca or Code.Ldloca_S => AddressLocal(InstructionOperands.AddressedLocal(m, i)),
             Code.Stloc_0 => StoreLocal(0),
             Code.Stloc_1 => StoreLocal(1),
             Code.Stloc_2 => StoreLocal(2),

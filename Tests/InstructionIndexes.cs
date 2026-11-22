@@ -231,6 +231,8 @@ Console.WriteLine("PASS context-taking emission rejects mismatched architecture"
 var indexHomes = extractor.GetType("Nethermind.LeanCIL.ParameterStorage", true)!
     .GetMethod("IndexHomes", BindingFlags.Static | BindingFlags.NonPublic)!
     .CreateDelegate<Func<IEnumerable<int>, int, Dictionary<int, int>>>();
+var addressSlot = Model("InstructionOperands").GetMethod("AddressSlot", BindingFlags.Static | BindingFlags.NonPublic)!
+    .CreateDelegate<Func<MethodDefinition, Instruction, IReadOnlyDictionary<int, int>, int?>>();
 var homePositions = indexHomes([2, 1, 2], 2);
 if (homePositions[2] != 2 || homePositions[1] != 3 || homePositions.ContainsKey(0))
     throw new Exception("Home positions lost first-match or missing-argument behavior");
@@ -252,8 +254,15 @@ object TranslateArgument(Instruction instruction, Dictionary<int, int> positions
         Index(argumentMethod), sites, null, null, positions, null, null])!;
 if (!Equals(TranslateArgument(storeArgument, homePositions), Make("SetLocal", 3)) ||
     !Equals(TranslateArgument(loadArgument, homePositions), Make("Local", 3)) ||
-    !Equals(TranslateArgument(addressArgument, homePositions), Make("LocalAddress", 3)))
+    TranslateArgument(addressArgument, homePositions).GetType() != Model("Unoutlined") ||
+    addressSlot(argumentMethod, addressArgument, homePositions) != 3)
     throw new Exception("A homed argument's store, load or address used the wrong frame slot");
+foreach (var opcode in new[] { OpCodes.Ldloca, OpCodes.Ldloca_S })
+    if (addressSlot(argumentMethod, Instruction.Create(opcode, argumentMethod.Body.Variables[1]), homePositions) != 1)
+        throw new Exception("A local address did not retain its declared slot");
+if (addressSlot(argumentMethod, Instruction.Create(OpCodes.Ldarga_S, argumentMethod.Parameters[1]), homePositions) != 3 ||
+    addressSlot(argumentMethod, loadArgument, homePositions) is not null)
+    throw new Exception("An argument load and a short address did not retain their distinct opcodes");
 if (!Equals(TranslateArgument(loadArgument, []), Make("Arg", 1)))
     throw new Exception("Unhomed loads no longer use the original argument");
 try

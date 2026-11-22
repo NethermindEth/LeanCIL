@@ -21,6 +21,15 @@ internal static class InstructionOperands
             throw new InvalidDataException("Tail call requires exactly its arguments on the evaluation stack");
     }
 
+    /// <summary>The frame slot whose address the CIL instruction pushes.</summary>
+    internal static int? AddressSlot(MethodDefinition method, Instruction site, IReadOnlyDictionary<int, int> homes) =>
+        site.OpCode.Code switch
+        {
+            Code.Ldloca or Code.Ldloca_S => AddressedLocal(method, site),
+            Code.Ldarga or Code.Ldarga_S => ArgumentHomeSlot(method, site, homes),
+            _ => null
+        };
+
     internal static int AddressedLocal(MethodDefinition method, Instruction site)
     {
         var local = (VariableDefinition)site.Operand;

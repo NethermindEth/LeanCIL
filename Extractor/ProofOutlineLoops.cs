@@ -206,6 +206,9 @@ internal static partial class ProofOutline
             index == 0 ? "" : (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         readonly MethodDefinition method = extraction.Methods[0];
+        readonly Dictionary<int, int> homes = ParameterStorage.IndexHomes(
+            extraction.Emitted[0].Frame.ParameterHomes.Select(home => home.Argument),
+            extraction.Methods[0].Body.Variables.Count);
         readonly FieldViews views = new(extraction);
         readonly List<Slot> slots = [];
         readonly List<Component> components = [];
@@ -1543,9 +1546,9 @@ internal static partial class ProofOutline
                     : new Unknown("a widened value"));
             }
             // A span local's address pushes the view it holds, as loading the local does.
-            else if (op is LocalAddress addressed)
-                stack.Add(slots[addressed.Index].Components[0].Part == Part.Span
-                    ? new LocalValue(addressed.Index) : new LocalAddressValue(addressed.Index));
+            else if (op is Unoutlined && InstructionOperands.AddressSlot(method, site, homes) is int addressed)
+                stack.Add(slots[addressed].Components[0].Part == Part.Span
+                    ? new LocalValue(addressed) : new LocalAddressValue(addressed));
             else if (op is ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Initobj })
             {
                 if (Pop() is not LocalAddressValue address) return Stop("zeroing storage other than a struct local");

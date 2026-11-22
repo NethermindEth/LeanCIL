@@ -23,8 +23,10 @@ internal static partial class ProofOutline
             WrittenSpanWidth(method.Parameters[0].ParameterType) is not { } width ||
             ElementWidth(method.Parameters[1].ParameterType) != width ||
             !extraction.Emitted[index].Frame.HasNoLocals) return null;
-        if (ops is not [(LocalAddress { Index: 0 }, _), (Constant { Width: 32, Value: 0, Numeral: true }, _),
+        if (ops is not [(Unoutlined, var address), (Constant { Width: 32, Value: 0, Numeral: true }, _),
                 (Unoutlined, var item), (Arg { Index: 1 }, _), var store, (_, { OpCode.Code: Code.Ret })] ||
+            address.OpCode.Code is not (Code.Ldarga or Code.Ldarga_S) ||
+            address.Operand is not ParameterDefinition parameter || MethodArguments.Index(method, parameter) != 0 ||
             Spans.MemberWidth(item, "get_Item", 1, extraction.Architecture) != width || !MethodArguments.Plain(method, 1))
             return null;
         var write = ScalarStore(store.Op, store.Site, extraction.Architecture);

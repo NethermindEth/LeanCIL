@@ -523,7 +523,8 @@ internal static partial class ProofOutline
         var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
         var steppable = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.StructValue) &&
-            body.Operations.All(op => Body.Pure(op, spec.Method, plainReturn) || Steps(spec.Method, op));
+            body.Operations.Index().All(entry => Body.Pure(entry.Item, spec.Method, plainReturn) ||
+                Steps(spec.Method, entry.Item, spec.Method.Body.Instructions[entry.Index]));
         var split = !steppable && SplitsOnBooleans(body.Operations, spec.Method, spec.Parameters, plainReturn);
         var paths = steppable || split ? null : ScalarPaths(spec, body.Operations);
         // A body over words that calls helpers composes them through stub contracts, as a body over objects does.
@@ -567,11 +568,12 @@ internal static partial class ProofOutline
     /// <summary>A frame, field or duplicate operation the stepping tactics take without facts: a local access
     /// other than to a narrow integer local, an aggregate initialisation or a field access whose load is not
     /// sign-extending.</summary>
-    static bool Steps(MethodDefinition method, Operation op) => op switch
+    static bool Steps(MethodDefinition method, Operation op, Instruction site) => op switch
     {
         Local load => !NarrowLocal(method, load.Index),
         SetLocal store => !NarrowLocal(method, store.Index),
-        _ => op is LocalAddress or ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Initobj } or
+        Unoutlined => site.OpCode.Code is Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S,
+        _ => op is ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Initobj } or
             StackOperation { Kind: Code.Dup } or
             StructField { Access: FieldAccess.Address or FieldAccess.Store or FieldAccess.LoadAggregate or
                 FieldAccess.StoreAggregate } or StructField { Access: FieldAccess.Load, Signed: false }
