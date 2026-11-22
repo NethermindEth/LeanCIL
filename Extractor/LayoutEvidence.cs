@@ -52,7 +52,10 @@ internal sealed class LayoutEvidence
     internal static string Scope(TypeReference type)
     {
         if (type.Scope is not AssemblyNameReference assembly) return type.Module.Assembly.Name.FullName;
-        var module = PinnedAssemblies.Active?.ModuleOf(type);
+        // Primitive signature elements carry their module's core AssemblyRef directly.
+        var pins = PinnedAssemblies.Active;
+        if (pins?.Signatures.IsPrimitiveElement(type) == true) return assembly.FullName;
+        var module = pins?.ModuleOf(type);
         if (module is not { HasExportedTypes: true }) return assembly.FullName;
         var element = type.GetElementType();
         if (!module.ExportedTypes.Any(export => export.IsForwarder && export.FullName == element.FullName))

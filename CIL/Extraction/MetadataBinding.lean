@@ -673,13 +673,21 @@ def checkCallReference (env : MetadataEnv) (frame : Frame) (token : Nat) (site :
   if !member.admits site.result declared.returnType ||
       !parametersAdmitted member site.parameters declared.parameters then
     throw (.operandMismatch token)
+  -- A nongeneric MethodDef supplies the closed signature in its own module's primitive scope.
+  let closed ← match site.definition with
+    | some (position, definition) =>
+      if position == 0 || site.genericArity != 0 || !ownerList.isEmpty then pure located
+      else do
+        let index ← env.slice position definition
+        pure { located with corlib := ← index.corlibIdentity }
+    | none => pure located
   let some returned := siteReturn site.methodArguments ownerArguments site.result
     | throw (.operandMismatch token)
-  if call.returnsValue != (returned != .primitive 1) || !(located.admits returned call.returnType)
+  if call.returnsValue != (returned != .primitive 1) || !(closed.admits returned call.returnType)
   then throw (.operandMismatch token)
   let some parameters := site.parameters.mapM (siteParameter site.methodArguments ownerArguments)
     | throw (.operandMismatch token)
-  if !parametersAdmitted located parameters call.parameterTypes then throw (.operandMismatch token)
+  if !parametersAdmitted closed parameters call.parameterTypes then throw (.operandMismatch token)
   return ()
 
 /-- Resolve the token through the selected import, or through the ordinary metadata environment. -/

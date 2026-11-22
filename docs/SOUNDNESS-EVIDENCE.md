@@ -257,6 +257,9 @@ What `MetadataResolution` and `MetadataBinding` check:
   `System.Object` whose `TypeDef` has no base. CoreLib supplies the scope of its own primitive
   signatures. In a method declaration or call signature, an `ELEMENT_TYPE_OBJECT` parameter
   admits an object reference named `System.Object` in that signature's primitive scope.
+  For a nongeneric call into another pinned module, Lean checks primitive parameters and
+  results against the caller's core assembly in the MemberRef declaration and the callee's
+  core assembly in the closed signature.
   The field index counts the instance fields of each class below `System.Object`.
 - A reference whose scope has the name of a pinned assembly, at any version, culture or key token,
   needs the pinned assembly's slice among the method's slices; without it the check fails with

@@ -168,7 +168,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     {
         var (method, name, owners, extracted, typeArguments) = MethodOperand(reference);
         var definition = reference is GenericInstanceMethod generic ? generic.ElementMethod : reference;
-        var resolved = extracted ? definition.Resolve() : null;
+        var resolved = extracted ? definition.Resolve() ??
+            throw new InvalidDataException("Unresolved pinned method: " + definition.FullName) : null;
         var slot = InstructionPrefixes.IsStaticVirtualSlot(resolved) ? "staticVirtualInterfaceSlot := true, " : "";
         var target = extracted
             ? $".managed {resolved!.MetadataToken.ToUInt32()}"
@@ -209,16 +210,23 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             foreach (var argument in owners) closedOwner.GenericArguments.Add(argument);
             declaringType = closedOwner;
         }
-        var name = extracted
-            ? ((MethodDefinition)Original(definition.Resolve().Module)
-                .LookupToken(definition.Resolve().MetadataToken)).Name : definition.Name;
+        var resolved = extracted ? definition.Resolve() : null;
+        var name = resolved is null ? definition.Name :
+            ((MethodDefinition)Original(resolved.Module).LookupToken(resolved.MetadataToken)).Name;
         var genericArity = (reference is MethodDefinition own ? MethodSpecialization.Definition(own) : definition)
             .GenericParameters.Count;
-        // Types render in the order they always have, since rendering a type can number its layout.
+        // A cross-module MemberRef and its MethodDef can use different core assemblies for primitive elements.
+        var signature = reference;
+        if (resolved is not null && resolved.Module != reference.Module && genericArity == 0 && owners.Length == 0)
+        {
+            signature = resolved;
+            declaringType = resolved.DeclaringType;
+        }
+        // Rendering a type can number its layout.
         var ownerType = Type(declaringType, true);
         var typeArguments = List(arguments.Select(Type));
-        var returnType = Type(Returned(reference));
-        ValueList<string> parameters = [.. CallReturnType.Parameters(reference).Select(Parameter)];
+        var returnType = Type(Returned(signature));
+        ValueList<string> parameters = [.. CallReturnType.Parameters(signature).Select(Parameter)];
         ValueList<string> methodArguments = [.. arguments[..^owners.Length].Select(Type)];
         return (new(ownerType, MetadataName.OfText(name), reference.HasThis, genericArity, returnType, parameters,
             methodArguments), name, owners.Length, extracted, typeArguments);

@@ -234,6 +234,31 @@ private def blobOffset (slice : MetadataSlice) (payload : List Nat) : Nat :=
   | some (offset, _) => offset
   | none => 0
 
+/-- Both assemblies declare Int32 Get(Object). Lib uses a different core AssemblyRef version. -/
+private def getWithObject (slice : MetadataSlice) : MetadataSlice :=
+  mutateBlob slice (blobOffset slice [0, 0, 8]) fun _ => [4, 0, 1, 8, 0x1C]
+
+/-- Primitive results and parameters bind separately to the MemberRef and MethodDef scopes. -/
+theorem managed_call_binds_both_primitive_scopes :
+    let caller := getWithObject own.1
+    let callee := mutateRow (getWithObject lib) 0x23000001 fun row => row.set 0 10
+    let scope := "System.Runtime, Version=10.0.0.0, Culture=neutral, " ++
+      "PublicKeyToken=b03f5f7f11d50a3a"
+    let declaredObject := TypeExpr.object runtimeScope "System.Object"
+    let closedObject := TypeExpr.object scope "System.Object"
+    let closedResult := TypeExpr.atom scope "System.Int32"
+    let call := { getSite with
+      declared.parameters := [declaredObject], parameterCount := 1
+      method.parameters := [closedObject], method.returnType := closedResult }
+    passes caller callee tokens.getRef (.call call) = true ∧
+      [{ call with declared.parameters := [closedObject] },
+       { call with method.parameters := [declaredObject] },
+       { call with declared.returnType := closedResult },
+       { call with method.returnType := int32 }].all (fun changed =>
+         rejects caller callee tokens.getRef (.call changed) (.operandMismatch tokens.getRef)) = true
+    := by decide +kernel
+#print axioms managed_call_binds_both_primitive_scopes
+
 /-- A row whose two bytes at `position` are copied from another row of the slice. -/
 private def borrow (slice : MetadataSlice) (token source position : Nat) : MetadataSlice :=
   mutateRow slice token fun bytes =>
@@ -722,13 +747,18 @@ theorem checks_the_arity_of_a_generic_struct_owner :
       (.operandMismatch genericPair.2.1) = true := by decide +kernel
 #print axioms checks_the_arity_of_a_generic_struct_owner
 
-/-- A call into a struct of a pinned assembly whose core-library number is wrong: the struct is
-    still a value type, so a call that names it as a class is refused. -/
+/-- A void signature needs no core-library scope, and its struct owner still binds as a value
+    type. An Int32 result needs the callee's primitive scope. -/
 theorem rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number :
+    let asVoid := fun slice => mutateBlob slice (blobOffset slice [0, 0, 8]) fun _ => [3, 0, 0, 1]
+    let call := { sumSite with
+      declared.returnType := .void, method.returnType := .void, returnsValue := false }
     passes own.1 lib tokens.sumRef (.call sumSite) = true ∧
-    passes own.1 libWithoutCorlib tokens.sumRef (.call sumSite) = true ∧
-    rejects own.1 libWithoutCorlib tokens.sumRef
-      (.call { sumSite with method.owner := .object libScope "Lib.Pair" })
+    rejects own.1 libWithoutCorlib tokens.sumRef (.call sumSite)
+      (.operandMismatch tokens.sumRef) = true ∧
+    passes (asVoid own.1) (asVoid libWithoutCorlib) tokens.sumRef (.call call) = true ∧
+    rejects (asVoid own.1) (asVoid libWithoutCorlib) tokens.sumRef
+      (.call { call with method.owner := .object libScope "Lib.Pair" })
       (.operandMismatch tokens.sumRef) = true := by decide +kernel
 #print axioms rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number
 
