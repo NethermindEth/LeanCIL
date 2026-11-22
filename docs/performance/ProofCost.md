@@ -115,7 +115,7 @@ it twice uses fewer kernel heartbeats than reducing two reads for either layout.
 gives command-level measurements after extraction. Image hashing and layout replay run separately.
 
 A second fixture, `LayoutProbe.Reader`, compares the interpreter at
-[27953edb](https://github.com/NethermindEth/LeanCIL/blob/27953edb/CIL/Instructions.lean#L103)
+[27953edb](https://github.com/NethermindEth/LeanCIL/commit/27953edb)
 with canonical execution at `4d72d8c3`. The .NET 10 and .NET 11 builds produce
 identical eight-byte method bodies for each reader, including the field token and tiny header.
 Both interpreters use the same positive contract proof and consumer sources.
