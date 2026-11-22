@@ -64,6 +64,29 @@ heartbeats, proof objects and olean bytes, so a base checkout in another directo
   on no other row; the other 29 rows of the module move by at most 0.2%.
 - Elapsed times depend on load and never decide a comparison.
 
+## Reusing a wide vector equality contract
+
+On Lean 4.35.0 the scalar-profile extractions of `EqualBytes256` and `EqualSigned512` each
+load two arguments, call vector equality and return a Boolean. For each method the consumer
+proves that zero compared with a vector containing only its highest bit returns false and
+preserves arbitrary caller memory. Both proofs allow any sufficient fuel. The direct proof
+supplies 16 and reduces the invocation. The other proof obtains the fuel, return value and
+memory equality from the universal contract.
+
+| Vector width | Proof | Frontend heartbeats | Kernel heartbeats | Proof objects | Elapsed ms |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 256 | Universal contract | 4,611,894 | 768,547 | 312 | 441 |
+| 256 | Direct consumer | 2,744,041 | 767,330 | 129 | 276 |
+| 256 | Consumer using contract | 73,207 | 6,015 | 535 | 11 |
+| 512 | Universal contract | 5,608,075 | 978,331 | 312 | 536 |
+| 512 | Direct consumer | 3,346,702 | 977,114 | 129 | 389 |
+| 512 | Consumer using contract | 73,249 | 6,015 | 535 | 10 |
+
+The universal contract incurs its kernel cost once per extracted method. At either width,
+checking it once and using it twice costs fewer kernel heartbeats than reducing two such
+invocations. The proof that uses the contract has more proof objects. The command-level
+measurements use the proof-cost frontend described below. Elapsed times are from one run.
+
 ## Measuring one module of another package
 
 The frontend runs without the C# driver, from any Lake package that depends on LeanCIL. From the
