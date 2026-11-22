@@ -117,6 +117,12 @@ partial class Program
         Mutation("layout coverage for an empty selection", LayoutContentModule, source => source.Replace(
             "Extracted.imports layoutCoverage% :=", "Extracted.imports true :=", StringComparison.Ordinal),
             "replay", BindingFact.LayoutContent);
+        Mutation("dispatch catalog about other methods", DispatchCatalogsModule, source => source.Replace(
+            "Extracted.methodEvidence Extracted.imports dispatchCoverage% :=", "[] Extracted.imports false :=",
+            StringComparison.Ordinal), "Theorem statement mismatch", BindingFact.DispatchCatalogs);
+        Mutation("dispatch coverage for an empty selection", DispatchCatalogsModule, source => source.Replace(
+            "Extracted.imports dispatchCoverage% :=", "Extracted.imports true :=", StringComparison.Ordinal),
+            "replay", BindingFact.DispatchCatalogs);
         Mutation("generic constraints about other imports", GenericConstraintsModule, source => source.Replace(
             "Extracted.imports constraintCoverage% :=", "[] false :=", StringComparison.Ordinal),
             "Theorem statement mismatch", BindingFact.GenericConstraints);

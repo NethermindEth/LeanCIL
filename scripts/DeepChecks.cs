@@ -539,7 +539,8 @@ partial class Program
         BindingFact.ObjectFields => "the supplied images do not cover the extraction's platform definition of System.Object",
         BindingFact.LayoutContent =>
             "no value layout was selected, or a layout or import lacks physical coverage",
-        BindingFact.DispatchCatalogs => "no check reads the types of an image",
+        BindingFact.DispatchCatalogs =>
+            "no virtual class slot was selected, or a hierarchy, reference or import lacks physical coverage",
         BindingFact.StaticData => "no checked theorem binds the static field data to the pinned images",
         BindingFact.GenericConstraints =>
             "no generic parameter was selected, or a declaration, layout or import lacks physical coverage",
@@ -551,6 +552,8 @@ partial class Program
     const string ImagesModule = "BindingAudit.Images";
     const string LayoutContentModule = "BindingAudit.LayoutContent";
     const string LayoutContentTheorem = "BindingAudit.layoutContent";
+    const string DispatchCatalogsModule = "BindingAudit.DispatchCatalogs";
+    const string DispatchCatalogsTheorem = "BindingAudit.dispatchCatalogs";
     const string GenericConstraintsModule = "BindingAudit.GenericConstraints";
     const string GenericConstraintsTheorem = "BindingAudit.genericConstraints";
     const string PlatformKindsModule = "BindingAudit.PlatformKinds";
@@ -758,6 +761,9 @@ partial class Program
         File.WriteAllText(ModuleSource(plan.Output, LayoutContentModule), CoverageSource(
             "checkLayoutContent", "LayoutContentChecked", "layoutContent", "layoutCoverage",
             "LayoutContent", "Extracted.rawLayouts Extracted.imports"));
+        File.WriteAllText(ModuleSource(plan.Output, DispatchCatalogsModule), CoverageSource(
+            "ClassDispatch.check", "DispatchCatalogsChecked", "dispatchCatalogs", "dispatchCoverage",
+            "DispatchCatalogs", "Extracted.assemblies Extracted.methodEvidence Extracted.imports"));
         File.WriteAllText(ModuleSource(plan.Output, GenericConstraintsModule), CoverageSource(
             "checkGenericConstraints", "GenericConstraintsChecked", "genericConstraints", "constraintCoverage",
             "GenericConstraints", "Extracted.methodEvidence Extracted.rawLayouts Extracted.imports"));
@@ -1037,6 +1043,8 @@ partial class Program
             new(ImagesModule, new("BindingAudit.images_eq", imagesEq, ApprovedAxioms)),
             Coverage(LayoutContentModule, LayoutContentTheorem, "LayoutContentChecked", BindingFact.LayoutContent,
                 "rawLayouts", "imports"),
+            Coverage(DispatchCatalogsModule, DispatchCatalogsTheorem, "DispatchCatalogsChecked",
+                BindingFact.DispatchCatalogs, "assemblies", "methodEvidence", "imports"),
             Coverage(GenericConstraintsModule, GenericConstraintsTheorem, "GenericConstraintsChecked",
                 BindingFact.GenericConstraints, "methodEvidence", "rawLayouts", "imports"),
             Coverage(PlatformKindsModule, PlatformKindsTheorem, "PlatformKindsChecked", BindingFact.PlatformTypeKinds,
@@ -1080,7 +1088,7 @@ partial class Program
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
         var facts = PagedFacts.Select(fact => PagedFact(fact).Module)
             .Append(StaticDataModule).Append(EnumStorageModule).Append(PlatformKindsModule)
-            .Append(GenericConstraintsModule).Append(LayoutContentModule);
+            .Append(GenericConstraintsModule).Append(LayoutContentModule).Append(DispatchCatalogsModule);
         if (plan.ObjectFields.HasValue) facts = facts.Append(ObjectFieldsModule);
         if (plan.TupleFields.HasValue) facts = facts.Append(TupleFieldsModule);
         if (plan.PublicKeys.HasValue) facts = facts.Append(PublicKeysModule);

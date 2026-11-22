@@ -46,6 +46,12 @@ private def primitiveScope (image : PreparedImage) : Except AuditError String :=
   let some core := found | throw .uncoveredConstraint
   return core
 
+/-- A top-level simple name cannot include a namespace separator or a constructed type suffix. -/
+def ordinaryTypeName (space name : String) : Bool :=
+  let component := fun (c : Char) => c.isAlphanum || c == '_' || c == '`'
+  !name.isEmpty && (metadataChars name).all component &&
+    (metadataChars space).all (fun c => component c || c == '.')
+
 /-- A top-level TypeDef or AssemblyRef-scoped TypeRef with its physical assembly identity. -/
 private def constraintTypeName (image : PreparedImage) (token : Nat) :
     Except AuditError String := do
@@ -54,10 +60,7 @@ private def constraintTypeName (image : PreparedImage) (token : Nat) :
   let name ← image.layout.stringAt image.view (← cell typeNameColumn)
   let some namespaceText := spelled? space | throw (.constraintMismatch token)
   let some nameText := spelled? name | throw (.constraintMismatch token)
-  let component := fun (c : Char) => c.isAlphanum || c == '_' || c == '`'
-  unless !nameText.isEmpty && (metadataChars nameText).all component &&
-      (metadataChars namespaceText).all (fun c => component c || c == '.') do
-    throw .uncoveredConstraint
+  unless ordinaryTypeName namespaceText nameText do throw .uncoveredConstraint
   let scope ← match tableOf token with
     | 2 => do
       if visibilityOf (← cell typeDefFlagsColumn) ≥ nestedVisibility then

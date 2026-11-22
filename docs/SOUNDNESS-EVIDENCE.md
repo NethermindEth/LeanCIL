@@ -408,6 +408,12 @@ For enums, Lean checks the physical TypeDef and its instance field `value__` aga
 storage code from the certified method environment. A nested enum is identified by its
 enclosing TypeDefs. An external enum may reach its definition through several forwarding
 assemblies. Each must be supplied for complete coverage.
+For local virtual class slots in a single image, Lean follows each physical TypeDef parent,
+including abstract intermediates, and checks the MethodDefs and signatures of every descendant.
+It compares the complete declarations of each method's catalog and validates each reachable
+target table against the physical hierarchy. Casts, constrained and cross-image dispatch,
+interfaces, explicit overrides, additional metadata modules and unsupported signatures leave this
+fact uncovered.
 With all direct reference images supplied, the audit checks each AssemblyRef against its target's
 full publisher key or unsigned definition. It also compares each carried AssemblyRef token with
 the physical row in its source assembly. Generic import identities remain uncovered. `check` hashes

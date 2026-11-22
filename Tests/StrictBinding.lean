@@ -9,6 +9,7 @@ import Tests.StrictBinding.EnumEvidence
 import Tests.StrictBinding.PlatformKinds
 import Tests.StrictBinding.StaticData
 import Tests.StrictBinding.LayoutContent
+import Tests.StrictBinding.DispatchCatalogs
 
 /-!
 # Strict binding tests: digests

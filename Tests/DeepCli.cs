@@ -30,6 +30,11 @@ if (args is ["--layouts"])
     CheckLayoutContent();
     return;
 }
+if (args is ["--dispatch"])
+{
+    CheckDispatchCatalogs();
+    return;
+}
 if (args is ["--enums"])
 {
     CheckEnumStorage();
@@ -310,6 +315,53 @@ void CheckGenericConstraints()
         throw new InvalidOperationException("Generic layouts incorrectly reconfirmed: " + layout);
 }
 
+void CheckDispatchCatalogs()
+{
+    foreach (bool changed in new[] { false, true })
+    {
+        var build = changed ? "FiveFaces" : "SixFaces";
+        var assembly = fixture.Build(build, "DeepCli.Dispatch", $$"""
+            namespace Geometry;
+            public abstract class Shape { public abstract int Sides(); }
+            public class Triangle : Shape { public override int Sides() => 3; }
+            public sealed class Equilateral : Triangle { }
+            public abstract class Solid { public abstract int Faces(); }
+            public sealed class Cube : Solid { public override int Faces() => {{(changed ? 5 : 6)}}; }
+            public static class Reader {
+                public static int Total(Shape shape, Solid solid) => shape.Sides() + solid.Faces() + shape.Sides();
+            }
+            """);
+        var pins = Path.Combine(fixture.Root, build + ".sha256");
+        File.WriteAllText(pins, Sha(assembly) + "  " + assembly + Environment.NewLine);
+        var output = fixture.Artifact(build + "Total");
+        const string selector = "Geometry.Reader::Total(Geometry.Shape,Geometry.Solid)";
+        Run([.. cli, "extract", assembly, selector, output]);
+        var proof = Path.Combine(output, "Proof.lean");
+        var template = File.ReadAllText(At("Tests/StrictBinding/DispatchTotal.lean.in"));
+        var claim = changed ? "Refuted" : "Holds";
+        var evidence = changed ? "refuted rfl" : "holds (by intro shape; cases shape <;> rfl)";
+        File.WriteAllText(proof, template +
+            $"\ntheorem correctness : contract.{claim} Extracted.program 0 := {evidence}\n" +
+            "#print axioms correctness\nend DispatchGate\n");
+        string[] binding = changed ? [] : ["--deep-checks", pins];
+        Run([.. cli, "verify", output, "--proof", proof, "--theorem", "DispatchGate.correctness", .. binding]);
+        using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "verified.json")));
+        if (changed)
+        {
+            var method = report.RootElement.GetProperty("refutation").GetProperty("method");
+            if (method.GetProperty("assemblySha256").GetString() != Sha(assembly) ||
+                !method.GetProperty("signature").GetString()!.Contains(selector, StringComparison.Ordinal))
+                throw new InvalidOperationException("Wrong dispatch counterexample: " + method);
+            continue;
+        }
+        var fact = report.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+            .Single(item => item.GetProperty("id").GetString() == "dispatch-catalogs");
+        if (fact.GetProperty("status").GetString() != "reconfirmed" ||
+            fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
+            throw new InvalidOperationException("Incorrect dispatch binding report: " + fact);
+    }
+}
+
 void CheckLayoutContent()
 {
     foreach (bool changed in new[] { false, true })
@@ -574,6 +626,7 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
     CheckEnumStorage();
     CheckGenericConstraints();
     CheckLayoutContent();
+    CheckDispatchCatalogs();
 
     var tables = fixture.Build("Table", "DeepCli.Table", """
         public static class Table {
