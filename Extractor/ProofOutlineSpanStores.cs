@@ -8,9 +8,9 @@ namespace Nethermind.LeanCIL;
 internal static partial class ProofOutline
 {
     /// <summary>Non-nop outline operations paired with their original CIL instructions.</summary>
-    static (Operation Op, Instruction Site)[] StoreBodySites(Extraction extraction, int index) =>
+    static (Operation Op, Instruction Site, int Pc)[] StoreBodySites(Extraction extraction, int index) =>
         extraction.Emitted[index].Operations
-            .Select((op, pc) => (Op: op, Site: extraction.Methods[index].Body.Instructions[pc]))
+            .Select((op, pc) => (Op: op, Site: extraction.Methods[index].Body.Instructions[pc], Pc: pc))
             .Where(pair => !pair.Op.IsNop).ToArray();
 
     /// <summary>The element width and store of a static method `(Span&lt;T&gt; target, T value)` whose body only
@@ -23,8 +23,9 @@ internal static partial class ProofOutline
             WrittenSpanWidth(method.Parameters[0].ParameterType) is not { } width ||
             ElementWidth(method.Parameters[1].ParameterType) != width ||
             !extraction.Emitted[index].Frame.HasNoLocals) return null;
-        if (ops is not [(Unoutlined, var address), (Constant { Width: 32, Value: 0, Numeral: true }, _),
-                (Unoutlined, var item), (Arg { Index: 1 }, _), var store, (_, { OpCode.Code: Code.Ret })] ||
+        if (ops is not [(Unoutlined, var address, _), (Constant { Width: 32, Value: 0, Numeral: true }, _, _),
+                (Unoutlined, var item, _), var value, var store, (_, { OpCode.Code: Code.Ret }, _)] ||
+            extraction.Emitted[index].ArgumentAt(value.Pc) != 1 ||
             address.OpCode.Code is not (Code.Ldarga or Code.Ldarga_S) ||
             address.Operand is not ParameterDefinition parameter || MethodArguments.Index(method, parameter) != 0 ||
             Spans.MemberWidth(item, "get_Item", 1, extraction.Architecture) != width || !MethodArguments.Plain(method, 1))

@@ -114,11 +114,50 @@ private def interfaceName (image : PreparedImage) (coded : Nat) : Reading TypeEx
   let name ← localName image (coded / 4) .interface
   return .atom image.identity name
 
+/-- Local MethodImpl rows bind the implementing MethodDef to its class and the overridden
+    MethodDef to its interface. Both signatures describe the same nongeneric instance slot. -/
+private def localOverrides (image : PreparedImage) (interfaces : Array (Array Nat))
+    (parents : Array Nat) (root : Nat) :
+    Reading (Array (List (Nat × TypeExpr))) := do
+  let rowCount := image.layout.rowCount 0x19
+  if rowCount == 0 then return #[]
+  let methods := image.layout.rowCount Table.methodDef
+  let mut bindings := Array.replicate (methods + 1) []
+  for i in [:rowCount] do
+    let cell := image.layout.cellOfRow image.view 0x19 (i+1)
+    let owner ← physical (cell 0)
+    let body ← physical (cell 1)
+    let slot ← physical (cell 2)
+    guard (body % 2 == 0)
+    let bodyToken ← physical (checkedTokenOf Table.methodDef (body / 2) .rowOverflow)
+    let classToken ← physical (checkedTokenOf Table.typeDef owner .rowOverflow)
+    unless (← physical (methodDeclaringType image bodyToken)) == classToken do
+      throwThe AuditError (.dispatchMismatch bodyToken)
+    -- An unrelated class can implement an external interface. Its slots do not enter this catalog.
+    unless ← descends parents root (image.layout.rowCount Table.typeDef) owner false do continue
+    guard (slot % 2 == 0)
+    let slotToken ← physical (checkedTokenOf Table.methodDef (slot / 2) .rowOverflow)
+    let interfaceToken ← physical (methodDeclaringType image slotToken)
+    let some direct := interfaces[owner]? | failure
+    guard (direct.contains ((interfaceToken % 2^24) * 4))
+    let name ← localName image (interfaceToken % 2^24) .interface
+    let slotOwner := TypeExpr.atom image.identity name
+    let implementation ← classMethod image (body / 2)
+    let declaration ← classMethod image (slot / 2)
+    guard (implementation.hasThis && implementation.hasBody && implementation.isVirtual &&
+      declaration.hasThis && declaration.isVirtual && declaration.isAbstract &&
+      implementation.returnType == declaration.returnType &&
+      implementation.parameters == declaration.parameters)
+    let binding := (slotToken, slotOwner)
+    guard (!bindings[body / 2]!.contains binding)
+    bindings := bindings.modify (body / 2) (binding :: ·)
+  return bindings.map List.reverse
+
 /-- Enumerate every physical descendant, including abstract intermediates, and every MethodDef
-    each one owns. MethodPtr and explicit method overrides remain outside this reader's coverage. -/
+    each one owns, including explicit implementations of direct local interface slots. -/
 def physicalHierarchy (image : PreparedImage) (owner : Nat) :
     OptionT (Except AuditError) (List DispatchType) := do
-  guard (image.layout.rowCount 5 == 0 && image.layout.rowCount 25 == 0)
+  guard (image.layout.rowCount 5 == 0)
   -- A File row with metadata introduces another module whose classes this image cannot enumerate.
   for i in [:image.layout.rowCount 0x26] do
     guard ((← physical (image.layout.cellOfRow image.view 0x26 (i+1) 0)) == 1)
@@ -126,6 +165,7 @@ def physicalHierarchy (image : PreparedImage) (owner : Nat) :
   let interfaces ← interfacesByOwner image count
   let mut parents := #[0]
   for i in [:count] do parents := parents.push (← parentRow image (i+1))
+  let overrides ← localOverrides image interfaces parents owner
   let mut types := #[]
   for i in [:count] do
     let row := i+1
@@ -136,7 +176,9 @@ def physicalHierarchy (image : PreparedImage) (owner : Nat) :
     let finish ← if row == count then pure (image.layout.rowCount Table.methodDef + 1)
       else physical (image.layout.cellOfRow image.view Table.typeDef (row+1) 5)
     let mut methods := #[]
-    for index in [first:finish] do methods := methods.push (← classMethod image index)
+    for index in [first:finish] do
+      let method ← classMethod image index
+      methods := methods.push { method with overrides := overrides[index]?.getD [] }
     let base ← if parents[row]! == 0 then pure TypeExpr.void else className image parents[row]!
     let owned ← interfaces[row]!.toList.mapM (interfaceName image)
     guard owned.Nodup

@@ -291,7 +291,9 @@ foreach (var opcode in new[] { OpCodes.Ldloca, OpCodes.Ldloca_S })
 if (addressSlot(argumentMethod, Instruction.Create(OpCodes.Ldarga_S, argumentMethod.Parameters[1]), homePositions) != 3 ||
     addressSlot(argumentMethod, loadArgument, homePositions) is not null)
     throw new Exception("An argument load and a short address did not retain their distinct opcodes");
-if (!Equals(TranslateArgument(loadArgument, []), Make("Arg", 1)))
+var argumentIndex = Model("MethodArguments").GetMethod("LoadIndex", BindingFlags.Static | BindingFlags.NonPublic)!
+    .CreateDelegate<Func<MethodDefinition, Instruction, int?>>();
+if (TranslateArgument(loadArgument, []).GetType() != Model("Unoutlined") || argumentIndex(argumentMethod, loadArgument) != 1)
     throw new Exception("Unhomed loads no longer use the original argument");
 try
 {
@@ -325,8 +327,9 @@ Array Operations(params object[] operations)
     return array;
 }
 var scalarProfile = Model("FeatureProfile").GetMethod("Select", Declared)!.Invoke(null, ["scalar"]);
-object OutlineMethod(MethodDefinition source, HashSet<Instruction> reachable, params object[] operations) =>
-    Make("ProofOutline+Method", null, Operations(operations), source, reachable, scalarProfile, context);
+object OutlineMethod(MethodDefinition source, HashSet<Instruction> reachable, Dictionary<int, int> homes,
+    params object[] operations) =>
+    Make("ProofOutline+Method", null, Operations(operations), source, reachable, homes, scalarProfile, context);
 int Loops(object body) => ((System.Collections.IList)bodyType.GetMethod("Loops", Declared)!.Invoke(body, null)!).Count;
 // An argument read is pure only when its declared type is no narrow integer: (int, byte) below.
 var mixedArguments = new MethodDefinition("Mixed", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
@@ -335,9 +338,17 @@ mixedArguments.Parameters.Add(new ParameterDefinition("word", Mono.Cecil.Paramet
 mixedArguments.Parameters.Add(new ParameterDefinition("small", Mono.Cecil.ParameterAttributes.None,
     module.TypeSystem.Byte));
 owner.Methods.Add(mixedArguments);
-bool Pure(object operation, bool plainReturn = true) =>
-    (bool)bodyType.GetMethod("Pure", Declared, [Model("Operation"), typeof(MethodDefinition), typeof(bool)])!
-        .Invoke(null, [operation, mixedArguments, plainReturn])!;
+var mixedCode = mixedArguments.Body.Instructions;
+mixedCode.Add(Instruction.Create(OpCodes.Ldarg_0));
+mixedCode.Add(Instruction.Create(OpCodes.Ldarg_S, mixedArguments.Parameters[1]));
+mixedCode.Add(Instruction.Create(OpCodes.Ret));
+mixedCode.Add(Instruction.Create(OpCodes.Call, mixedArguments));
+var mixedLive = mixedCode.ToHashSet();
+var mixedHomes = new Dictionary<int, int>();
+var mixed = OutlineMethod(mixedArguments, mixedLive, mixedHomes, Make("Unoutlined"), Make("Unoutlined"),
+    Make("StackOperation", Code.Ret), Make("Call", Named("CallKind", "Tail"), 1, 0));
+bool Pure(int pc, bool plainReturn = true) =>
+    (bool)mixed.GetType().GetMethod("PureAt", Declared)!.Invoke(mixed, [pc, plainReturn])!;
 foreach (var encoding in new[] { OpCodes.Blt_S, OpCodes.Blt })
 {
     var head = Instruction.Create(OpCodes.Ldc_I4_0);
@@ -346,7 +357,7 @@ foreach (var encoding in new[] { OpCodes.Blt_S, OpCodes.Blt })
         Instruction.Create(OpCodes.Ret) })
         caller.Body.Instructions.Add(site);
     var code = caller.Body.Instructions;
-    var loopMethod = OutlineMethod(caller, code.ToHashSet(), code.Select(Operation).ToArray());
+    var loopMethod = OutlineMethod(caller, code.ToHashSet(), [], code.Select(Operation).ToArray());
     var body = Activator.CreateInstance(bodyType, Declared, null, [loopMethod], null)!;
     if (Loops(body) != 1)
         throw new Exception("A conditional back edge is not found as a loop: " + encoding.Name);
@@ -355,7 +366,7 @@ var fieldReader = module.GetType("Examples.Counter").Methods.Single(member => me
 var fieldCode = fieldReader.Body.Instructions;
 var fieldSite = fieldCode.Single(site => site.OpCode.Code == Code.Ldfld);
 var live = fieldCode.ToHashSet();
-var extractedReader = OutlineMethod(fieldReader, live,
+var extractedReader = OutlineMethod(fieldReader, live, [],
     fieldCode.Select(_ => Make("Unoutlined")).ToArray());
 var fieldAt = extractedReader.GetType().GetMethod("StructFieldAt", Declared)!;
 object? Shape(Instruction site) => fieldAt.Invoke(extractedReader, [fieldCode.IndexOf(site)]);
@@ -363,10 +374,13 @@ if (!Equals(Shape(fieldSite), (Code.Ldfld, 0, 8, false, false)) || Shape(fieldCo
     throw new Exception("The outline did not resolve the compiled unsigned field load at its original site");
 live.Remove(fieldSite);
 if (Shape(fieldSite) is not null) throw new Exception("An unreachable struct field contributed an outline operand");
-if (!Pure(Make("Arg", 0)) || Pure(Make("Arg", 1)) ||
-    !Pure(Make("StackOperation", Code.Ret)) || Pure(Make("StackOperation", Code.Ret), plainReturn: false) ||
-    Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)))
+if (!Pure(0) || Pure(1) || !Pure(2) || Pure(2, plainReturn: false) || Pure(3))
     throw new Exception("The pure operations are no longer exactly the admitted unnarrowed ones");
+mixedHomes.Add(0, 0);
+if (Pure(0)) throw new Exception("A homed argument was stepped as a direct argument load");
+mixedHomes.Clear();
+mixedLive.Remove(mixedCode[0]);
+if (Pure(0)) throw new Exception("An unreachable argument load contributed a pure step");
 var unaligned = Model("UnsafeModels").GetMethod("UnalignedStorage", Declared)!;
 Instruction TransferSite(string name) => module.GetType("Examples.UnalignedMemory").Methods
     .Single(method => method.Name == name).Body.Instructions.Single(site => site.OpCode.Code == Code.Call);

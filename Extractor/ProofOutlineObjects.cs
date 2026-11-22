@@ -190,7 +190,7 @@ internal static partial class ProofOutline
     /// which objects a body with loops touches; its steps are not a proof.</remarks>
     /// <remarks>With `throws`, for a callee, a path may end in a throw, which its contract's `pre` must exclude.
     /// </remarks>
-    sealed class ObjectWalk(Specification spec, Operation[] ops, FieldViews views, Func<int, Callee?> callees,
+    sealed class ObjectWalk(Specification spec, Method emitted, FieldViews views, Func<int, Callee?> callees,
         IReadOnlyDictionary<int, int> homes, bool linear = false, bool numericHomes = false,
         Func<int, Stub?>? stubs = null, bool throws = false,
         int methodIndex = 0)
@@ -305,9 +305,9 @@ internal static partial class ProofOutline
         bool Walk(int start, List<Item> stack, Dictionary<int, Item> locals, HashSet<int> visited,
             Func<int, string> location)
         {
-            for (var pc = start; pc < ops.Length; pc++)
+            for (var pc = start; pc < emitted.Operations.Length; pc++)
             {
-                var op = ops[pc];
+                var op = emitted.Operations[pc];
                 var classField = views.FieldAt(methodIndex, pc);
                 Item? Pop()
                 {
@@ -325,7 +325,7 @@ internal static partial class ProofOutline
                 bool Branch(string condition, bool takenWhenTrue, int target)
                 {
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
-                    var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
+                    var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, emitted,
                         views, callees, homes, linear, numericHomes, stubs, throws, methodIndex)
                     { Objects = Objects, Arrays = Arrays,
                         Slots = Slots, Stored = Stored, ArrayApart = ArrayApart,
@@ -342,9 +342,9 @@ internal static partial class ProofOutline
                     return true;
                 }
                 if (!visited.Add(pc)) return Stop("a backward jump");
-                if (op is Arg argument && MethodArguments.Plain(spec.Method, argument.Index))
+                if (emitted.ArgumentAt(pc) is int argument && MethodArguments.Plain(spec.Method, argument))
                 {
-                    var parameter = spec.Parameters[argument.Index];
+                    var parameter = spec.Parameters[argument];
                     Item? item = parameter.Shape switch
                     {
                         ParameterShape.Object => new Instance(Objects.First(reached => reached.Name == parameter.Name)),
@@ -1155,7 +1155,7 @@ internal static partial class ProofOutline
                 return null;
             var spec = new Specification(method, parameters, DescribeResult(method, extraction.Architecture), true,
                 true);
-            var walk = new ObjectWalk(spec, extraction.Emitted[index].Operations, views, _ => null,
+            var walk = new ObjectWalk(spec, extraction.Emitted[index], views, _ => null,
                 extraction.Emitted[index].Frame.IndexParameterHomes(),
                 numericHomes: HasNumericObjectHomes(method), throws: splits, methodIndex: index);
             // A contract states reference stores only of objects the callee reaches, and its caller cannot give
@@ -1212,7 +1212,7 @@ internal static partial class ProofOutline
         var summaries = new Dictionary<int, Callee?>();
         Callee? Summary(int index) => summaries.TryGetValue(index, out var known) ? known
             : summaries[index] = Summarize(extraction, index, names.Claim("callee" + index, "callee" + index), views);
-        var walk = new ObjectWalk(spec, body.Operations, views, Summary,
+        var walk = new ObjectWalk(spec, body.Method, views, Summary,
             extraction.Emitted[0].Frame.IndexParameterHomes(), linear: true);
         if (walk.Run(pc => Location(spec.Method, pc)) && walk.Objects.All(reached => reached.Holder is null) &&
             walk.Arrays.Count == 0)

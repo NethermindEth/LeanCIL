@@ -12,10 +12,32 @@ internal static partial class ProofOutline
 {
     /// <summary>The frame and instruction descriptors used to outline a proof of this method.</summary>
     internal sealed class Method(FrameMetadata frame, Operation[] operations, MethodDefinition source,
-        IReadOnlySet<Instruction> reachable, FeatureProfile profile, MetadataValidation.LayoutContext layouts)
+        IReadOnlySet<Instruction> reachable, IReadOnlyDictionary<int, int> parameterHomes,
+        FeatureProfile profile, MetadataValidation.LayoutContext layouts)
     {
         internal FrameMetadata Frame { get; } = frame;
         internal Operation[] Operations { get; } = operations;
+
+        /// <summary>The argument read directly at a reachable site. Addressed and assigned arguments use a frame slot.</summary>
+        internal int? ArgumentAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            return Operations[pc] is Unoutlined && reachable.Contains(site) &&
+                MethodArguments.LoadIndex(source, site) is int index && !parameterHomes.ContainsKey(index)
+                ? index : null;
+        }
+
+        /// <summary>Whether one checked, straight-line word step suffices for this site.</summary>
+        internal bool PureAt(int pc, bool plainReturn) => Operations[pc] switch
+        {
+            StackOperation { Kind: Code.Ret } => plainReturn,
+            Unoutlined when ArgumentAt(pc) is int argument => MethodArguments.Plain(source, argument),
+            var operation => Body.ConstantOf(operation) is { Width: 32 or 64 } ||
+                operation is ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } or
+                StackOperation { Kind: Code.Add or Code.Sub or Code.Mul or Code.And
+                    or Code.Or or Code.Xor or Code.Nop or
+                    Code.Conv_I8 or Code.Conv_I or Code.Conv_U8 or Code.Conv_U4 or Code.Conv_I4 }
+        };
 
         /// <summary>The admitted struct field at this instruction, using the extraction's layout context.</summary>
         internal (Code Opcode, int Offset, int Width, bool Signed, bool IsAggregate)? StructFieldAt(int pc)

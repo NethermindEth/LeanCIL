@@ -50,18 +50,6 @@ internal static partial class ProofOutline
             _ => null
         };
 
-        /// <summary>An operation that steps without a branch, a fault or memory: arithmetic, conversions, constants
-        /// and the calls modelled as one, and the bit-count calls, which step as their total intrinsic.</summary>
-        internal static bool Pure(Operation operation, MethodDefinition method, bool plainReturn) =>
-            operation is StackOperation { Kind: Code.Ret } ? plainReturn :
-            operation is Arg load ? MethodArguments.Plain(method, load.Index) :
-            ConstantOf(operation) is { Width: 32 or 64 } ||
-            operation is ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } or
-            StackOperation { Kind: Code.Add or Code.Sub or Code.Mul or Code.And
-                or Code.Or or Code.Xor or Code.Nop or
-                Code.Conv_I8 or Code.Conv_I or Code.Conv_U8 or Code.Conv_U4 or
-                Code.Conv_I4 };
-
         /// <summary>The proposition a conditional branch tests of its `bits`-bit operands' terms, and whether it
         /// is taken when the proposition holds; signed comparisons read the words through `toInt`. A literal
         /// operand is written as default `simp` writes it, so the split's fact rewrites a simplified goal.</summary>
@@ -338,10 +326,10 @@ internal static partial class ProofOutline
                 store = pc;
             }
             if (store < 0) throw refused;
-            Parameter Argument(int pc) => ops[pc] is Arg argument && MethodArguments.Plain(spec.Method, argument.Index)
-                ? spec.Parameters[argument.Index] : throw refused;
+            Parameter Argument(int pc) => body.Method.ArgumentAt(pc) is int argument && MethodArguments.Plain(spec.Method, argument)
+                ? spec.Parameters[argument] : throw refused;
             Parameter source;
-            if (ops[store - 1] is Arg)
+            if (body.Method.ArgumentAt(store - 1).HasValue)
                 source = Argument(store - 1);
             else if (store >= 2 && Argument(store - 2) is { Shape: ParameterShape.WordArray } array &&
                 ops[store - 1] is Unoutlined &&
@@ -357,9 +345,9 @@ internal static partial class ProofOutline
             {
                 // An array read other than through the span is indexed, which a spanned array is not destructured for.
                 var argument = Array.IndexOf(spec.Parameters, source);
-                if (Enumerable.Range(0, ops.Length).Any(pc =>
-                    ops[pc] is Arg read && read.Index == argument && pc != store - 2))
-                    throw Unsupported($"array `{source.Name}` is both spanned by `{name}` and read directly");
+                for (var pc = 0; pc < ops.Length; pc++)
+                    if (pc != store - 2 && body.Method.ArgumentAt(pc) == argument)
+                        throw Unsupported($"array `{source.Name}` is both spanned by `{name}` and read directly");
                 spanned.Add(source);
             }
             return source;
@@ -549,7 +537,7 @@ internal static partial class ProofOutline
                     : inputs.Any(input => input.Object is not null) ? "it takes an object, whose fields need facts"
                     : output is null ? "it returns nothing to state"
                     : !extraction.Emitted[index].Frame.HasNoLocals ? "it has locals"
-                    : Unstepped(callee, extraction.Emitted[index].Operations, []);
+                    : Unstepped(callee, extraction.Emitted[index], []);
                 lean.Noted("  ", "sorry", $"{NotOutlined}{callee.Name}'s body against the contract, since " +
                     reason);
             }
@@ -564,7 +552,8 @@ internal static partial class ProofOutline
             var ops = StoreBodySites(extraction, index);
             if (callee.HasThis || callee.ReturnType.FullName != "System.Void" || ops.Length != 4 ||
                 !extraction.Emitted[index].Frame.HasNoLocals || ops[3].Site.OpCode.Code != Code.Ret) return null;
-            if (ops[0].Op is not Arg { Index: var reference } || ops[1].Op is not Arg { Index: var word } ||
+            var emitted = extraction.Emitted[index];
+            if (emitted.ArgumentAt(ops[0].Pc) is not int reference || emitted.ArgumentAt(ops[1].Pc) is not int word ||
                 !MethodArguments.Plain(callee, reference) || !MethodArguments.Plain(callee, word)) return null;
             if (callee.Parameters[reference].ParameterType is not ByReferenceType target ||
                 ElementWidth(target.ElementType) is not { } width ||
@@ -579,8 +568,8 @@ internal static partial class ProofOutline
         {
             var plainReturn = LeanEmitter.Narrow(extraction.Methods[index].ReturnType) is null;
             return extraction.Emitted[index].Frame.HasNoLocals &&
-                extraction.Emitted[index].Operations
-                    .All(op => Body.Pure(op, extraction.Methods[index], plainReturn));
+                Enumerable.Range(0, extraction.Emitted[index].Operations.Length)
+                    .All(pc => extraction.Emitted[index].PureAt(pc, plainReturn));
         }
 
         /// <summary>The `Holds` proof of a callee of words that `Computes` or `Branches`, its inputs bound by
@@ -619,7 +608,7 @@ internal static partial class ProofOutline
             bool Supported(int pc) => ops[pc] switch
             {
                 StackOperation { Kind: Code.Ret } => plainReturn,
-                Arg load => MethodArguments.Plain(callee, load.Index),
+                Unoutlined when extraction.Emitted[index].ArgumentAt(pc) is int argument => MethodArguments.Plain(callee, argument),
                 // The word stack ends at this throw before any path can use its object operand.
                 StackOperation { Kind: Code.Ldnull } =>
                     Throws.Analyze(callee).Operands.Contains(callee.Body.Instructions[pc]),
@@ -675,7 +664,7 @@ internal static partial class ProofOutline
             while (true)
             {
                 var op = ops[pc];
-                if (op is Arg { Index: var argument } && MethodArguments.Plain(callee, argument))
+                if (extraction.Emitted[index].ArgumentAt(pc) is int argument && MethodArguments.Plain(callee, argument))
                 {
                     var bits = 8 * ElementWidth(callee.Parameters[argument].ParameterType)!.Value;
                     stack.Add(new(arguments[argument], bits));
@@ -1494,7 +1483,7 @@ internal static partial class ProofOutline
                     state.State[first] = EntrySpan(source);
                 else return Stop("a store of a value the outline cannot name");
             }
-            else if (op is Arg { Index: var argument } && MethodArguments.Plain(spec.Method, argument))
+            else if (body.Method.ArgumentAt(state.Pc) is int argument && MethodArguments.Plain(spec.Method, argument))
             {
                 var parameter = spec.Parameters[argument];
                 stack.Add(parameter.Shape switch
@@ -1709,7 +1698,7 @@ internal static partial class ProofOutline
                 return Stop("an `Unsafe.Add` other than one of a reference argument by a 32-bit index, written " +
                     "through before any other store of an iteration, which needs `add memory base width offset = " +
                     ".ok reference` (such as from `Writable.add_int`) and write authority in `footprint`");
-            else if (op is Arg { Index: var narrow })
+            else if (body.Method.ArgumentAt(state.Pc) is int narrow)
             {
                 var name = spec.Parameters[narrow].Name;
                 return Stop($", a read of the narrow argument `{name}`, which the outline does not step",

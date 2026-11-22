@@ -1,0 +1,139 @@
+import Extracted
+import Tests.HalfSwapContract
+open CIL.Safety
+open Tests.HalfSwapContract (bytes packed unpack put)
+/-! The source occupies bytes 24 through 55 of a 96-byte caller allocation. The eight
+placements use the same source and destination slices as the compiled CLR comparisons. -/
+
+namespace HalfSwapOverlap
+
+inductive Placement where
+  | left16 | left8 | left1 | same | right1 | right8 | right16 | separate
+
+/-- Destination byte offset in the caller allocation. -/
+def dest : Placement → Nat
+  | .left16 => 8
+  | .left8 => 16
+  | .left1 => 23
+  | .same => 24
+  | .right1 => 25
+  | .right8 => 32
+  | .right16 => 40
+  | .separate => 56
+
+def memory (data : Nat → BitVec 8) : Memory := { Memory.empty with
+  allocations := fun id => if id == 0 then some ⟨.callerStack, ⟨96, 1, []⟩, true, [96]⟩ else none
+  cells := fun _ offset => ⟨data offset, true⟩
+  views := [⟨0, 0, 96, true, true⟩]
+  nextIdentity := 1 }
+
+def args (p : Placement) : List Value :=
+  [.bufferSpan ⟨.address ⟨0, 24⟩, 32, 1, false⟩, .bufferSpan ⟨.address ⟨0, dest p⟩, 32, 1, true⟩]
+
+def saved (p : Placement) : Frame :=
+  ⟨1, [.root (some (.address ⟨0, dest p⟩)), .bytes .vector128 ⟨1, 0⟩], [1], 0⟩
+
+def entered (data : Nat → BitVec 8) : Memory :=
+  let m := memory data
+  let fresh := ((allocateHome m 1 16 1).toOption.getD (⟨1, 0⟩, m)).2
+  put fresh 1 0 (numberBytes 0 16)
+
+/-- Both vector loads read the original source bytes before either destination store. -/
+def savedLow (data : Nat → BitVec 8) := put (entered data) 1 0 (bytes data 24)
+def highWritten (p : Placement) (data : Nat → BitVec 8) := put (savedLow data) 0 (dest p) (bytes data 40)
+def lowWritten (p : Placement) (data : Nat → BitVec 8) := put (highWritten p data) 0 (dest p + 16) (bytes data 24)
+
+private theorem firstLoad (p : Placement) (data : Nat → BitVec 8) (fuel : Nat) :
+    invoke Extracted.program (fuel + 7) 0 (args p) (memory data) =
+    run Extracted.program fuel 0 7 (args p) (saved p)
+      [.scalar (.v128 (packed data 24)), .readOnlyReference (.address ⟨0, 24⟩)] (entered data) := by
+  cases p <;> with_unfolding_all rfl
+
+private theorem saveAndLoad (p : Placement) (data : Nat → BitVec 8) (fuel : Nat) :
+    run Extracted.program (fuel + 4) 0 7 (args p) (saved p)
+      [.scalar (.v128 (packed data 24)), .readOnlyReference (.address ⟨0, 24⟩)] (entered data) =
+    run Extracted.program fuel 0 11 (args p) (saved p)
+      [.scalar (.v128 (packed data 40))] (savedLow data) := by
+  unfold savedLow
+  rw [← unpack data 24]
+  cases p <;> with_unfolding_all rfl
+
+private theorem firstStore (p : Placement) (data : Nat → BitVec 8) (fuel : Nat) :
+    run Extracted.program (fuel + 2) 0 11 (args p) (saved p)
+      [.scalar (.v128 (packed data 40))] (savedLow data) =
+    run Extracted.program fuel 0 13 (args p) (saved p) [] (highWritten p data) := by
+  unfold highWritten
+  rw [← unpack data 40]
+  cases p <;> with_unfolding_all rfl
+
+private theorem secondStore (p : Placement) (data : Nat → BitVec 8) :
+    run Extracted.program 6 0 13 (args p) (saved p) [] (highWritten p data) =
+    .ok (expire (lowWritten p data) 1, []) := by
+  unfold lowWritten
+  rw [← unpack data 24]
+  cases p <;> with_unfolding_all rfl
+
+theorem ran (p : Placement) (data : Nat → BitVec 8) :
+    invoke Extracted.program 19 0 (args p) (memory data) = .ok (expire (lowWritten p data) 1, []) :=
+  (firstLoad p data 12).trans ((saveAndLoad p data 8).trans ((firstStore p data 6).trans (secondStore p data)))
+#print axioms ran
+
+/-- The method exchanges the two original halves and preserves caller storage outside the destination. -/
+def contract : MethodContract (Placement × (Nat → BitVec 8)) Unit where
+  args input := args input.1
+  results _ := []
+  footprint input := [(⟨0, dest input.1⟩, 32)]
+  pre input before := before = memory input.2
+  post input _ after _ := ∀ i, i < 32 →
+    (after.cells 0 (dest input.1 + i)).bits = input.2 (24 + (i + 16) % 32)
+
+private theorem writeHigh (p : Placement) (data : Nat → BitVec 8) :
+    write (savedLow data) ⟨0, dest p⟩ (bytes data 40) 1 = .ok (highWritten p data) := by
+  cases p <;> with_unfolding_all rfl
+
+private theorem writeLow (p : Placement) (data : Nat → BitVec 8) :
+    write (highWritten p data) ⟨0, dest p + 16⟩ (bytes data 24) 1 = .ok (lowWritten p data) := by
+  cases p <;> with_unfolding_all rfl
+
+private theorem confined (p : Placement) (data : Nat → BitVec 8) :
+    Confined [(⟨0, dest p⟩, 32)] (memory data) (expire (lowWritten p data) 1) := by
+  constructor
+  · change 1 ≤ 2
+    decide
+  all_goals
+    intro id old
+    have h : id = 0 := Nat.eq_zero_of_le_zero (Nat.le_of_lt_succ old)
+    subst id
+  · with_unfolding_all rfl
+  · intro offset outside
+    have bound : offset < dest p ∨ dest p + 32 ≤ offset := by simpa [Outside] using outside
+    change (lowWritten p data).cells 0 offset = _
+    rw [write_outside _ _ _ _ _ _ _ (writeLow p data) (Or.inr (by simp [bytes]; omega)),
+        write_outside _ _ _ _ _ _ _ (writeHigh p data) (Or.inr (by simp [bytes]; omega))]
+    with_unfolding_all rfl
+  · intro offset
+    with_unfolding_all rfl
+  · intro offset _
+    with_unfolding_all rfl
+  · intro offset _
+    with_unfolding_all rfl
+
+private theorem outputs (p : Placement) (data : Nat → BitVec 8) (i : Nat) (bound : i < 32) :
+    ((expire (lowWritten p data) 1).cells 0 (dest p + i)).bits = data (24 + (i + 16) % 32) := by
+  change ((lowWritten p data).cells 0 (dest p + i)).bits = _
+  by_cases low : i < 16
+  · rw [write_outside _ _ _ _ _ _ _ (writeLow p data) (Or.inr (Or.inl (by dsimp; omega)))]
+    have inside : i < (bytes data 40).length := by simpa [bytes] using low
+    have eq := congrArg Cell.bits (write_initializes _ _ _ _ _ i (writeHigh p data) inside)
+    simpa [bytes, Nat.mod_eq_of_lt (show i + 16 < 32 by omega), Nat.add_comm, Nat.add_assoc, Nat.add_left_comm] using eq
+  · have inside : i - 16 < (bytes data 24).length := by simp [bytes]; omega
+    have eq := congrArg Cell.bits (write_initializes _ _ _ _ _ (i - 16) (writeLow p data) inside)
+    have idx : dest p + 16 + (i - 16) = dest p + i := by omega
+    have rotated : (i + 16) % 32 = i - 16 := by omega
+    simpa [bytes, idx, rotated] using eq
+
+theorem correctness : contract.Holds Extracted.program 0 := by
+  rintro ⟨p, data⟩ _ rfl
+  exact ⟨19, (expire (lowWritten p data) 1, []), ran p data, confined p data, (), rfl, outputs p data⟩
+#print axioms correctness
+end HalfSwapOverlap

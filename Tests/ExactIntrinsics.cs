@@ -24,7 +24,7 @@ using Mono.Cecil.Cil;
 using X86Aes = System.Runtime.Intrinsics.X86.Aes;
 
 using Program verification = new();
-Run(["lake", "build", "Tests.ExactIntrinsics"], verification.CheckoutPackage());
+Run(["lake", "build", "Tests.ExactIntrinsics", "Tests.HalfSwapContract"], verification.CheckoutPackage());
 string assembly = At("Examples/Assembly/bin/Examples.dll");
 using ModuleDefinition metadata = ModuleDefinition.ReadModule(assembly);
 var divisionMethods = metadata.GetType("Examples.DivisionIntrinsics").Methods.ToDictionary(method => method.Name);
@@ -1244,7 +1244,8 @@ Console.WriteLine("PASS ARM64 REV64 contract and certified swapped lanes at (1, 
 var halves = new byte[32];
 windowRandom.NextBytes(halves);
 var swappedHalves = new byte[32];
-runtime.GetMethod("SwapHalves")!.CreateDelegate<HalfSwap>()(halves, swappedHalves);
+var originalSwap = runtime.GetMethod("SwapHalves")!.CreateDelegate<HalfSwap>();
+originalSwap(halves, swappedHalves);
 if (!swappedHalves.SequenceEqual(halves[16..].Concat(halves[..16])))
     throw new InvalidOperationException("Runtime SwapHalves did not swap the 16-byte halves");
 var halvesOutput = Path.Combine(root, "SwapHalves");
@@ -1286,6 +1287,101 @@ File.WriteAllText(halvesProof, $$"""
 pending.Add((new(selectors["SwapHalves"], halvesProof, halvesOutput), "arm64-advsimd",
     () => Console.WriteLine("PASS SwapHalves matches the host's halves and faults past a short destination")));
 Flush();
+// Move only the upper LoadUnsafe to offset zero. The compiled variant still returns normally.
+var repeatedHalf = Path.Combine(root, "RepeatLowerHalf");
+Directory.CreateDirectory(repeatedHalf);
+var repeatedImage = Path.Combine(repeatedHalf, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var method = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(m => m.Name == "SwapHalves");
+    var load = method.Body.Instructions.Single(i => i.Operand is MethodReference call &&
+        call.Name == "LoadUnsafe" && call.Parameters.Count == 2);
+    var offset = load.Previous;
+    if (offset.OpCode == OpCodes.Conv_I || offset.OpCode == OpCodes.Conv_U) offset = offset.Previous;
+    if (offset.OpCode != OpCodes.Ldc_I4_S || (sbyte)offset.Operand != 16)
+        throw new InvalidDataException("SwapHalves must load its second vector at byte offset 16.");
+    offset.Operand = (sbyte)0;
+    variant.Write(repeatedImage);
+}
+
+var repeatedSwap = Assembly.Load(File.ReadAllBytes(repeatedImage)).GetType("Examples.DivisionIntrinsics")!
+    .GetMethod("SwapHalves")!.CreateDelegate<HalfSwap>();
+var overlapRandom = new Random(568);
+foreach (var displacement in new[] { -16, -8, -1, 0, 1, 8, 16, 32 })
+{
+    const int source = 24;
+    var destination = source + displacement;
+    for (int trial = 0; trial < 12; trial++)
+    {
+        var initial = new byte[96];
+        overlapRandom.NextBytes(initial);
+        var expected = (byte[])initial.Clone();
+        initial.AsSpan(source + 16, 16).CopyTo(expected.AsSpan(destination));
+        initial.AsSpan(source, 16).CopyTo(expected.AsSpan(destination + 16));
+        var actual = (byte[])initial.Clone();
+        originalSwap(actual.AsSpan(source, 32), actual.AsSpan(destination, 32));
+        var changed = (byte[])initial.Clone();
+        repeatedSwap(changed.AsSpan(source, 32), changed.AsSpan(destination, 32));
+        if (!actual.AsSpan().SequenceEqual(expected) || changed.AsSpan().SequenceEqual(expected))
+            throw new InvalidOperationException($"SwapHalves overlap mismatch at displacement {displacement}, trial {trial}.");
+    }
+}
+
+verification.VerifyContractVariant(assembly, "Examples", selectors["SwapHalves"], Path.Combine(root, "InPlaceHalfSwap"),
+    repeatedImage, selectors["SwapHalves"], repeatedHalf, "open Tests.HalfSwapContract", """
+    /-- The first load snapshots the low half before either caller write. -/
+    private theorem firstLoad (data : Nat → BitVec 8) (fuel : Nat) :
+        invoke Extracted.program (fuel + 7) 0 (swap.args data) (memory data) =
+        run Extracted.program fuel 0 7 (swap.args data) saved
+          [.scalar (.v128 (packed data 0)), .readOnlyReference (.address ⟨0, 0⟩)] (entered data) := by
+      with_unfolding_all rfl
+    #print axioms firstLoad
+
+    /-- The low half occupies the private local while the second load reads the high half. -/
+    private theorem saveAndLoad (data : Nat → BitVec 8) (fuel : Nat) :
+        run Extracted.program (fuel + 4) 0 7 (swap.args data) saved
+          [.scalar (.v128 (packed data 0)), .readOnlyReference (.address ⟨0, 0⟩)] (entered data) =
+        run Extracted.program fuel 0 11 (swap.args data) saved
+          [.scalar (.v128 (packed data 16))] (savedLow data) := by
+      unfold savedLow
+      rw [← unpack data 0]
+      with_unfolding_all rfl
+    #print axioms saveAndLoad
+
+    /-- The first store copies the high half into the low addresses. -/
+    private theorem firstStore (data : Nat → BitVec 8) (fuel : Nat) :
+        run Extracted.program (fuel + 2) 0 11 (swap.args data) saved
+          [.scalar (.v128 (packed data 16))] (savedLow data) =
+        run Extracted.program fuel 0 13 (swap.args data) saved [] (highWritten data) := by
+      unfold highWritten
+      rw [← unpack data 16]
+      with_unfolding_all rfl
+    #print axioms firstStore
+
+    /-- The saved vector fills the upper half and the return retires its private home. -/
+    private theorem secondStore (data : Nat → BitVec 8) :
+        run Extracted.program 6 0 13 (swap.args data) saved [] (highWritten data) =
+        .ok (expire (lowWritten data) 1, []) := by
+      unfold lowWritten
+      rw [← unpack data 0]
+      with_unfolding_all rfl
+    #print axioms secondStore
+
+    /-- Every in-place swap exchanges both halves inside the caller footprint. -/
+    theorem correctness : swap.Holds Extracted.program 0 := by
+      rintro data _ rfl
+      refine ⟨19, (expire (lowWritten data) 1, []), ?_, framed data, (), rfl, swapped data⟩
+      exact (firstLoad data 12).trans ((saveAndLoad data 8).trans ((firstStore data 6).trans (secondStore data)))
+    """, """
+    theorem correctness : swap.Refuted Extracted.program 0 := by
+      apply refuted_of_first_byte
+      with_unfolding_all rfl
+    """, profile: "arm64-advsimd", imports: "import Tests.HalfSwapContract");
+var overlapProof = Path.Combine(root, "HalfSwapOverlap.lean");
+File.Copy(At("Tests/HalfSwapOverlap.lean.in"), overlapProof, overwrite: true);
+verification.Verify(assembly, "Examples", selectors["SwapHalves"], overlapProof,
+    Path.Combine(root, "OverlapHalfSwap"), "arm64-advsimd", theorem: "HalfSwapOverlap.correctness");
+Console.WriteLine("PASS SwapHalves contracts for all eight placements, certified repeated load and 96 CLR comparisons");
 // Without AdvSimd or AVX-512 VL the reachable calls are rejected before any evidence is written.
 foreach ((string name, string profile, string feature) in new[]
 {

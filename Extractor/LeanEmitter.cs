@@ -348,7 +348,7 @@ internal static class LeanEmitter
                     outlineOperations.Add(InstructionTranslation.Translate(site, m, methodIndices, instructions,
                         callSites, profile, scalarCertificate, parameterHomes, importResolution, layoutContext));
                 }
-                outlines.Add(new(frame, [.. outlineOperations], m, reachable, profile, layoutContext));
+                outlines.Add(new(frame, [.. outlineOperations], m, reachable, parameterHomes, profile, layoutContext));
             }
             // The decoder's raw definition is the method's only source; the command states its field facts and
             // writes each field operand as the definition the operand shapes name.

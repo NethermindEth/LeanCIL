@@ -42,8 +42,9 @@ internal static partial class ProofOutline
 
     /// <summary>The paths of a body over word arguments that tests named words or checks arithmetic, with no
     /// backward jump; null when it does neither, has another operation or splits into too many paths.</summary>
-    static ScalarStep? ScalarPaths(Specification spec, Operation[] ops)
+    static ScalarStep? ScalarPaths(Specification spec, Method emitted)
     {
+        var ops = emitted.Operations;
         var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
         if (spec.Parameters.Any(parameter => parameter.Shape != ParameterShape.Scalar)) return null;
         var paths = 0;
@@ -53,9 +54,9 @@ internal static partial class ProofOutline
             for (; pc < ops.Length; pc++)
             {
                 var op = ops[pc];
-                if (op is Arg argument && MethodArguments.Plain(spec.Method, argument.Index))
+                if (emitted.ArgumentAt(pc) is int argument && MethodArguments.Plain(spec.Method, argument))
                 {
-                    var parameter = spec.Parameters[argument.Index];
+                    var parameter = spec.Parameters[argument];
                     stack = stack.Push(new(parameter.Name, 8 * parameter.Width));
                 }
                 else if (Body.ConstantOf(op) is { } constant)
@@ -113,7 +114,7 @@ internal static partial class ProofOutline
                 else if (op is StackOperation { Kind: Code.Ret } && plainReturn)
                     return ++paths > MaxScalarPaths ? null : new ScalarReturn();
                 else if (op.IsNop) { }
-                else if (Body.Pure(op, spec.Method, plainReturn))
+                else if (emitted.PureAt(pc, plainReturn))
                 {
                     // Conversions and bit counts compute a word the outline does not name; it may be returned.
                     if (stack.Count == 0) return null;

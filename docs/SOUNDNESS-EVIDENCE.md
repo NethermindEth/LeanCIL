@@ -411,9 +411,13 @@ assemblies. Each must be supplied for complete coverage.
 For local virtual class slots in a single image, Lean follows each physical TypeDef parent,
 including abstract intermediates, and checks the MethodDefs and signatures of every descendant.
 It compares the complete declarations of each method's catalog and validates each reachable
-target table against the physical hierarchy. Casts, constrained and cross-image dispatch,
-interfaces, explicit overrides, additional metadata modules and unsupported signatures leave this
-fact uncovered.
+target table against the physical hierarchy. For an explicit implementation of a direct local
+interface slot, the MethodImpl row must name the implementing class and two local MethodDefs
+with matching nongeneric instance signatures. The catalog records the interface and the exact
+declaration token. A class outside the selected hierarchy may implement an external interface
+when its body MethodDef belongs to that class. Casts, constrained calls, interface dispatch,
+cross-image dispatch, other override forms on selected classes, additional metadata modules
+and unsupported signatures leave this fact uncovered.
 With all direct reference images supplied, the audit checks each AssemblyRef against its target's
 full publisher key or unsigned definition. It also compares each carried AssemblyRef token with
 the physical row in its source assembly. For scalar static generic calls on top-level classes with

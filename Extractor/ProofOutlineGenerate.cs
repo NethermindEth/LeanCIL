@@ -524,10 +524,10 @@ internal static partial class ProofOutline
         var homes = extraction.Emitted[0].Frame.IndexParameterHomes();
         var steppable = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.StructValue) &&
-            body.Operations.Index().All(entry => Body.Pure(entry.Item, spec.Method, plainReturn) ||
+            body.Operations.Index().All(entry => body.Method.PureAt(entry.Index, plainReturn) ||
                 Steps(body.Method, spec.Method, entry.Index, homes));
-        var split = !steppable && SplitsOnBooleans(body.Operations, spec.Method, spec.Parameters, plainReturn);
-        var paths = steppable || split ? null : ScalarPaths(spec, body.Operations);
+        var split = !steppable && SplitsOnBooleans(body.Method, spec.Parameters, plainReturn);
+        var paths = steppable || split ? null : ScalarPaths(spec, body.Method);
         // A body over words that calls helpers composes them through stub contracts, as a body over objects does.
         if (!steppable && !split && paths is null &&
             spec.Parameters.All(parameter => parameter.Shape == ParameterShape.Scalar) &&
@@ -559,7 +559,7 @@ internal static partial class ProofOutline
         {
             lean.Line("  -- Choose a fuel bound and step the body with `cil_checked_steps [facts]`,");
             lean.Line("  -- splitting cases where it branches.");
-            lean.Noted("  ", "sorry", $"{NotOutlined}{Unstepped(spec.Method, body.Operations, spec.Parameters)}; " +
+            lean.Noted("  ", "sorry", $"{NotOutlined}{Unstepped(spec.Method, body.Method, spec.Parameters)}; " +
                 "prove its run and Postcondition");
         }
         Footer(lean);
@@ -606,17 +606,23 @@ internal static partial class ProofOutline
 
     /// <summary>Whether a body over words and `bool`s steps once each `bool` is a literal: every operation is
     /// pure or a jump, and every test reads a `bool` argument just loaded.</summary>
-    static bool SplitsOnBooleans(Operation[] ops, MethodDefinition method, Parameter[] parameters, bool plainReturn)
+    static bool SplitsOnBooleans(Method emitted, Parameter[] parameters, bool plainReturn)
     {
         var booleans = parameters.Count(parameter => parameter.Shape == ParameterShape.Boolean);
         if (booleans is 0 or > MaxBooleanSplits ||
             parameters.Any(parameter => parameter.Shape is not (ParameterShape.Scalar or ParameterShape.Boolean)))
             return false;
-        bool LoadsBoolean(Operation op) => op is Arg load && parameters[load.Index].Shape == ParameterShape.Boolean;
-        return ops.Select((op, pc) => Body.Pure(op, method, plainReturn) || LoadsBoolean(op) ||
-            op is Jump { Kind: ILOpCode.Br } ||
-                op is Jump { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } && pc > 0 && LoadsBoolean(ops[pc - 1]))
-            .All(stepped => stepped);
+        var previousBoolean = false;
+        for (var pc = 0; pc < emitted.Operations.Length; pc++)
+        {
+            var loadsBoolean = emitted.ArgumentAt(pc) is int index && parameters[index].Shape == ParameterShape.Boolean;
+            var jump = emitted.Operations[pc] as Jump;
+            if (!loadsBoolean && !emitted.PureAt(pc, plainReturn) && jump?.Kind != ILOpCode.Br &&
+                !(previousBoolean && jump?.Kind is ILOpCode.Brfalse or ILOpCode.Brtrue))
+                return false;
+            previousBoolean = loadsBoolean;
+        }
+        return true;
     }
 
     /// <summary>A straight-line body over object arguments: stepped when it loads fields and stores at most one
@@ -652,7 +658,7 @@ internal static partial class ProofOutline
             .Any(call => summarized(call.Method)?.Walk.NumericHomes == true);
         // Local homes belong to the entry memory, so the statement accepts any well-formed entry memory.
         if (numericHomes && !spec.Symbolic) spec = spec.InMemory();
-        var walk = new ObjectWalk(spec, body.Operations, views, summarized,
+        var walk = new ObjectWalk(spec, body.Method, views, summarized,
             extraction.Emitted[0].Frame.IndexParameterHomes(), numericHomes: numericHomes, stubs: Stubbed);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.Object or ParameterShape.Array or ParameterShape.ValueArray or ParameterShape.WordArray) &&
@@ -693,7 +699,7 @@ internal static partial class ProofOutline
         {
             lean.Line("  -- Choose a fuel bound and step the body with `cil_checked_steps [facts]`, giving a store");
             lean.Line("  -- its `Owned.store`; a scalar field's load is read from its fact in the context.");
-            var reason = walk.Stopped ?? Unstepped(spec.Method, body.Operations, spec.Parameters);
+            var reason = walk.Stopped ?? Unstepped(spec.Method, body.Method, spec.Parameters);
             lean.Noted("  ", "sorry", $"{NotOutlined}the body meets {reason}; prove its run and Postcondition");
         }
         Footer(lean);
@@ -815,7 +821,7 @@ internal static partial class ProofOutline
 
     /// <summary>Why the outline leaves a body to the author: the first argument or operation that
     /// `cil_checked_steps` cannot take without facts or a case split.</summary>
-    static string Unstepped(MethodDefinition method, Operation[] ops, IEnumerable<Parameter> parameters)
+    static string Unstepped(MethodDefinition method, Method emitted, IEnumerable<Parameter> parameters)
     {
         // A narrow parameter is named first: its load is what refuses an otherwise outlined body.
         if (parameters.OrderBy(parameter => parameter.Shape != ParameterShape.Narrow)
@@ -833,7 +839,8 @@ internal static partial class ProofOutline
                 _ => "a span of caller memory"
             };
         var plainReturn = LeanEmitter.Narrow(method.ReturnType) is null;
-        var pc = Array.FindIndex(ops, op => !Body.Pure(op, method, plainReturn));
+        var ops = emitted.Operations;
+        var pc = Enumerable.Range(0, ops.Length).FirstOrDefault(i => !emitted.PureAt(i, plainReturn), -1);
         if (pc < 0) return "the body has locals";
         // A call the outline cannot compose names the contract the author must write and prove.
         var instruction = InstructionAt(method, pc);

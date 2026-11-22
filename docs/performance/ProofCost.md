@@ -87,6 +87,35 @@ checking it once and using it twice costs fewer kernel heartbeats than reducing 
 invocations. The proof that uses the contract has more proof objects. The command-level
 measurements use the proof-cost frontend described below. Elapsed times are from one run.
 
+## Reusing an in-place vector swap contract
+
+On Lean 4.35.0, the `arm64-advsimd` extraction of `DivisionIntrinsics.SwapHalves` exchanges
+two 16-byte halves of one writable buffer. The contract covers every initial byte pattern.
+The following runs use the base at
+[27953edb](https://github.com/NethermindEth/LeanCIL/commit/27953edb) and the canonical interpreter.
+The two Release assemblies target .NET 10 and .NET 11 respectively. All 19 instruction offsets,
+opcodes, resolved operands and local signature bytes agree. The six generic calls have different
+MethodSpec row numbers in the two assemblies.
+
+Only input byte 16 is set for the consumer proofs. Both require output byte zero to equal one
+for some sufficient fuel. The direct proof reduces the invocation. The other applies the
+universal contract. Append the [consumer proofs](../../Tests/HalfSwapCost.lean.in) to the original
+half-swap proof from [the intrinsics fixture](../../Tests/ExactIntrinsics.cs) and measure that
+module with the proof-cost driver. Both modules passed standalone kernel replay. The legacy
+frame includes an empty argument-home list in the intermediate state.
+
+| Interpreter | Proof | Frontend heartbeats | Kernel heartbeats | Proof objects | Elapsed ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Base | Direct consumer | 1,982,309 | 550,666 | 98 | 143 |
+| Canonical | Direct consumer | 5,621,328 | 1,684,575 | 98 | 432 |
+| Base | Consumer using contract | 87,678 | 4,929 | 387 | 7 |
+| Canonical | Consumer using contract | 87,670 | 4,929 | 387 | 10 |
+
+Proving the four execution regions once costs 761,169 kernel heartbeats on the base and
+3,545,916 on canonical. The same composition with the footprint and byte-order proofs costs
+4,614 on each interpreter. The direct consumer costs 3.06 times as much on canonical.
+Applying the universal contract costs the same on both.
+
 ## Reusing a compiled field-read contract
 
 The scalar-profile methods `Gates.Reader.Read` and `ReadPacked` read four bytes by reference.

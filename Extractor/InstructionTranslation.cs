@@ -119,8 +119,7 @@ internal static class InstructionTranslation
             Code.Ldsfld or Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference =>
                 Unoutlined.Site,
             Code.Stsfld => throw new InvalidDataException($"Unsupported static field store: {i}\n  Static fields are written only by their static constructor, which is never extracted."),
-            _ when MethodArguments.LoadIndex(m, i) is int index =>
-                parameterHomes.ContainsKey(index) ? Unoutlined.Site : new Arg(index),
+            _ when MethodArguments.LoadIndex(m, i).HasValue => Unoutlined.Site,
             Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 or Code.Ldloc or Code.Ldloc_S =>
                 Unoutlined.Site,
             Code.Ldfld or Code.Ldflda or Code.Stfld => Unoutlined.Site,

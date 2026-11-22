@@ -322,14 +322,19 @@ void CheckDispatchCatalogs()
         var build = changed ? "FiveFaces" : "SixFaces";
         var assembly = fixture.Build(build, "DeepCli.Dispatch", $$"""
             namespace Geometry;
-            public interface IShapeTag { }
+            public interface IShapeTag { int Tag(); int OtherTag(); }
             public interface IColour { }
             public abstract class Shape { public abstract int Sides(); }
-            public class Triangle : Shape, IShapeTag, IColour { public override int Sides() => 3; }
+            public class Triangle : Shape, IShapeTag, IColour {
+                public override int Sides() => 3;
+                int IShapeTag.Tag() => 1;
+                int IShapeTag.OtherTag() => 2;
+            }
             public sealed class Equilateral : Triangle { }
             public abstract class Solid { public abstract int Faces(); }
             public sealed class Cube : Solid, IColour { public override int Faces() => {{(changed ? 5 : 6)}}; }
-            public sealed class TagOnly : IShapeTag { }
+            public sealed class TagOnly : IShapeTag { public int Tag() => 1; public int OtherTag() => 2; }
+            public sealed class UnrelatedResource : System.IDisposable { void System.IDisposable.Dispose() { } }
             public static class Reader {
                 public static int Total(Shape shape, Solid solid) => shape.Sides() + solid.Faces() + shape.Sides();
             }
@@ -362,6 +367,9 @@ void CheckDispatchCatalogs()
         if (fact.GetProperty("status").GetString() != "reconfirmed" ||
             fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
             throw new InvalidOperationException("Incorrect dispatch binding report: " + fact);
+        ReplayImageCases(output, assembly, "DispatchImage", At("Tests/StrictBinding/DispatchOverrideCases.lean"),
+            ["StrictBinding.DispatchCatalogs", "Tests.StrictBinding.Mutation"]);
+        Console.WriteLine("PASS physical MethodImpl rows reject missing slots, crossed owners and crossed declarations");
     }
 }
 
@@ -671,23 +679,30 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
         throw new InvalidOperationException("The compiled table has no audited physical-data theorem.");
     Console.WriteLine("PASS the third word comes from a 32-byte RVA field in the pinned table assembly");
 
-    Run(["lake", "build", "StrictBinding.StaticData"], preparation.CheckoutPackage());
-    var leanPath = tableOutput + Path.PathSeparator + preparation.CheckoutLeanPath();
-    File.WriteAllText(Path.Combine(tableOutput, "RvaImage.lean"),
-        "import StrictBinding.Image\nimport CIL.Extraction.FixedDigits\nnamespace RvaImage\n" +
-        BindingImage.Definitions(File.ReadAllBytes(tables)) + "\nend RvaImage\n");
-    File.Copy(At("Tests/StrictBinding/StaticSiteCases.lean"), Path.Combine(tableOutput, "StaticSiteCases.lean"), true);
-    string[] modules = ["Extracted", "RvaImage", "StaticSiteCases"];
+    ReplayImageCases(tableOutput, tables, "RvaImage", At("Tests/StrictBinding/StaticSiteCases.lean"),
+        ["StrictBinding.StaticData"]);
+    Console.WriteLine("PASS the pinned FieldRVA rejects a matching prefix, changed bytes and a missing RVA marker");
+}
+
+void ReplayImageCases(string directory, string assembly, string imageModule, string casesFile, string[] dependencies)
+{
+    Run(["lake", "build", .. dependencies], preparation.CheckoutPackage());
+    var leanPath = directory + Path.PathSeparator + preparation.CheckoutLeanPath();
+    File.WriteAllText(Path.Combine(directory, imageModule + ".lean"),
+        $"import StrictBinding.Image\nimport CIL.Extraction.FixedDigits\nnamespace {imageModule}\n" +
+        BindingImage.Definitions(File.ReadAllBytes(assembly)) + $"\nend {imageModule}\n");
+    var cases = Path.GetFileNameWithoutExtension(casesFile);
+    File.Copy(casesFile, Path.Combine(directory, cases + ".lean"), true);
+    string[] modules = ["Extracted", imageModule, cases];
     foreach (var module in modules)
     {
-        var log = Run([preparation.LeanExecutable, "--root=" + tableOutput, "-o",
-            Path.Combine(tableOutput, module + ".olean"), Path.Combine(tableOutput, module + ".lean")],
+        var log = Run([preparation.LeanExecutable, "--root=" + directory, "-o",
+            Path.Combine(directory, module + ".olean"), Path.Combine(directory, module + ".lean")],
             leanPath: leanPath);
         if (log.Contains("sorryAx", StringComparison.Ordinal))
             throw new InvalidDataException(module + " depends on sorryAx");
     }
-    preparation.ReplayCheckedModules(modules, leanPath, "Kernel replay of static field descriptor checks");
-    Console.WriteLine("PASS the pinned FieldRVA rejects a matching prefix, changed bytes and a missing RVA marker");
+    preparation.ReplayCheckedModules(modules, leanPath, "Kernel replay of " + cases);
 }
 if (args is ["--text"]) return;
 if (args is ["--mutations"])

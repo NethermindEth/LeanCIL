@@ -22,27 +22,27 @@ internal static partial class ProofOutline
     {
         // Instructions after the return cannot affect a straight-line read.
         var end = Array.FindIndex(all, op => op is StackOperation { Kind: Code.Ret });
-        var ops = all.Take(end + 1).Where(op => !op.IsNop).ToArray();
+        var ops = all.Take(end + 1).Index().Where(site => !site.Item.IsNop).ToArray();
         if (LeanEmitter.Narrow(spec.Method.ReturnType) is not null || spec.Method.HasThis ||
             spec.Result is not { Boolean: false, Object: false } || ops.Length < 4 ||
-            Argument(ops[0]) is not { Shape: ParameterShape.WordArray } array ||
-            Argument(ops[1]) is not { Shape: ParameterShape.Scalar, Width: 4 } index ||
-            spec.Result.Lean != WordType(array.Width) || ops[^1] is not StackOperation { Kind: Code.Ret })
+            Argument(ops[0].Index) is not { Shape: ParameterShape.WordArray } array ||
+            Argument(ops[1].Index) is not { Shape: ParameterShape.Scalar, Width: 4 } index ||
+            spec.Result.Lean != WordType(array.Width) || ops[^1].Item is not StackOperation { Kind: Code.Ret })
             return null;
         if (ops.Length == 4 &&
-            Arrays.Numeric(ops[2], spec.Method, Array.IndexOf(all, ops[2])) is { Store: false, Signed: false } load &&
+            Arrays.Numeric(ops[2].Item, spec.Method, ops[2].Index) is { Store: false, Signed: false } load &&
             load.Width == array.Width)
             return new(array, index, null, load);
         // A helper's address is loaded with `ldind.i4`, the only indirect load whose step the outline gives.
         if (ops.Length != 5 || array.Width != 4 ||
-            ops[3] is not StackOperation { Kind: Code.Ldind_I4 } ||
-            ops[2] is not Call { Kind: CallKind.Static, Arguments: 2 } call)
+            ops[3].Item is not StackOperation { Kind: Code.Ldind_I4 } ||
+            ops[2].Item is not Call { Kind: CallKind.Static, Arguments: 2 } call)
             return null;
         return ElementAddress(extraction, call.Method, array.Element!) is { } method
             ? new(array, index, new(call.Method, method, ""), null) : null;
 
-        Parameter? Argument(Operation op) =>
-            op is Arg load && MethodArguments.Plain(spec.Method, load.Index) ? spec.Parameters[load.Index] : null;
+        Parameter? Argument(int pc) => extraction.Emitted[0].ArgumentAt(pc) is int argument &&
+            MethodArguments.Plain(spec.Method, argument) ? spec.Parameters[argument] : null;
     }
 
     /// <summary>Method `index` when it is static `(T[] values, int index)` returning `ref values[index]` of
@@ -53,14 +53,15 @@ internal static partial class ProofOutline
         var slots = extraction.Emitted[index].Operations;
         var instructions = method.Body.Instructions;
         if (slots.Length != instructions.Count) return null;
-        var sites = slots.Zip(instructions).Where(site => !site.First.IsNop).ToArray();
+        var sites = StoreBodySites(extraction, index);
         return !method.HasThis && method.Parameters.Count == 2 && method.ReturnType is ByReferenceType &&
             method.Parameters[0].ParameterType is ArrayType { Rank: 1 } array &&
             WordArrayElement(array.ElementType) == element &&
             method.Parameters[1].ParameterType.FullName is "System.Int32" &&
             extraction.Emitted[index].Frame.HasNoLocals && sites is
-                [(Arg { Index: 0 }, _), (Arg { Index: 1 }, _),
-                    (Unoutlined, { OpCode.Code: Code.Ldelema } address), (StackOperation { Kind: Code.Ret }, _)] &&
+                [var arraySite, var indexSite, (Unoutlined, { OpCode.Code: Code.Ldelema } address, _),
+                    (StackOperation { Kind: Code.Ret }, _, _)] &&
+            extraction.Emitted[index].ArgumentAt(arraySite.Pc) == 0 && extraction.Emitted[index].ArgumentAt(indexSite.Pc) == 1 &&
             address.Previous?.OpCode.Code != Code.Readonly && Arrays.ElementStorage(address, extraction.Architecture) == element
             ? method : null;
     }
