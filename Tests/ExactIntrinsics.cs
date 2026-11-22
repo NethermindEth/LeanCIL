@@ -833,9 +833,9 @@ while (windowInputs.Count < WindowCases)
     windowInputs.Add(Enumerable.Range(0, 8).Select(_ => WindowWord()).ToArray());
 string VectorBits(byte[] bytes) => $"0x{Convert.ToHexString(bytes.Reverse().ToArray())}";
 // Index bits 0-1 pick a lane and bit 2 picks the fill table; the mutants change which bit or table it is.
-byte[] Window(ulong[] input, int tableBit, bool swapTables)
+byte[] Window(ulong[] input, int tableBit, bool swapTables, bool lowSign = false)
 {
-    ulong fill = (long)input[3] < 0 ? ulong.MaxValue : 0;
+    ulong fill = (long)input[lowSign ? 0 : 3] < 0 ? ulong.MaxValue : 0;
     return input[4..].SelectMany(selector => BitConverter.GetBytes(
         (((selector >> tableBit) & 1) == 1) != swapTables ? fill : input[(int)(selector & 3)])).ToArray();
 }
@@ -881,8 +881,58 @@ using (var variant = ModuleDefinition.ReadModule(assembly))
     control.Operand = null;
     variant.Write(lowSignImage);
 }
-verification.VerifyContractVariant(assembly, "Examples", selectors["SignWindow"], Path.Combine(root, "SignWindowContract"),
-    lowSignImage, selectors["SignWindow"], lowSign, "open Tests.SignWindowContract CIL.Vector", """
+// Exchange the two tables passed to VPERMT2Q, keeping the index vector unchanged.
+var swappedTables = Path.Combine(root, "SignWindowSwappedTables");
+Directory.CreateDirectory(swappedTables);
+var swappedImage = Path.Combine(swappedTables, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var method = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(m => m.Name == "SignWindow");
+    var tableCall = method.Body.Instructions.Single(instruction =>
+        instruction.OpCode == OpCodes.Call && instruction.Operand is MethodReference { Name: "PermuteVar4x64x2" });
+    var storeFill = method.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Stloc_0);
+    var loadFill = tableCall.Previous;
+    if (loadFill.OpCode != OpCodes.Ldloc_0 || method.Body.Variables.Count != 1)
+        throw new InvalidDataException("Expected the upper sign table in local zero before VPERMT2Q.");
+    var sourceTable = new VariableDefinition(method.Body.Variables[0].VariableType);
+    method.Body.Variables.Add(sourceTable);
+    var il = method.Body.GetILProcessor();
+    var saveSource = il.Create(OpCodes.Stloc, sourceTable);
+    il.InsertAfter(storeFill, saveSource);
+    il.InsertAfter(saveSource, il.Create(OpCodes.Ldloc_0));
+    il.Replace(loadFill, il.Create(OpCodes.Ldloc, sourceTable));
+    variant.Write(swappedImage);
+}
+// Move bit 3 of each scalar selector to bit 2 before VPERMT2Q chooses a table.
+var bitThree = Path.Combine(root, "SignWindowBitThree");
+Directory.CreateDirectory(bitThree);
+var bitThreeImage = Path.Combine(bitThree, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var method = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(m => m.Name == "SignWindow");
+    var indices = method.Body.Instructions.Where(instruction => instruction.OpCode == OpCodes.Ldarg_S
+        && instruction.Operand is ParameterDefinition { Index: >= 4 and <= 7 }).ToArray();
+    if (!indices.Select(instruction => ((ParameterDefinition)instruction.Operand).Index).SequenceEqual([4, 5, 6, 7]))
+        throw new InvalidDataException("Expected four scalar selector loads in lane order.");
+    var il = method.Body.GetILProcessor();
+    foreach (var load in indices)
+    {
+        var next = load.Next;
+        // (index & 3) | ((index >> 1) & 4) preserves the lane and changes the table selector.
+        il.InsertBefore(next, il.Create(OpCodes.Ldc_I4_3));
+        il.InsertBefore(next, il.Create(OpCodes.Conv_I8));
+        il.InsertBefore(next, il.Create(OpCodes.And));
+        il.InsertBefore(next, il.Create(OpCodes.Ldarg_S, (ParameterDefinition)load.Operand));
+        il.InsertBefore(next, il.Create(OpCodes.Ldc_I4_1));
+        il.InsertBefore(next, il.Create(OpCodes.Shr_Un));
+        il.InsertBefore(next, il.Create(OpCodes.Ldc_I4_4));
+        il.InsertBefore(next, il.Create(OpCodes.Conv_I8));
+        il.InsertBefore(next, il.Create(OpCodes.And));
+        il.InsertBefore(next, il.Create(OpCodes.Or));
+    }
+    variant.Write(bitThreeImage);
+}
+const string windowContractProof = """
     set_option maxRecDepth 12288
     set_option exponentiation.threshold 1024
 
@@ -917,30 +967,56 @@ verification.VerifyContractVariant(assembly, "Examples", selectors["SignWindow"]
         refine (run_next (fuel := 45) Extracted.program_method0 (by rfl) loaded).trans ?_
         rfl
       · exact signWindow_result v i
-    """, """
+    """;
+string WindowCounterexample(string actual) => $$"""
     set_option maxRecDepth 12288
     /-- The sign bit is set only in limb three. Each selector requests the sign-fill table. -/
     private def witness : Limbs × Limbs := (⟨0, 1, 2, 0x8000000000000000⟩, ⟨4, 5, 6, 7⟩)
 
-    /-- Broadcasting the sign of the low limb returns zero in every lane at the witness. -/
+    /-- The compiled variant returns a different vector from the high-sign table at this input. -/
     theorem correctness : signWindow.Refuted Extracted.program 0 := by
-      let call := invoke Extracted.program 64 0 (signWindow.args witness) Memory.empty
-      have observed : call.map Prod.snd = .ok [.scalar (.v256 0)] := by decide +kernel
+      let call := invoke Extracted.program 128 0 (signWindow.args witness) Memory.empty
+      have observed : call.map Prod.snd = .ok [.scalar (.v256 ({{actual}}))] := by decide +kernel
       cases ran : call with
       | error fault => simp [ran, Except.map] at observed
       | ok result =>
         obtain ⟨after, values⟩ := result
-        have actual : values = [.scalar (.v256 0)] := by simpa [ran, Except.map] using observed
+        have actual : values = [.scalar (.v256 ({{actual}}))] := by simpa [ran, Except.map] using observed
         subst values
         apply MethodContract.Refuted.of_return (c := signWindow) (input := witness)
-          (program := Extracted.program) (fuel := 64) (method := 0) (final := after)
-          (values := [.scalar (.v256 0)]) Memory.empty_wellFormed ran
+          (program := Extracted.program) (fuel := 128) (method := 0) (final := after)
+          (values := [.scalar (.v256 ({{actual}}))]) Memory.empty_wellFormed ran
         rintro ⟨_, value, encoded, rfl⟩
-        exact (by decide : ¬ ([CIL.Safety.Value.scalar (.v256 0)] =
+        exact (by decide : ¬ ([CIL.Safety.Value.scalar (.v256 ({{actual}}))] =
           [.scalar (.v256 (pack256 (selected witness.1 witness.2.a) (selected witness.1 witness.2.b)
             (selected witness.1 witness.2.c) (selected witness.1 witness.2.d)))])) encoded
-    """, profile: "x64-v4", imports: "import Tests.SignWindowContract\nimport CIL.Safety.LocalSnapshots");
-Console.WriteLine("PASS AVX-512 sign window for every selector and certified low-limb sign replacement");
+    """;
+foreach (var (image, output, actual, tableBit, swapTables) in new[]
+{
+    (lowSignImage, lowSign, "0", 2, false),
+    (swappedImage, swappedTables, "pack256 0 1 2 0x8000000000000000", 2, true),
+    (bitThreeImage, bitThree, "pack256 0 1 2 0x8000000000000000", 3, false)
+})
+{
+    if (Avx512F.VL.IsSupported)
+    {
+        var changed = Assembly.Load(File.ReadAllBytes(image)).GetType("Examples.DivisionIntrinsics")!
+            .GetMethod("SignWindow")!;
+        ulong[] witness = [0, 1, 2, 1UL << 63, 4, 5, 6, 7];
+        foreach (var input in windowInputs.Append(witness))
+        {
+            var observed = (Vector256<ulong>)changed.Invoke(null, input.Cast<object>().ToArray())!;
+            var expected = Window(input, tableBit, swapTables, lowSign: output == lowSign);
+            if (!Vector256.EqualsAll(observed.AsByte(), Vector256.Create<byte>(expected)))
+                throw new InvalidDataException($"The compiled {Path.GetFileName(output)} disagreed with its scalar result.");
+        }
+    }
+    verification.VerifyContractVariant(assembly, "Examples", selectors["SignWindow"], Path.Combine(root, "SignWindowContract"),
+        image, selectors["SignWindow"], output, "open Tests.SignWindowContract CIL.Vector",
+        windowContractProof, WindowCounterexample(actual), profile: "x64-v4",
+        imports: "import Tests.SignWindowContract\nimport CIL.Safety.LocalSnapshots");
+    Console.WriteLine($"PASS AVX-512 sign window and checked {Path.GetFileName(output)} counterexample");
+}
 
 uint[] words = Enumerable.Range(0, 8).Select(_ => (uint)WindowWord()).ToArray();
 var wordBytes = new byte[32];
