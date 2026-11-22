@@ -420,6 +420,53 @@ theorem rejects_body_with_exception_section :
   decide +kernel
 #print axioms rejects_body_with_exception_section
 
+/-- A six-byte body with a two-byte alignment gap before its small exception section.
+    The handler pops the caught object and leaves to the return at byte offset five. -/
+private def catchBytes : List Nat :=
+  [0x0B, 0x30, 1, 0, 6, 0, 0, 0, 0, 0, 0, 0,
+   0x14, 0x7A, 0x26, 0xDE, 0, 0x2A, 0, 0,
+   1, 16, 0, 0, 0, 0, 0, 0, 2, 2, 0, 3] ++ token tokens.boxRef
+
+/-- Decode the catch and its branch destinations against the fixture's pinned metadata. -/
+private def readCatch (bytes : List Nat) (caught := TypeExpr.object libScope "Lib.Box") :
+    Except BodyError (List RawInstruction × CatchClause) := do
+  let body := evidence bytes
+  let env ← body.environment.mapError BodyError.metadata
+  let (decoded, clause) ← decodeSingleCatch env 0 0 body caught
+  return (decoded.code, clause)
+
+/-- The catch retains the class token and half-open byte ranges. The leave targets instruction
+    four. Executable body decoding still refuses the exception section at the same bytes. -/
+theorem single_catch_binds_code_and_class :
+    readCatch catchBytes = .ok ([instr 0 0x14, instr 1 0x7A, instr 2 0x26,
+        instr 3 0xDE (.target 4), instr 5 0x2A], ⟨0, 2, 2, 5, tokens.boxRef⟩) ∧
+    failsWith (evidence catchBytes) .extraSections fatMethod = true :=
+  ⟨by cil_kernel_rfl, by decide +kernel⟩
+#print axioms single_catch_binds_code_and_class
+
+/-- Catch clauses must be complete, disjoint and instruction-aligned. The header, section
+    kind, clause flags, class token and resolved type all bind independently. -/
+theorem malformed_catch_refused :
+    ([catchBytes.set 0 3, catchBytes.set 20 0x81, catchBytes.set 21 15, catchBytes.set 24 2,
+      catchBytes.set 28 0, catchBytes.set 29 1, catchBytes.set 31 2, catchBytes.set 31 5,
+      catchBytes.set 35 6, catchBytes.take 35, catchBytes ++ [0]].all fun bytes =>
+        match readCatch bytes with | .error .invalidCatchSection => true | _ => false) = true ∧
+    readCatch catchBytes (.object ownIdentity "Program") =
+      .error (.metadata (.operandMismatch tokens.boxRef)) :=
+  ⟨by decide +kernel, by cil_kernel_rfl⟩
+#print axioms malformed_catch_refused
+
+/-- In `ldarg.0; volatile.; ldind.i4`, the prefix starts at byte one and the load at three.
+    A protected range may start at the prefix, but cannot skip it by starting at the load. -/
+theorem catch_boundary_respects_prefixes :
+    let bytes := [0x0B, 0x30, 1, 0, 11, 0, 0, 0, 0, 0, 0, 0,
+      2, 0xFE, 0x13, 0x4A, 0x26, 0x14, 0x7A, 0x26, 0xDE, 0, 0x2A, 0,
+      1, 16, 0, 0, 0, 0, 1, 0, 6, 7, 0, 3] ++ token tokens.boxRef
+    ((readCatch bytes).toOption.map Prod.snd = some ⟨1, 7, 7, 10, tokens.boxRef⟩) ∧
+      readCatch ((bytes.set 30 3).set 32 4) = .error .invalidCatchSection := by
+  exact ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
+#print axioms catch_boundary_respects_prefixes
+
 /-- A body with an exception section does not match the method that has the same code. -/
 theorem body_with_exception_section_does_not_match :
     bodyMatches (evidence (0x1B :: fatBytes.tail)) fatMethod [] = false := by

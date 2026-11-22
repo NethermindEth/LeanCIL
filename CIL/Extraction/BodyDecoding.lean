@@ -23,8 +23,9 @@ stay trusted.
 Opcodes use the numbering of `RawInstruction`: one-byte opcodes keep their byte and two-byte
 opcodes `0xFE nn` are `0xFE00 + nn`. Branch operands become instruction indices, and a branch may
 not enter a prefixed instruction after its first prefix, so the decoded code satisfies
-`PrefixEntryFree` (`checkBody_prefixEntryFree`). A body with extra sections (exception
-handlers) is rejected, since the model has none.
+`PrefixEntryFree` (`checkBody_prefixEntryFree`). Executable methods require section-free bodies. The separate
+`decodeSingleCatch` reader binds a small typed exception clause for proofs about the protected
+range and handler.
 -/
 
 namespace CIL.Extraction
@@ -225,9 +226,8 @@ theorem BodyImports.checked_call_has_link {bound : BodyImports}
 
 #print axioms BodyImports.checked_call_has_link
 
-/-- The exact bytes of one method body, its header and code but not its extra sections, each
-    byte a `Nat` below 256, with the token table its operands resolve through, the metadata
-    those tokens are checked against and the lookup tables of that metadata. -/
+/-- Method bytes, their operand table and the metadata used to resolve the tokens.
+    Executable evidence carries the header and code. Catch inspection also takes the section. -/
 structure BodyEvidence where
   bytes : List Nat
   tokens : TokenTable
@@ -274,6 +274,7 @@ inductive BodyError where
   | truncatedOpcode (offset : Nat)
   | unsupportedHeader (flags : Nat)
   | extraSections
+  | invalidCatchSection
   | codeSizeMismatch (declared supplied : Nat)
   | duplicateToken (token : Nat)
   | metadata (error : MetadataError)
@@ -473,11 +474,12 @@ structure BodyHeader where
 def tinyMaxStack : Nat := 8
 
 /-- Decode the tiny or fat header (II.25.4.2 and II.25.4.3), returning the bytes after it. A fat
-    header must be three words long, set only the init-locals flag and have no extra sections. -/
-private def decodeHeader : List Nat → Except BodyError (BodyHeader × List Nat)
+    header has three words and can set InitLocals. MoreSects must match the requested form. -/
+private def decodeHeader (withSection : Bool) : List Nat → Except BodyError (BodyHeader × List Nat)
   | [] => .error .truncatedHeader
   | first :: rest =>
     if first % 4 == 2 then
+      if withSection then .error .invalidCatchSection else
       .ok ({ maxStack := tinyMaxStack, initLocals := false, codeSize := first / 4,
              localSignature := 0 }, rest)
     else if first % 4 == 3 then
@@ -486,9 +488,10 @@ private def decodeHeader : List Nat → Except BodyError (BodyHeader × List Nat
           token0 :: token1 :: token2 :: token3 :: code =>
         let flags := first + 256 * (second % 16)
         if second / 16 != 3 then .error (.unsupportedHeader flags)
-        else if flags / 8 % 2 == 1 then .error .extraSections
-        else if flags != 0x03 && flags != 0x13 then .error (.unsupportedHeader flags)
-        else .ok ({ maxStack := stack0 + 256 * stack1, initLocals := flags == 0x13,
+        else if !withSection && flags / 8 % 2 == 1 then .error .extraSections
+        else if withSection && !(flags == 0x0B || flags == 0x1B) then .error .invalidCatchSection
+        else if !withSection && flags != 0x03 && flags != 0x13 then .error (.unsupportedHeader flags)
+        else .ok ({ maxStack := stack0 + 256 * stack1, initLocals := flags / 16 % 2 == 1,
                     codeSize := size0 + 256 * (size1 + 256 * (size2 + 256 * size3)),
                     localSignature := token0 + 256 * (token1 + 256 * (token2 + 256 * token3)) },
                   code)
@@ -564,14 +567,9 @@ def MethodMetadata.environment (metadata : MethodMetadata)
   .ok (MetadataEnv.ofSlices (← metadata.slices.mapM MetadataSlice.index)
     pinned.prefixes (exactPins := pinned.exact))
 
-/-- Decode a method body: its header and its instructions, with branch operands as instruction
-    indices and every token operand checked against the metadata. `arity` is the number of
-    generic parameters of the method and `ownerArity` that of its owner. The supplied bytes
-    must be exactly the header and the declared code. -/
-def decodeBody (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence) :
-    Except BodyError DecodedBody := do
-  if !body.bytes.all (· < 256) then throw .invalidByte
-  let (header, code) ← decodeHeader body.bytes
+/-- Decode the complete instruction stream under the checked header and operand table. -/
+private def decodeCode (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
+    (header : BodyHeader) (code : List Nat) : Except BodyError DecodedBody := do
   if code.length != header.codeSize then
     throw (.codeSizeMismatch header.codeSize code.length)
   let frame ← (env.frame arity ownerArity).mapError BodyError.metadata
@@ -584,6 +582,52 @@ def decodeBody (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence
   let instructions ← raw.mapM (resolveBranches starts code.length)
   .ok { maxStack := header.maxStack, initLocals := header.initLocals,
         localSignature := header.localSignature, code := instructions, statics := statics }
+
+/-- Decode a method body: its header and its instructions, with branch operands as instruction
+    indices and every token operand checked against the metadata. `arity` is the number of
+    generic parameters of the method and `ownerArity` that of its owner. The supplied bytes
+    must be exactly the header and the declared code. -/
+def decodeBody (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence) :
+    Except BodyError DecodedBody := do
+  if !body.bytes.all (· < 256) then throw .invalidByte
+  let (header, code) ← decodeHeader false body.bytes
+  decodeCode env arity ownerArity body header code
+
+/-- A single typed catch clause with half-open IL byte ranges. -/
+structure CatchClause where
+  tryStart : Nat
+  tryEnd : Nat
+  handlerStart : Nat
+  handlerEnd : Nat
+  classToken : Nat
+  deriving Repr, DecidableEq
+
+/-- Read the code and one small typed catch (II.25.4.6). Both half-open ranges end at
+    instruction boundaries or the end of code. A boundary in a prefix group must precede
+    its first prefix. -/
+def decodeSingleCatch (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
+    (catchType : TypeExpr) : Except BodyError (DecodedBody × CatchClause) := do
+  unless body.bytes.all (· < 256) do throw .invalidByte
+  let (header, payload) ← decodeHeader true body.bytes
+  let (code, tail) := payload.splitAt header.codeSize
+  let decoded ← decodeCode env arity ownerArity body header code
+  let padding := (4 - header.codeSize % 4) % 4
+  let [1, 16, 0, 0, 0, 0, start0, start1, tryLength, handler0, handler1, handlerLength,
+        token0, token1, token2, table] := tail.drop padding | throw .invalidCatchSection
+  unless table ∈ [Table.typeRef, Table.typeDef, Table.typeSpec] && catchType matches .object .. do
+    throw .invalidCatchSection
+  let classToken := token0 + 256 * (token1 + 256 * (token2 + 256 * table))
+  let frame ← (env.frame arity ownerArity).mapError BodyError.metadata
+  let _ ← (checkTypeOperand env frame classToken catchType).mapError BodyError.metadata
+  let tryStart := start0 + 256 * start1
+  let handlerStart := handler0 + 256 * handler1
+  let tryEnd := tryStart + tryLength
+  let handlerEnd := handlerStart + handlerLength
+  let starts := indexStarts decoded.code 0 false {}
+  let boundary := fun offset => offset == code.length || (starts[offset]?).any (!·.2)
+  unless 0 < tryLength && 0 < handlerLength && (tryEnd ≤ handlerStart || handlerEnd ≤ tryStart) &&
+      [tryStart, tryEnd, handlerStart, handlerEnd].all boundary do throw .invalidCatchSection
+  return (decoded, ⟨tryStart, tryEnd, handlerStart, handlerEnd, classToken⟩)
 
 /-- The metadata environment and imported layouts used to check the body's own tokens. -/
 def BodyEvidence.environment (body : BodyEvidence) : Except MetadataError MetadataEnv := do
@@ -793,7 +837,7 @@ theorem decodeBody_prefixEntryFree {env : MetadataEnv} {arity ownerArity : Nat}
     {body : BodyEvidence} {decoded : DecodedBody}
     (ok : decodeBody env arity ownerArity body = .ok decoded) : PrefixEntryFree decoded.code := by
   unfold decodeBody at ok
-  simp only [bind, Except.bind] at ok
+  simp only [decodeCode, bind, Except.bind] at ok
   repeat' split at ok
   all_goals first
     | (simp only [Except.ok.injEq] at ok; subst ok; exact resolved_prefixEntryFree ‹_›)
@@ -821,7 +865,7 @@ private theorem decodeBody_checkedTable {env : MetadataEnv} {arity ownerArity : 
     ∃ frame table, env.frame arity ownerArity = .ok frame ∧
       checkTable env frame body.imports.byIdentity body.tokens.operands ∅ = .ok table := by
   unfold decodeBody at ok
-  simp only [bind, Except.bind] at ok
+  simp only [decodeCode, bind, Except.bind] at ok
   repeat' split at ok
   all_goals first
     | contradiction
@@ -966,7 +1010,7 @@ private theorem decodeBody_call {env arity ownerArity body decoded}
     (fetched : decoded.code[pc]? = some instruction) (called : instruction.operand = .call call) :
     ∃ token, (token, RawOperand.call call) ∈ body.tokens.operands := by
   unfold decodeBody at ok
-  simp only [bind, Except.bind] at ok
+  simp only [decodeCode, bind, Except.bind] at ok
   repeat' split at ok
   all_goals first
     | contradiction

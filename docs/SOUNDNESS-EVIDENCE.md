@@ -115,6 +115,11 @@ See [runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions).
 
 ### Method body decoding
 
+`CIL.Extraction.decodeSingleCatch` reads a fat method body with one small typed catch clause.
+It checks the class token against the supplied metadata and the protected and handler ranges
+against the decoded instruction boundaries. It accepts aligned sections with nonempty,
+disjoint ranges. The public execution checker still rejects methods with exception sections.
+
 Each method's evidence holds the bytes the extractor emitted for its body (the header and the
 code, not extra sections) and a token table. `BodyDecodes` decodes the bytes in the kernel
 ([BodyDecoding](../CIL/Extraction/BodyDecoding.lean)) and requires the result to equal the
