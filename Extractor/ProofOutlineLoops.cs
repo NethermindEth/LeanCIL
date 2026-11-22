@@ -29,36 +29,23 @@ internal static partial class ProofOutline
         internal Method Method { get; } = method;
         internal Operation[] Operations { get; } = method.Operations;
 
-        /// <summary>The branch represented by an operation.</summary>
-        internal static Jump? JumpOf(Operation operation) => operation switch
+        /// <summary>The number of stack values consumed by a normalized CIL branch.</summary>
+        internal static int BranchOperands(ILOpCode kind) => kind switch
         {
-            Jump jump => jump,
-            _ => null
-        };
-
-        internal static int? Target(Operation operation) => JumpOf(operation)?.Target;
-
-        internal static bool Conditional(Operation operation) => JumpOf(operation) is { Conditional: true };
-
-        /// <summary>The constant pushed by a literal, a modelled call or the size of a closed type.
-        /// </summary>
-        internal static Constant? ConstantOf(Operation operation) => operation switch
-        {
-            Constant literal => literal,
-            ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Sizeof, ByteSize: int size } =>
-                new Constant(32, size, true),
-            _ => null
+            ILOpCode.Br => 0,
+            ILOpCode.Brfalse or ILOpCode.Brtrue => 1,
+            _ => 2
         };
 
         /// <summary>The proposition a conditional branch tests of its `bits`-bit operands' terms, and whether it
         /// is taken when the proposition holds; signed comparisons read the words through `toInt`. A literal
         /// operand is written as default `simp` writes it, so the split's fact rewrites a simplified goal.</summary>
-        internal static (string Condition, bool TakenWhenTrue) Test(Jump jump, Operand[] terms, int bits)
+        internal static (string Condition, bool TakenWhenTrue) Test(ILOpCode kind, Operand[] terms, int bits)
         {
             string Word(int index) => Literal(terms[index], bits);
             string Signed(int index) => terms[index].Numeral is { } numeral
                 ? SignedValue(numeral, bits) : $"{terms[index].Term}.toInt";
-            return jump.Kind switch
+            return kind switch
             {
                 ILOpCode.Brfalse => ($"{terms[0].Term} = {Literal(new Operand("0", 0), bits)}", true),
                 ILOpCode.Brtrue => ($"{terms[0].Term} = {Literal(new Operand("0", 0), bits)}", false),
@@ -72,7 +59,8 @@ internal static partial class ProofOutline
                 ILOpCode.Ble_un => ($"{Word(0)} ≤ {Word(1)}", true),
                 ILOpCode.Bgt_un => ($"{Word(1)} < {Word(0)}", true),
                 ILOpCode.Bge_un => ($"{Word(1)} ≤ {Word(0)}", true),
-                _ => throw new ArgumentException($"`{jump.Mnemonic}` is not a conditional branch", nameof(jump))
+                _ => throw new ArgumentException(
+                    $"`{kind.ToString().ToLowerInvariant()}` is not a conditional branch", nameof(kind))
             };
         }
 
@@ -94,7 +82,8 @@ internal static partial class ProofOutline
         }
 
         /// <summary>Each loop as its head and latch, the last pc branching back to it, in head order.</summary>
-        internal List<(int Head, int Latch)> Loops() => Operations.Select((op, pc) => (Target: Target(op), Pc: pc))
+        internal List<(int Head, int Latch)> Loops() => Enumerable.Range(0, Operations.Length)
+            .Select(pc => (Target: Method.BranchAt(pc)?.Target, Pc: pc))
             .Where(edge => edge.Target is { } target && target <= edge.Pc)
             .GroupBy(edge => edge.Target!.Value).OrderBy(group => group.Key)
             .Select(group => (group.Key, group.Max(edge => edge.Pc))).ToList();
@@ -105,8 +94,9 @@ internal static partial class ProofOutline
             var leaders = new SortedSet<int> { 0 };
             for (var index = 0; index < Operations.Length; index++)
             {
-                if (Target(Operations[index]) is { } target) leaders.Add(target);
-                if (Target(Operations[index]) is not null || Operations[index] is StackOperation { Kind: Code.Ret })
+                var branch = Method.BranchAt(index);
+                if (branch is { } jump) leaders.Add(jump.Target);
+                if (branch is not null || Operations[index] is StackOperation { Kind: Code.Ret })
                     leaders.Add(index + 1);
             }
             return leaders.Where(leader => leader <= pc).Max();
@@ -381,8 +371,8 @@ internal static partial class ProofOutline
         // Callees are named for their methods so a reader can match each contract to its call.
         void Callees()
         {
-            foreach (var op in body.Operations)
-                if (op is Call { ReturnsToCaller: true } call)
+            for (var pc = 0; pc < body.Operations.Length; pc++)
+                if (body.Method.CallAt(pc) is { Kind: not CallKind.Tail } call)
                 {
                     var index = call.Method;
                     if (callees.ContainsKey(index)) continue;
@@ -558,7 +548,7 @@ internal static partial class ProofOutline
             if (callee.Parameters[reference].ParameterType is not ByReferenceType target ||
                 ElementWidth(target.ElementType) is not { } width ||
                 ElementWidth(callee.Parameters[word].ParameterType) != width) return null;
-            var write = ScalarStore(ops[2].Op, ops[2].Site, extraction.Architecture);
+            var write = ScalarStore(emitted, ops[2].Pc, ops[2].Site, extraction.Architecture);
             return width is 4 or 8 && write is { } store && store.Width == width
                 ? (reference, word, width, store.Lemma) : null;
         }
@@ -598,12 +588,22 @@ internal static partial class ProofOutline
             var callee = extraction.Methods[index];
             var ops = extraction.Emitted[index].Operations;
             var plainReturn = LeanEmitter.Narrow(callee.ReturnType) is null;
-            return !callee.HasThis &&
-                callee.Parameters.All(parameter => ElementWidth(parameter.ParameterType) is not null) &&
-                callee.ReturnType.FullName != "System.Void" && ElementWidth(callee.ReturnType) is not null &&
-                extraction.Emitted[index].Frame.HasNoLocals &&
-                ops.Any(op => Body.Conditional(op) || op is StackOperation { Kind: Code.Throw }) &&
-                Enumerable.Range(0, ops.Length).All(Supported);
+            var emitted = extraction.Emitted[index];
+            if (callee.HasThis || callee.Parameters.Any(parameter => ElementWidth(parameter.ParameterType) is null) ||
+                callee.ReturnType.FullName == "System.Void" || ElementWidth(callee.ReturnType) is null ||
+                !emitted.Frame.HasNoLocals) return false;
+            var hasSplit = false;
+            for (var pc = 0; pc < ops.Length; pc++)
+            {
+                if (emitted.BranchAt(pc) is { } branch)
+                {
+                    hasSplit |= branch.Kind != ILOpCode.Br;
+                    continue;
+                }
+                if (!Supported(pc)) return false;
+                hasSplit |= ops[pc] is StackOperation { Kind: Code.Throw };
+            }
+            return hasSplit;
 
             bool Supported(int pc) => ops[pc] switch
             {
@@ -612,14 +612,14 @@ internal static partial class ProofOutline
                 // The word stack ends at this throw before any path can use its object operand.
                 StackOperation { Kind: Code.Ldnull } =>
                     Throws.Analyze(callee).Operands.Contains(callee.Body.Instructions[pc]),
-                Jump or StackOperation { Kind: Code.Throw or Code.Add or Code.Sub or Code.Mul or
+                StackOperation { Kind: Code.Throw or Code.Add or Code.Sub or Code.Mul or
                     Code.And or Code.Or or Code.Xor or Code.Nop } => true,
-                var op => Body.ConstantOf(op) is { Width: 32 or 64 }
+                _ => extraction.Emitted[index].ConstantAt(pc) is { Width: 32 or 64 }
             };
         }
 
         /// <summary>The term a constant's operand is written as: its digits, or its bit-vector conversion.</summary>
-        static string ConstantTerm(Constant constant) => constant.Numeral
+        static string ConstantTerm((int Width, long Value, bool Numeral) constant) => constant.Numeral
             ? $"{constant.Value}" : $"(BitVec.ofInt {constant.Width} ({constant.Value}))";
 
         /// <summary>The infix operator of a word operation the walks name, or null for any other operation.</summary>
@@ -633,9 +633,10 @@ internal static partial class ProofOutline
                 : operation is StackOperation { Kind: Code.Add } ? 1 : null;
 
         /// <summary>The operation reads an unsigned element of <paramref name="width"/> bytes.</summary>
-        static bool ReadsWidth(Operation operation, Instruction site, string architecture, int width) => operation switch
+        static bool ReadsWidth(Method emitted, int pc, Instruction site, string architecture, int width) =>
+            emitted.Operations[pc] switch
         {
-            ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Ldobj, Signed: false } load => load.ScalarWidth == width,
+            Unoutlined when emitted.ObjectAt(pc, Code.Ldobj) is { Signed: false } load => load.ScalarWidth == width,
             Unoutlined when UnsafeModels.UnalignedStorage(site, "ReadUnaligned", architecture) is { } storage =>
                 storage.FullName is not ("System.SByte" or "System.Int16") &&
                 MetadataValidation.PrimitiveWidth(storage) == width,
@@ -669,7 +670,7 @@ internal static partial class ProofOutline
                     var bits = 8 * ElementWidth(callee.Parameters[argument].ParameterType)!.Value;
                     stack.Add(new(arguments[argument], bits));
                 }
-                else if (Body.ConstantOf(op) is { Width: 32 or 64 } constant)
+                else if (extraction.Emitted[index].ConstantAt(pc) is { Width: 32 or 64 } constant)
                     stack.Add(new(ConstantTerm(constant), constant.Width, constant.Numeral ? constant.Value : null));
                 else if (Arithmetic(op) is { } symbol)
                 {
@@ -697,19 +698,19 @@ internal static partial class ProofOutline
                     lean.Line($"{indent}cil_loop_obligation [{name}Contract]");
                     return;
                 }
-                else if (op is Jump { Conditional: false } branch)
-                {
-                    pc = branch.Target;
-                    continue;
-                }
-                else if (op is Jump test)
+                else if (extraction.Emitted[index].BranchAt(pc) is { } test)
                 {
                     var taken = test.Target;
-                    var arity = test.Kind is ILOpCode.Brfalse or ILOpCode.Brtrue ? 1 : 2;
+                    if (test.Kind == ILOpCode.Br)
+                    {
+                        pc = taken;
+                        continue;
+                    }
+                    var arity = Body.BranchOperands(test.Kind);
                     var operands = stack.TakeLast(arity).ToArray();
                     var rest = stack.Take(stack.Count - arity).ToList();
                     var terms = operands.Select(operand => new Body.Operand(operand.Term, operand.Numeral)).ToArray();
-                    var (condition, takenWhenTrue) = Body.Test(test, terms, operands[0].Bits);
+                    var (condition, takenWhenTrue) = Body.Test(test.Kind, terms, operands[0].Bits);
                     var fact = $"branch{facts.Count + 1}";
                     lean.Line($"{indent}by_cases {fact} : {condition}");
                     foreach (var holds in new[] { true, false })
@@ -829,7 +830,7 @@ internal static partial class ProofOutline
         void LoopHeader(Writer lean)
         {
             var suffix = Suffix(active);
-            if (body.Operations[loop.Latch] is not Jump { Conditional: true } latch)
+            if (body.Method.BranchAt(loop.Latch) is not { Kind: not ILOpCode.Br } latch)
                 throw Unsupported($"its loop at {Location(loop.Latch)} does not test a condition at its back edge");
             string Projected(Component component) =>
                 Projection("state.values", components.IndexOf(component), components.Count);
@@ -853,7 +854,8 @@ internal static partial class ProofOutline
                 .Append($"(state : {StateType("memory")})");
             lean.Line($"-- The cutpoint is the loop's back-edge test at {Location(loop.Latch)}.");
             lean.Wrapped($"bind_cutpoint header{suffix}", binders, ":=");
-            lean.Line($"  Extracted.method0 at loop{suffix}.latch matching (· matches .{latch.Mnemonic} _)");
+            var mnemonic = latch.Kind.ToString().ToLowerInvariant();
+            lean.Line($"  Extracted.method0 at loop{suffix}.latch matching (· matches .{mnemonic} _)");
             var frame = FrameArguments(component =>
                 Projection("state.values", components.IndexOf(component), components.Count) + ".view", "memory");
             var entryFrame = $"entry.frame{(frame.Length > 0 ? " " + frame : "")}";
@@ -927,7 +929,7 @@ internal static partial class ProofOutline
                 if (Step(state) != Event.Continue)
                     throw Unsupported(
                         $"the loop test at {Location(loop.Latch)} is not a straight block ({stopReason})");
-            var arity = body.Operations[loop.Latch] is Jump { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } ? 1 : 2;
+            var arity = body.Method.BranchAt(loop.Latch) is { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } ? 1 : 2;
             if (state.Stack.Count != arity)
                 throw Unsupported($"the loop test at {Location(loop.Latch)} uses values from before its block");
             if (state.Stack is [Number left, Number right] && left.Width != right.Width)
@@ -1218,7 +1220,7 @@ internal static partial class ProofOutline
 
         bool EnterCall(Writer lean, PathState state, string indent, int pc)
         {
-            var call = (Call)body.Operations[pc];
+            var call = body.Method.CallAt(pc) ?? throw new InvalidOperationException("Expected a call at this site");
             var callee = call.Method;
             var count = call.Arguments;
             var arguments = state.Stack.TakeLast(count).ToArray();
@@ -1291,7 +1293,8 @@ internal static partial class ProofOutline
         void Branch(Writer lean, PathState state, string indent, string fact)
         {
             var pc = state.Pc;
-            var jump = (Jump)body.Operations[pc];
+            var jump = body.Method.BranchAt(pc) ??
+                throw new InvalidOperationException("Expected a branch at this site");
             var target = jump.Target;
             var zero = jump.Kind == ILOpCode.Brfalse;
             var nonzero = jump.Kind == ILOpCode.Brtrue;
@@ -1362,7 +1365,7 @@ internal static partial class ProofOutline
             if (jump.Kind is ILOpCode.Beq or ILOpCode.Bne_un && identities.All(term => term is not null))
             {
                 var (identity, equalTaken) =
-                    Body.Test(jump, [new($"({identities[0]} : ManagedReference)"), new(identities[1]!)], 64);
+                    Body.Test(jump.Kind, [new($"({identities[0]} : ManagedReference)"), new(identities[1]!)], 64);
                 var same = Side(equalTaken ? target : pc + 1, fact);
                 var different = Side(equalTaken ? pc + 1 : target, fact);
                 lean.Line($"{indent}by_cases {fact} : {identity}");
@@ -1384,7 +1387,7 @@ internal static partial class ProofOutline
             }
             var terms = operands.Select(operand => (Number)operand)
                 .Select(number => new Body.Operand(number.Term, number.Value)).ToArray();
-            var (condition, takenWhenTrue) = Body.Test(jump, terms, 8 * ((Number)operands[0]).Width);
+            var (condition, takenWhenTrue) = Body.Test(jump.Kind, terms, 8 * ((Number)operands[0]).Width);
             var holds = Side(takenWhenTrue ? target : pc + 1, fact);
             var fails = Side(takenWhenTrue ? pc + 1 : target, fact);
             lean.Line($"{indent}by_cases {fact} : {condition}");
@@ -1438,7 +1441,7 @@ internal static partial class ProofOutline
         {
             var op = body.Operations[state.Pc];
             var site = method.Body.Instructions[state.Pc];
-            var scalarStore = ScalarStore(op, site, extraction.Architecture);
+            var scalarStore = ScalarStore(body.Method, state.Pc, site, extraction.Architecture);
             var displacement = op is Unoutlined ? UnsafeModels.Offset(site, extraction.Architecture) : null;
             var stack = state.Stack;
             Value Pop()
@@ -1505,7 +1508,7 @@ internal static partial class ProofOutline
                 stack.Add(new SpannedArray(whole));
                 state.Facts.Add(whole.Name + "Spanned");
             }
-            else if (Body.ConstantOf(op) is { Width: 32 or 64 } constant)
+            else if (body.Method.ConstantAt(state.Pc) is { Width: 32 or 64 } constant)
             {
                 var width = constant.Width == 64 ? 8 : 4;
                 stack.Add(new Number(ConstantTerm(constant), width, Value: constant.Numeral ? constant.Value : null));
@@ -1543,7 +1546,7 @@ internal static partial class ProofOutline
             else if (op is Unoutlined && InstructionOperands.AddressSlot(method, site, homes) is int addressed)
                 stack.Add(slots[addressed].Components[0].Part == Part.Span
                     ? new LocalValue(addressed) : new LocalAddressValue(addressed));
-            else if (op is ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Initobj })
+            else if (body.Method.ObjectAt(state.Pc, Code.Initobj) is not null)
             {
                 if (Pop() is not LocalAddressValue address) return Stop("zeroing storage other than a struct local");
                 state.Moved = true;
@@ -1606,7 +1609,7 @@ internal static partial class ProofOutline
                 stack.Add(new Element(components.IndexOf(slots[value.Slot].Components[0])));
             }
             else if (stack.Count > 0 && stack[^1] is Element reading &&
-                ReadsWidth(op, site, extraction.Architecture, components[reading.Component].Width))
+                ReadsWidth(body.Method, state.Pc, site, extraction.Architecture, components[reading.Component].Width))
             {
                 var element = (Element)Pop();
                 var span = (SpanTerm)state.State[element.Component];
@@ -1661,13 +1664,13 @@ internal static partial class ProofOutline
                 state.Moved = true;
             }
             else if (op.IsNop) { }
-            else if (op is Jump { Conditional: false } branch)
+            else if (body.Method.BranchAt(state.Pc) is { } branch)
             {
+                if (branch.Kind != ILOpCode.Br) return Event.Branch;
                 state.Pc = branch.Target;
                 return Event.Continue;
             }
-            else if (op is Jump) return Event.Branch;
-            else if (op is Call { ReturnsToCaller: true }) return Event.Call;
+            else if (body.Method.CallAt(state.Pc) is { Kind: not CallKind.Tail }) return Event.Call;
             else if (op is StackOperation { Kind: Code.Ret }) return Event.Return;
             else if (scalarStore is { Width: 4 or 8 } spanWrite && stack.Count >= 2 &&
                 stack[^2] is Element written && state.State[written.Component] is SpanTerm { Written: true })

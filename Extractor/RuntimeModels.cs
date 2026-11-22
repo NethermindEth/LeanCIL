@@ -143,10 +143,9 @@ internal static class RuntimeModels
     /// </summary>
     internal static Operation? CallModel(MethodReference reference, FeatureProfile profile)
     {
-        if (FeatureProfile.PlatformConstant(reference) is int constant) return new Constant(32, constant, true);
+        if (FeatureProfile.PlatformConstant(reference) is not null) return Unoutlined.Site;
         if (FeatureProfile.Getter(reference) is not null) return Unoutlined.Site;
-        if (ReferenceQueries.Constant(reference, profile.Architecture) is int referenceContent)
-            return new Constant(32, referenceContent, true);
+        if (ReferenceQueries.Constant(reference, profile.Architecture) is not null) return Unoutlined.Site;
         if (ArgumentGuards.CallModel(reference, profile.Architecture) is { } guard) return guard;
         if (Spans.ArrayExtension(reference, profile.Architecture) is { } arrayView) return arrayView;
         if (Spans.Member(reference, profile.Architecture) is { } span) return span;
@@ -164,7 +163,7 @@ internal static class RuntimeModels
                 ValueTuples.RequirePair(reference.ReturnType, reference.Module, profile.Architecture);
             return vector;
         }
-        if (BitModels.Call(reference, profile) is { } bits) return bits;
+        if (BitModels.Admits(reference, profile)) return Unoutlined.Site;
         if (UnsafeModels.CallModel(reference, profile.Architecture) is { } helper) return helper;
         if (reference.HasThis || reference.ExplicitThis || reference.HasGenericParameters ||
             reference is GenericInstanceMethod ||
@@ -181,7 +180,7 @@ internal static class RuntimeModels
             $"System.Void {Unsafe}::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" or
             $"System.Void {Unsafe}::InitBlockUnaligned(System.Void*,System.Byte,System.UInt32)" =>
                 Unoutlined.Site,
-            _ => IntegerMathCalls.GetValueOrDefault(reference.FullName)
+            _ => IntegerMathCalls.Contains(reference.FullName) ? Unoutlined.Site : null
         };
         if (model is null) return null;
         ValidateSignature(reference, profile.Architecture);
@@ -236,11 +235,8 @@ internal static class RuntimeModels
         ("System.Int64", 64, true), ("System.UInt64", 64, false),
         ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
     ];
-    private static readonly (string Name, ScalarFunction Function, int Arity)[] MathOperations =
-    [
-        ("Min", ScalarFunction.Min, 2), ("Max", ScalarFunction.Max, 2), ("Clamp", ScalarFunction.Clamp, 3),
-        ("Abs", ScalarFunction.Abs, 1), ("Sign", ScalarFunction.Sign, 1)
-    ];
+    private static readonly (string Name, int Arity)[] MathOperations =
+        [("Min", 2), ("Max", 2), ("Clamp", 3), ("Abs", 1), ("Sign", 1)];
 
     // Vector helpers must bind a static declaration in the exact intrinsics assembly.
     static Operation? VectorModel(MethodReference reference, FeatureProfile profile)
@@ -265,41 +261,36 @@ internal static class RuntimeModels
         return HardwareModel(signature, profile);
     }
 
-    private static readonly Dictionary<string, Operation> IntegerMathCalls = BuildIntegerMathCalls();
+    private static readonly HashSet<string> IntegerMathCalls = BuildIntegerMathCalls();
 
-    private static ScalarIntrinsic Scalar(ScalarFunction function, int width, bool signed, int arguments,
-        int result = 32) => new(function, width, signed, result, arguments);
+    /// <summary>Whether a modelled call binds an integer absolute-value overload.</summary>
+    internal static bool IntegerAbs(MethodReference reference) =>
+        reference.Name == "Abs" && IntegerMathCalls.Contains(reference.FullName) &&
+        ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime);
 
-    // The overload's complete signature selects its scalar intrinsic or checked out-parameter write.
-    private static Dictionary<string, Operation> BuildIntegerMathCalls()
+    // The call retains its complete operand. Lean selects the operation for the checked overload.
+    private static HashSet<string> BuildIntegerMathCalls()
     {
-        var calls = new Dictionary<string, Operation>(StringComparer.Ordinal)
+        var calls = new HashSet<string>(StringComparer.Ordinal)
         {
-            ["System.UInt64 System.Math::BigMul(System.UInt32,System.UInt32)"] =
-                Scalar(ScalarFunction.BigMul32, 32, false, 2),
-            ["System.Int64 System.Math::BigMul(System.Int32,System.Int32)"] =
-                Scalar(ScalarFunction.BigMul32, 32, true, 2),
-            ["System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)"] =
-                Unoutlined.Site,
-            ["System.Int64 System.Math::BigMul(System.Int64,System.Int64,System.Int64&)"] =
-                Unoutlined.Site,
-            ["System.Int32 System.Math::DivRem(System.Int32,System.Int32,System.Int32&)"] =
-                Unoutlined.Site,
-            ["System.Int64 System.Math::DivRem(System.Int64,System.Int64,System.Int64&)"] =
-                Unoutlined.Site
+            "System.UInt64 System.Math::BigMul(System.UInt32,System.UInt32)",
+            "System.Int64 System.Math::BigMul(System.Int32,System.Int32)",
+            "System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)",
+            "System.Int64 System.Math::BigMul(System.Int64,System.Int64,System.Int64&)",
+            "System.Int32 System.Math::DivRem(System.Int32,System.Int32,System.Int32&)",
+            "System.Int64 System.Math::DivRem(System.Int64,System.Int64,System.Int64&)"
         };
-        foreach (var (type, width, signed) in MathIntegers)
-            calls.Add($"System.ValueTuple`2<{type},{type}> System.Math::DivRem({type},{type})",
-                Scalar(ScalarFunction.DivRem, width, signed, 2));
-        foreach (var (type, width, signed) in MathIntegers)
-        foreach (var (name, function, arity) in MathOperations)
+        foreach (var (type, _, signed) in MathIntegers)
         {
-            if (!signed && arity == 1) continue;
-            var result = name == "Sign" ? "System.Int32" : type;
-            var parameters = string.Join(",", Enumerable.Repeat(type, arity));
-            var model = Scalar(function, width, signed, arity);
-            calls.Add($"{result} System.Math::{name}({parameters})", model);
-            calls.Add($"{result} {type}::{name}({parameters})", model);
+            calls.Add($"System.ValueTuple`2<{type},{type}> System.Math::DivRem({type},{type})");
+            foreach (var (name, arity) in MathOperations)
+            {
+                if (!signed && arity == 1) continue;
+                var result = name == "Sign" ? "System.Int32" : type;
+                var parameters = string.Join(",", Enumerable.Repeat(type, arity));
+                calls.Add($"{result} System.Math::{name}({parameters})");
+                calls.Add($"{result} {type}::{name}({parameters})");
+            }
         }
         return calls;
     }

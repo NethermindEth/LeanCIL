@@ -59,7 +59,7 @@ internal static partial class ProofOutline
                     var parameter = spec.Parameters[argument];
                     stack = stack.Push(new(parameter.Name, 8 * parameter.Width));
                 }
-                else if (Body.ConstantOf(op) is { } constant)
+                else if (emitted.ConstantAt(pc) is { } constant)
                     stack = stack.Push(new(constant.Numeral ? $"{constant.Value}" : $"({constant.Value})",
                         constant.Width == 32 ? 32 : 64, constant.Numeral ? constant.Value : null));
                 else if (op is StackOperation { IsArithmetic: true } arithmetic)
@@ -84,12 +84,12 @@ internal static partial class ProofOutline
                     return new ScalarCheck(fits, $"CIL.checkedValues_{operation}_{reading}_i{left.Bits}",
                         operation, pc, next);
                 }
-                else if (op is Jump jump)
+                else if (emitted.BranchAt(pc) is { } jump)
                 {
                     var target = jump.Target;
                     if (target <= pc) return null;
-                    if (!jump.Conditional) { pc = target - 1; continue; }
-                    var operands = new ScalarWord[jump.Operands];
+                    if (jump.Kind == ILOpCode.Br) { pc = target - 1; continue; }
+                    var operands = new ScalarWord[Body.BranchOperands(jump.Kind)];
                     if (stack.Count < operands.Length) return null;
                     for (var position = operands.Length - 1; position >= 0; position--)
                         stack = stack.Pop(out operands[position]);
@@ -103,7 +103,7 @@ internal static partial class ProofOutline
                         if (Taken(jump.Kind, literals, operands[0].Bits)) pc = target - 1;
                         continue;
                     }
-                    var (condition, takenWhenTrue) = Body.Test(jump, [.. operands.Select(operand =>
+                    var (condition, takenWhenTrue) = Body.Test(jump.Kind, [.. operands.Select(operand =>
                         new Body.Operand(Operand(operand.Term!), operand.Numeral))], operands[0].Bits);
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     decided = true;
@@ -121,8 +121,8 @@ internal static partial class ProofOutline
                     stack = stack.Pop(out var word).Push(new(null,
                         op is StackOperation { Kind: Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I }
                             ? 64
-                        : op is StackOperation { Kind: Code.Conv_U4 or Code.Conv_I4 }
-                            or ScalarIntrinsic { Result: 32 } ? 32
+                        : op is StackOperation { Kind: Code.Conv_U4 or Code.Conv_I4 } ||
+                            emitted.BitCountWidthAt(pc) == 32 ? 32
                         : word.Bits));
                 }
                 else return null;

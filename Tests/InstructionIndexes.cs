@@ -79,15 +79,21 @@ List<(int Pc, string Link)> Links(SortedSet<int> targets) =>
     (List<(int, string)>)sitesType.GetMethod("Links", BindingFlags.Instance | BindingFlags.NonPublic)!
         .Invoke(sites, [caller, caller.Body.Instructions.ToHashSet(), methods, null, null, targets])!;
 
-// Proof outlines keep the callee index; templates take the link at its pc and its target from the admitted graph.
-if (!Equals(Property(Operation(call), "Method"), 1)) throw new Exception("Incorrect call index");
+// The proof outline and the template link use the same bound target at the call site.
+object? BoundCall(Instruction site) => sitesType.GetMethod("OutlineTarget", BindingFlags.Instance |
+    BindingFlags.NonPublic)!.Invoke(sites, [site, methods, null]);
+if (Operation(call).GetType() != Model("Unoutlined") ||
+    BoundCall(call) is not System.Runtime.CompilerServices.ITuple direct ||
+    !Equals(direct[0], Named("CallKind", "Static")) || !Equals(direct[1], 1) || !Equals(direct[2], 0))
+    throw new Exception("Incorrect direct call binding");
 var linked = new SortedSet<int>();
 if (!Links(linked).SequenceEqual([(0, ".direct 1")]) || !linked.SetEquals([1]))
     throw new Exception("Incorrect call link or target");
 caller.Body.GetILProcessor().InsertBefore(call, Instruction.Create(OpCodes.Tail));
-var tail = Operation(call);
 linked.Clear();
-if (!Equals(Property(tail, "Method"), 1) || !Equals(Property(tail, "Kind"), Named("CallKind", "Tail")) ||
+if (Operation(call).GetType() != Model("Unoutlined") ||
+    BoundCall(call) is not System.Runtime.CompilerServices.ITuple tail ||
+    !Equals(tail[0], Named("CallKind", "Tail")) || !Equals(tail[1], 1) ||
     !Links(linked).SequenceEqual([(1, ".direct 1")]) || !linked.SetEquals([1]))
     throw new Exception("The prefixed call lost its target or its link at the call instruction");
 methods.Remove(callee);
@@ -317,7 +323,6 @@ const BindingFlags Declared = BindingFlags.Instance | BindingFlags.Static | Bind
 Type Model(string name) => extractor.GetType("Nethermind.LeanCIL." + name, true)!;
 object Make(string name, params object?[] arguments) => Activator.CreateInstance(Model(name), arguments)!;
 object Named(string type, string value) => Enum.Parse(Model(type), value);
-object Property(object value, string name) => value.GetType().GetProperty(name, Declared)!.GetValue(value)!;
 var bodyType = extractor.GetType("Nethermind.LeanCIL.ProofOutline", true)!.GetNestedType("Body",
     BindingFlags.NonPublic)!;
 Array Operations(params object[] operations)
@@ -329,7 +334,8 @@ Array Operations(params object[] operations)
 var scalarProfile = Model("FeatureProfile").GetMethod("Select", Declared)!.Invoke(null, ["scalar"]);
 object OutlineMethod(MethodDefinition source, HashSet<Instruction> reachable, Dictionary<int, int> homes,
     params object[] operations) =>
-    Make("ProofOutline+Method", null, Operations(operations), source, reachable, homes, scalarProfile, context);
+    Make("ProofOutline+Method", null, Operations(operations), source, reachable, homes, scalarProfile, context,
+        Index(source), sites, methods, null);
 int Loops(object body) => ((System.Collections.IList)bodyType.GetMethod("Loops", Declared)!.Invoke(body, null)!).Count;
 // An argument read is pure only when its declared type is no narrow integer: (int, byte) below.
 var mixedArguments = new MethodDefinition("Mixed", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
@@ -346,7 +352,7 @@ mixedCode.Add(Instruction.Create(OpCodes.Call, mixedArguments));
 var mixedLive = mixedCode.ToHashSet();
 var mixedHomes = new Dictionary<int, int>();
 var mixed = OutlineMethod(mixedArguments, mixedLive, mixedHomes, Make("Unoutlined"), Make("Unoutlined"),
-    Make("StackOperation", Code.Ret), Make("Call", Named("CallKind", "Tail"), 1, 0));
+    Make("StackOperation", Code.Ret), Make("Unoutlined"));
 bool Pure(int pc, bool plainReturn = true) =>
     (bool)mixed.GetType().GetMethod("PureAt", Declared)!.Invoke(mixed, [pc, plainReturn])!;
 foreach (var encoding in new[] { OpCodes.Blt_S, OpCodes.Blt })
@@ -357,10 +363,42 @@ foreach (var encoding in new[] { OpCodes.Blt_S, OpCodes.Blt })
         Instruction.Create(OpCodes.Ret) })
         caller.Body.Instructions.Add(site);
     var code = caller.Body.Instructions;
-    var loopMethod = OutlineMethod(caller, code.ToHashSet(), [], code.Select(Operation).ToArray());
+    var liveBranches = code.ToHashSet();
+    var loopMethod = OutlineMethod(caller, liveBranches, [], code.Select(Operation).ToArray());
     var body = Activator.CreateInstance(bodyType, Declared, null, [loopMethod], null)!;
     if (Loops(body) != 1)
         throw new Exception("A conditional back edge is not found as a loop: " + encoding.Name);
+    (System.Reflection.Metadata.ILOpCode Kind, int Target)? Branch(int pc) =>
+        ((System.Reflection.Metadata.ILOpCode, int)?)loopMethod.GetType()
+            .GetMethod("BranchAt", Declared)!.Invoke(loopMethod, [pc]);
+    if (Branch(2) != (System.Reflection.Metadata.ILOpCode.Blt, 0) || Branch(0) is not null)
+        throw new Exception("A short or long branch lost its original target");
+    code[2].Operand = code[3];
+    loopMethod = OutlineMethod(caller, liveBranches, [], code.Select(Operation).ToArray());
+    if (Branch(2)?.Target != 3) throw new Exception("The new body index lost the changed CIL target");
+    liveBranches.Remove(code[2]);
+    if (Branch(2) is not null) throw new Exception("An unreachable branch contributed an outline edge");
+}
+var bitMethods = module.GetType("Examples.Bits").Methods;
+foreach (var (methodName, width) in new (string, int?)[]
+    { ("PrimitiveCounts64", 64), ("PrimitiveCountsNative", 64), ("PopulationNative", 32), ("RoundUp64", null) })
+{
+    var bitMethod = bitMethods.Single(candidate => candidate.Name == methodName);
+    var instructions = bitMethod.Body.Instructions;
+    var site = instructions.First(instruction => instruction.OpCode.Code == Code.Call);
+    var pc = instructions.IndexOf(site);
+    sitesType.GetMethod("AddModel", Declared)!.Invoke(sites, [site]);
+    var liveCalls = instructions.ToHashSet();
+    var outline = OutlineMethod(bitMethod, liveCalls, [], instructions.Select(_ => Make("Unoutlined")).ToArray());
+    int? CountWidth() => (int?)outline.GetType().GetMethod("BitCountWidthAt", Declared)!.Invoke(outline, [pc]);
+    if (CountWidth() != width) throw new Exception("Wrong bit-count result width for " + methodName);
+    liveCalls.Remove(site);
+    if (CountWidth() is not null) throw new Exception("An unreachable bit count was outlined");
+    liveCalls.Add(site);
+    var original = (MethodReference)site.Operand;
+    site.Operand = new MethodReference(original.Name, original.ReturnType, owner);
+    if (CountWidth() is not null) throw new Exception("An unrelated member was outlined as a bit count");
+    site.Operand = original;
 }
 var fieldReader = module.GetType("Examples.Counter").Methods.Single(member => member.Name == "Read");
 var fieldCode = fieldReader.Body.Instructions;
@@ -399,11 +437,43 @@ if (Storage(writeSite, "WriteUnaligned")?.MetadataType != MetadataType.UInt64 ||
     throw new Exception("A transfer outline lost its opcode, direction, alignment or scalar type");
 var outlineType = Model("ProofOutline");
 var unoutlined = Model("Unoutlined").GetField("Site", Declared)!.GetValue(null)!;
+var objectSites = new MethodDefinition("ObjectOperands", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
+owner.Methods.Add(objectSites);
+var objectCode = objectSites.Body.Instructions;
+objectCode.Add(Instruction.Create(OpCodes.Sizeof, module.TypeSystem.UInt32));
+objectCode.Add(Instruction.Create(OpCodes.Ldobj, module.TypeSystem.Int16));
+objectCode.Add(Instruction.Create(OpCodes.Stobj, module.TypeSystem.UInt64));
+var objectLive = objectCode.ToHashSet();
+var objectMethod = OutlineMethod(objectSites, objectLive, [], objectCode.Select(_ => unoutlined).ToArray());
+(int? Bytes, int? ScalarWidth, bool Signed)? ObjectShape(int pc, Code op) =>
+    ((int?, int?, bool)?)objectMethod.GetType().GetMethod("ObjectAt", Declared)!.Invoke(objectMethod, [pc, op]);
+if (ObjectShape(0, Code.Sizeof) != (4, null, false) || ObjectShape(1, Code.Ldobj) != (null, 2, true) ||
+    ObjectShape(2, Code.Stobj) != (null, 8, false) || ObjectShape(2, Code.Ldobj) is not null)
+    throw new Exception("An object outline lost its original opcode, width or signedness");
+objectLive.Remove(objectCode[0]);
+if (ObjectShape(0, Code.Sizeof) is not null)
+    throw new Exception("An unreachable sizeof contributed a literal to the outline");
+
 var readsWidth = outlineType.GetNestedType("LoopOutline", BindingFlags.NonPublic)!.GetMethod("ReadsWidth", Declared)!;
-bool Reads(string name, int width) => (bool)readsWidth.Invoke(null, [unoutlined, TransferSite(name), "x64", width])!;
+(object Method, int Pc, Instruction Site) TransferOutline(string name)
+{
+    var method = module.GetType("Examples.UnalignedMemory").Methods.Single(candidate => candidate.Name == name);
+    var code = method.Body.Instructions;
+    var site = TransferSite(name);
+    return (OutlineMethod(method, code.ToHashSet(), [], code.Select(_ => unoutlined).ToArray()),
+        code.IndexOf(site), site);
+}
+bool Reads(string name, int width)
+{
+    var (method, pc, site) = TransferOutline(name);
+    return (bool)readsWidth.Invoke(null, [method, pc, site, "x64", width])!;
+}
 var scalarStore = outlineType.GetMethod("ScalarStore", Declared)!;
-(int Width, string Lemma)? Store(string name) =>
-    ((int, string)?)scalarStore.Invoke(null, [unoutlined, TransferSite(name), "x64"]);
+(int Width, string Lemma)? Store(string name)
+{
+    var (method, pc, site) = TransferOutline(name);
+    return ((int, string)?)scalarStore.Invoke(null, [method, pc, site, "x64"]);
+}
 if (!Reads("ReadWord", 8) || Reads("ReadWord", 4) || Reads("ReadSigned", 1) || Reads("ReadHalf", 2) ||
     Store("WritePointerWord") != (8, "transfer_i64_of_write") || Store("WriteHalf") != (2, "transfer_i32_of_write") ||
     Store("ReadWord") is not null || Store("WritePointerAggregate") is not null)
@@ -419,25 +489,23 @@ if (Offset(subtract) != (ulong.MaxValue - 7, true) || Offset(PointerCall("AddPoi
     Offset(Instruction.Create(OpCodes.Callvirt, (MethodReference)subtract.Operand)) is not null ||
     Offset(TransferSite("ReadWord")) is not null)
     throw new Exception("Incorrect displacement for a retained Unsafe call");
-try
-{
-    Make("Constant", 32, -1L, true);
-    throw new Exception("A negative numeral constant was admitted");
-}
-catch (TargetInvocationException error) when (error.InnerException is ArgumentOutOfRangeException) { }
-// A `with` copy sets one member of an existing constant, so each member checks the other as well.
-void Assign(object value, string property, object newValue) =>
-    value.GetType().GetProperty(property, Declared)!.SetValue(value, newValue);
-foreach (var (constant, property, newValue) in new (object, string, object)[]
-{
-    (Make("Constant", 32, 5L, true), "Value", -1L), (Make("Constant", 32, -1L, false), "Numeral", true)
-})
-    try
-    {
-        Assign(constant, property, newValue);
-        throw new Exception("Changing " + property + " made a negative numeral constant");
-    }
-    catch (TargetInvocationException error) when (error.InnerException is ArgumentOutOfRangeException) { }
+var constants = new MethodDefinition("Constants", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
+owner.Methods.Add(constants);
+var literals = constants.Body.Instructions;
+foreach (var literal in new[] { Instruction.Create(OpCodes.Ldc_I4_M1), Instruction.Create(OpCodes.Ldc_I4_0),
+    Instruction.Create(OpCodes.Ldc_I4_8), Instruction.Create(OpCodes.Ldc_I4_S, (sbyte)-3),
+    Instruction.Create(OpCodes.Ldc_I4, 5), Instruction.Create(OpCodes.Ldc_I8, long.MinValue) })
+    literals.Add(literal);
+var liveLiterals = literals.ToHashSet();
+var literalMethod = OutlineMethod(constants, liveLiterals, [], literals.Select(_ => unoutlined).ToArray());
+(int Width, long Value, bool Numeral)? Literal(int pc) =>
+    ((int, long, bool)?)literalMethod.GetType().GetMethod("ConstantAt", Declared)!.Invoke(literalMethod, [pc]);
+(int, long, bool)[] expectedLiterals = [(32, -1, false), (32, 0, true), (32, 8, true), (32, -3, false),
+    (32, 5, false), (64, long.MinValue, false)];
+for (var pc = 0; pc < expectedLiterals.Length; pc++)
+    if (Literal(pc) != expectedLiterals[pc]) throw new Exception("Incorrect original literal at " + pc);
+liveLiterals.Remove(literals[0]);
+if (Literal(0) is not null) throw new Exception("An unreachable literal contributed an outline operand");
 Console.WriteLine("PASS typed operations preserve outline operands, argument kinds and tail-call targets");
 
 // The extractor's narrowing table, which the outline readers refuse arguments by, states for every primitive

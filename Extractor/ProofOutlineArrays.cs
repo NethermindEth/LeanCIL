@@ -36,7 +36,7 @@ internal static partial class ProofOutline
         // A helper's address is loaded with `ldind.i4`, the only indirect load whose step the outline gives.
         if (ops.Length != 5 || array.Width != 4 ||
             ops[3].Item is not StackOperation { Kind: Code.Ldind_I4 } ||
-            ops[2].Item is not Call { Kind: CallKind.Static, Arguments: 2 } call)
+            extraction.Emitted[0].CallAt(ops[2].Index) is not { Kind: CallKind.Static, Arguments: 2 } call)
             return null;
         return ElementAddress(extraction, call.Method, array.Element!) is { } method
             ? new(array, index, new(call.Method, method, ""), null) : null;

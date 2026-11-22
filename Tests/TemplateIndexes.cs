@@ -231,8 +231,7 @@ if (!dispatchDifference.Contains("different instructions: Caller at pc 1", Strin
     throw new Exception("Equal call instructions with different receiver tables were merged: " + dispatchDifference);
 Console.WriteLine("PASS differing dispatch metadata names the call pc after target renumbering");
 
-// The canonical instruction comparisons use decoded values. The outline descriptors independently
-// preserve their existing equality for widths or signs the operation ignores.
+// Canonical templates compare the decoded method operands.
 string Merge(string identity, object[] left, object[] right)
 {
     var directory = Path.Combine(root, "Merge" + identity);
@@ -243,8 +242,6 @@ string Merge(string identity, object[] left, object[] right)
     run.Invoke(null, [(string[])[shared, one, two], read]);
     return File.ReadAllText(Path.Combine(shared, "Templates.lean"));
 }
-object Scalar(string function, int width, bool signed, int result, int arguments) => Create("ScalarIntrinsic",
-    Named(Model("ScalarFunction"), function), width, signed, result, arguments);
 object Named(Type type, string value) => Enum.Parse(type, value);
 object ValueName() => Model("MetadataName").GetMethod("OfText", BindingFlags.Static | BindingFlags.NonPublic)!
     .Invoke(null, ["value"])!;
@@ -254,19 +251,16 @@ string ScalarCall(string owner, string name, string result, params string[] para
     static string Word(string type) => $".atom Extraction.runtimeScope \"System.{type}\"";
     return $$""".call { owner := {{Word(owner)}}, name := name!"{{name}}", hasThis := false, genericArity := 0, returnType := {{Word(result)}}, parameters := [{{string.Join(", ", parameters.Select(Word))}}] }""";
 }
-var merged = new (string Identity, object Left, object Right, string Code)[]
+var merged = new (string Identity, string Code)[]
 {
-    ("BigMul", Scalar("BigMul32", 32, true, 32, 2), Scalar("BigMul32", 64, true, 32, 2),
-        ScalarCall("Math", "BigMul", "Int64", "Int32", "Int32")),
-    ("PopCount", Scalar("PopCount", 32, true, 32, 1), Scalar("PopCount", 32, false, 32, 1),
-        ScalarCall("Numerics.BitOperations", "PopCount", "Int32", "UInt32"))
+    ("BigMul", ScalarCall("Math", "BigMul", "Int64", "Int32", "Int32")),
+    ("PopCount", ScalarCall("Numerics.BitOperations", "PopCount", "Int32", "UInt32"))
 };
-foreach (var (identity, left, right, code) in merged)
+foreach (var (identity, code) in merged)
 {
     var body = Merge(identity, [code, ".ret"], [$"id ({code} : Instruction)", ".ret"]);
-    if (!body.Contains("cil_template_code% (Input0.method0.code)", StringComparison.Ordinal) ||
-        !Equals(left, right) || left.GetHashCode() != right.GetHashCode())
-        throw new Exception($"The {identity} alternatives must agree and share one decoded body.");
+    if (!body.Contains("cil_template_code% (Input0.method0.code)", StringComparison.Ordinal))
+        throw new Exception($"The {identity} alternatives must share one decoded body.");
 }
 // A decoded field reference carries the whole operand, including its metadata name.
 string Store(int index, string name) =>

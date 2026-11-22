@@ -11,14 +11,14 @@ internal static class UnsafeModels
 
     // A modelled helper keeps its call. Extractor analyses read the operation selected for that call.
     internal static Operation? CallModel(MethodReference reference, string architecture) =>
-        ClassifyCall(reference, architecture, out _, out _);
+        ClassifyCall(reference, architecture, out _, out _, out _);
 
     // Proof outlines read the closed storage type from the validated unaligned call at this site.
     internal static TypeReference? UnalignedStorage(Instruction site, string name, string architecture)
     {
         if (site.OpCode.Code != Code.Call || site.Operand is not GenericInstanceMethod call || call.Name != name)
             return null;
-        ClassifyCall(call, architecture, out var storage, out _);
+        ClassifyCall(call, architecture, out var storage, out _, out _);
         return storage;
     }
 
@@ -27,13 +27,22 @@ internal static class UnsafeModels
     {
         if (site.OpCode.Code != Code.Call || site.Operand is not GenericInstanceMethod
             { Name: "Add" or "Subtract" or "AddByteOffset" } call) return null;
-        ClassifyCall(call, architecture, out _, out var offset);
+        ClassifyCall(call, architecture, out _, out var offset, out _);
         return offset;
     }
 
-    static Operation? ClassifyCall(MethodReference reference, string architecture, out TypeReference? storage,
-        out (ulong Stride, bool Signed)? offset)
+    /// <summary>The element width of an admitted Unsafe.SizeOf call.</summary>
+    internal static int? SizeOf(MethodReference reference, string architecture)
     {
+        if (reference.Name != "SizeOf") return null;
+        ClassifyCall(reference, architecture, out _, out _, out var size);
+        return size;
+    }
+
+    static Operation? ClassifyCall(MethodReference reference, string architecture, out TypeReference? storage,
+        out (ulong Stride, bool Signed)? offset, out int? size)
+    {
+        size = null;
         storage = null;
         offset = null;
         if (reference.Name is "As" or "AsRef" or "BitCast")
@@ -109,7 +118,11 @@ internal static class UnsafeModels
         };
         if (byteOffset) return Unoutlined.Site;
         if (subtractBytes) return new StackOperation(Code.Sub);
-        if (sizeOf) return new Constant(32, width, true);
+        if (sizeOf)
+        {
+            size = width;
+            return Unoutlined.Site;
+        }
         var signed = reference.Parameters[1].ParameterType.FullName != "System.UIntPtr";
         // Native-width negative strides reuse the checked wrapping offset operation.
         var stride = reference.Name == "Subtract" ? unchecked(0UL - (ulong)width) : (ulong)(addBytes ? 1 : width);

@@ -236,7 +236,11 @@ internal static class LeanEmitter
         // The shape facts are written here once every method has been translated, so admission reports its own
         // refusals first, and every method's components see them.
         IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
-        var slots = string.Join(", ", importBindings.Select(ImportResolution.LeanSlot));
+        GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
+        var importNames = importBindings.Select(binding =>
+            genericEvidence.ExternalIdentities.Reference(binding.Identity, reachable: true)).ToArray();
+        genericEvidence.ExternalIdentities.Emit(lean, inputs);
+        var slots = string.Join(", ", importBindings.Zip(importNames, ImportResolution.LeanSlot));
         lean.AppendLine($"""def imports : List ImportSlot := [{slots}]""");
         if (importBindings.Count != 0)
             lean.AppendLine("""
@@ -245,7 +249,6 @@ internal static class LeanEmitter
                 """);
         var shapeFactsAt = lean.Length;
         var operandShapes = new OperandShapes(layoutEvidence);
-        GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
         genericEvidence.EmitAssemblyMetadata(lean);
         var fieldAccesses = new List<ClassViews.Access>();
         for (int n = 0; n < methods.Length; n++)
@@ -348,7 +351,8 @@ internal static class LeanEmitter
                     outlineOperations.Add(InstructionTranslation.Translate(site, m, methodIndices, instructions,
                         callSites, profile, scalarCertificate, parameterHomes, importResolution, layoutContext));
                 }
-                outlines.Add(new(frame, [.. outlineOperations], m, reachable, parameterHomes, profile, layoutContext));
+                outlines.Add(new(frame, [.. outlineOperations], m, reachable, parameterHomes, profile,
+                    layoutContext, instructions, callSites, methodIndices, importResolution));
             }
             // The decoder's raw definition is the method's only source; the command states its field facts and
             // writes each field operand as the definition the operand shapes name.
@@ -405,7 +409,7 @@ internal static class LeanEmitter
         // entry is its evidence record's, which the body check equates with the full name its metadata row spells.
         lean.AppendLine("def signatures : List String := methodEvidence.map Extraction.MethodEvidence.signature");
         lean.AppendLine("theorem signatures_length : signatures.length = program.length := rfl");
-        var signatures = string.Join(", ", importBindings.Select(binding => IdentityText.Quote(binding.Identity)));
+        var signatures = string.Join(", ", importNames);
         lean.AppendLine($"def importSignatures : List String := [{signatures}]");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
         lean.AppendLine("theorem statics_validated : Extraction.StaticValuesValid program := " + Decide);

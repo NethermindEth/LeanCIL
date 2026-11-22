@@ -1,3 +1,4 @@
+using ILOpCode = System.Reflection.Metadata.ILOpCode;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -51,7 +52,7 @@ internal static partial class ProofOutline
             if (spec.Parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.Narrow) is { } narrow)
                 throw Unsupported(
                     $"A struct receiver loop reads word arguments only, and `{narrow.Name}` is a narrow integer");
-            if (loops.Count != 1 || !Body.Conditional(body.Operations[loops[0].Latch]) ||
+            if (loops.Count != 1 || body.Method.BranchAt(loops[0].Latch) is not { Kind: not ILOpCode.Br } ||
                 spec.Method.Body.Variables.Count != 0 || spec.Parameters.Any(parameter =>
                     parameter.Shape is not (ParameterShape.StructReference or ParameterShape.Scalar) ||
                     parameter.Shape == ParameterShape.Scalar && parameter.Width != 8) ||
@@ -228,7 +229,7 @@ internal static partial class ProofOutline
                 }
                 if (body.Method.ArgumentAt(pc) is int argument && MethodArguments.Plain(spec.Method, argument))
                     path.Stack.Add(spec.Parameters[argument].Name);
-                else if (StructLiteral(op) is { } literal)
+                else if (StructLiteral(body.Method.ConstantAt(pc)) is { } literal)
                 {
                     if (literal.Width == 8) path.Stack.Add(literal.Term);
                     else if (pc + 1 < body.Operations.Length &&
@@ -260,13 +261,14 @@ internal static partial class ProofOutline
                     Access(path, field, store ? value : null, indent);
                     if (!store) path.Stack.Add(path.Values[field.Offset]);
                 }
-                else if (op is Jump jump)
+                else if (body.Method.BranchAt(pc) is { } jump)
                 {
                     var target = jump.Target;
-                    if (!jump.Conditional) { pc = target; continue; }
+                    if (jump.Kind == ILOpCode.Br) { pc = target; continue; }
                     var right = Pop();
-                    var operands = jump.Operands == 1 ? new[] { right } : [Pop(), right];
-                    var (condition, taken) = Body.Test(jump, [.. operands.Select(term => new Body.Operand(term))], 64);
+                    var operands = Body.BranchOperands(jump.Kind) == 1 ? new[] { right } : [Pop(), right];
+                    var (condition, taken) = Body.Test(jump.Kind,
+                        [.. operands.Select(term => new Body.Operand(term))], 64);
                     var fact = "branch" + ++names;
                     Line($"{indent}by_cases {fact} : {condition}");
                     var yes = path.Copy();

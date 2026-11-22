@@ -1,4 +1,3 @@
-using ILOpCode = System.Reflection.Metadata.ILOpCode;
 using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
@@ -37,38 +36,6 @@ internal sealed record StackOperation(Code Kind) : Operation
     internal static readonly StackOperation Nop = new(Code.Nop);
 }
 
-/// <summary>The one-byte CIL branch encoding and the destination's instruction index.</summary>
-internal sealed record Jump(int Opcode, int Target) : Operation
-{
-    // ECMA-335 places the short and long branch families in the same order in consecutive ranges.
-    private int LongOpcode => Opcode is >= (int)ILOpCode.Br_s and <= (int)ILOpCode.Blt_un_s
-        ? Opcode + ((int)ILOpCode.Br - (int)ILOpCode.Br_s) : Opcode;
-
-    internal ILOpCode Kind => (ILOpCode)LongOpcode;
-    internal bool Conditional => LongOpcode != (int)ILOpCode.Br;
-
-    /// <summary>The number of evaluation stack operands consumed by this branch.</summary>
-    internal int Operands => LongOpcode switch
-    {
-        (int)ILOpCode.Br => 0,
-        (int)ILOpCode.Brfalse or (int)ILOpCode.Brtrue => 1,
-        _ => 2
-    };
-
-    /// <summary>The Lean constructor name, without its dot.</summary>
-    internal string Mnemonic => Name[1..];
-
-    string Name => LongOpcode switch
-    {
-        (int)ILOpCode.Br => ".br", (int)ILOpCode.Brfalse => ".brfalse", (int)ILOpCode.Brtrue => ".brtrue",
-        (int)ILOpCode.Beq => ".beq", (int)ILOpCode.Bne_un => ".bne_un", (int)ILOpCode.Blt => ".blt",
-        (int)ILOpCode.Ble => ".ble", (int)ILOpCode.Bgt => ".bgt", (int)ILOpCode.Bge => ".bge",
-        (int)ILOpCode.Blt_un => ".blt_un", (int)ILOpCode.Ble_un => ".ble_un",
-        (int)ILOpCode.Bgt_un => ".bgt_un", (int)ILOpCode.Bge_un => ".bge_un",
-        _ => throw new ArgumentOutOfRangeException(nameof(Opcode))
-    };
-}
-
 /// <summary>The width and signedness a narrow integer is truncated to when it is read.</summary>
 internal enum Narrowing { Signed8, Unsigned8, Signed16, Unsigned16 }
 
@@ -82,52 +49,6 @@ internal static class NarrowingText
         _ => throw new ArgumentOutOfRangeException(nameof(narrowing))
     };
 }
-
-/// <summary>
-/// An integer constant of <see cref="Width"/> bits. <see cref="Numeral"/> says it was written as a bare numeral
-/// rather than as a bit-vector conversion.
-/// </summary>
-internal sealed record Constant : Operation
-{
-    public Constant(int width, long value, bool numeral)
-    {
-        Width = width;
-        Value = value;
-        Numeral = numeral;
-    }
-
-    public int Width { get; init; }
-
-    /// <summary>The value; a numeral never holds a negative one, whichever of the two is set last.</summary>
-    public long Value
-    {
-        get;
-        init => field = !Numeral || value >= 0 ? value : throw NegativeNumeral(nameof(Value));
-    }
-
-    /// <summary>Whether the constant is written as a bare numeral; the numeral form has no sign.</summary>
-    public bool Numeral
-    {
-        get;
-        init => field = !value || Value >= 0 ? value : throw NegativeNumeral(nameof(Numeral));
-    }
-
-    static ArgumentOutOfRangeException NegativeNumeral(string name) =>
-        new(name, "A numeral constant is not negative.");
-}
-
-internal enum CallKind { Static, Instance, Tail }
-
-/// <summary>A resolved call target and its stack argument count for the proof outline.</summary>
-internal sealed record Call(CallKind Kind, int Method, int Arguments) : Operation
-{
-    /// <summary>The call enters one body with a caller continuation for contract composition.</summary>
-    internal bool ReturnsToCaller => Kind is CallKind.Static or CallKind.Instance;
-}
-
-/// <summary>The object opcode and storage shape used by a proof outline.</summary>
-internal sealed record ObjectInstruction(Code Opcode, int? ScalarWidth = null,
-    bool Signed = false, int? ByteSize = null) : Operation;
 
 /// <summary>
 /// The integer element an <c>ldind</c>, <c>stind</c>, <c>ldelem</c> or <c>stelem</c> opcode names; <c>I</c> is
@@ -152,36 +73,4 @@ internal static class NumericKinds
 
     /// <summary>The Lean term of the kind, such as <c>.i4</c>.</summary>
     internal static string Term(this NumericKind kind) => "." + kind.ToString().ToLowerInvariant();
-}
-
-internal enum ScalarFunction
-{
-    BigMul32, DivRem, Min, Max, Clamp, Abs, Sign, RotateLeft, RotateRight, PopCount, LeadingZeroCount,
-    TrailingZeroCount, Log2, RoundUpToPowerOf2, IsPow2, ReverseEndianness
-}
-
-/// <summary>
-/// A scalar helper over integers of <paramref name="Width"/> bits. <paramref name="Result"/> is the width of the
-/// word a bit count returns.
-/// </summary>
-internal sealed record ScalarIntrinsic(ScalarFunction Function, int Width, bool Signed, int Result, int Arguments)
-    : Operation
-{
-    /// <summary>The function counts bits, which the instruction semantics treats as pure word arithmetic.</summary>
-    internal bool CountsBits => Function is ScalarFunction.PopCount or ScalarFunction.LeadingZeroCount or
-        ScalarFunction.TrailingZeroCount or ScalarFunction.Log2;
-
-    // BigMul32 fixes its input width. Only bit counts select a result width.
-    // Rotates, unsigned round-up and bit counts ignore signedness.
-    (int Width, bool Signed, int Result) OperandTypes =>
-        (Function == ScalarFunction.BigMul32 ? 32 : Width,
-         Signed && !CountsBits && Function is not (ScalarFunction.RotateLeft or ScalarFunction.RotateRight or
-             ScalarFunction.RoundUpToPowerOf2),
-         CountsBits ? Result : 0);
-
-    public bool Equals(ScalarIntrinsic? other) =>
-        other is not null && Function == other.Function && Arguments == other.Arguments &&
-        OperandTypes == other.OperandTypes;
-
-    public override int GetHashCode() => HashCode.Combine(Function, Arguments, OperandTypes);
 }

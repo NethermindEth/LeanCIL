@@ -3,6 +3,8 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
+internal enum CallKind { Static, Instance, Tail }
+
 /// <summary>The managed targets of reachable raw sites in one extraction.</summary>
 internal sealed class ResolvedCallSites
 {
@@ -28,6 +30,19 @@ internal sealed class ResolvedCallSites
         IReadOnlyDictionary<MethodDefinition, int> indices) =>
         direct.TryGetValue(site, out var target) && indices.TryGetValue(target, out var index)
             ? (target, index) : throw new InvalidDataException($"Unsupported or unresolved call: {site.Operand}");
+
+    /// <summary>The bound direct callee and its stack arity at a call instruction in a proof outline.</summary>
+    internal (CallKind Kind, int Method, int Arguments)? OutlineTarget(Instruction site,
+        IReadOnlyDictionary<MethodDefinition, int> indices, ImportResolution? imports)
+    {
+        if (site.OpCode.Code is not (Code.Call or Code.Callvirt)) return null;
+        if (imports?.Slot(site) is int slot)
+            return (CallKind.Static, indices.Count + slot, ((MethodReference)site.Operand).Parameters.Count);
+        if (!direct.TryGetValue(site, out var callee) || virtualSlots.ContainsKey(site)) return null;
+        var kind = TailCalls.IsCall(site) ? CallKind.Tail :
+            ObjectTypes.ReceiverCall(site) ? CallKind.Instance : CallKind.Static;
+        return (kind, indices[callee], callee.Parameters.Count + (callee.HasThis ? 1 : 0));
+    }
 
     /// <summary>The validated receiver cases of a virtual slot, in dispatch order.</summary>
     internal VirtualDispatch.Entry[]? VirtualTargets(Instruction site) => virtualSlots.GetValueOrDefault(site);

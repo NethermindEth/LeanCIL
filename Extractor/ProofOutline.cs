@@ -1,4 +1,5 @@
 using System.Runtime.ExceptionServices;
+using ILOpCode = System.Reflection.Metadata.ILOpCode;
 using System.Text;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -13,7 +14,8 @@ internal static partial class ProofOutline
     /// <summary>The frame and instruction descriptors used to outline a proof of this method.</summary>
     internal sealed class Method(FrameMetadata frame, Operation[] operations, MethodDefinition source,
         IReadOnlySet<Instruction> reachable, IReadOnlyDictionary<int, int> parameterHomes,
-        FeatureProfile profile, MetadataValidation.LayoutContext layouts)
+        FeatureProfile profile, MetadataValidation.LayoutContext layouts, InstructionIndex instructions,
+        ResolvedCallSites calls, IReadOnlyDictionary<MethodDefinition, int> methodIndices, ImportResolution? imports)
     {
         internal FrameMetadata Frame { get; } = frame;
         internal Operation[] Operations { get; } = operations;
@@ -27,15 +29,77 @@ internal static partial class ProofOutline
                 ? index : null;
         }
 
+        /// <summary>The callee selected by the original reachable call and its binding.</summary>
+        internal (CallKind Kind, int Method, int Arguments)? CallAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            return Operations[pc] is Unoutlined && reachable.Contains(site)
+                ? calls.OutlineTarget(site, methodIndices, imports) : null;
+        }
+
+        /// <summary>The normalized opcode and instruction index of the branch's original destination.</summary>
+        internal (ILOpCode Kind, int Target)? BranchAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            if (Operations[pc] is not Unoutlined || site.Operand is not Instruction target ||
+                site.OpCode.OperandType is not (OperandType.InlineBrTarget or OperandType.ShortInlineBrTarget) ||
+                site.OpCode.Code is Code.Leave or Code.Leave_S || !reachable.Contains(site)) return null;
+            int opcode = site.OpCode.Value;
+            // ECMA-335 assigns both branch families in the same order.
+            if (opcode is >= (int)ILOpCode.Br_s and <= (int)ILOpCode.Blt_un_s)
+                opcode += (int)ILOpCode.Br - (int)ILOpCode.Br_s;
+            return ((ILOpCode)opcode, instructions.Position(target));
+        }
+
+        /// <summary>The storage shape of a reachable CIL type operand with the requested opcode.</summary>
+        internal (int? Bytes, int? ScalarWidth, bool Signed)? ObjectAt(int pc, Code opcode)
+        {
+            var site = source.Body.Instructions[pc];
+            if (site.OpCode.Code != opcode || Operations[pc] is not Unoutlined ||
+                !reachable.Contains(site) || site.Operand is not TypeReference operand) return null;
+            return InstructionOperands.ObjectStorage(source, site, operand, instructions, layouts, profile);
+        }
+
+        /// <summary>The word pushed by a literal, a modelled call or the size of a closed type.</summary>
+        internal (int Width, long Value, bool Numeral)? ConstantAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            if (Operations[pc] is not Unoutlined || !reachable.Contains(site)) return null;
+            var code = site.OpCode.Code;
+            return code switch
+            {
+                Code.Ldc_I4_M1 => (32, -1, false),
+                >= Code.Ldc_I4_0 and <= Code.Ldc_I4_8 => (32, code - Code.Ldc_I4_0, true),
+                Code.Ldc_I4 or Code.Ldc_I4_S => (32, Convert.ToInt64(site.Operand), false),
+                Code.Ldc_I8 => (64, (long)site.Operand, false),
+                Code.Sizeof when ObjectAt(pc, code)?.Bytes is int size => (32, size, true),
+                Code.Ldsfld when site.Operand is FieldReference field &&
+                    FeatureProfile.PlatformField(field) is int value => (32, value, true),
+                Code.Call when calls.IsModel(site) && site.Operand is MethodReference member &&
+                    (FeatureProfile.PlatformConstant(member) ??
+                     ReferenceQueries.Constant(member, profile.Architecture) ??
+                     UnsafeModels.SizeOf(member, profile.Architecture)) is int value => (32, value, true),
+                _ => null
+            };
+        }
+
+        /// <summary>The result width of a reachable bit-count call bound to its runtime declaration.</summary>
+        internal int? BitCountWidthAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            return Operations[pc] is Unoutlined && site.OpCode.Code == Code.Call &&
+                site.Operand is MethodReference member && reachable.Contains(site) && calls.IsModel(site)
+                ? BitModels.CountWidth(member, profile) : null;
+        }
+
         /// <summary>Whether one checked, straight-line word step suffices for this site.</summary>
         internal bool PureAt(int pc, bool plainReturn) => Operations[pc] switch
         {
             StackOperation { Kind: Code.Ret } => plainReturn,
             Unoutlined when ArgumentAt(pc) is int argument => MethodArguments.Plain(source, argument),
-            var operation => Body.ConstantOf(operation) is { Width: 32 or 64 } ||
-                operation is ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } or
-                StackOperation { Kind: Code.Add or Code.Sub or Code.Mul or Code.And
-                    or Code.Or or Code.Xor or Code.Nop or
+            var operation => ConstantAt(pc) is { Width: 32 or 64 } ||
+                BitCountWidthAt(pc) is not null || operation is StackOperation { Kind:
+                    Code.Add or Code.Sub or Code.Mul or Code.And or Code.Or or Code.Xor or Code.Nop or
                     Code.Conv_I8 or Code.Conv_I or Code.Conv_U8 or Code.Conv_U4 or Code.Conv_I4 }
         };
 

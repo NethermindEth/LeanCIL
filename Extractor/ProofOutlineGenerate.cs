@@ -531,7 +531,8 @@ internal static partial class ProofOutline
         // A body over words that calls helpers composes them through stub contracts, as a body over objects does.
         if (!steppable && !split && paths is null &&
             spec.Parameters.All(parameter => parameter.Shape == ParameterShape.Scalar) &&
-            body.Operations.Any(op => op is Call { Kind: CallKind.Static }) &&
+            Enumerable.Range(0, body.Operations.Length)
+                .Any(pc => body.Method.CallAt(pc) is { Kind: CallKind.Static }) &&
             ObjectStraightLine(extraction, spec, body, lean, stubsOnly: true) is { } composed)
             return composed;
         Header(lean, spec, paths is null ? ["CIL.Verification", "CIL.Safety.SymbolicExecution"]
@@ -579,8 +580,8 @@ internal static partial class ProofOutline
             Unoutlined when InstructionOperands.StoreSlot(method, site, homes) is int stored =>
                 !NarrowLocal(method, stored),
             Unoutlined => site.OpCode.Code is Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S ||
-                emitted.StructFieldAt(pc) is { Signed: false },
-            ObjectInstruction { Opcode: Code.Initobj } or StackOperation { Kind: Code.Dup } => true,
+                emitted.StructFieldAt(pc) is { Signed: false } || emitted.ObjectAt(pc, Code.Initobj) is not null,
+            StackOperation { Kind: Code.Dup } => true,
             _ => false
         };
     }
@@ -616,7 +617,7 @@ internal static partial class ProofOutline
         for (var pc = 0; pc < emitted.Operations.Length; pc++)
         {
             var loadsBoolean = emitted.ArgumentAt(pc) is int index && parameters[index].Shape == ParameterShape.Boolean;
-            var jump = emitted.Operations[pc] as Jump;
+            var jump = emitted.BranchAt(pc);
             if (!loadsBoolean && !emitted.PureAt(pc, plainReturn) && jump?.Kind != ILOpCode.Br &&
                 !(previousBoolean && jump?.Kind is ILOpCode.Brfalse or ILOpCode.Brtrue))
                 return false;
@@ -653,9 +654,9 @@ internal static partial class ProofOutline
         // keeps locals, whose homes change the memory a stub's `post` keeps.
         Func<int, Callee?> summarized = !stubsOnly ? Summary
             : index => Stubbed(index) is null && Summary(index) is { Walk.NumericHomes: true } read ? read : null;
-        var numericHomes = HasNumericObjectHomes(spec.Method) || body.Operations
-            .OfType<Call>().Where(call => call.Kind != CallKind.Tail)
-            .Any(call => summarized(call.Method)?.Walk.NumericHomes == true);
+        var numericHomes = HasNumericObjectHomes(spec.Method) || Enumerable.Range(0, body.Operations.Length)
+            .Any(pc => body.Method.CallAt(pc) is { Kind: not CallKind.Tail } call &&
+                summarized(call.Method)?.Walk.NumericHomes == true);
         // Local homes belong to the entry memory, so the statement accepts any well-formed entry memory.
         if (numericHomes && !spec.Symbolic) spec = spec.InMemory();
         var walk = new ObjectWalk(spec, body.Method, views, summarized,
@@ -844,7 +845,7 @@ internal static partial class ProofOutline
         if (pc < 0) return "the body has locals";
         // A call the outline cannot compose names the contract the author must write and prove.
         var instruction = InstructionAt(method, pc);
-        return ops[pc] is Call { ReturnsToCaller: true } call
+        return emitted.CallAt(pc) is { Kind: not CallKind.Tail } call
             ? $"""
                 {instruction} calls method {call.Method}, which `cil_contract_steps` composes through a
                 `MethodContract` you write and prove with `Holds Extracted.program {call.Method}`

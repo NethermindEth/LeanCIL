@@ -194,26 +194,26 @@ def ImportSlotIndex.forLinks (imports : ImportSlotIndex) (methodCount : Nat)
 
 /-- Each mention of an imported method in the instruction stream is a call at its linked pc. -/
 def BodyImports.checkUses (bound : BodyImports)
-    (identities : Std.TreeMap String ImportSlot) (code : List RawInstruction) : Bool :=
+    (identities : Std.TreeMap (List Nat) ImportSlot) (code : List RawInstruction) : Bool :=
   let positions := Std.TreeMap.ofList bound.calls
   code.zipIdx.all fun (instruction, pc) =>
     match instruction.operand, positions[pc]? with
     | .call site, expected =>
       match site.target, expected with
       | .external name, some slot => instruction.opcode == 0x28 && slot.identity == name
-      | .external name, none => !identities.contains name
+      | .external name, none => !identities.contains (bytesOf name)
       | .managed _, slot => slot.isNone
     | _, slot => slot.isNone
 
 /-- Every use of a registered import identity has its own direct call at its linked pc. -/
 theorem BodyImports.checked_call_has_link {bound : BodyImports}
-    {identities : Std.TreeMap String ImportSlot} {code : List RawInstruction}
+    {identities : Std.TreeMap (List Nat) ImportSlot} {code : List RawInstruction}
     {instruction : RawInstruction} {pc : Nat} {site : CallSite} {identity : String}
     (checked : bound.checkUses identities code = true)
     (atPc : Membership.mem code.zipIdx (instruction, pc))
     (operand : instruction.operand = .call site)
     (target : site.target = .external identity)
-    (registered : identities.contains identity = true) :
+    (registered : identities.contains (bytesOf identity) = true) :
     Exists fun slot => (Std.TreeMap.ofList bound.calls)[pc]? = some slot /\
       instruction.opcode = 0x28 /\ slot.identity = identity := by
   unfold BodyImports.checkUses at checked
@@ -499,19 +499,19 @@ private def decodeHeader (withSection : Bool) : List Nat → Except BodyError (B
     else .error (.unsupportedHeader first)
 
 /-- Look up the slot authorized for an external target by the method's links. -/
-def callImportSlot (imports : Std.TreeMap String ImportSlot) (call : CallSite) : Option ImportSlot :=
+def callImportSlot (imports : Std.TreeMap (List Nat) ImportSlot) (call : CallSite) : Option ImportSlot :=
   match call.target with
-  | .external name => imports[name]?
+  | .external name => imports[bytesOf name]?
   | .managed _ => none
 
 /-- Index the slots for all imported calls in a body. -/
-def BodyImports.byIdentity (imports : BodyImports) : Std.TreeMap String ImportSlot :=
-  imports.calls.foldl (fun slots (_, entry) => slots.insert entry.identity entry) {}
+def BodyImports.byIdentity (imports : BodyImports) : Std.TreeMap (List Nat) ImportSlot :=
+  imports.calls.foldl (fun slots (_, entry) => slots.insert (bytesOf entry.identity) entry) {}
 
 /-- The checked table of a body: every entry is checked against the metadata, and no token has
     two entries. -/
 private def checkTable (env : MetadataEnv) (frame : Frame)
-    (imports : Std.TreeMap String ImportSlot) :
+    (imports : Std.TreeMap (List Nat) ImportSlot) :
     List (Nat × RawOperand) → Std.TreeMap Nat (RawOperand × TokenFacts) →
       Except BodyError (Std.TreeMap Nat (RawOperand × TokenFacts))
   | [], table => .ok table

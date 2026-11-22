@@ -23,30 +23,31 @@ internal static partial class ProofOutline
             WrittenSpanWidth(method.Parameters[0].ParameterType) is not { } width ||
             ElementWidth(method.Parameters[1].ParameterType) != width ||
             !extraction.Emitted[index].Frame.HasNoLocals) return null;
-        if (ops is not [(Unoutlined, var address, _), (Constant { Width: 32, Value: 0, Numeral: true }, _, _),
+        if (ops is not [(Unoutlined, var address, _), var head,
                 (Unoutlined, var item, _), var value, var store, (_, { OpCode.Code: Code.Ret }, _)] ||
+            extraction.Emitted[index].ConstantAt(head.Pc) != (32, 0L, true) ||
             extraction.Emitted[index].ArgumentAt(value.Pc) != 1 ||
             address.OpCode.Code is not (Code.Ldarga or Code.Ldarga_S) ||
             address.Operand is not ParameterDefinition parameter || MethodArguments.Index(method, parameter) != 0 ||
             Spans.MemberWidth(item, "get_Item", 1, extraction.Architecture) != width || !MethodArguments.Plain(method, 1))
             return null;
-        var write = ScalarStore(store.Op, store.Site, extraction.Architecture);
+        var write = ScalarStore(extraction.Emitted[index], store.Pc, store.Site, extraction.Architecture);
         return width is 4 or 8 && write?.Width == width ? write : null;
     }
 
     /// <summary>The number of bytes stored and the successful-write theorem for this CIL site.</summary>
-    static (int Width, string Lemma)? ScalarStore(Operation op, Instruction site, string architecture)
+    static (int Width, string Lemma)? ScalarStore(Method emitted, int pc, Instruction site, string architecture)
     {
         static (int, string) Transfer(int width) =>
             (width, width == 8 ? "transfer_i64_of_write" : "transfer_i32_of_write");
-        return op switch
+        return emitted.Operations[pc] switch
         {
             StackOperation { Kind: Code.Stind_I1 } => (1, "step_stind_narrow_of_write .i1"),
             StackOperation { Kind: Code.Stind_I2 } => (2, "step_stind_narrow_of_write .i2"),
             StackOperation { Kind: Code.Stind_I4 } => (4, "step_stind_narrow_of_write .i4"),
             StackOperation { Kind: Code.Stind_I8 } => (8, "step_stind_i8_of_write"),
             StackOperation { Kind: Code.Stind_I } => (8, "step_stind_i_of_write"),
-            ObjectInstruction { Opcode: Code.Stobj, ScalarWidth: { } width } => Transfer(width),
+            Unoutlined when emitted.ObjectAt(pc, Code.Stobj)?.ScalarWidth is int width => Transfer(width),
             Unoutlined when UnsafeModels.UnalignedStorage(site, "WriteUnaligned", architecture) is { } storage =>
                 Transfer(MetadataValidation.PrimitiveWidth(storage)),
             _ => null

@@ -8,7 +8,7 @@ partial class Program
 {
     static void CheckGenericImportIdentities(string library, string output, Type metadata)
     {
-        Run(["lake", "build", "CIL.Extraction.MetadataBinding"]);
+        Run(["lake", "build", "CIL.Extraction.BodyDecoding"]);
         long previousNames = 0;
         foreach (int size in new[] { 64, 256, 1024 })
         {
@@ -59,7 +59,18 @@ partial class Program
         foreach (int size in new[] { 128, 512, 2048 })
         {
             identity.Name = new string('N', size);
-            string text = Source(identity, Selected(identity));
+            string text = Source(identity, Selected(identity)) + """
+
+                /-- A linked slot resolves under its full identity and rejects an appended byte. -/
+                theorem indexed_import (call : CallSite) :
+                    let slot : ImportSlot := ⟨identity, "", 1, false, true, none, {}⟩
+                    let imports := (BodyImports.mk [(0, slot)] #[]).byIdentity
+                    (callImportSlot imports { call with target := .external identity }).isSome = true ∧
+                      (callImportSlot imports { call with target := .external (identity ++ "x") }).isNone = true := by
+                  simp only [callImportSlot]
+                  decide +kernel
+                #print axioms indexed_import
+                """;
             string path = Path.Combine(output, "IdentityScaling" + size + ".lean");
             File.WriteAllText(path, text + "\n#eval show IO Nat from IO.getNumHeartbeats\n");
             string result = Compile(path);
@@ -199,7 +210,7 @@ partial class Program
         StringBuilder encoded = new();
         evidence.Emit(encoded);
         return $$"""
-            import CIL.Extraction.MetadataBinding
+            import CIL.Extraction.BodyDecoding
             open CIL CIL.Extraction
             set_option maxRecDepth 100000
             set_option maxHeartbeats 10000000

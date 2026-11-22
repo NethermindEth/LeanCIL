@@ -36,7 +36,8 @@ internal static partial class ProofOutline
     }
 
     /// <summary>A scalar literal with its stack width in bytes; conversions preserve this source width.</summary>
-    static (string Term, int Width)? StructLiteral(Operation op) => Body.ConstantOf(op) is { } constant
+    static (string Term, int Width)? StructLiteral((int Width, long Value, bool Numeral)? literal) =>
+        literal is { } constant
         ? (constant.Numeral ? $"({constant.Value}#{constant.Width})"
             : $"(BitVec.ofInt {constant.Width} ({constant.Value}))",
             constant.Width == 64 ? 8 : 4) : null;
@@ -89,7 +90,7 @@ internal static partial class ProofOutline
                 else if (parameter.Shape == ParameterShape.Scalar) stack.Push(parameter.Name);
                 else return Stop($"the argument `{parameter.Name}`", pc);
             }
-            else if (StructLiteral(op) is { } literal) stack.Push(literal.Term);
+            else if (StructLiteral(body.Method.ConstantAt(pc)) is { } literal) stack.Push(literal.Term);
             else if (SizedConversion(op) is { } conversion)
             {
                 if (stack.Count == 0 || stack.Pop() is not { } value || value == Receiver)

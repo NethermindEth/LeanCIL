@@ -14,7 +14,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     ImportResolution? imports = null)
 {
     // Closed instantiations share their definition's bytes; the first method to use a body names them.
-    readonly ExternalIdentityEvidence externalIdentities = new();
+    internal ExternalIdentityEvidence ExternalIdentities { get; } = new();
     readonly MetadataSlices? metadata = pinned is null ? null : new(pinned);
     readonly Dictionary<MethodReference, string> declaredSignatures = new();
     readonly List<TypeReference> statedTypes = [];
@@ -173,7 +173,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var slot = InstructionPrefixes.IsStaticVirtualSlot(resolved) ? "staticVirtualInterfaceSlot := true, " : "";
         var target = extracted
             ? $".managed {resolved!.MetadataToken.ToUInt32()}"
-            : ".external " + externalIdentities.Reference(imports?.Identity(instruction) ??
+            : ".external " + ExternalIdentities.Reference(imports?.Identity(instruction) ??
                 (LayoutEvidence.Scope(definition.DeclaringType) + "::" + ExternalSignature(definition)),
                 reachable.Contains(instruction));
         return $$"""
@@ -496,7 +496,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var body = Body(original, method, reachable, number);
         closedTypes.Clear();
         var closedEvidence = Method(method, original, method, reachable, staticInput, closedTypes);
-        externalIdentities.Emit(lean, decoderInputs);
+        ExternalIdentities.Emit(lean, decoderInputs);
         lean.AppendLine($"def method{number}Original : Extraction.RawMethod := {originalEvidence}");
         lean.AppendLine(body.Bytes);
         if (body.Slices.Length > 0)

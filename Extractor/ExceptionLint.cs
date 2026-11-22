@@ -134,7 +134,7 @@ internal static partial class ExceptionLint
         if (typeTests.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction)) return null;
         return RuntimeModels.CallModel(reference, profile) switch
         {
-            ScalarIntrinsic { Function: ScalarFunction.Abs } => FaultKind.Overflow,
+            Unoutlined when RuntimeModels.IntegerAbs(reference) => FaultKind.Overflow,
             Unoutlined when reference.FullName == RuntimeModels.X86DivRemSignature => FaultKind.DivideByZeroAndOverflow,
             Unoutlined when Spans.MemberWidth(instruction, "get_Item", 1, profile.Architecture) is not null =>
                 FaultKind.IndexOutOfRange,

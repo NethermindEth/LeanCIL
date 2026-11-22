@@ -199,14 +199,14 @@ internal static partial class ProofOutline
         internal string? Returned { get; private set; }
 
         /// <summary>The constant the returned word spells, when the body returns one.</summary>
-        internal Constant? ReturnedOrigin { get; private set; }
+        Word? returnedWord;
         internal List<Reached> Objects { get; private init; } = [];
         internal List<object> Steps { get; } = [];
         internal bool NumericHomes => numericHomes;
 
         abstract record Item;
-        /// <summary>A word the walk names by `Term`; `Origin` is the constant it spells, when it is one.</summary>
-        sealed record Word(string? Term, int Width, Constant? Origin = null) : Item;
+        /// <summary>A named word. Bare numerals and negative literals retain their value for branch and array proofs.</summary>
+        sealed record Word(string? Term, int Width, long Literal = 0, bool Numeral = false) : Item;
         sealed record Instance(Reached Object) : Item;
         sealed record Null : Item;
         /// <summary>A reference to an object outside the model, as the field it was loaded from names it before any
@@ -342,6 +342,7 @@ internal static partial class ProofOutline
                     return true;
                 }
                 if (!visited.Add(pc)) return Stop("a backward jump");
+                var branchSite = emitted.BranchAt(pc);
                 if (emitted.ArgumentAt(pc) is int argument && MethodArguments.Plain(spec.Method, argument))
                 {
                     var parameter = spec.Parameters[argument];
@@ -393,12 +394,12 @@ internal static partial class ProofOutline
                 {
                     if (Pop() is null) return Stop("a pop of an empty stack");
                 }
-                else if (linear && op is Jump jump)
+                else if (linear && branchSite is { } jump)
                 {
-                    for (var operand = 0; operand < jump.Operands; operand++)
+                    for (var operand = 0; operand < Body.BranchOperands(jump.Kind); operand++)
                         if (Pop() is null) return Stop(" on an empty stack", showInstruction: true);
                 }
-                else if (op is Jump { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } nullTest &&
+                else if (branchSite is { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } nullTest &&
                     stack.Count > 0 && stack[^1] is Opaque)
                 {
                     var tested = (Opaque)Pop()!;
@@ -406,7 +407,7 @@ internal static partial class ProofOutline
                     // `brfalse` takes its target when the reference is null.
                     return Branch($"{tested.Term[1..^1]} = .null", nullTest.Kind == ILOpCode.Brfalse, nullTest.Target);
                 }
-                else if (op is Jump { Kind: ILOpCode.Beq or ILOpCode.Bne_un } equalityTest && stack.Count > 1 &&
+                else if (branchSite is { Kind: ILOpCode.Beq or ILOpCode.Bne_un } equalityTest && stack.Count > 1 &&
                     (stack[^1] is Opaque || stack[^2] is Opaque))
                 {
                     var right = Pop();
@@ -425,30 +426,30 @@ internal static partial class ProofOutline
                         return Stop(Uncompared, showInstruction: true);
                     stack.Add(new Word(null, 4));
                 }
-                else if (op is Jump { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } objectTest &&
+                else if (branchSite is { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } objectTest &&
                     stack.Count > 0 && stack[^1] is not Word)
                 {
                     // An argument object is never null, so its test always goes one way.
                     var zero = Pop() is Null;
                     if (zero == (objectTest.Kind == ILOpCode.Brfalse)) pc = objectTest.Target - 1;
                 }
-                else if (op is Jump { Conditional: true } test)
+                else if (branchSite is { Kind: not ILOpCode.Br } test)
                 {
-                    var operands = new Word?[test.Operands];
+                    var operands = new Word?[Body.BranchOperands(test.Kind)];
                     for (var position = operands.Length - 1; position >= 0; position--)
                         operands[position] = Pop() as Word;
                     if (operands.Any(operand => operand?.Term is null) ||
                         operands.Any(operand => operand!.Width != operands[0]!.Width))
                         return Stop(" on a value the outline does not name", showInstruction: true);
                     var terms = operands.Select(operand => new Body.Operand(operand!.Term!,
-                        operand.Origin is { Numeral: true } origin ? origin.Value : null)).ToArray();
-                    var (condition, takenWhenTrue) = Body.Test(test, terms, 8 * operands[0]!.Width);
+                        operand.Numeral ? operand.Literal : null)).ToArray();
+                    var (condition, takenWhenTrue) = Body.Test(test.Kind, terms, 8 * operands[0]!.Width);
                     return Branch(condition, takenWhenTrue, test.Target);
                 }
-                else if (op is Jump { Kind: ILOpCode.Br } branch) pc = branch.Target - 1;
-                else if (Body.ConstantOf(op) is { Width: 32 or 64 } constant)
+                else if (branchSite is { Kind: ILOpCode.Br } branch) pc = branch.Target - 1;
+                else if (emitted.ConstantAt(pc) is { Width: 32 or 64 } constant)
                     stack.Add(new Word(constant.Numeral ? $"{constant.Value}" : $"({constant.Value})",
-                        constant.Width == 64 ? 8 : 4, constant));
+                        constant.Width == 64 ? 8 : 4, constant.Value, constant.Numeral));
                 else if (op is StackOperation { IsArithmetic: true } arithmetic)
                 {
                     if (Pop() is not Word right || Pop() is not Word left || left.Width != right.Width)
@@ -645,7 +646,7 @@ internal static partial class ProofOutline
                             return Stop("`ldlen` of an array the outline cannot name");
                     }
                 }
-                else if (op is Call { ReturnsToCaller: true } invocation)
+                else if (emitted.CallAt(pc) is { Kind: not CallKind.Tail } invocation)
                 {
                     var index = invocation.Method;
                     // A contract read whole from the callee's body comes first, then a stub over words.
@@ -698,7 +699,7 @@ internal static partial class ProofOutline
                         var call = (CallStep)Steps[^1];
                         stack.Add(new Word(Substitute(returned, callee, arguments, Memory(call.FieldMemory),
                             call.Found), callee.Spec.Result is { Width: 8 } ? 8 : 4,
-                            callee.Walk.ReturnedOrigin));
+                            callee.Walk.returnedWord?.Literal ?? 0, callee.Walk.returnedWord?.Numeral ?? false));
                     }
                     else if (callee.Spec.Result is not null && !linear)
                         return Stop($"a call to `{callee.Spec.Method.Name}`, whose result the outline cannot name");
@@ -711,12 +712,12 @@ internal static partial class ProofOutline
                     LayoutEvidence.Scope(element) is var elementScope && elementScope != TypeTests.RuntimeScope)
                 {
                     // Facts stated of the caller's memory carry into the fresh one only across this first write.
-                    if (Pop() is not Word { Width: 4, Origin: { Numeral: true, Value: > 0 } count })
+                    if (Pop() is not Word { Width: 4, Numeral: true, Literal: > 0 } count)
                         return Stop("`newarr` of a length that is not a positive literal");
                     if (linear || stores > 0 || calls > 0 || Fresh is not null)
                         return Stop("`newarr` after a write, a call or another allocation");
                     Fresh = new Allocation("fresh1", GenericEvidence.Quote(elementScope),
-                        GenericEvidence.Quote(element.FullName), (int)count.Value, stores);
+                        GenericEvidence.Quote(element.FullName), (int)count.Literal, stores);
                     Steps.Add(Fresh);
                     stores++;
                     stack.Add(new ArrayArgument(Fresh.Array));
@@ -805,8 +806,7 @@ internal static partial class ProofOutline
                             Values values when spec.Result.Array => values.Array.View,
                             _ => null
                         };
-                        ReturnedOrigin =
-                            Returned is not null && result is Word returnedWord ? returnedWord.Origin : null;
+                        returnedWord = Returned is not null ? result as Word : null;
                         // The return checks a returned array in the memory it leaves.
                         if (result is Values returned && spec.Result.Array)
                             Steps.Add(new ArrayUse(returned.Array, stores));
@@ -974,8 +974,8 @@ internal static partial class ProofOutline
         static ElementIndex? Index(Word index) => index switch
         {
             { Width: not 4 } or { Term: null } => null,
-            { Origin: { Numeral: true } origin } => new(index.Term, origin.Value),
-            { Origin: { Numeral: false, Value: < 0 } } => null,
+            { Numeral: true } => new(index.Term, index.Literal),
+            { Literal: < 0 } => null,
             { Term: var term } => new(term + ".toNat")
         };
 

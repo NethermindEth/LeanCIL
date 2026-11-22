@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using Mono.Cecil;
@@ -389,9 +388,8 @@ internal sealed class ImportResolution : IDisposable
         return actual;
     }
 
-    internal static string LeanSlot(Binding binding)
+    internal static string LeanSlot(Binding binding, string identity)
     {
-        var identity = IdentityText.Quote(binding.Identity);
         var digest = IdentityText.Quote(binding.ClosureDigest);
         var metadata = $"identity := {identity}, closureDigest := {digest}";
         var arity = $"parameterCount := {binding.ParameterCount}, hasThis := false";
@@ -409,17 +407,6 @@ internal sealed class ImportResolution : IDisposable
     }
 
     internal int? Slot(Instruction instruction) => sites.TryGetValue(instruction, out var slot) ? slot : null;
-
-    internal bool TryTranslate(Instruction instruction, int methodCount, [NotNullWhen(true)] out Operation? translated)
-    {
-        if (sites.TryGetValue(instruction, out int slot))
-        {
-            translated = new Call(CallKind.Static, methodCount + slot, bindings[slot].ParameterCount);
-            return true;
-        }
-        translated = null;
-        return false;
-    }
 
     // Bound libraries and their declared dependencies contribute modules to the extraction.
     internal SortedDictionary<string, string> InterfaceModules() => Modules(libraries.Where(used.Contains));
