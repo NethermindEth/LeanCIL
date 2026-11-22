@@ -265,11 +265,16 @@ void CheckGenericConstraints()
         namespace Gates;
         public interface IClosed<T> { }
         public struct Both : IClosed<int>, IClosed<long> { public int Value; }
+        public struct Pair<S, T> : IClosed<T> where S : unmanaged where T : unmanaged
+        {
+            public S First;
+            public T Second;
+        }
         public static class Counter
         {
             public static int Read<T>(int n) where T : struct, IClosed<int> => n + 1;
             public static int ReadWide<T>(int n) where T : struct, IClosed<long> => n + 1;
-            public static int Entry(int n) => ReadWide<Both>(Read<Both>(n));
+            public static int Entry(int n) => ReadWide<Pair<int, long>>(Read<Both>(n));
         }
         """);
     var extracted = fixture.Artifact("GenericExtraction");

@@ -73,8 +73,10 @@ private def constraintTypeName (image : PreparedImage) (token : Nat) :
   let fullName := if namespaceText.isEmpty then nameText else namespaceText ++ "." ++ nameText
   return scope ++ "::" ++ fullName
 
-/-- A direct interface, scoped generic interface with primitive arguments, or required modifier. -/
-private def constraintIdentity (image : PreparedImage) (token : Nat) :
+/-- Physical constraint identity. A VAR in an implemented interface refers to the corresponding
+    closed argument of its declaring type. -/
+private def constraintIdentity (image : PreparedImage) (token : Nat)
+    (arguments : Option (List String) := none) :
     Except AuditError String := do
   if tableOf token != Table.typeSpec then return ← constraintTypeName image token
   let blob ← image.layout.blobAt image.view (← image.layout.cell image.view token 0)
@@ -86,9 +88,15 @@ private def constraintIdentity (image : PreparedImage) (token : Nat) :
     unless kind == .interface && arity == args.toList.length do throw .uncoveredConstraint
     let core ← primitiveScope image
     let names ← args.toList.mapM fun argument => do
-      let .primitive code := argument | throw .uncoveredConstraint
-      let some name := (primitiveName code).bind spelled? | throw .uncoveredConstraint
-      return core ++ "::" ++ name
+      match argument with
+      | .primitive code =>
+        let some name := (primitiveName code).bind spelled? | throw .uncoveredConstraint
+        return core ++ "::" ++ name
+      | .var index =>
+        let some closed := arguments | throw .uncoveredConstraint
+        let some name := closed[index]? | throw (.constraintMismatch token)
+        return name
+      | _ => throw .uncoveredConstraint
     return (← constraintTypeName image head) ++ "<" ++ String.intercalate "," names ++ ">"
   | .modified true modifier (.named false base) =>
     let name := (← constraintTypeName image modifier) ++ "!" ++ (← constraintTypeName image base)
@@ -148,8 +156,9 @@ def methodDeclaringType (image : PreparedImage) (method : Nat) : Except AuditErr
   let some row := owner | throw (.constraintMismatch method)
   return StrictBinding.tokenOf Table.typeDef row
 
-/-- A nongeneric local layout names a unique top-level TypeDef. -/
-private def layoutType (image : PreparedImage) (identity : String) (fullName : List Char) :
+/-- The layout owner names a unique top-level value type of the specified arity. -/
+private def layoutType (image : PreparedImage) (identity : String) (fullName : List Char)
+    (expectedArity : Nat) :
     Except AuditError Nat := do
   let (reversedName, rest) := fullName.reverse.span (· != '.')
   let name := bytesOf (String.ofList reversedName.reverse)
@@ -158,23 +167,47 @@ private def layoutType (image : PreparedImage) (identity : String) (fullName : L
   unless (← constraintTypeName image (StrictBinding.tokenOf Table.typeDef row)) == identity do
     throw (.constraintMismatch (StrictBinding.tokenOf Table.typeDef row))
   let (kind, arity) ← physicalTypeShape image row
-  unless kind == .valueType && arity == 0 do throw .uncoveredConstraint
+  unless kind == .valueType do throw .uncoveredConstraint
+  unless arity == expectedArity do
+    throw (.constraintMismatch (StrictBinding.tokenOf Table.typeDef row))
   return row
+
+/-- A closed value type's argument order and parameter declarations are those of its TypeDef.
+    Only primitive arguments with the physical core scope can close an interface VAR here. -/
+private def layoutTypeArguments (image : PreparedImage) (token : Nat) (layout : RawLayout) :
+    Except AuditError (Option (List String)) := do
+  let some generic := layout.generic | return none
+  unless generic.owner matches .constructor .. do throw (.constraintMismatch token)
+  unless genericOwnerIdentity generic.owner generic.arguments == some layout.identity &&
+      generic.arity > 0 && generic.arguments.length == generic.arity do
+    throw (.constraintMismatch token)
+  parameterDeclarations image token (generic.constraints.map fun (flags, types) => { flags, types })
+  let core ← primitiveScope image
+  let names ← generic.arguments.mapM fun argument => do
+    let .atom scope name := argument | throw .uncoveredConstraint
+    unless scope == core && primitiveCodes.any (fun code =>
+        code != 0x01 && (primitiveName code).bind spelled? == some name) do
+      throw .uncoveredConstraint
+    return scope ++ "::" ++ name
+  return some names
 
 /-- Direct interfaces of a concrete argument are the InterfaceImpl rows the physical type owns. -/
 def layoutInterfaces (images : List PreparedImage) (layout : RawLayout) :
     Except AuditError Unit := do
-  if layout.generic.isSome then throw .uncoveredConstraint
-  let some (scope, name) := namedType (.aggregate layout.identity 0) | throw .uncoveredConstraint
+  let ownerType := (layout.generic.map (·.owner)).getD (.aggregate layout.identity 0)
+  let some (scope, name) := namedType ownerType | throw .uncoveredConstraint
   let some image := images.find? (·.identity == String.ofList scope) | throw .uncoveredConstraint
-  let owner ← layoutType image layout.identity name
+  let ownerName := String.ofList scope ++ "::" ++ String.ofList name
+  let owner ← layoutType image ownerName name ((layout.generic.map (·.arity)).getD 0)
+  let token := StrictBinding.tokenOf Table.typeDef owner
+  let arguments ← layoutTypeArguments image token layout
   let cell := image.layout.cellOfRow image.view interfaceImplTable
   let mut interfaces := #[]
   for index in [:image.layout.rowCount interfaceImplTable] do
     let row := index + 1
     if (← cell row 0) == owner then
       let target ← constraintTarget image (← cell row 1)
-      let identity ← constraintIdentity image target
+      let identity ← constraintIdentity image target arguments
       if interfaces.contains identity then
         throw (.constraintMismatch (StrictBinding.tokenOf Table.typeDef owner))
       interfaces := interfaces.push identity
@@ -200,7 +233,7 @@ private def checkMethodConstraints (images : List PreparedImage) (item : MethodE
   return method && owner
 
 /-- Check every method, its owner and the interfaces of concrete arguments in the extraction.
-    Generic layouts, imports and unhandled declarations leave the result partial. -/
+    Imports, unsupported layout arguments and unhandled signatures leave the result partial. -/
 def checkGenericConstraints (images : List PinnedImage) (methods : List MethodEvidence)
     (layouts : List RawLayout) (imports : List CIL.ImportSlot) : Except AuditError Bool := do
   let selected := methods.any fun method =>
