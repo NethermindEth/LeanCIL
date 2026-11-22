@@ -69,10 +69,8 @@ internal static class InstructionTranslation
         Operation Field(FieldAccess access)
         {
             var field = (FieldReference)i.Operand;
+            if (ObjectTypes.Candidate(field.DeclaringType)) return Unoutlined.Site;
             var resolved = field.Resolve() ?? throw new InvalidDataException("Unresolved field");
-            if (ObjectTypes.Candidate(field.DeclaringType))
-                return new ClassField(ObjectTypes.FieldOperation(field, resolved, access == FieldAccess.Store,
-                    access == FieldAccess.Address, profile.Architecture));
             var shape = InstructionOperands.StructField(field, resolved, access, m, profile, layouts);
             return new StructField(shape.Access, shape.Offset, shape.Width, shape.Signed);
         }

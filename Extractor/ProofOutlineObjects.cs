@@ -22,14 +22,19 @@ internal static partial class ProofOutline
     sealed class FieldViews
     {
         readonly Dictionary<string, ViewField[]> classes = new(StringComparer.Ordinal);
+        readonly IReadOnlyDictionary<(int Method, int Pc), ClassViews.FieldOperation> fieldSites;
 
         internal FieldViews(Extraction extraction)
         {
+            fieldSites = extraction.ClassFields;
             foreach (var view in extraction.Views)
                 classes[view.FullName] = [.. view.Fields.Select(field => new ViewField(view.Path, field.Lean,
                     field.Kind, field.Width, field.Element, field.Offset, field.Storers.Length > 0, field.Loaders,
                     field.Storers))];
         }
+
+        /// <summary>The reachable field load or store used to generate the named class view at this site.</summary>
+        internal ClassViews.FieldOperation? FieldAt(int method, int pc) => fieldSites.GetValueOrDefault((method, pc));
 
         /// <summary>The short name of an array element some named field holds arrays of, or none.</summary>
         internal string? ElementType(Arrays.Element element) => classes.Values.SelectMany(fields => fields)
@@ -303,6 +308,7 @@ internal static partial class ProofOutline
             for (var pc = start; pc < ops.Length; pc++)
             {
                 var op = ops[pc];
+                var classField = views.FieldAt(methodIndex, pc);
                 Item? Pop()
                 {
                     if (stack.Count == 0) return null;
@@ -477,7 +483,7 @@ internal static partial class ProofOutline
                     if (Pop() is not Word word) return Stop(" on a value that is not a word", showInstruction: true);
                     stack.Add(new Word(null, unary.Kind == Code.Neg ? word.Width : 4));
                 }
-                else if (op is ClassField { Field: { Store: false, Kind: ClassViews.FieldKind.Word } load })
+                else if (classField is { Store: false, Kind: ClassViews.FieldKind.Word } load)
                 {
                     if (Pop() is not Instance instance || Field(instance, load) is not { } field)
                         return Stop("a field load of an object the outline cannot name");
@@ -491,7 +497,7 @@ internal static partial class ProofOutline
                         _ => new Word(term, field.Width!.Value)
                     });
                 }
-                else if (op is ClassField { Field: { Store: true, Kind: ClassViews.FieldKind.Word } store })
+                else if (classField is { Store: true, Kind: ClassViews.FieldKind.Word } store)
                 {
                     var value = Pop();
                     if (Pop() is not Instance instance || Field(instance, store) is not { } field)
@@ -507,8 +513,7 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Store, false, stores++, word.Term));
                     fieldMemory = stores;
                 }
-                else if (op is ClassField
-                    { Field: { Store: false, Kind: ClassViews.FieldKind.Reference } referenceLoad })
+                else if (classField is { Store: false, Kind: ClassViews.FieldKind.Reference } referenceLoad)
                 {
                     if (Pop() is not Instance instance || Field(instance, referenceLoad) is not { } field)
                         return Stop("a reference field load of an object the outline cannot name");
@@ -540,8 +545,7 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Load, false, stores, Target: reached));
                     stack.Add(new Instance(reached));
                 }
-                else if (op is ClassField
-                    { Field: { Store: true, Kind: ClassViews.FieldKind.Reference } referenceStore })
+                else if (classField is { Store: true, Kind: ClassViews.FieldKind.Reference } referenceStore)
                 {
                     var value = Pop();
                     if (Pop() is not Instance instance || Field(instance, referenceStore) is not { } field)
@@ -564,7 +568,7 @@ internal static partial class ProofOutline
                     Steps.Add(stored);
                     stores++;
                 }
-                else if (op is ClassField { Field: { Store: false, Kind: ClassViews.FieldKind.Array } arrayLoad })
+                else if (classField is { Store: false, Kind: ClassViews.FieldKind.Array } arrayLoad)
                 {
                     if (Pop() is not Instance instance || Field(instance, arrayLoad) is not { } field)
                         return Stop("an array field load of an object the outline cannot name");
@@ -580,7 +584,7 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Load, false, stores, Array: held));
                     stack.Add(new Values(held));
                 }
-                else if (op is ClassField { Field: { Store: true, Kind: ClassViews.FieldKind.Array } arrayStore })
+                else if (classField is { Store: true, Kind: ClassViews.FieldKind.Array } arrayStore)
                 {
                     var value = Pop();
                     if (Pop() is not Instance instance || Field(instance, arrayStore) is not { } field)

@@ -16,7 +16,8 @@ internal static partial class ProofOutline
     /// its computed layouts in emission order, each with its identity, its named class fields, and
     /// the architecture that sizes its struct array elements.</summary>
     internal sealed record Extraction(MethodDefinition[] Methods, Method[] Emitted,
-        ClassViews.View[] Views, string Architecture,
+        ClassViews.View[] Views, IReadOnlyDictionary<(int Method, int Pc), ClassViews.FieldOperation> ClassFields,
+        string Architecture,
         ComputedLayout[] Layouts);
 
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ComputedLayout[],

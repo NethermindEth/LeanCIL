@@ -9,6 +9,7 @@ internal static class LeanEmitter
     /// <summary>An extraction's Lean source and what it is built from.</summary>
     internal readonly record struct Emission(string Source, string[] LayoutIdentities,
         TemplateEmitter.Method[] Templates, ProofOutline.Method[] Outlines, ClassViews.View[] Views,
+        IReadOnlyList<ClassViews.Access> ClassFields,
         ComputedLayout[] Layouts, string TemplateInputs);
 
     internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
@@ -469,7 +470,8 @@ internal static class LeanEmitter
                 StringComparison.Ordinal) + imported.Length);
         }
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), outlines.ToArray(), classViews, layouts,
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), outlines.ToArray(), classViews,
+            fieldAccesses, layouts,
             inputs?.ToString().ReplaceLineEndings("\n") ?? "");
     }
 

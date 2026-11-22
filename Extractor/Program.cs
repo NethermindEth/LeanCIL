@@ -508,6 +508,7 @@ internal static partial class Program
             definitions?.Invoke(new(methods));
             if (args[0] == "check" && !refresh)
                 inspect?.Invoke(new(methods, emitted.Outlines, emitted.Views,
+                    emitted.ClassFields.ToDictionary(access => (access.Method, access.Pc), access => access.Operation),
                     profile.Architecture, emitted.Layouts));
         }
         catch (Exception exception)

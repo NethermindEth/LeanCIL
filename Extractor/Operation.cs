@@ -137,9 +137,6 @@ internal enum FieldAccess { Load, Store, LoadAggregate, StoreAggregate, Address 
 /// </summary>
 internal sealed record StructField(FieldAccess Access, int Offset, int Width, bool Signed) : Operation;
 
-/// <summary>The class layout entry used by a field load or store in a proof outline.</summary>
-internal sealed record ClassField(ClassViews.FieldOperation Field) : Operation;
-
 /// <summary>The object opcode and storage shape used by a proof outline.</summary>
 internal sealed record ObjectInstruction(Code Opcode, int? ScalarWidth = null,
     bool Signed = false, int? ByteSize = null) : Operation;
