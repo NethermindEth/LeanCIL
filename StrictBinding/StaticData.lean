@@ -17,7 +17,7 @@ def fieldRvaTable : Nat := 0x1d
 
 /-- Index the physical rows of a table by the full token of the Field or TypeDef each row
     names. Reject duplicate keys independently of the table header's sorted bit. -/
-private def dataTableIndex (image : PreparedImage) (table column target : Nat) :
+def dataTableIndex (image : PreparedImage) (table column target : Nat) :
     Except AuditError (Std.TreeMap Nat Nat) := do
   let mut rows : Std.TreeMap Nat Nat := {}
   let count := image.layout.rowCount target
@@ -87,7 +87,8 @@ private structure StaticTables where
   fields : Std.TreeMap Nat Nat
   layouts : Std.TreeMap Nat Nat
 
-private def classLayoutTable : Nat := 0x0f
+/-- ClassLayout stores packing, declared size and the owning TypeDef. -/
+def classLayoutTable : Nat := 0x0f
 
 private def StaticTables.read (image : PreparedImage) : Except AuditError StaticTables := do
   return ⟨image, ← fieldRvaIndex image,

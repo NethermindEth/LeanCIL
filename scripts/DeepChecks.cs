@@ -492,7 +492,7 @@ partial class Program
         Dictionary<Sha256Digest, string> imageTheorems = [];
         foreach (var request in audited)
         {
-            if (request.Audit.name is EnumStorageTheorem or PlatformKindsTheorem or GenericConstraintsTheorem &&
+            if (request.CoveragePredicate is not null &&
                 !CoverageComplete(oleanAudit.theorems.Single(result => result.name == request.Audit.name)))
                 continue;
             var distinct = request.Subject switch
@@ -537,7 +537,8 @@ partial class Program
         BindingFact.EnumUnderlyingTypes => "the extraction selects no enum or a defining or forwarding image is missing",
         BindingFact.ValueTupleFieldOrder => "the supplied images do not cover a selected System.ValueTuple pair",
         BindingFact.ObjectFields => "the supplied images do not cover the extraction's platform definition of System.Object",
-        BindingFact.LayoutContent => "no check reads field offsets, sizes or attributes from the image",
+        BindingFact.LayoutContent =>
+            "no value layout was selected, or a layout or import lacks physical coverage",
         BindingFact.DispatchCatalogs => "no check reads the types of an image",
         BindingFact.StaticData => "no checked theorem binds the static field data to the pinned images",
         BindingFact.GenericConstraints =>
@@ -548,6 +549,8 @@ partial class Program
     };
 
     const string ImagesModule = "BindingAudit.Images";
+    const string LayoutContentModule = "BindingAudit.LayoutContent";
+    const string LayoutContentTheorem = "BindingAudit.layoutContent";
     const string GenericConstraintsModule = "BindingAudit.GenericConstraints";
     const string GenericConstraintsTheorem = "BindingAudit.genericConstraints";
     const string PlatformKindsModule = "BindingAudit.PlatformKinds";
@@ -752,6 +755,9 @@ partial class Program
         File.WriteAllText(ModuleSource(plan.Output, ImagesModule), ImagesModuleSource(plan));
         File.WriteAllText(ModuleSource(plan.Output, EnumStorageModule), CoverageSource(
             "checkEnumStorage", "EnumStorageChecked", "enumStorage", "enumCoverage", "EnumStorage"));
+        File.WriteAllText(ModuleSource(plan.Output, LayoutContentModule), CoverageSource(
+            "checkLayoutContent", "LayoutContentChecked", "layoutContent", "layoutCoverage",
+            "LayoutContent", "Extracted.rawLayouts Extracted.imports"));
         File.WriteAllText(ModuleSource(plan.Output, GenericConstraintsModule), CoverageSource(
             "checkGenericConstraints", "GenericConstraintsChecked", "genericConstraints", "constraintCoverage",
             "GenericConstraints", "Extracted.methodEvidence Extracted.rawLayouts Extracted.imports"));
@@ -956,7 +962,8 @@ partial class Program
     }
 
     /// <summary>A theorem the audit expects in a module, with the type the driver derives from the plan.</summary>
-    sealed record BindingRequest(string Module, AuditRequest Audit, BindingSubject? Subject = null);
+    sealed record BindingRequest(string Module, AuditRequest Audit, BindingSubject? Subject = null,
+        string? CoveragePredicate = null);
 
     /// <summary>Generator-owned request and module subjects, indexed before any generated code runs.</summary>
     sealed class BindingTargets(BindingRequest[] requests)
@@ -974,6 +981,14 @@ partial class Program
         static object Const(string name, params int[] levels) =>
             levels.Length == 0 ? new { @const = name } : new { @const = name, levels };
         static object App(params object[] parts) => new { app = parts };
+        static BindingRequest Coverage(string module, string theorem, string predicate, BindingFact fact,
+            params string[] definitions)
+        {
+            object[] parts = [Const("StrictBinding." + predicate), Const("BindingAudit.images"),
+                .. definitions.Select(name => Const("Extracted." + name)), "_"];
+            return new(module, new(theorem, App(parts), ApprovedAxioms, term: true), new BindingSubject.Fact(fact),
+                predicate);
+        }
         static JsonElement Nat(Sha256Digest digest)
         {
             Span<byte> bytes = stackalloc byte[Sha256Digest.Length];
@@ -1020,19 +1035,14 @@ partial class Program
         [
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
             new(ImagesModule, new("BindingAudit.images_eq", imagesEq, ApprovedAxioms)),
-            new(GenericConstraintsModule, new(GenericConstraintsTheorem,
-                App(Const("StrictBinding.GenericConstraintsChecked"),
-                Const("BindingAudit.images"), Const("Extracted.methodEvidence"), Const("Extracted.rawLayouts"),
-                Const("Extracted.imports"), "_"), ApprovedAxioms, term: true),
-                new BindingSubject.Fact(BindingFact.GenericConstraints)),
-            new(PlatformKindsModule, new(PlatformKindsTheorem, App(Const("StrictBinding.PlatformKindsChecked"),
-                Const("BindingAudit.images"), Const("Extracted.platformDefinitions"),
-                Const("Extracted.methodEvidence"), "_"), ApprovedAxioms, term: true),
-                new BindingSubject.Fact(BindingFact.PlatformTypeKinds)),
-            new(EnumStorageModule, new(EnumStorageTheorem, App(Const("StrictBinding.EnumStorageChecked"),
-                Const("BindingAudit.images"), Const("Extracted.platformDefinitions"),
-                Const("Extracted.methodEvidence"), "_"), ApprovedAxioms, term: true),
-                new BindingSubject.Fact(BindingFact.EnumUnderlyingTypes)),
+            Coverage(LayoutContentModule, LayoutContentTheorem, "LayoutContentChecked", BindingFact.LayoutContent,
+                "rawLayouts", "imports"),
+            Coverage(GenericConstraintsModule, GenericConstraintsTheorem, "GenericConstraintsChecked",
+                BindingFact.GenericConstraints, "methodEvidence", "rawLayouts", "imports"),
+            Coverage(PlatformKindsModule, PlatformKindsTheorem, "PlatformKindsChecked", BindingFact.PlatformTypeKinds,
+                "platformDefinitions", "methodEvidence"),
+            Coverage(EnumStorageModule, EnumStorageTheorem, "EnumStorageChecked", BindingFact.EnumUnderlyingTypes,
+                "platformDefinitions", "methodEvidence"),
             .. PagedFacts.Select(fact => (Fact: fact, Paged: PagedFact(fact))).Select(item => new BindingRequest(
                 item.Paged.Module, new("BindingAudit." + item.Paged.Theorem, App(Const(item.Paged.Proposition),
                     Const("BindingAudit.images"), Const("Extracted.methodEvidence")), ApprovedAxioms),
@@ -1070,7 +1080,7 @@ partial class Program
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
         var facts = PagedFacts.Select(fact => PagedFact(fact).Module)
             .Append(StaticDataModule).Append(EnumStorageModule).Append(PlatformKindsModule)
-            .Append(GenericConstraintsModule);
+            .Append(GenericConstraintsModule).Append(LayoutContentModule);
         if (plan.ObjectFields.HasValue) facts = facts.Append(ObjectFieldsModule);
         if (plan.TupleFields.HasValue) facts = facts.Append(TupleFieldsModule);
         if (plan.PublicKeys.HasValue) facts = facts.Append(PublicKeysModule);

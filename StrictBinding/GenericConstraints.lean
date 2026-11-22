@@ -156,10 +156,9 @@ def methodDeclaringType (image : PreparedImage) (method : Nat) : Except AuditErr
   let some row := owner | throw (.constraintMismatch method)
   return StrictBinding.tokenOf Table.typeDef row
 
-/-- The layout owner names a unique top-level value type of the specified arity. -/
-private def layoutType (image : PreparedImage) (identity : String) (fullName : List Char)
-    (expectedArity : Nat) :
-    Except AuditError Nat := do
+/-- The unique top-level value type of this scoped name, with its physical generic arity. -/
+def valueLayoutOwner (image : PreparedImage) (identity : String) (fullName : List Char) :
+    Except AuditError (Nat × Nat) := do
   let (reversedName, rest) := fullName.reverse.span (· != '.')
   let name := bytesOf (String.ofList reversedName.reverse)
   let space := bytesOf (String.ofList (rest.drop 1).reverse)
@@ -168,9 +167,7 @@ private def layoutType (image : PreparedImage) (identity : String) (fullName : L
     throw (.constraintMismatch (StrictBinding.tokenOf Table.typeDef row))
   let (kind, arity) ← physicalTypeShape image row
   unless kind == .valueType do throw .uncoveredConstraint
-  unless arity == expectedArity do
-    throw (.constraintMismatch (StrictBinding.tokenOf Table.typeDef row))
-  return row
+  return (row, arity)
 
 /-- A closed value type's argument order and parameter declarations are those of its TypeDef.
     Only primitive arguments with the physical core scope can close an interface VAR here. -/
@@ -198,8 +195,9 @@ def layoutInterfaces (images : List PreparedImage) (layout : RawLayout) :
   let some (scope, name) := namedType ownerType | throw .uncoveredConstraint
   let some image := images.find? (·.identity == String.ofList scope) | throw .uncoveredConstraint
   let ownerName := String.ofList scope ++ "::" ++ String.ofList name
-  let owner ← layoutType image ownerName name ((layout.generic.map (·.arity)).getD 0)
+  let (owner, arity) ← valueLayoutOwner image ownerName name
   let token := StrictBinding.tokenOf Table.typeDef owner
+  unless arity == (layout.generic.map (·.arity)).getD 0 do throw (.constraintMismatch token)
   let arguments ← layoutTypeArguments image token layout
   let cell := image.layout.cellOfRow image.view interfaceImplTable
   let mut interfaces := #[]

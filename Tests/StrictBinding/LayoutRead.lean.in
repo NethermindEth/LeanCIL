@@ -1,0 +1,46 @@
+import Extracted
+import CIL.Safety.MethodContract
+
+/-! The same read-only field contract for an original and relocated compiled field. -/
+
+namespace LayoutGate
+open CIL CIL.Safety
+
+/-- The caller owns 24 initialized bytes and grants only read access. -/
+def caller (data : Nat → BitVec 8) : Safety.Memory where
+  allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨24, 1, []⟩, true, [24]⟩ else none
+  cells := fun _ offset => ⟨data offset, true⟩
+  views := [⟨0, 0, 24, true, false⟩]
+  nextIdentity := 1
+
+/-- The field value of the original struct at its declared offset. -/
+def word (data : Nat → BitVec 8) : W32 :=
+  let offset := FIELD_OFFSET
+  BitVec.ofNat 32 (byteNumber [data offset, data (offset+1), data (offset+2), data (offset+3)])
+
+/-- The field reader preserves memory and returns the selected four little-endian bytes. -/
+def contract : MethodContract (Nat → BitVec 8) W32 where
+  args _ := [.reference (.address ⟨0,0⟩)]
+  results value := [.scalar (.i32 value)]
+  pre data memory := memory = caller data
+  footprint _ := []
+  post data initial final value := final = initial ∧ value = word data
+
+/-- Direct execution suffices for every byte pattern in an original struct. -/
+theorem holds (ran : ∀ data, invoke Extracted.program 8 0 (contract.args data) (caller data) =
+    .ok (caller data, contract.results (word data))) : contract.Holds Extracted.program 0 := by
+  rintro data _ rfl
+  exact MethodContract.Holds.intro (c := contract) _ _ ⟨8, ran data⟩ (Confined.refl [] _) ⟨rfl, rfl⟩
+#print axioms holds
+
+/-- The original field's low byte is the only nonzero byte. -/
+def witness (offset : Nat) : BitVec 8 := if offset = FIELD_OFFSET then 128 else 0
+
+/-- A read of zero on this input violates the same contract on a successful return. -/
+theorem refuted (ran : invoke Extracted.program 8 0 (contract.args witness) (caller witness) =
+    .ok (caller witness, [.scalar (.i32 0)])) : contract.Refuted Extracted.program 0 := by
+  apply MethodContract.Refuted.of_return (c := contract) (input := witness) rfl ran
+  rintro ⟨_, value, encoded, _, rfl⟩
+  revert encoded
+  decide +kernel
+#print axioms refuted

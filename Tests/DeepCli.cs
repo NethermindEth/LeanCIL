@@ -25,6 +25,11 @@ if (args is ["--constraints"])
     CheckGenericConstraints();
     return;
 }
+if (args is ["--layouts"])
+{
+    CheckLayoutContent();
+    return;
+}
 if (args is ["--enums"])
 {
     CheckEnumStorage();
@@ -299,6 +304,65 @@ void CheckGenericConstraints()
     if (fact.GetProperty("status").GetString() != "reconfirmed" ||
         fact.GetProperty("theorem").GetString() != "BindingAudit.genericConstraints")
         throw new InvalidOperationException("Incorrect generic constraint report: " + fact);
+    var layout = report.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+        .Single(item => item.GetProperty("id").GetString() == "layout-content");
+    if (layout.GetProperty("status").GetString() != "not covered")
+        throw new InvalidOperationException("Generic layouts incorrectly reconfirmed: " + layout);
+}
+
+void CheckLayoutContent()
+{
+    foreach (bool changed in new[] { false, true })
+    {
+        var build = changed ? "RelocatedFields" : "OriginalFields";
+        var assembly = fixture.Build(build, "DeepCli.Layouts", $$"""
+            using System.Runtime.InteropServices;
+            namespace Gates;
+            [StructLayout(LayoutKind.Explicit, Pack = 2, Size = 24)]
+            public struct Overlay {
+                [FieldOffset(0)] public uint Tag;
+                [FieldOffset({{(changed ? 4 : 8)}})] public int Value;
+                [FieldOffset(16)] public long Stamp;
+                public static int Outside;
+            }
+            [StructLayout(LayoutKind.Sequential, Pack = {{(changed ? 8 : 1)}})]
+            public struct Packed { public short Flag; public uint Count; }
+            public static class Reader {
+                public static int Read(ref Overlay row) => row.Value;
+                public static uint ReadPacked(ref Packed row) => row.Count;
+            }
+            """);
+        var pins = Path.Combine(fixture.Root, build + ".sha256");
+        File.WriteAllText(pins, Sha(assembly) + "  " + assembly + Environment.NewLine);
+        foreach (var (method, type, offset) in new[] { ("Read", "Overlay", "8"), ("ReadPacked", "Packed", "2") })
+        {
+            var output = fixture.Artifact(build + method);
+            Run([.. cli, "extract", assembly, $"Gates.Reader::{method}(Gates.{type}&)", output]);
+            var proof = Path.Combine(output, "Proof.lean");
+            var (claim, lemma, evidence) = changed ? ("Refuted", "refuted", "rfl") : ("Holds", "holds", "fun _ => rfl");
+            var template = File.ReadAllText(At("Tests/StrictBinding/LayoutRead.lean.in"));
+            File.WriteAllText(proof, template.Replace("FIELD_OFFSET", offset, StringComparison.Ordinal) +
+                $"\ntheorem correctness : contract.{claim} Extracted.program 0 := {lemma} ({evidence})\n" +
+                "#print axioms correctness\nend LayoutGate\n");
+            string[] binding = changed ? [] : ["--deep-checks", pins];
+            Run([.. cli, "verify", output, "--proof", proof, "--theorem", "LayoutGate.correctness", .. binding]);
+            using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "verified.json")));
+            if (changed)
+            {
+                var counter = report.RootElement.GetProperty("refutation").GetProperty("method");
+                var signature = counter.GetProperty("signature").GetString()!;
+                if (counter.GetProperty("assemblySha256").GetString() != Sha(assembly) ||
+                    !signature.Contains("::" + method + "(", StringComparison.Ordinal))
+                    throw new InvalidOperationException("Wrong layout counterexample: " + counter);
+                continue;
+            }
+            var fact = report.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+                .Single(item => item.GetProperty("id").GetString() == "layout-content");
+            if (fact.GetProperty("status").GetString() != "reconfirmed" ||
+                fact.GetProperty("theorem").GetString() != "BindingAudit.layoutContent")
+                throw new InvalidOperationException("Incorrect layout binding report: " + fact);
+        }
+    }
 }
 
 void CheckEnumStorage()
@@ -509,6 +573,7 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
     CheckPublisherKey();
     CheckEnumStorage();
     CheckGenericConstraints();
+    CheckLayoutContent();
 
     var tables = fixture.Build("Table", "DeepCli.Table", """
         public static class Table {

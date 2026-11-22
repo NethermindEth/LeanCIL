@@ -111,6 +111,12 @@ partial class Program
         Mutation("platform kind coverage claimed for an empty selection", PlatformKindsModule, source => source.Replace(
             "Extracted.methodEvidence kindCoverage% :=", "Extracted.methodEvidence true :=", StringComparison.Ordinal),
             "replay", BindingFact.PlatformTypeKinds);
+        Mutation("layout content about other layouts", LayoutContentModule, source => source.Replace(
+            "Extracted.rawLayouts Extracted.imports layoutCoverage% :=", "[] Extracted.imports false :=",
+            StringComparison.Ordinal), "Theorem statement mismatch", BindingFact.LayoutContent);
+        Mutation("layout coverage for an empty selection", LayoutContentModule, source => source.Replace(
+            "Extracted.imports layoutCoverage% :=", "Extracted.imports true :=", StringComparison.Ordinal),
+            "replay", BindingFact.LayoutContent);
         Mutation("generic constraints about other imports", GenericConstraintsModule, source => source.Replace(
             "Extracted.imports constraintCoverage% :=", "[] false :=", StringComparison.Ordinal),
             "Theorem statement mismatch", BindingFact.GenericConstraints);

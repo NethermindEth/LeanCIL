@@ -189,14 +189,13 @@ static AuditedTheorem IncompleteCoverage(string theorem, string predicate) => ne
         new object[] { "const", 0, new[] { "StrictBinding", predicate }, Array.Empty<object>() },
         new object[] { "const", 0, new[] { "Bool", "false" }, Array.Empty<object>() },
         new object[] { "app", 0, 1 } } }));
-AuditedOleans coverageAudit = new(new(), [
-    IncompleteCoverage(EnumStorageTheorem, "EnumStorageChecked"),
-    IncompleteCoverage(PlatformKindsTheorem, "PlatformKindsChecked")
-], []);
+var conditional = subjects.Where(request => request.CoveragePredicate is not null).ToArray();
+AuditedOleans coverageAudit = new(new(), [.. conditional.Select(request =>
+    IncompleteCoverage(request.Audit.name, request.CoveragePredicate!))], []);
 var withoutRows = DeepBindingSection(inputs, [new("Identity", inputs.Images[0])],
     [.. subjects.Where(request => request.Module != MetadataRowsModule)], report.binding.sources!, coverageAudit);
-if (withoutRows.facts.Single(fact => fact.id == BindingFact.EnumUnderlyingTypes).status != BindingStatus.NotCovered ||
-    withoutRows.facts.Single(fact => fact.id == BindingFact.PlatformTypeKinds).status != BindingStatus.NotCovered ||
+if (conditional.Select(request => ((BindingSubject.Fact)request.Subject!).Value).Any(subject =>
+        withoutRows.facts.Single(fact => fact.id == subject).status != BindingStatus.NotCovered) ||
     withoutRows.facts.Single(fact => fact.id == BindingFact.MetadataRows).status != BindingStatus.NotCovered ||
     withoutRows.facts.Single(fact => fact.id == BindingFact.BodyBytes).theorem != "BindingAudit.bodies")
     throw new InvalidOperationException("A fact without an audited request was reported as reconfirmed");

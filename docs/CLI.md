@@ -367,6 +367,13 @@ nested enum, and reads the integer signature of the defining row's instance fiel
 An extraction with no enum or a missing destination reports `not covered`. A supplied
 definition with the wrong storage code fails verification.
 
+For `layout-content`, Lean reads each selected struct from the pinned image. It checks
+sequential or explicit layout, packing, declared size, instance field order and integer field
+signatures, and explicit field offsets. The certified extraction uses those same raw layouts
+to compute sizes, alignments and offsets for its architecture. An empty selection, imports,
+missing images, or structs with unhandled fields, generics, custom attributes or interfaces
+leave the fact `not covered`. A conflicting supported layout fails the audit.
+
 For `generic-constraints`, Lean locates each selected method and its declaring type in the
 pinned image. It compares each parameter's ordinal, flags and complete constraint list,
 including the argument types of locally defined generic interfaces instantiated with primitive
