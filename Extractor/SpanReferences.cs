@@ -43,9 +43,8 @@ internal static class SpanReferences
         var type = (TypeReference)copy.Operand;
         var source = copy.Previous switch
         {
-            { OpCode.Code: Code.Ldarg or Code.Ldarg_S or Code.Ldarg_0 or Code.Ldarg_1 or Code.Ldarg_2 or
-                Code.Ldarg_3 } load =>
-                MethodArguments.Type(method, ArgumentIndex(method, load)),
+            { } load when MethodArguments.LoadIndex(method, load) is int argument =>
+                MethodArguments.Type(method, argument),
             { OpCode.Code: Code.Ldarga or Code.Ldarga_S, Operand: ParameterDefinition parameter } =>
                 new ByReferenceType(parameter.ParameterType),
             { OpCode.Code: Code.Ldloca or Code.Ldloca_S, Operand: VariableDefinition local } =>
@@ -74,10 +73,4 @@ internal static class SpanReferences
                   The span must be reset directly through its own local or parameter address.
                 """);
     }
-
-    static int ArgumentIndex(MethodDefinition method, Instruction load) => load.OpCode.Code switch
-    {
-        Code.Ldarg_0 => 0, Code.Ldarg_1 => 1, Code.Ldarg_2 => 2, Code.Ldarg_3 => 3,
-        _ => MethodArguments.Index(method, (ParameterDefinition)load.Operand)
-    };
 }

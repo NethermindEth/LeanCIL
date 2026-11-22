@@ -206,9 +206,7 @@ internal static partial class ProofOutline
             index == 0 ? "" : (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         readonly MethodDefinition method = extraction.Methods[0];
-        readonly Dictionary<int, int> homes = ParameterStorage.IndexHomes(
-            extraction.Emitted[0].Frame.ParameterHomes.Select(home => home.Argument),
-            extraction.Methods[0].Body.Variables.Count);
+        readonly Dictionary<int, int> homes = extraction.Emitted[0].Frame.IndexParameterHomes();
         readonly FieldViews views = new(extraction);
         readonly List<Slot> slots = [];
         readonly List<Component> components = [];
@@ -325,14 +323,20 @@ internal static partial class ProofOutline
         Parameter SpanSource(int local, LocalKind kind, string name)
         {
             var ops = body.Operations;
-            var stores = Enumerable.Range(1, ops.Length - 1)
-                .Where(pc => ops[pc] is SetLocal store && store.Index == local)
-                .Where(pc => ops[pc - 1] is not Unoutlined || Spans.MemberWidth(method.Body.Instructions[pc - 1],
-                    "Slice", 1, extraction.Architecture) is null).ToArray();
             var refused = Unsupported($"span local `{name}` is not assigned once from a span argument or from the " +
                 "whole of an array argument");
-            if (stores.Length != 1 || stores[0] >= loops[0].Head) throw refused;
-            var store = stores[0];
+            int store = -1;
+            for (int pc = 1; pc < ops.Length; pc++)
+            {
+                if (ops[pc] is not Unoutlined ||
+                    InstructionOperands.StoreSlot(method, method.Body.Instructions[pc], homes) != local) continue;
+                if (ops[pc - 1] is Unoutlined &&
+                    Spans.MemberWidth(method.Body.Instructions[pc - 1], "Slice", 1, extraction.Architecture) != null)
+                    continue;
+                if (store >= 0 || pc >= loops[0].Head) throw refused;
+                store = pc;
+            }
+            if (store < 0) throw refused;
             Parameter Argument(int pc) => ops[pc] is Arg argument && MethodArguments.Plain(spec.Method, argument.Index)
                 ? spec.Parameters[argument.Index] : throw refused;
             Parameter source;
@@ -1459,14 +1463,14 @@ internal static partial class ProofOutline
                 stopReason = StopAt(method, state.Pc, reason, showInstruction);
                 return Event.Stop;
             }
-            if (op is Local { Index: var loaded })
+            if (op is Unoutlined && InstructionOperands.LoadSlot(method, site, homes) is int loaded)
             {
                 var slot = slots[loaded];
                 var first = components.IndexOf(slot.Components[0]);
                 stack.Add(slot.Components[0].Part is Part.Word or Part.Object ? (Value)state.State[first]
                     : new LocalValue(slot.Index));
             }
-            else if (op is SetLocal { Index: var assigned })
+            else if (op is Unoutlined && InstructionOperands.StoreSlot(method, site, homes) is int assigned)
             {
                 var slot = slots[assigned];
                 var first = components.IndexOf(slot.Components[0]);

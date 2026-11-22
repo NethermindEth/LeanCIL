@@ -521,10 +521,11 @@ internal static partial class ProofOutline
     {
         if (spec.Framed) return ObjectStraightLine(extraction, spec, body, lean)!;
         var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
+        var homes = extraction.Emitted[0].Frame.IndexParameterHomes();
         var steppable = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.StructValue) &&
             body.Operations.Index().All(entry => Body.Pure(entry.Item, spec.Method, plainReturn) ||
-                Steps(spec.Method, entry.Item, spec.Method.Body.Instructions[entry.Index]));
+                Steps(spec.Method, entry.Item, spec.Method.Body.Instructions[entry.Index], homes));
         var split = !steppable && SplitsOnBooleans(body.Operations, spec.Method, spec.Parameters, plainReturn);
         var paths = steppable || split ? null : ScalarPaths(spec, body.Operations);
         // A body over words that calls helpers composes them through stub contracts, as a body over objects does.
@@ -568,10 +569,13 @@ internal static partial class ProofOutline
     /// <summary>A frame, field or duplicate operation the stepping tactics take without facts: a local access
     /// other than to a narrow integer local, an aggregate initialisation or a field access whose load is not
     /// sign-extending.</summary>
-    static bool Steps(MethodDefinition method, Operation op, Instruction site) => op switch
+    static bool Steps(MethodDefinition method, Operation op, Instruction site,
+        IReadOnlyDictionary<int, int> homes) => op switch
     {
-        Local load => !NarrowLocal(method, load.Index),
-        SetLocal store => !NarrowLocal(method, store.Index),
+        Unoutlined when InstructionOperands.LoadSlot(method, site, homes) is int loaded =>
+            !NarrowLocal(method, loaded),
+        Unoutlined when InstructionOperands.StoreSlot(method, site, homes) is int stored =>
+            !NarrowLocal(method, stored),
         Unoutlined => site.OpCode.Code is Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S,
         _ => op is ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Initobj } or
             StackOperation { Kind: Code.Dup } or
@@ -646,8 +650,8 @@ internal static partial class ProofOutline
             .Any(call => summarized(call.Method)?.Walk.NumericHomes == true);
         // Local homes belong to the entry memory, so the statement accepts any well-formed entry memory.
         if (numericHomes && !spec.Symbolic) spec = spec.InMemory();
-        var walk = new ObjectWalk(spec, body.Operations, views, summarized, numericHomes: numericHomes,
-            stubs: Stubbed);
+        var walk = new ObjectWalk(spec, body.Operations, views, summarized,
+            extraction.Emitted[0].Frame.IndexParameterHomes(), numericHomes: numericHomes, stubs: Stubbed);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.Object or ParameterShape.Array or ParameterShape.ValueArray or ParameterShape.WordArray) &&
             walk.Run(pc => Location(spec.Method, pc));

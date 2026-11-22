@@ -186,7 +186,8 @@ internal static partial class ProofOutline
     /// <remarks>With `throws`, for a callee, a path may end in a throw, which its contract's `pre` must exclude.
     /// </remarks>
     sealed class ObjectWalk(Specification spec, Operation[] ops, FieldViews views, Func<int, Callee?> callees,
-        bool linear = false, bool numericHomes = false, Func<int, Stub?>? stubs = null, bool throws = false,
+        IReadOnlyDictionary<int, int> homes, bool linear = false, bool numericHomes = false,
+        Func<int, Stub?>? stubs = null, bool throws = false,
         int methodIndex = 0)
     {
         internal string? Stopped { get; private set; }
@@ -319,7 +320,7 @@ internal static partial class ProofOutline
                 {
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
-                        views, callees, linear, numericHomes, stubs, throws, methodIndex)
+                        views, callees, homes, linear, numericHomes, stubs, throws, methodIndex)
                     { Objects = Objects, Arrays = Arrays,
                         Slots = Slots, Stored = Stored, ArrayApart = ArrayApart,
                         stores = stores, fieldMemory = fieldMemory,
@@ -352,7 +353,8 @@ internal static partial class ProofOutline
                     if (item is Values loaded) Steps.Add(new ArrayUse(loaded.Array, stores));
                     stack.Add(item);
                 }
-                else if (op is SetLocal setLocal)
+                else if (op is Unoutlined && InstructionOperands.StoreSlot(spec.Method,
+                    spec.Method.Body.Instructions[pc], homes) is int storedSlot)
                 {
                     if (Pop() is not { } item) return Stop("a local store of an empty stack");
                     // An array home checks the view it takes and the view it gives back.
@@ -361,17 +363,18 @@ internal static partial class ProofOutline
                     {
                         if (item is not Word { Term: { } value } word)
                             return Stop("a numeric local store whose value the outline cannot name");
-                        Steps.Add(new LocalAccess(setLocal.Index, value, word.Width, stores++, true));
+                        Steps.Add(new LocalAccess(storedSlot, value, word.Width, stores++, true));
                     }
-                    locals[setLocal.Index] = item;
+                    locals[storedSlot] = item;
                 }
-                else if (op is Local local)
+                else if (op is Unoutlined && InstructionOperands.LoadSlot(spec.Method,
+                    spec.Method.Body.Instructions[pc], homes) is int loadedSlot)
                 {
-                    if (!locals.TryGetValue(local.Index, out var item))
+                    if (!locals.TryGetValue(loadedSlot, out var item))
                         return Stop("a local the body reads before it stores it");
                     if (item is Values loaded) Steps.Add(new ArrayUse(loaded.Array, stores));
                     if (numericHomes && item is Word { Term: { } value } word)
-                        Steps.Add(new LocalAccess(local.Index, value, word.Width, stores, false));
+                        Steps.Add(new LocalAccess(loadedSlot, value, word.Width, stores, false));
                     stack.Add(item);
                 }
                 else if (op is StackOperation { Kind: Code.Ldnull }) stack.Add(new Null());
@@ -1149,6 +1152,7 @@ internal static partial class ProofOutline
             var spec = new Specification(method, parameters, DescribeResult(method, extraction.Architecture), true,
                 true);
             var walk = new ObjectWalk(spec, extraction.Emitted[index].Operations, views, _ => null,
+                extraction.Emitted[index].Frame.IndexParameterHomes(),
                 numericHomes: HasNumericObjectHomes(method), throws: splits, methodIndex: index);
             // A contract states reference stores only of objects the callee reaches, and its caller cannot give
             // it the premise that a reference outside the model forms; it states no array a field holds.
@@ -1204,7 +1208,8 @@ internal static partial class ProofOutline
         var summaries = new Dictionary<int, Callee?>();
         Callee? Summary(int index) => summaries.TryGetValue(index, out var known) ? known
             : summaries[index] = Summarize(extraction, index, names.Claim("callee" + index, "callee" + index), views);
-        var walk = new ObjectWalk(spec, body.Operations, views, Summary, linear: true);
+        var walk = new ObjectWalk(spec, body.Operations, views, Summary,
+            extraction.Emitted[0].Frame.IndexParameterHomes(), linear: true);
         if (walk.Run(pc => Location(spec.Method, pc)) && walk.Objects.All(reached => reached.Holder is null) &&
             walk.Arrays.Count == 0)
             spec.Plan = walk.Plan();

@@ -233,6 +233,10 @@ var indexHomes = extractor.GetType("Nethermind.LeanCIL.ParameterStorage", true)!
     .CreateDelegate<Func<IEnumerable<int>, int, Dictionary<int, int>>>();
 var addressSlot = Model("InstructionOperands").GetMethod("AddressSlot", BindingFlags.Static | BindingFlags.NonPublic)!
     .CreateDelegate<Func<MethodDefinition, Instruction, IReadOnlyDictionary<int, int>, int?>>();
+var storeSlot = Model("InstructionOperands").GetMethod("StoreSlot", BindingFlags.Static | BindingFlags.NonPublic)!
+    .CreateDelegate<Func<MethodDefinition, Instruction, IReadOnlyDictionary<int, int>, int?>>();
+var loadSlot = Model("InstructionOperands").GetMethod("LoadSlot", BindingFlags.Static | BindingFlags.NonPublic)!
+    .CreateDelegate<Func<MethodDefinition, Instruction, IReadOnlyDictionary<int, int>, int?>>();
 var homePositions = indexHomes([2, 1, 2], 2);
 if (homePositions[2] != 2 || homePositions[1] != 3 || homePositions.ContainsKey(0))
     throw new Exception("Home positions lost first-match or missing-argument behavior");
@@ -252,11 +256,35 @@ foreach (var instruction in new[] { Instruction.Create(OpCodes.Ldc_I4_0), storeA
 object TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => translate.Invoke(null,
     [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
         Index(argumentMethod), sites, null, null, positions, null, null])!;
-if (!Equals(TranslateArgument(storeArgument, homePositions), Make("SetLocal", 3)) ||
-    !Equals(TranslateArgument(loadArgument, homePositions), Make("Local", 3)) ||
+if (TranslateArgument(storeArgument, homePositions).GetType() != Model("Unoutlined") ||
+    storeSlot(argumentMethod, storeArgument, homePositions) != 3 ||
+    TranslateArgument(loadArgument, homePositions).GetType() != Model("Unoutlined") ||
+    loadSlot(argumentMethod, loadArgument, homePositions) != 3 ||
     TranslateArgument(addressArgument, homePositions).GetType() != Model("Unoutlined") ||
     addressSlot(argumentMethod, addressArgument, homePositions) != 3)
     throw new Exception("A homed argument's store, load or address used the wrong frame slot");
+var shortStore = Instruction.Create(OpCodes.Starg_S, argumentMethod.Parameters[1]);
+if (storeSlot(argumentMethod, shortStore, homePositions) != 3 ||
+    storeSlot(argumentMethod, addressArgument, homePositions) is not null ||
+    storeSlot(argumentMethod, loadArgument, homePositions) is not null)
+    throw new Exception("An argument store did not retain its original opcode and home");
+var storeMacros = new[] { OpCodes.Stloc_0, OpCodes.Stloc_1, OpCodes.Stloc_2, OpCodes.Stloc_3 };
+var loadMacros = new[] { OpCodes.Ldloc_0, OpCodes.Ldloc_1, OpCodes.Ldloc_2, OpCodes.Ldloc_3 };
+for (int slot = 0; slot < loadMacros.Length; slot++)
+    if (loadSlot(argumentMethod, Instruction.Create(loadMacros[slot]), homePositions) != slot)
+        throw new Exception("A local load macro selected another slot");
+foreach (var opcode in new[] { OpCodes.Ldloc, OpCodes.Ldloc_S })
+    if (loadSlot(argumentMethod, Instruction.Create(opcode, argumentMethod.Body.Variables[1]), homePositions) != 1)
+        throw new Exception("A local load operand lost its declared slot");
+if (loadSlot(argumentMethod, loadArgument, new Dictionary<int, int>()) is not null ||
+    loadSlot(argumentMethod, storeArgument, homePositions) is not null)
+    throw new Exception("An unhomed argument or store was mistaken for a local load");
+for (int slot = 0; slot < storeMacros.Length; slot++)
+    if (storeSlot(argumentMethod, Instruction.Create(storeMacros[slot]), homePositions) != slot)
+        throw new Exception("A local store macro selected another slot");
+foreach (var opcode in new[] { OpCodes.Stloc, OpCodes.Stloc_S })
+    if (storeSlot(argumentMethod, Instruction.Create(opcode, argumentMethod.Body.Variables[1]), homePositions) != 1)
+        throw new Exception("A local store operand lost its declared slot");
 foreach (var opcode in new[] { OpCodes.Ldloca, OpCodes.Ldloca_S })
     if (addressSlot(argumentMethod, Instruction.Create(opcode, argumentMethod.Body.Variables[1]), homePositions) != 1)
         throw new Exception("A local address did not retain its declared slot");

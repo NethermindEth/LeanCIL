@@ -96,6 +96,10 @@ internal sealed record FrameMetadata(bool ReturnsValue, ValueList<InitialValue> 
     /// <summary>The method declares no locals.</summary>
     internal bool HasNoLocals => Locals.Count == 0;
 
+    /// <summary>Argument homes follow the declared locals in this frame's slot order.</summary>
+    internal Dictionary<int, int> IndexParameterHomes() =>
+        ParameterStorage.IndexHomes(ParameterHomes.Select(home => home.Argument), Locals.Count);
+
     internal string ReturnsValueLean => LeanText.Bool(ReturnsValue);
 
     internal string LocalsLean => string.Join(", ", Locals.Select(value => value.ToLean()));

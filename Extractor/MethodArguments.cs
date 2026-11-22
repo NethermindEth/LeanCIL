@@ -1,4 +1,5 @@
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -20,6 +21,14 @@ internal static class MethodArguments
     /// <summary>Whether argument <paramref name="index"/> is read as the whole word it holds, its declared type
     /// being no narrow integer.</summary>
     internal static bool Plain(MethodDefinition method, int index) => LeanEmitter.Narrow(Type(method, index)) is null;
+
+    /// <summary>The argument (including the instance receiver) loaded by this CIL instruction.</summary>
+    internal static int? LoadIndex(MethodDefinition method, Instruction site) => site.OpCode.Code switch
+    {
+        Code.Ldarg_0 => 0, Code.Ldarg_1 => 1, Code.Ldarg_2 => 2, Code.Ldarg_3 => 3,
+        Code.Ldarg or Code.Ldarg_S => Index(method, (ParameterDefinition)site.Operand),
+        _ => null
+    };
 
     internal static int Index(MethodDefinition method, ParameterDefinition parameter)
     {

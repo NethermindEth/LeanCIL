@@ -86,12 +86,6 @@ internal static class NarrowingText
 /// <summary>An argument pushed from its slot; the method's declared parameter type gives any narrowing.</summary>
 internal sealed record Arg(int Index) : Operation;
 
-/// <summary>A local pushed from its slot; the slot's kind gives any narrowing.</summary>
-internal sealed record Local(int Index) : Operation;
-
-/// <summary>A local assigned from the stack; the slot's kind gives any narrowing.</summary>
-internal sealed record SetLocal(int Index) : Operation;
-
 /// <summary>
 /// An integer constant of <see cref="Width"/> bits. <see cref="Numeral"/> says it was written as a bare numeral
 /// rather than as a bit-vector conversion.

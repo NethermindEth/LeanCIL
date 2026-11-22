@@ -38,6 +38,25 @@ internal static class InstructionOperands
         return local.Index;
     }
 
+    /// <summary>The frame slot assigned by the original local or argument store.</summary>
+    internal static int? StoreSlot(MethodDefinition method, Instruction site, IReadOnlyDictionary<int, int> homes) =>
+        site.OpCode.Code switch
+        {
+            Code.Stloc_0 or Code.Stloc_1 or Code.Stloc_2 or Code.Stloc_3 or Code.Stloc or Code.Stloc_S =>
+                FeatureConstants.Local(site),
+            Code.Starg or Code.Starg_S => ArgumentHomeSlot(method, site, homes),
+            _ => null
+        };
+
+    /// <summary>The local slot read by ldloc or by ldarg of an argument with a frame home.</summary>
+    internal static int? LoadSlot(MethodDefinition method, Instruction site, IReadOnlyDictionary<int, int> homes)
+    {
+        if (site.OpCode.Code is Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 or Code.Ldloc or
+            Code.Ldloc_S) return FeatureConstants.Local(site);
+        return MethodArguments.LoadIndex(method, site) is int argument && homes.TryGetValue(argument, out int slot)
+            ? slot : null;
+    }
+
     internal static int ArgumentHomeSlot(MethodDefinition method, Instruction site, IReadOnlyDictionary<int, int> homes)
     {
         var parameter = (ParameterDefinition)site.Operand;

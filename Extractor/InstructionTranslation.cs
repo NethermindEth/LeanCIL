@@ -64,12 +64,8 @@ internal static class InstructionTranslation
             i.OpCode.OperandType is OperandType.InlineBrTarget or OperandType.ShortInlineBrTarget &&
             i.OpCode.Code is not (Code.Leave or Code.Leave_S))
             return new Jump(i.OpCode.Value, instructions.Position(destination));
-        int LocalIndex() => ((VariableDefinition)i.Operand).Index;
-        Operation LoadArgument(int index) => parameterHomes.TryGetValue(index, out var slot)
-            ? new Local(slot) : new Arg(index);
-        Operation LoadLocal(int index) => new Local(index);
-        Operation StoreLocal(int index) => new SetLocal(index);
         if (InstructionOperands.AddressSlot(m, i, parameterHomes).HasValue) return Unoutlined.Site;
+        if (InstructionOperands.StoreSlot(m, i, parameterHomes).HasValue) return Unoutlined.Site;
         Operation Field(FieldAccess access)
         {
             var field = (FieldReference)i.Operand;
@@ -128,27 +124,15 @@ internal static class InstructionTranslation
             // For block instructions the validated prefix selects the required alignment.
             Code.Unaligned => StackOperation.Nop,
             Code.Localloc or Code.Switch => Unoutlined.Site,
-            Code.Starg or Code.Starg_S => StoreLocal(InstructionOperands.ArgumentHomeSlot(m, i, parameterHomes)),
             Code.Ldsfld when FeatureProfile.PlatformField((FieldReference)i.Operand) is int constant =>
                 new Constant(32, constant, true),
             Code.Ldsfld or Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference =>
                 Unoutlined.Site,
             Code.Stsfld => throw new InvalidDataException($"Unsupported static field store: {i}\n  Static fields are written only by their static constructor, which is never extracted."),
-            Code.Ldarg_0 => LoadArgument(0),
-            Code.Ldarg_1 => LoadArgument(1),
-            Code.Ldarg_2 => LoadArgument(2),
-            Code.Ldarg_3 => LoadArgument(3),
-            Code.Ldarg or Code.Ldarg_S => LoadArgument(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
-            Code.Ldloc_0 => LoadLocal(0),
-            Code.Ldloc_1 => LoadLocal(1),
-            Code.Ldloc_2 => LoadLocal(2),
-            Code.Ldloc_3 => LoadLocal(3),
-            Code.Ldloc or Code.Ldloc_S => LoadLocal(LocalIndex()),
-            Code.Stloc_0 => StoreLocal(0),
-            Code.Stloc_1 => StoreLocal(1),
-            Code.Stloc_2 => StoreLocal(2),
-            Code.Stloc_3 => StoreLocal(3),
-            Code.Stloc or Code.Stloc_S => StoreLocal(LocalIndex()),
+            _ when MethodArguments.LoadIndex(m, i) is int index =>
+                parameterHomes.ContainsKey(index) ? Unoutlined.Site : new Arg(index),
+            Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 or Code.Ldloc or Code.Ldloc_S =>
+                Unoutlined.Site,
             Code.Ldfld => Field(FieldAccess.Load),
             Code.Ldflda => Field(FieldAccess.Address),
             Code.Stfld => Field(FieldAccess.Store),
