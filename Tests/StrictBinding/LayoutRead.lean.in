@@ -1,5 +1,6 @@
 import Extracted
 import CIL.Safety.MethodContract
+import CIL.Safety.InstructionSteps
 
 /-! The same read-only field contract for an original and relocated compiled field. -/
 
@@ -13,9 +14,8 @@ def caller (data : Nat → BitVec 8) : Safety.Memory where
   views := [⟨0, 0, 24, true, false⟩]
   nextIdentity := 1
 
-/-- The field value of the original struct at its declared offset. -/
-def word (data : Nat → BitVec 8) : W32 :=
-  let offset := FIELD_OFFSET
+/-- The four little-endian bytes beginning at the supplied offset in the caller's memory. -/
+def wordAt (offset : Nat) (data : Nat → BitVec 8) : W32 :=
   BitVec.ofNat 32 (byteNumber [data offset, data (offset+1), data (offset+2), data (offset+3)])
 
 /-- The field reader preserves memory and returns the selected four little-endian bytes. -/
@@ -24,14 +24,36 @@ def contract : MethodContract (Nat → BitVec 8) W32 where
   results value := [.scalar (.i32 value)]
   pre data memory := memory = caller data
   footprint _ := []
-  post data initial final value := final = initial ∧ value = word data
+  post data initial final value := final = initial ∧ value = wordAt FIELD_OFFSET data
 
 /-- Direct execution suffices for every byte pattern in an original struct. -/
 theorem holds (ran : ∀ data, invoke Extracted.program 8 0 (contract.args data) (caller data) =
-    .ok (caller data, contract.results (word data))) : contract.Holds Extracted.program 0 := by
+    .ok (caller data, contract.results (wordAt FIELD_OFFSET data))) : contract.Holds Extracted.program 0 := by
   rintro data _ rfl
   exact MethodContract.Holds.intro (c := contract) _ _ ⟨8, ran data⟩ (Confined.refl [] _) ⟨rfl, rfl⟩
 #print axioms holds
+
+/-- The extracted field shape supplies the checked offset and width for every caller memory. -/
+theorem readAtOffset (shape : Extracted.method0.fieldShape Extracted.fieldRef0 =
+    .value READ_OFFSET 4 false) (data : Nat → BitVec 8) :
+    invoke Extracted.program 8 0 (contract.args data) (caller data) =
+      .ok (caller data, contract.results (wordAt READ_OFFSET data)) := by
+  let frame : Frame := ⟨1, [], [], 0⟩
+  let address : Reference := ⟨0, 0⟩
+  let args : List Safety.Value := [.reference (.address address)]
+  let memory := caller data
+  change invoke Extracted.program 8 0 args memory = .ok (memory, contract.results (wordAt READ_OFFSET data))
+  apply invoke_of_run (frame := frame) (entered := memory) Extracted.program_method0 rfl rfl
+  rw [run_next (fuel := 7) (op := .ldarg 0) (target := 1) (values := args)
+    (nextFrame := frame) (updated := memory) Extracted.program_method0 rfl rfl]
+  have read : step Extracted.method0 (.ldfld Extracted.fieldRef0) 1 args frame args memory =
+      .ok (.next 2 [.scalar (.i32 (wordAt READ_OFFSET data))] frame memory) := by
+    rw [step_ldfld_value_reference_eq _ _ _ _ _ _ _ _ _ shape address []]
+    dsimp only [memory, address, frame, wordAt, caller]
+    rfl
+  rw [run_next (fuel := 6) Extracted.program_method0 rfl read]
+  rfl
+#print axioms readAtOffset
 
 /-- The original field's low byte is the only nonzero byte. -/
 def witness (offset : Nat) : BitVec 8 := if offset = FIELD_OFFSET then 128 else 0

@@ -114,8 +114,9 @@ heartbeats for each layout. With that cost included, checking the contract once 
 it twice uses fewer kernel heartbeats than reducing two reads for either layout. The table
 gives command-level measurements after extraction. Image hashing and layout replay run separately.
 
-A second fixture, `LayoutProbe.Reader`, compares the historical `CIL.Op` interpreter at
-`27953edb` with canonical execution at `4d72d8c3`. The .NET 10 and .NET 11 builds produce
+A second fixture, `LayoutProbe.Reader`, compares the interpreter at
+[27953edb](https://github.com/NethermindEth/LeanCIL/blob/27953edb/CIL/Instructions.lean#L103)
+with canonical execution at `4d72d8c3`. The .NET 10 and .NET 11 builds produce
 identical eight-byte method bodies for each reader, including the field token and tiny header.
 Both interpreters use the same positive contract proof and consumer sources.
 
@@ -131,8 +132,24 @@ Both interpreters use the same positive contract proof and consumer sources.
 Direct reduction costs 19.8 times as many kernel heartbeats for the explicit field and 19.5
 times as many for the sequential field. The universal proof incurs a comparable increase once
 per layout. Applying it to the same caller memory costs exactly the same in both models.
-The direct consumers took 24 and 25 ms to elaborate with `CIL.Op` and 291 and 279 ms with
+The direct consumers took 24 and 25 ms to elaborate on the historical revision and 291 and 279 ms with
 canonical execution in single runs. The explicit contract application took 6 ms with each.
+
+The explicit `LayoutProbe.Reader` resolves its field to offset 8 and width 4 in 1,218,000
+kernel heartbeats. Checking the owner against the indexed raw layout accounts for 1,106,363
+of those heartbeats when measured separately. Extraction already proves the field shape once.
+
+The `Gates.Reader` proofs can apply that shape theorem at the field load and compose the
+argument load, field load and return. The following costs exclude the extraction and measure
+the reusable execution lemma plus the final contract statement. Both negative cases use the
+same contract as their original and return zero on the byte pattern that requires 128.
+
+| Layout and outcome | Execution lemma, kernel heartbeats | Final theorem, kernel heartbeats | Combined elaboration, ms |
+| --- | ---: | ---: | ---: |
+| Explicit, verified contract | 168,181 | 297 | 72 |
+| Sequential, verified contract | 177,298 | 299 | 82 |
+| Explicit, refuted contract | 168,177 | 3,670 | 77 |
+| Sequential, refuted contract | 177,262 | 3,675 | 76 |
 
 ## Reusing the compiled Countdown loop contract
 

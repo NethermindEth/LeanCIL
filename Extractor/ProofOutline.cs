@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using System.Text;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -10,7 +11,23 @@ namespace Nethermind.LeanCIL;
 internal static partial class ProofOutline
 {
     /// <summary>The frame and instruction descriptors used to outline a proof of this method.</summary>
-    internal sealed record Method(FrameMetadata Frame, Operation[] Operations);
+    internal sealed class Method(FrameMetadata frame, Operation[] operations, MethodDefinition source,
+        IReadOnlySet<Instruction> reachable, FeatureProfile profile, MetadataValidation.LayoutContext layouts)
+    {
+        internal FrameMetadata Frame { get; } = frame;
+        internal Operation[] Operations { get; } = operations;
+
+        /// <summary>The admitted struct field at this instruction, using the extraction's layout context.</summary>
+        internal (Code Opcode, int Offset, int Width, bool Signed, bool IsAggregate)? StructFieldAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            if (site.OpCode.Code is not (Code.Ldfld or Code.Ldflda or Code.Stfld) ||
+                !reachable.Contains(site) || site.Operand is not FieldReference field ||
+                ObjectTypes.Candidate(field.DeclaringType)) return null;
+            var definition = field.Resolve() ?? throw new InvalidDataException("Unresolved field");
+            return InstructionOperands.StructField(field, definition, site.OpCode.Code, source, profile, layouts);
+        }
+    }
 
     /// <summary>A checked extraction: its methods while still loaded, their emitted operations and
     /// its computed layouts in emission order, each with its identity, its named class fields, and

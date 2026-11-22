@@ -54,8 +54,9 @@ internal static partial class ProofOutline
     } : null;
 
     /// <summary>Walks a branch-free body over the receiver's disjoint scalar fields and integer arguments.</summary>
-    static StructWalk WalkStruct(Specification spec, Operation[] ops, Names names)
+    static StructWalk WalkStruct(Specification spec, Body body, Names names)
     {
+        var ops = body.Operations;
         var walk = new StructWalk();
         var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
         var receiver = spec.Parameters[0];
@@ -107,7 +108,7 @@ internal static partial class ProofOutline
                 var symbol = arithmetic.Symbol;
                 stack.Push($"{Operand(left)} {symbol} {Operand(right)}");
             }
-            else if (op is StructField { Access: FieldAccess.Load, Width: 1 or 2 or 4 or 8 } load)
+            else if (body.Method.StructFieldAt(pc) is { Opcode: Code.Ldfld, IsAggregate: false, Width: 1 or 2 or 4 or 8 } load)
             {
                 if (stack.Count == 0 || stack.Pop() != Receiver) return Stop("a field load of another value", pc);
                 if (Field(pc, load.Offset, load.Width) is not { } field)
@@ -125,7 +126,7 @@ internal static partial class ProofOutline
                 string Loaded(string value) => field.Width < 4
                     ? $"({value}).{(load.Signed ? "signExtend" : "setWidth")} 32" : value;
             }
-            else if (op is StructField { Access: FieldAccess.Store, Width: 1 or 2 or 4 or 8 } store)
+            else if (body.Method.StructFieldAt(pc) is { Opcode: Code.Stfld, IsAggregate: false, Width: 1 or 2 or 4 or 8 } store)
             {
                 if (stack.Count < 2) return Stop("a field store on a short stack", pc);
                 var value = stack.Pop();
@@ -169,7 +170,7 @@ internal static partial class ProofOutline
     /// postcondition, or one hole naming where the walk stopped.</summary>
     static string StructStraightLine(Specification spec, Body body, Names names, Writer lean)
     {
-        var walk = WalkStruct(spec, body.Operations, names);
+        var walk = WalkStruct(spec, body, names);
         var stepped = walk.Stopped is null;
         Header(lean, spec, ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.BufferContents",
             "CIL.Safety.LoopCallerFacts", "CIL.Safety.AggregateFields"], stepped ? "`postcondition`" : null);

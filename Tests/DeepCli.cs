@@ -322,11 +322,14 @@ void CheckDispatchCatalogs()
         var build = changed ? "FiveFaces" : "SixFaces";
         var assembly = fixture.Build(build, "DeepCli.Dispatch", $$"""
             namespace Geometry;
+            public interface IShapeTag { }
+            public interface IColour { }
             public abstract class Shape { public abstract int Sides(); }
-            public class Triangle : Shape { public override int Sides() => 3; }
+            public class Triangle : Shape, IShapeTag, IColour { public override int Sides() => 3; }
             public sealed class Equilateral : Triangle { }
             public abstract class Solid { public abstract int Faces(); }
-            public sealed class Cube : Solid { public override int Faces() => {{(changed ? 5 : 6)}}; }
+            public sealed class Cube : Solid, IColour { public override int Faces() => {{(changed ? 5 : 6)}}; }
+            public sealed class TagOnly : IShapeTag { }
             public static class Reader {
                 public static int Total(Shape shape, Solid solid) => shape.Sides() + solid.Faces() + shape.Sides();
             }
@@ -391,9 +394,12 @@ void CheckLayoutContent()
             var output = fixture.Artifact(build + method);
             Run([.. cli, "extract", assembly, $"Gates.Reader::{method}(Gates.{type}&)", output]);
             var proof = Path.Combine(output, "Proof.lean");
-            var (claim, lemma, evidence) = changed ? ("Refuted", "refuted", "rfl") : ("Holds", "holds", "fun _ => rfl");
+            var (claim, lemma, evidence) = changed
+                ? ("Refuted", "refuted", "readAtOffset (Extracted.fieldRef0_shape rfl) witness")
+                : ("Holds", "holds", "readAtOffset (Extracted.fieldRef0_shape rfl)");
             var template = File.ReadAllText(At("Tests/StrictBinding/LayoutRead.lean.in"));
-            File.WriteAllText(proof, template.Replace("FIELD_OFFSET", offset, StringComparison.Ordinal) +
+            File.WriteAllText(proof, template.Replace("FIELD_OFFSET", offset, StringComparison.Ordinal)
+                .Replace("READ_OFFSET", changed ? "4" : offset, StringComparison.Ordinal) +
                 $"\ntheorem correctness : contract.{claim} Extracted.program 0 := {lemma} ({evidence})\n" +
                 "#print axioms correctness\nend LayoutGate\n");
             string[] binding = changed ? [] : ["--deep-checks", pins];

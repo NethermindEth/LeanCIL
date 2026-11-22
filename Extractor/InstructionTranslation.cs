@@ -66,14 +66,6 @@ internal static class InstructionTranslation
             return new Jump(i.OpCode.Value, instructions.Position(destination));
         if (InstructionOperands.AddressSlot(m, i, parameterHomes).HasValue) return Unoutlined.Site;
         if (InstructionOperands.StoreSlot(m, i, parameterHomes).HasValue) return Unoutlined.Site;
-        Operation Field(FieldAccess access)
-        {
-            var field = (FieldReference)i.Operand;
-            if (ObjectTypes.Candidate(field.DeclaringType)) return Unoutlined.Site;
-            var resolved = field.Resolve() ?? throw new InvalidDataException("Unresolved field");
-            var shape = InstructionOperands.StructField(field, resolved, access, m, profile, layouts);
-            return new StructField(shape.Access, shape.Offset, shape.Width, shape.Signed);
-        }
         if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof or Code.Cpobj &&
             i.Operand is TypeReference operand)
         {
@@ -131,9 +123,7 @@ internal static class InstructionTranslation
                 parameterHomes.ContainsKey(index) ? Unoutlined.Site : new Arg(index),
             Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 or Code.Ldloc or Code.Ldloc_S =>
                 Unoutlined.Site,
-            Code.Ldfld => Field(FieldAccess.Load),
-            Code.Ldflda => Field(FieldAccess.Address),
-            Code.Stfld => Field(FieldAccess.Store),
+            Code.Ldfld or Code.Ldflda or Code.Stfld => Unoutlined.Site,
             Code.Ldc_I4_M1 => new Constant(32, -1, false),
             Code.Ldc_I4_0 => new Constant(32, 0, true),
             Code.Ldc_I4_1 => new Constant(32, 1, true),

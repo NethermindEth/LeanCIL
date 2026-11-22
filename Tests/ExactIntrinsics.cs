@@ -1107,6 +1107,57 @@ pending.Add((new(selectors["ReverseLimbs"], reverseProof, reverseOutput), "arm64
     return (image, output);
 }
 
+var equalityArguments = SwapFirstArguments("EqualWords128");
+var equalWords = runtime.GetMethod("EqualWords128")!;
+var swappedEqualWords = Assembly.Load(File.ReadAllBytes(equalityArguments.Assembly))
+    .GetType("Examples.DivisionIntrinsics")!.GetMethod("EqualWords128")!;
+object[] firstWordSet = [1u, 0u, 0u, 0u, Vector128.Create(1u, 0u, 0u, 0u)];
+if (equalWords.Invoke(null, firstWordSet) is not true || swappedEqualWords.Invoke(null, firstWordSet) is not false)
+    throw new InvalidOperationException("Swapping the two low words must change equality at the CLR witness.");
+verification.VerifyContractVariant(assembly, "Examples", selectors["EqualWords128"],
+    Path.Combine(root, "EqualWords128Contract"), equalityArguments.Assembly, selectors["EqualWords128"],
+    equalityArguments.Output, """
+    /-- Four 32-bit words and the vector to compare against. -/
+    structure Comparison where
+      a : W32
+      b : W32
+      c : W32
+      d : W32
+      expected : BitVec 128
+
+    /-- The comparison packs the four words in lane order and preserves caller memory. -/
+    def equalWords : MethodContract Comparison Bool where
+      args w := [.scalar (.i32 w.a), .scalar (.i32 w.b), .scalar (.i32 w.c), .scalar (.i32 w.d),
+        .scalar (.v128 w.expected)]
+      results equal := [.scalar (.i32 (if equal then 1 else 0))]
+      pre _ _ := True
+      footprint _ := []
+      post w before after equal := after = before ∧
+        equal = (((w.d ++ w.c) ++ (w.b ++ w.a)) == w.expected)
+    """, """
+    set_option maxRecDepth 8192 in
+    /-- The compiled comparison checks every bit of all four words. -/
+    theorem correctness : equalWords.Holds Extracted.program 0 := by
+      intro w memory _
+      let equal := (((w.d ++ w.c) ++ (w.b ++ w.a)) == w.expected)
+      apply MethodContract.Holds.intro (c := equalWords) (input := w) memory equal ?_
+        (Confined.refl _ _) ⟨rfl, rfl⟩
+      refine ⟨32, ?_⟩
+      change Except.ok (memory, [Value.scalar (.i32
+        (CIL.NarrowKind.unsigned8.extend (if equal then 1 else 0)))]) =
+        Except.ok (memory, [Value.scalar (.i32 (if equal then 1 else 0))])
+      rw [CIL.NarrowKind.extend_ite_one_zero]
+    """, """
+    /-- Moving the only set bit from lane zero to lane one changes the return to false. -/
+    theorem correctness : equalWords.Refuted Extracted.program 0 := by
+      apply MethodContract.Refuted.of_return (c := equalWords) (input := ⟨1, 0, 0, 0, 1⟩)
+        (initial := Memory.empty) (fuel := 32) (values := [.scalar (.i32 0)]) trivial rfl
+      rintro ⟨_, value, encoded, _, rfl⟩
+      revert encoded
+      decide
+    """);
+Console.WriteLine("PASS four-word vector equality preserves memory and refutes swapped low words");
+
 var wordArguments = SwapFirstArguments("CreateWords");
 verification.VerifyContractVariant(assembly, "Examples", selectors["CreateWords"], Path.Combine(root, "WordsContract"),
     wordArguments.Assembly, selectors["CreateWords"], wordArguments.Output, """

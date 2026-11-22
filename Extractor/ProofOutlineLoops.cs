@@ -24,9 +24,10 @@ internal static partial class ProofOutline
     }
 
     /// <summary>The emitted operations of one method and its control flow.</summary>
-    sealed class Body(Operation[] operations)
+    sealed class Body(Method method)
     {
-        internal Operation[] Operations { get; } = operations;
+        internal Method Method { get; } = method;
+        internal Operation[] Operations { get; } = method.Operations;
 
         /// <summary>The branch represented by an operation.</summary>
         internal static Jump? JumpOf(Operation operation) => operation switch
@@ -1560,7 +1561,8 @@ internal static partial class ProofOutline
                 foreach (var field in slots[address.Slot].Components)
                     state.State[components.IndexOf(field)] = new Number("0", field.Width, Value: 0);
             }
-            else if (op is StructField { Access: FieldAccess.Load, Signed: false } load)
+            else if (body.Method.StructFieldAt(state.Pc) is { Opcode: Code.Ldfld, IsAggregate: false,
+                Signed: false, Offset: var loadOffset })
             {
                 var source = Pop();
                 var slot = source switch
@@ -1568,19 +1570,20 @@ internal static partial class ProofOutline
                     LocalValue value => value.Slot, LocalAddressValue address => address.Slot, _ => -1
                 };
                 var field = slot < 0 ? null : slots[slot].Components.FirstOrDefault(component =>
-                    component.Offset == load.Offset);
+                    component.Offset == loadOffset);
                 if (field is null) return Stop("a field read outside a struct local");
                 var held = (Value)state.State[components.IndexOf(field)];
                 // A narrow field loads its low bytes zero-extended, as `narrowLoad` reads the word it holds.
                 stack.Add(field.Width < 4 && held is Number { Literal: false } word
                     ? new Number(NarrowRead(word.Term, field.Width), 4) : held);
             }
-            else if (op is StructField { Access: FieldAccess.Store } store)
+            else if (body.Method.StructFieldAt(state.Pc) is { Opcode: Code.Stfld, IsAggregate: false,
+                Offset: var storeOffset })
             {
                 var value = Pop();
                 var field = Pop() is LocalAddressValue address
                     ? slots[address.Slot].Components.FirstOrDefault(component =>
-                    component.Offset == store.Offset) : null;
+                    component.Offset == storeOffset) : null;
                 if (field is null || value is not (Number or Unknown))
                     return Stop("a field store outside a struct local");
                 state.Moved = true;

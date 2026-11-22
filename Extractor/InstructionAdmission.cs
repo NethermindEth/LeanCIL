@@ -128,11 +128,7 @@ internal sealed class InstructionAdmission(MethodDefinition method, FeatureProfi
         if (ObjectTypes.Candidate(operand.DeclaringType))
             ObjectTypes.FieldOperation(operand, field, code == Code.Stfld, code == Code.Ldflda, profile.Architecture);
         else
-        {
-            var access = code == Code.Ldfld ? FieldAccess.Load :
-                code == Code.Stfld ? FieldAccess.Store : FieldAccess.Address;
-            InstructionOperands.StructField(operand, field, access, method, profile, layouts);
-        }
+            InstructionOperands.StructField(operand, field, code, method, profile, layouts);
     }
 
     bool CheckArray(Instruction site)

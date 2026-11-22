@@ -86,7 +86,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `blocks` | block memory, alignment prefixes, runtime comparisons and safety faults |
 | `unsafe` | layout-based Unsafe sizes, reference offsets and metadata validation |
 | `math` | integer Math helpers, BigMul, runtime faults and universal minimum |
-| `intrinsics` | exact SIMD call signatures, 256- and 512-bit equality contracts and repeated-operand counterexamples, byte shuffles, AES rounds, unspecified lanes, opaque locals, profile rejection and the library of generated runtime comparisons |
+| `intrinsics` | exact SIMD call signatures, 128-, 256- and 512-bit equality contracts with swapped-word and repeated-operand counterexamples, byte shuffles, AES rounds, unspecified lanes, opaque locals, profile rejection and the library of generated runtime comparisons |
 | `divrem` | X86Base.X64.DivRem and Math.DivRem through ValueTuple fields, divide faults and layout rejection |
 | `fsharp` | F# arithmetic, branches, calls, references and struct construction |
 | `constructors` | struct construction, initialized temporaries and constructor faults |

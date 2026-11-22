@@ -324,8 +324,9 @@ Array Operations(params object[] operations)
     for (var at = 0; at < operations.Length; at++) array.SetValue(operations[at], at);
     return array;
 }
-object Body(params object[] operations) => Activator.CreateInstance(bodyType, Declared, null,
-    [Operations(operations)], null)!;
+var scalarProfile = Model("FeatureProfile").GetMethod("Select", Declared)!.Invoke(null, ["scalar"]);
+object OutlineMethod(MethodDefinition source, HashSet<Instruction> reachable, params object[] operations) =>
+    Make("ProofOutline+Method", null, Operations(operations), source, reachable, scalarProfile, context);
 int Loops(object body) => ((System.Collections.IList)bodyType.GetMethod("Loops", Declared)!.Invoke(body, null)!).Count;
 // An argument read is pure only when its declared type is no narrow integer: (int, byte) below.
 var mixedArguments = new MethodDefinition("Mixed", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
@@ -337,13 +338,31 @@ owner.Methods.Add(mixedArguments);
 bool Pure(object operation, bool plainReturn = true) =>
     (bool)bodyType.GetMethod("Pure", Declared, [Model("Operation"), typeof(MethodDefinition), typeof(bool)])!
         .Invoke(null, [operation, mixedArguments, plainReturn])!;
-var nop = Make("StackOperation", Code.Nop);
 foreach (var encoding in new[] { OpCodes.Blt_S, OpCodes.Blt })
 {
-    var backEdge = Make("Jump", (int)encoding.Value, 0);
-    if (Loops(Body(nop, nop, backEdge)) != 1)
+    var head = Instruction.Create(OpCodes.Ldc_I4_0);
+    caller.Body.Instructions.Clear();
+    foreach (var site in new[] { head, Instruction.Create(OpCodes.Ldc_I4_1), Instruction.Create(encoding, head),
+        Instruction.Create(OpCodes.Ret) })
+        caller.Body.Instructions.Add(site);
+    var code = caller.Body.Instructions;
+    var loopMethod = OutlineMethod(caller, code.ToHashSet(), code.Select(Operation).ToArray());
+    var body = Activator.CreateInstance(bodyType, Declared, null, [loopMethod], null)!;
+    if (Loops(body) != 1)
         throw new Exception("A conditional back edge is not found as a loop: " + encoding.Name);
 }
+var fieldReader = module.GetType("Examples.Counter").Methods.Single(member => member.Name == "Read");
+var fieldCode = fieldReader.Body.Instructions;
+var fieldSite = fieldCode.Single(site => site.OpCode.Code == Code.Ldfld);
+var live = fieldCode.ToHashSet();
+var extractedReader = OutlineMethod(fieldReader, live,
+    fieldCode.Select(_ => Make("Unoutlined")).ToArray());
+var fieldAt = extractedReader.GetType().GetMethod("StructFieldAt", Declared)!;
+object? Shape(Instruction site) => fieldAt.Invoke(extractedReader, [fieldCode.IndexOf(site)]);
+if (!Equals(Shape(fieldSite), (Code.Ldfld, 0, 8, false, false)) || Shape(fieldCode[0]) is not null)
+    throw new Exception("The outline did not resolve the compiled unsigned field load at its original site");
+live.Remove(fieldSite);
+if (Shape(fieldSite) is not null) throw new Exception("An unreachable struct field contributed an outline operand");
 if (!Pure(Make("Arg", 0)) || Pure(Make("Arg", 1)) ||
     !Pure(Make("StackOperation", Code.Ret)) || Pure(Make("StackOperation", Code.Ret), plainReturn: false) ||
     Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)))

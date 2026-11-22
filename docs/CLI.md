@@ -376,11 +376,13 @@ leave the fact `not covered`. A conflicting supported layout fails the audit.
 
 For `dispatch-catalogs`, Lean checks ordinary virtual slots of nongeneric classes in a single
 pinned assembly. It reads the physical parent of every TypeDef, enumerates all descendants of
-each slot owner, and checks their class flags and all declared methods
-against the catalog. Every reachable virtual site must dispatch to the implementations selected
-by these declarations. Empty selections, multiple audited images, imports, constrained calls, casts,
-interfaces, explicit method overrides, additional metadata modules and unsupported ancestry or signatures leave the fact
-`not covered`. A different catalog or target table for a supported slot fails verification.
+each slot owner, and checks their class flags, declared methods and direct local nongeneric
+interfaces against the catalog. Each interface must resolve to its unique physical TypeDef.
+Every reachable virtual site must dispatch to the implementations selected by these declarations.
+Empty selections, multiple audited images, imports, constrained calls, casts, interface dispatch,
+explicit method overrides, additional metadata modules and unsupported interface types, ancestry
+or signatures leave the fact `not covered`. A different catalog or target table for a supported
+slot fails verification.
 
 For `generic-constraints`, Lean locates each selected method and its declaring type in the
 pinned image. It compares each parameter's ordinal, flags and complete constraint list,

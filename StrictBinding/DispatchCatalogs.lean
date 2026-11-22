@@ -11,24 +11,30 @@ private abbrev Reading := OptionT (Except AuditError)
 /-- Structural PE errors retain the token, heap offset or column that failed. -/
 private def physical (action : Except AuditError α) : Reading α := liftM action
 
-/-- A top-level nongeneric class identified by its unique physical declaration. -/
-private def className (image : PreparedImage) (row : Nat) : Reading TypeExpr := do
+/-- The name of a unique, top-level nongeneric declaration of the required CLI kind. -/
+private def localName (image : PreparedImage) (row : Nat) (kind : TypeKind) : Reading String := do
   let cell := image.layout.cellOfRow image.view Table.typeDef row
   let name ← physical (image.layout.stringAt image.view (← physical (cell 1)))
   let space ← physical (image.layout.stringAt image.view (← physical (cell 2)))
   unless (← physical (enumDefinition? image 0 [space, name])) == some row do failure
-  unless (← physical (physicalTypeShape image row)) == (.classType, 0) do failure
+  unless (← physical (physicalTypeShape image row)) == (kind, 0) do failure
   let some simple := spelled? name | failure
   let some scope := spelled? space | failure
   guard (ordinaryTypeName scope simple)
-  return .object image.identity (if scope.isEmpty then simple else scope ++ "." ++ simple)
+  return if scope.isEmpty then simple else scope ++ "." ++ simple
+
+/-- A physical class identity used by the slot or its signatures. -/
+private def className (image : PreparedImage) (row : Nat) : Reading TypeExpr := do
+  return .object image.identity (← localName image row .classType)
 
 /-- Follow a local TypeDef edge. The core Object, ValueType and Enum roots cannot descend
     from a local class. This lets a class hierarchy coexist with unrelated structs and enums. -/
 private def parentRow (image : PreparedImage) (row : Nat) : Reading Nat := do
-  let coded ← physical (image.layout.cellOfRow image.view Table.typeDef row typeDefExtendsColumn)
+  let declaration := image.layout.cellOfRow image.view Table.typeDef row
+  let coded ← physical (declaration typeDefExtendsColumn)
   if coded == 0 then
-    guard (row == 1)
+    unless row == 1 do
+      guard ((← physical (declaration typeDefFlagsColumn)) &&& 0x20 != 0)
     return 0
   if coded % 4 == 0 then
     let token ← physical (checkedTokenOf Table.typeDef (coded / 4) .rowOverflow)
@@ -89,16 +95,35 @@ private def classMethod (image : PreparedImage) (row : Nat) : Reading DispatchMe
     parameters := ← sig.parameters.mapM (formalType image),
     overrides := [] }
 
+/-- InterfaceImpl targets grouped by their physical TypeDef owner, in declaration order. -/
+private def interfacesByOwner (image : PreparedImage) (count : Nat) :
+    Reading (Array (Array Nat)) := do
+  let mut owners := Array.replicate (count + 1) #[]
+  let interfaceImpl := 0x09
+  for i in [:image.layout.rowCount interfaceImpl] do
+    let cell := image.layout.cellOfRow image.view interfaceImpl (i+1)
+    let owner ← physical (cell 0)
+    guard (owner > 0 && owner ≤ count)
+    let target ← physical (cell 1)
+    owners := owners.modify owner (·.push target)
+  return owners
+
+/-- A local interface implemented by a class in the selected hierarchy. -/
+private def interfaceName (image : PreparedImage) (coded : Nat) : Reading TypeExpr := do
+  guard (coded % 4 == 0 && coded / 4 > 0)
+  let name ← localName image (coded / 4) .interface
+  return .atom image.identity name
+
 /-- Enumerate every physical descendant, including abstract intermediates, and every MethodDef
-    each one owns. MethodPtr, InterfaceImpl and MethodImpl are outside this reader's coverage. -/
+    each one owns. MethodPtr and explicit method overrides remain outside this reader's coverage. -/
 def physicalHierarchy (image : PreparedImage) (owner : Nat) :
     OptionT (Except AuditError) (List DispatchType) := do
-  guard (image.layout.rowCount 5 == 0 && image.layout.rowCount 9 == 0 &&
-    image.layout.rowCount 25 == 0)
+  guard (image.layout.rowCount 5 == 0 && image.layout.rowCount 25 == 0)
   -- A File row with metadata introduces another module whose classes this image cannot enumerate.
   for i in [:image.layout.rowCount 0x26] do
     guard ((← physical (image.layout.cellOfRow image.view 0x26 (i+1) 0)) == 1)
   let count := image.layout.rowCount Table.typeDef
+  let interfaces ← interfacesByOwner image count
   let mut parents := #[0]
   for i in [:count] do parents := parents.push (← parentRow image (i+1))
   let mut types := #[]
@@ -113,10 +138,12 @@ def physicalHierarchy (image : PreparedImage) (owner : Nat) :
     let mut methods := #[]
     for index in [first:finish] do methods := methods.push (← classMethod image index)
     let base ← if parents[row]! == 0 then pure TypeExpr.void else className image parents[row]!
+    let owned ← interfaces[row]!.toList.mapM (interfaceName image)
+    guard owned.Nodup
     types := types.push {
       identity := ← className image row, valueType := false, interfaceType := false,
       assembly := {identity := image.identity}, base, abstractType := flags &&& 0x80 != 0,
-      interfaces := [], methods := methods.toList }
+      interfaces := owned, methods := methods.toList }
   return types.toList
 
 /-- The union of all physical class hierarchies selected by a method's original callvirt sites.

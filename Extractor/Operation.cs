@@ -128,15 +128,6 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments) : Operatio
     internal bool ReturnsToCaller => Kind is CallKind.Static or CallKind.Instance;
 }
 
-internal enum FieldAccess { Load, Store, LoadAggregate, StoreAggregate, Address }
-
-/// <summary>
-/// A struct field access at byte <paramref name="Offset"/> of
-/// the layout the extraction computed. <paramref name="Width"/> is the field's size and <paramref name="Signed"/>
-/// says a load sign-extends; the step takes all three from the checked layouts, so only proof outlines read them.
-/// </summary>
-internal sealed record StructField(FieldAccess Access, int Offset, int Width, bool Signed) : Operation;
-
 /// <summary>The object opcode and storage shape used by a proof outline.</summary>
 internal sealed record ObjectInstruction(Code Opcode, int? ScalarWidth = null,
     bool Signed = false, int? ByteSize = null) : Operation;

@@ -108,7 +108,7 @@ internal static partial class ProofOutline
         var names = new Names();
         var views = new FieldViews(extraction);
         var receiver = method.HasThis ? new[] { Receiver(method, names, views) } : [];
-        var body = new Body(emitted.Operations);
+        var body = new Body(emitted);
         var parameters = WrittenArrays(method, receiver.Concat(method.Parameters.Select(parameter =>
             Describe(method, parameter, names, views, extraction.Architecture))).ToArray(), body.Operations,
             body.Loops().Count, extraction.Architecture);
@@ -525,7 +525,7 @@ internal static partial class ProofOutline
         var steppable = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.StructValue) &&
             body.Operations.Index().All(entry => Body.Pure(entry.Item, spec.Method, plainReturn) ||
-                Steps(spec.Method, entry.Item, spec.Method.Body.Instructions[entry.Index], homes));
+                Steps(body.Method, spec.Method, entry.Index, homes));
         var split = !steppable && SplitsOnBooleans(body.Operations, spec.Method, spec.Parameters, plainReturn);
         var paths = steppable || split ? null : ScalarPaths(spec, body.Operations);
         // A body over words that calls helpers composes them through stub contracts, as a body over objects does.
@@ -569,19 +569,21 @@ internal static partial class ProofOutline
     /// <summary>A frame, field or duplicate operation the stepping tactics take without facts: a local access
     /// other than to a narrow integer local, an aggregate initialisation or a field access whose load is not
     /// sign-extending.</summary>
-    static bool Steps(MethodDefinition method, Operation op, Instruction site,
-        IReadOnlyDictionary<int, int> homes) => op switch
+    static bool Steps(Method emitted, MethodDefinition method, int pc, IReadOnlyDictionary<int, int> homes)
     {
-        Unoutlined when InstructionOperands.LoadSlot(method, site, homes) is int loaded =>
-            !NarrowLocal(method, loaded),
-        Unoutlined when InstructionOperands.StoreSlot(method, site, homes) is int stored =>
-            !NarrowLocal(method, stored),
-        Unoutlined => site.OpCode.Code is Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S,
-        _ => op is ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Initobj } or
-            StackOperation { Kind: Code.Dup } or
-            StructField { Access: FieldAccess.Address or FieldAccess.Store or FieldAccess.LoadAggregate or
-                FieldAccess.StoreAggregate } or StructField { Access: FieldAccess.Load, Signed: false }
-    };
+        var site = method.Body.Instructions[pc];
+        return emitted.Operations[pc] switch
+        {
+            Unoutlined when InstructionOperands.LoadSlot(method, site, homes) is int loaded =>
+                !NarrowLocal(method, loaded),
+            Unoutlined when InstructionOperands.StoreSlot(method, site, homes) is int stored =>
+                !NarrowLocal(method, stored),
+            Unoutlined => site.OpCode.Code is Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S ||
+                emitted.StructFieldAt(pc) is { Signed: false },
+            ObjectInstruction { Opcode: Code.Initobj } or StackOperation { Kind: Code.Dup } => true,
+            _ => false
+        };
+    }
 
     /// <summary>Whether local `index` is a declared local of a narrow integer type, whose loads and stores the
     /// outlines leave to the author. A `byte` or `bool` argument's home has a narrow slot too, but its index follows

@@ -109,8 +109,8 @@ internal static class InstructionOperands
         return (null, null, false);
     }
 
-    internal static (FieldAccess Access, int Offset, int Width, bool Signed) StructField(FieldReference operand,
-        FieldDefinition field, FieldAccess access, MethodDefinition method, FeatureProfile profile,
+    internal static (Code Opcode, int Offset, int Width, bool Signed, bool IsAggregate) StructField(FieldReference operand,
+        FieldDefinition field, Code opcode, MethodDefinition method, FeatureProfile profile,
         MetadataValidation.LayoutContext layouts)
     {
         layouts.Size(operand.DeclaringType);
@@ -119,12 +119,9 @@ internal static class InstructionOperands
         var aggregate = MetadataValidation.IsAggregate(type, method.Module);
         var width = layouts.FieldSize(type);
         var offset = layouts.FieldOffset(operand.DeclaringType, field);
-        if (aggregate && access != FieldAccess.Address)
-            return (access == FieldAccess.Load ? FieldAccess.LoadAggregate : FieldAccess.StoreAggregate,
-                offset, width, false);
-        var signed = access == FieldAccess.Load &&
+        var signed = !aggregate && opcode == Code.Ldfld &&
             EnumTypes.Storage(type).FullName is "System.SByte" or "System.Int16";
-        return (access, offset, width, signed);
+        return (opcode, offset, width, signed, aggregate);
     }
 
     internal static (MethodDefinition Method, int Index) DirectTarget(MethodReference reference, bool tail,

@@ -22,10 +22,6 @@ internal static partial class ProofOutline
         readonly Names identifiers = new();
         int header;
         int names;
-        /// <summary>The operation as a load or store of an 8-byte unsigned struct field, else null.</summary>
-        static StructField? WordField(Operation operation) =>
-            operation is StructField { Access: FieldAccess.Store or FieldAccess.Load, Width: 8, Signed: false } field
-                ? field : null;
 
         string Footprint => "[" + string.Join(", ", fields.Where(item => item.Written)
             .Select(item => $"({item.Address(receiver)}, 8)")) + "]";
@@ -65,12 +61,13 @@ internal static partial class ProofOutline
             header = body.BlockStart(loops[0].Latch);
             for (var pc = 0; pc < body.Operations.Length; pc++)
             {
-                if (WordField(body.Operations[pc]) is not { } access) continue;
+                if (body.Method.StructFieldAt(pc) is not { Opcode: Code.Stfld or Code.Ldfld, IsAggregate: false,
+                    Width: 8, Signed: false } access) continue;
                 var offset = access.Offset;
                 if (spec.Method.Body.Instructions[pc].Operand is not FieldReference reference)
                     throw Unsupported("A receiver field has no metadata name");
                 var known = fields.FindIndex(field => field.Offset == offset);
-                var written = access.Access == FieldAccess.Store;
+                var written = access.Opcode == Code.Stfld;
                 if (known >= 0) fields[known] = fields[known] with { Written = fields[known].Written || written };
                 else
                 {
@@ -253,10 +250,11 @@ internal static partial class ProofOutline
                     var symbol = arithmetic.Symbol;
                     path.Stack.Add($"({left} {symbol} {right})");
                 }
-                else if (WordField(op) is { } fieldAccess)
+                else if (body.Method.StructFieldAt(pc) is { Opcode: Code.Stfld or Code.Ldfld, IsAggregate: false,
+                    Width: 8, Signed: false, Offset: var offset } fieldAccess)
                 {
-                    var field = fields.Single(field => field.Offset == fieldAccess.Offset);
-                    var store = fieldAccess.Access == FieldAccess.Store;
+                    var field = fields.Single(field => field.Offset == offset);
+                    var store = fieldAccess.Opcode == Code.Stfld;
                     var value = store ? Pop() : "";
                     if (Pop() != receiver) throw Unsupported("A receiver loop accesses another struct's field");
                     Access(path, field, store ? value : null, indent);
