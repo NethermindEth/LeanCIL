@@ -87,6 +87,33 @@ checking it once and using it twice costs fewer kernel heartbeats than reducing 
 invocations. The proof that uses the contract has more proof objects. The command-level
 measurements use the proof-cost frontend described below. Elapsed times are from one run.
 
+## Reusing a compiled field-read contract
+
+The scalar-profile methods `Gates.Reader.Read` and `ReadPacked` read four bytes by reference.
+The first reads an explicit-layout field at offset 8. The second reads a sequential field at
+offset 2 with one-byte packing. Each contract accepts arbitrary initialized contents of a
+24-byte caller allocation, grants read access only and requires the entire memory to remain
+equal after the call. Deep verification checks both layouts against the pinned assembly.
+
+The consumer sets the field's most significant byte to 128 and all other bytes to zero. It
+proves that some fuel returns `0x80000000` with identical caller memory. The direct proof
+supplies eight fuel and reduces the invocation. The proof using the contract obtains the fuel,
+return and memory equality from the universal theorem. All measurements use Lean 4.35.0.
+
+| Layout | Proof | Frontend heartbeats | Kernel heartbeats | Proof objects | Elapsed ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Explicit | Universal contract | 3,737,167 | 1,246,785 | 49 | 337 |
+| Explicit | Direct consumer | 3,501,647 | 1,249,312 | 91 | 293 |
+| Explicit | Consumer using contract | 56,417 | 7,700 | 371 | 6 |
+| Sequential | Universal contract | 3,700,831 | 1,232,107 | 49 | 318 |
+| Sequential | Direct consumer | 3,465,669 | 1,234,634 | 91 | 297 |
+| Sequential | Consumer using contract | 56,401 | 7,695 | 371 | 7 |
+
+The universal theorem uses a shared contract-introduction lemma costing another 2,893 kernel
+heartbeats for each layout. With that cost included, checking the contract once and applying
+it twice uses fewer kernel heartbeats than reducing two reads for either layout. The table
+gives command-level measurements after extraction. Image hashing and layout replay run separately.
+
 ## Measuring one module of another package
 
 The frontend runs without the C# driver, from any Lake package that depends on LeanCIL. From the
