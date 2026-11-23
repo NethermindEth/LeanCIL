@@ -500,6 +500,15 @@ size is representable and fits the heap budget, and the constructor returns norm
 object retains its runtime type across the call. With a zero budget, a positive-sized allocation
 fails even when both literals load.
 
+For the pinned .NET 11 Windows x64 body of `Throws.Percent(uint)`, Lean checks the original
+caller and the CoreLib constructor methods reached on the throwing path. Starting from empty
+memory, the loader interns both strings and the runtime supplies 128 bytes for the exception
+object. Under those conditions the decoded method returns the input through 100 and raises
+`ArgumentOutOfRangeException` at its original throw for every larger unsigned input. The proof
+works for arbitrary representable literal texts, including equal texts. Inputs through 100 also
+return with every caller memory untouched, before any runtime preparation. The ordinary entry from
+unprepared empty memory still relies on the recognized constructor fold for its exception guarantee.
+
 An in-place span constructor runs as a runtime-model call on a span home.
 `ObjectOperandsValid` requires its receiver to be the address of a local or parameter of the
 constructed type followed by one local or argument load, `ldnull` or int32 constant per
