@@ -14,7 +14,7 @@ using var fixtures = new Program();
 fixtures.PrepareLeanFixtures(
     "Tests.MetadataBuilder", "Tests.BodyEncoding", "Tests.ExtractionLayout", "Tests.ExtractionParameters",
     "Tests.FeatureEvidence", "Tests.LoweredCallRefusal",
-    "Tests.ScalarEvidence", "Tests.CoreStringLength", "Tests.CoreMonitor",
+    "Tests.ScalarEvidence", "Tests.CoreStringLength", "Tests.CoreMonitor", "Tests.CoreHeaderPointer",
     "Tests.LayoutCoverage", "Tests.TypeTestEvidence", "Tests.ThrowEvidence", "Tests.SpanEvidence",
     "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.AssemblyPins", "Tests.StaticValueEvidence", "Tests.SpanViews",
     "Tests.MemorySpanExecution", "Tests.ManagedPointerValues", "Tests.PrimitiveArrays", "Tests.ArrayElementReferences",

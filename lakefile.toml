@@ -49,6 +49,9 @@ name = "Tests.CoreLibImage"
 name = "Tests.CoreMonitor"
 
 [[lean_lib]]
+name = "Tests.CoreHeaderPointer"
+
+[[lean_lib]]
 name = "Tests.BodyLiteral"
 
 [[lean_lib]]

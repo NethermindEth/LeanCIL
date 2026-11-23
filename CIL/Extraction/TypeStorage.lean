@@ -177,7 +177,8 @@ def typeStorageAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Option St
   | type@(.functionPointer ..) => if callableLayoutsAt layoutAt type then
       StorageType.methodPointer <$> managedSignature type else none
   | .pointer (.atom scope name) =>
-    if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
+    if (scope == runtimeScope || scope == coreLibraryScope) &&
+        name ∈ ["System.SByte", "System.Byte", "System.Int16",
         "System.UInt16", "System.Char", "System.Int32", "System.UInt32", "System.Int64",
         "System.UInt64", "System.IntPtr", "System.UIntPtr"] then some .reference else none
   | .pointer (.enum _ underlying) =>

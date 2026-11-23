@@ -30,9 +30,11 @@ private def vectorOperand (width : Nat) (element : VectorOperand) : VectorOperan
 
 /-- The single-word broadcast used by the AVX2 execution lemmas. -/
 def broadcast256Method : MethodRef :=
-  let word := primitiveOperand "System.UInt64"
-  { owner := .atom intrinsicsScope (vectorOwnerName 256), name := name!"Create", hasThis := false,
-    genericArity := 0, returnType := (vectorOperand 256 word).1, parameters := [word.1] }
+  let word := TypeExpr.atom runtimeScope "System.UInt64"
+  { owner := .atom intrinsicsScope "System.Runtime.Intrinsics.Vector256",
+    name := name!"Create", hasThis := false, genericArity := 0,
+    returnType := .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector256`1") word,
+    parameters := [word] }
 
 /-- The result and parameters of a declaration at the supplied type argument. -/
 private def VectorMember.signature (member : VectorMember) (element : VectorOperand) :

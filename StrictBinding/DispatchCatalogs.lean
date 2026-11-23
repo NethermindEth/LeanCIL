@@ -279,16 +279,16 @@ def CatalogBound (image : PreparedImage) (item : MethodEvidence)
     (methods : List SpecializedMethod) : Prop :=
   ∃ actual, (selected image item methods).run = .ok (some actual) ∧ actual.Perm item.dispatchTypes
 
-/-- Whether this method is covered and whether its instructions select any class declarations. -/
+/-- Whether the claimed catalog equals the physically reconstructed declarations. -/
 private def checkItem (image : PreparedImage) (methods : List SpecializedMethod)
-    (item : MethodEvidence) : Except AuditError (Bool × Bool) := do
-  let some actual ← (selected image item methods).run | return (false, false)
-  if actual.Perm item.dispatchTypes then return (true, !actual.isEmpty)
+    (item : MethodEvidence) : Except AuditError Bool := do
+  let some actual ← (selected image item methods).run | return false
+  if actual.Perm item.dispatchTypes then return true
   throw (.dispatchMismatch item.original.token)
 
 /-- Every covered method has exactly the physically reconstructed declarations. -/
-private theorem bound_of_checkItem {image methods item any}
-    (checked : checkItem image methods item = .ok (true, any)) :
+private theorem bound_of_checkItem {image methods item}
+    (checked : checkItem image methods item = .ok true) :
     CatalogBound image item methods := by
   unfold checkItem at checked
   obtain ⟨value, physical, rest⟩ := CIL.Safety.except_bind_ok checked
@@ -300,26 +300,6 @@ private theorem bound_of_checkItem {image methods item any}
     · exact same
     · simp [same, throw] at rest
 #print axioms bound_of_checkItem
-
-/-- Every supported method selects its complete physical class catalog. -/
-private def checkMethods (image : PreparedImage) (items : List MethodEvidence)
-    (imports : List ImportSlot) : Except AuditError Bool := do
-  let coverage ← items.mapM (checkItem image (specializationTable items))
-  return imports.isEmpty && coverage.all Prod.fst && coverage.any Prod.snd
-
-/-- Every individual method was checked against the same physical image and program. -/
-theorem bound_of_checkMethods {image items imports}
-    (checked : checkMethods image items imports = .ok true) :
-    ∀ item ∈ items, CatalogBound image item (specializationTable items) := by
-  unfold checkMethods at checked
-  obtain ⟨coverage, read, yes⟩ := CIL.Safety.except_bind_ok checked
-  have all := (Bool.and_eq_true_iff.mp (Bool.and_eq_true_iff.mp (Except.ok.inj yes)).1).2
-  intro item mem
-  obtain ⟨⟨full, any⟩, member, result⟩ := read_member mem read
-  have covered : full = true := List.all_eq_true.mp all (full, any) member
-  subst full
-  exact bound_of_checkItem result
-#print axioms bound_of_checkMethods
 
 /-- An additional image has no class deriving from a non-core class of another assembly.
     Every declared parent chain reaches a recognized root, and no File row adds metadata. -/
@@ -340,42 +320,42 @@ private def checkNeighbour (home image : PreparedImage) : Except AuditError Bool
   let covered ← (closedParents image).run
   return covered.isSome
 
-/-- Every supplied pin participates in the audit. The selected class calls are local to one
-    image. Other images must have no descendants that could contribute a dispatch target. -/
-def check (images : List PinnedImage) (pins : List AssemblyPin) (items : List MethodEvidence)
-    (imports : List ImportSlot) : Except AuditError Bool := do
-  unless (images.map (·.identity)).Perm (pins.map (·.identity)) do return false
-  let first :: _ := items | return false
-  let prepared ← prepare images
-  let some home := prepared.find? (·.identity == first.assembly.identity) | return false
-  unless ← checkMethods home items imports do return false
-  let covered ← prepared.mapM (checkNeighbour home)
-  return covered.all id
+/-- Each method uses its own assembly's physical rows and the whole program's method indices. -/
+private def checkHome (prepared : List PreparedImage) (methods : List SpecializedMethod)
+    (items : List MethodEvidence) (home : PreparedImage) : Except AuditError Bool := do
+  let localItems := items.filter (fun item => item.assembly.identity == home.identity)
+  if localItems.isEmpty then return true
+  let coverage ← localItems.mapM (checkItem home methods)
+  unless coverage.all id do return false
+  let neighbours ← prepared.mapM (checkNeighbour home)
+  return neighbours.all id
 
-/-- The selected pin is the physical source of every catalog. Each other supplied image has
-    only local class parent chains ending at core roots. -/
-theorem bound_of_check {images pins items imports}
-    (checked : check images pins items imports = .ok true) :
-    ∃ prepared home, prepare images = .ok prepared ∧ home ∈ prepared ∧
-      (images.map (·.identity)).Perm (pins.map (·.identity)) ∧
-      (∀ other ∈ prepared, other.identity ≠ home.identity →
-        platformAssembly home = .ok false ∧ ParentsBound other) ∧
-      ∀ item ∈ items, CatalogBound home item (specializationTable items) := by
-  unfold check at checked
-  split at checked <;> try cases checked
-  split at checked <;> try cases checked
-  obtain ⟨prepared, preparedEq, rest⟩ := CIL.Safety.except_bind_ok checked
+/-- A checked method has the physical catalog in its own image. No other supplied image has
+    a class deriving from a non-core class in that image. -/
+private theorem bound_of_checkHome {prepared methods items home item}
+    (mem : item ∈ items) (same : item.assembly.identity == home.identity)
+    (checked : checkHome prepared methods items home = .ok true) :
+    CatalogBound home item methods ∧
+      ∀ other ∈ prepared, other.identity ≠ home.identity →
+        platformAssembly home = .ok false ∧ ParentsBound other := by
+  have localMem : item ∈ items.filter (fun i => i.assembly.identity == home.identity) :=
+    List.mem_filter.mpr ⟨mem, same⟩
+  unfold checkHome at checked
+  dsimp only at checked
+  split at checked
+  · rename_i empty
+    simp_all
+  obtain ⟨coverage, read, rest⟩ := CIL.Safety.except_bind_ok checked
   split at rest <;> try cases rest
-  rename_i home found
-  obtain ⟨localCheck, methodsEq, rest⟩ := CIL.Safety.except_bind_ok rest
-  cases localCheck <;> simp only [Bool.false_eq_true, ↓reduceIte] at rest
-  · cases rest
-  obtain ⟨bits, scanned, all⟩ := CIL.Safety.except_bind_ok rest
-  have allBits : bits.all id = true := Except.ok.inj all
-  refine ⟨prepared, home, preparedEq, List.mem_of_find?_eq_some found, by assumption, ?_,
-    bound_of_checkMethods methodsEq⟩
-  intro other mem different
-  obtain ⟨bit, member, probe⟩ := read_member mem scanned
+  rename_i all
+  obtain ⟨bit, member, result⟩ := read_member localMem read
+  have yes : bit = true := List.all_eq_true.mp all bit member
+  subst bit
+  refine ⟨bound_of_checkItem result, ?_⟩
+  obtain ⟨bits, scanned, final⟩ := CIL.Safety.except_bind_ok rest
+  have allBits : bits.all id = true := Except.ok.inj final
+  intro other otherMem different
+  obtain ⟨bit, member, probe⟩ := read_member otherMem scanned
   have full : bit = true := List.all_eq_true.mp allBits bit member
   subst bit
   unfold checkNeighbour at probe
@@ -385,7 +365,46 @@ theorem bound_of_check {images pins items imports}
   obtain ⟨value, valueEq, yes⟩ := CIL.Safety.except_bind_ok continued
   cases value <;> simp at yes
   exact ⟨coreEq, valueEq⟩
+#print axioms bound_of_checkHome
+
+/-- Check every selected method in its declaring image. Each image containing a selected
+    method must have a closed hierarchy relative to every other supplied pin. -/
+def check (images : List PinnedImage) (pins : List AssemblyPin) (items : List MethodEvidence)
+    (imports : List ImportSlot) : Except AuditError Bool := do
+  unless (images.map (·.identity)).Perm (pins.map (·.identity)) do return false
+  if items.isEmpty then return false
+  let prepared ← prepare images
+  unless items.all (fun item => prepared.any (fun image => item.assembly.identity == image.identity))
+    do return false
+  let covered ← prepared.mapM (checkHome prepared (specializationTable items) items)
+  return covered.all id && imports.isEmpty && items.any (fun item => !item.dispatchTypes.isEmpty)
+
+/-- Each selected catalog is reconstructed in the physical image that owns the method. -/
+theorem bound_of_check {images pins items imports}
+    (checked : check images pins items imports = .ok true) :
+    ∃ prepared, prepare images = .ok prepared ∧
+      (images.map (·.identity)).Perm (pins.map (·.identity)) ∧
+      ∀ item ∈ items, ∃ home ∈ prepared, item.assembly.identity = home.identity ∧
+        CatalogBound home item (specializationTable items) ∧
+        ∀ other ∈ prepared, other.identity ≠ home.identity →
+          platformAssembly home = .ok false ∧ ParentsBound other := by
+  unfold check at checked
+  split at checked <;> try cases checked
+  split at checked <;> try cases checked
+  obtain ⟨prepared, preparedEq, rest⟩ := CIL.Safety.except_bind_ok checked
+  split at rest <;> try cases rest
+  rename_i present
+  obtain ⟨bits, scanned, final⟩ := CIL.Safety.except_bind_ok rest
+  have allBits := (Bool.and_eq_true_iff.mp (Bool.and_eq_true_iff.mp (Except.ok.inj final)).1).1
+  refine ⟨prepared, preparedEq, by assumption, ?_⟩
+  intro item mem
+  obtain ⟨home, homeMem, same⟩ := List.any_eq_true.mp (List.all_eq_true.mp present item mem)
+  obtain ⟨bit, member, probe⟩ := read_member homeMem scanned
+  have covered : bit = true := List.all_eq_true.mp allBits bit member
+  subst bit
+  exact ⟨home, homeMem, eq_of_beq same, bound_of_checkHome mem same probe⟩
 #print axioms bound_of_check
+
 
 end StrictBinding.ClassDispatch
 
@@ -406,11 +425,12 @@ instance (images : List PinnedImage) (pins : List AssemblyPin) (items : List Met
 /-- Each claimed method catalog is a permutation of its reconstructed physical declarations. -/
 theorem DispatchCatalogsChecked.physical {images pins items imports}
     (checked : DispatchCatalogsChecked images pins items imports true) :
-    ∃ prepared home, prepare images = .ok prepared ∧ home ∈ prepared ∧
+    ∃ prepared, prepare images = .ok prepared ∧
       (images.map (·.identity)).Perm (pins.map (·.identity)) ∧
-      (∀ other ∈ prepared, other.identity ≠ home.identity →
-        platformAssembly home = .ok false ∧ ClassDispatch.ParentsBound other) ∧
-      ∀ item ∈ items, ClassDispatch.CatalogBound home item (specializationTable items) := by
+      ∀ item ∈ items, ∃ home ∈ prepared, item.assembly.identity = home.identity ∧
+        ClassDispatch.CatalogBound home item (specializationTable items) ∧
+        ∀ other ∈ prepared, other.identity ≠ home.identity →
+          platformAssembly home = .ok false ∧ ClassDispatch.ParentsBound other := by
   apply ClassDispatch.bound_of_check (pins := pins) (imports := imports)
   cases result : ClassDispatch.check images pins items imports with
   | error err => simp [DispatchCatalogsChecked, result, Except.toOption] at checked

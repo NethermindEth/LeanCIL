@@ -9,6 +9,7 @@
 #:include MultiAssemblyFixture.cs
 #:include DeepBinding.cs
 
+using System.Buffers.Binary;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
@@ -390,6 +391,92 @@ void CheckDispatchCatalogs()
             ("NeighbourImage", neighbour!), ("DerivedImage", derived));
         Console.WriteLine("PASS physical dispatch binds nested owners, byrefs and other pinned images");
     }
+    CheckTwoAssemblyCatalogs();
+}
+
+void CheckTwoAssemblyCatalogs()
+{
+    var library = fixture.Build("LocalClassLibrary", "Classes.Library", """
+        namespace Far;
+        public class Shape { }
+        public sealed class Second : Shape { }
+        public static class Reader { public static int Test(Shape value) => value is Second ? 2 : 0; }
+        """);
+    var app = fixture.Build("LocalClassApp", "Classes.App", """
+        namespace Near;
+        public class Shape { }
+        public sealed class First : Shape { }
+        public static class Reader {
+            public static int Both(Shape local, Far.Shape other) => Far.Reader.Test(other) + (local is First ? 4 : 0);
+        }
+        """, references: $"<Reference Include=\"Classes.Library\"><HintPath>{library}</HintPath></Reference>");
+    const string selector = "Near.Reader::Both(Near.Shape,Far.Shape)";
+    var changedLibrary = fixture.Artifact("ChangedClassLibrary");
+    Directory.CreateDirectory(changedLibrary);
+    var changed = Path.Combine(changedLibrary, Path.GetFileName(library));
+    RetargetForeignClassTest(library, changed);
+    var template = File.ReadAllText(At("Tests/StrictBinding/TwoClassTests.lean.in"));
+    foreach (var image in new[] { library, changed })
+    {
+        var original = image == library;
+        var output = fixture.Artifact(original ? "TwoAssemblyCatalogs" : "ChangedTwoAssemblyCatalogs");
+        Run([.. cli, "extract", app, selector, output, .. MultiAssemblyFixture.Reference(image)]);
+        var proof = Path.Combine(output, "Proof.lean");
+        var claim = original ? "Holds" : "Refuted";
+        var evidence = original
+            ? "holds (by rintro ⟨localMatch, other⟩; cases localMatch <;> cases other with " +
+              "| none => rfl | some subclass => cases subclass <;> rfl)"
+            : "refuted rfl";
+        File.WriteAllText(proof, template +
+            $"\ntheorem correctness : contract.{claim} Extracted.program 0 := {evidence}\n" +
+            "#print axioms correctness\nend BothCatalogs\n");
+        var pins = Path.Combine(output, "inputs.sha256");
+        File.WriteAllLines(pins, new[] { app, image }.Select(path => Sha(path) + "  " + path));
+        string[] binding = original ? ["--deep-checks", pins] : [];
+        Run([.. cli, "verify", output, "--proof", proof, "--theorem", "BothCatalogs.correctness", .. binding]);
+        using var receipt = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "verified.json")));
+        if (!original)
+        {
+            var method = receipt.RootElement.GetProperty("refutation").GetProperty("method");
+            if (method.GetProperty("assemblySha256").GetString() != Sha(app) ||
+                method.GetProperty("signature").GetString() != "System.Int32 " + selector)
+                throw new InvalidOperationException("Unexpected two-assembly refutation: " + method);
+            continue;
+        }
+        var fact = receipt.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+            .Single(item => item.GetProperty("id").GetString() == "dispatch-catalogs");
+        if (fact.GetProperty("status").GetString() != "reconfirmed" ||
+            fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
+            throw new InvalidOperationException("Expected both methods' physical class catalogs: " + fact);
+        ReplayImageCases(output, app, "AppImage", At("Tests/StrictBinding/TwoCatalogCases.lean"),
+            ["StrictBinding.DispatchCatalogs"], ("LibImage", library));
+    }
+    Console.WriteLine("PASS changing the foreign class token refutes the unchanged caller's return contract");
+}
+
+// The fixture's tiny method begins with ldarg.0 and isinst Far.Second. Change just its TypeDef token.
+static void RetargetForeignClassTest(string source, string destination)
+{
+    var bytes = File.ReadAllBytes(source);
+    using var pe = new PEReader(new MemoryStream(bytes));
+    var metadata = pe.GetMetadataReader();
+    TypeDefinitionHandle FarType(string name) => metadata.TypeDefinitions.Single(handle =>
+    {
+        var type = metadata.GetTypeDefinition(handle);
+        return metadata.StringComparer.Equals(type.Namespace, "Far") && metadata.StringComparer.Equals(type.Name, name);
+    });
+    var reader = metadata.GetTypeDefinition(FarType("Reader"));
+    var method = reader.GetMethods().Select(metadata.GetMethodDefinition)
+        .Single(definition => metadata.StringComparer.Equals(definition.Name, "Test"));
+    var body = pe.GetMethodBody(method.RelativeVirtualAddress);
+    if (!pe.PEHeaders.TryGetDirectoryOffset(new DirectoryEntry(method.RelativeVirtualAddress, body.Size), out var start)
+        || (bytes[start] & 3) != 2 || bytes[start + 1] != 0x02 || bytes[start + 2] != 0x75)
+        throw new InvalidDataException("Expected the tiny Far.Reader.Test body to start with ldarg.0; isinst.");
+    var operand = bytes.AsSpan(start + 3, sizeof(int));
+    if (BinaryPrimitives.ReadInt32LittleEndian(operand) != MetadataTokens.GetToken(FarType("Second")))
+        throw new InvalidDataException("Expected isinst Far.Second.");
+    BinaryPrimitives.WriteInt32LittleEndian(operand, MetadataTokens.GetToken(FarType("Shape")));
+    File.WriteAllBytes(destination, bytes);
 }
 
 void CheckClassTests(string assembly, string build, bool changed)

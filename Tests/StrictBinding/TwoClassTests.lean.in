@@ -1,0 +1,58 @@
+import Extracted
+import CIL.Safety.MethodContract
+
+/-! The two local class tests distinguish a foreign subclass from its base and null. -/
+
+namespace BothCatalogs
+open CIL CIL.Extraction CIL.Safety
+
+/-- A caller-owned object in one of the selected assemblies. -/
+private def objectAt (scope name : String) (bases : List TypeExpr) : Allocation :=
+  ⟨.object ⟨.object scope name, bases⟩, ⟨8, 8, []⟩, true, []⟩
+
+/-- The caller owns one local subclass, one foreign subclass, and one plain foreign base. -/
+private def caller : Safety.Memory := { Safety.Memory.empty with
+  allocations := fun id => match id with
+    | 0 => some (objectAt Extracted.assembly0.identity "Near.First"
+        [.object Extracted.assembly0.identity "Near.Shape"])
+    | 1 => some (objectAt Extracted.assembly1.identity "Far.Second"
+        [.object Extracted.assembly1.identity "Far.Shape"])
+    | 2 => some (objectAt Extracted.assembly1.identity "Far.Shape" [])
+    | _ => none
+  nextIdentity := 3 }
+
+/-- The second argument ranges over null, the subclass and its base. -/
+private def foreignReference : Option Bool → ManagedReference
+  | none => .null
+  | some true => .address ⟨1, 0⟩
+  | some false => .address ⟨2, 0⟩
+
+/-- Each exact subclass contributes its own weight. -/
+private def total (input : Bool × Option Bool) : W32 :=
+  (if input.1 then 4 else 0) + (if input.2 == some true then 2 else 0)
+
+/-- The independent class tests preserve all three caller allocations. -/
+def contract : MethodContract (Bool × Option Bool) W32 where
+  args input := [.object (if input.1 then .address ⟨0, 0⟩ else .null),
+    .object (foreignReference input.2)]
+  results value := [.scalar (.i32 value)]
+  pre _ memory := memory = caller
+  footprint _ := []
+  post input before after value := after = before ∧ value = total input
+
+/-- The six combinations of local and foreign reference establish the full contract. -/
+theorem holds (ran : ∀ input, invoke Extracted.program 32 0 (contract.args input) caller =
+    .ok (caller, contract.results (total input))) : contract.Holds Extracted.program 0 := by
+  rintro input _ rfl
+  exact MethodContract.Holds.intro (c := contract) _ _ ⟨32, ran input⟩
+    (Confined.refl [] _) ⟨rfl, rfl⟩
+#print axioms holds
+
+/-- A plain foreign base returning two contradicts the required zero at the original entry. -/
+theorem refuted (ran : invoke Extracted.program 32 0 (contract.args (false, some false)) caller =
+    .ok (caller, [.scalar (.i32 2)])) : contract.Refuted Extracted.program 0 := by
+  apply MethodContract.Refuted.of_return (c := contract) (input := (false, some false)) rfl ran
+  rintro ⟨_, value, encoded, _, rfl⟩
+  revert encoded
+  decide +kernel
+#print axioms refuted

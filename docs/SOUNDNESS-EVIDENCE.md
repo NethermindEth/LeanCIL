@@ -285,7 +285,9 @@ What `MetadataResolution` and `MetadataBinding` check:
   The two-argument `Monitor.Enter` wrapper reads the flag byte before calling either helper.
   When the object overload returns successfully and the byref remains writable, the wrapper
   sets that byte to one. Monitor ownership, the pinned object header and atomic updates are
-  outside this wrapper contract.
+  outside this wrapper contract. Pointers to the supported integer primitives in the defining
+  CoreLib image use allocation-relative references. The four-byte subtraction in the x64
+  object-header helper preserves memory and requires the result to stay within its allocation.
   An instance field access needs its owner's definition in a carried slice, which gives the
   field's index. Lean also binds the two fields of a platform ``ValueTuple`2`` when its generic
   signature marks the head as a value type and its own `TypeRef` names the supported
@@ -433,11 +435,12 @@ interface slot, the MethodImpl row must name the implementing class and two loca
 with matching nongeneric instance signatures. The catalog records the interface and the exact
 declaration token. A class outside the selected hierarchy may implement an external interface
 when its body MethodDef belongs to that class.
-If extra assemblies are pinned, each must have a distinct identity. Every class parent in
-each additional image must resolve locally or name the core Object, ValueType or Enum.
-The audit checks each chain for cycles and each file table for additional metadata modules.
-The selected hierarchy must then belong to a non-core image. The physical-catalog theorem
-identifies that image and establishes the closed parent chains of the others.
+Each selected method uses the physical image matching its own assembly identity. A single
+extraction can use local class tests and virtual slots in several assemblies. When more than one
+image is pinned, each selected hierarchy must belong to a non-core image. Class parents in the
+other images must resolve locally or name the core Object, ValueType or Enum. The audit checks
+parent chains for cycles and file tables for additional metadata modules. The physical-catalog
+theorem identifies the image and the reconstructed catalog for every selected method.
 Nonlocal class tests, constrained calls, interface dispatch,
 cross-image dispatch, other override forms on selected classes, additional metadata modules
 and unsupported signatures leave this fact uncovered.

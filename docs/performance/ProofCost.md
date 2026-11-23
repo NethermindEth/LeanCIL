@@ -108,6 +108,35 @@ proof and 186,310 for the 512-bit proof. Both proof terms have 773 objects, comp
 with the call theorem, compared with 350 and 414 ms by reduction. The production equality
 fixtures use the call theorem and check a compiled second-load substitution at each width.
 
+## Reusing an AVX2 AND-NOT contract
+
+The x64-v3 extraction of `Examples.DivisionIntrinsics.AndNot` broadcasts two 64-bit words,
+applies AVX2 AND-NOT and returns lane three. The contract covers every pair of words and
+preserves the caller's memory. The .NET 10 assembly at `27953edb` and the .NET 11 assembly
+at `97b318f7` have the same MethodDef token, complete tiny method body (24 IL bytes) and
+empty local signature. Lean 4.35.0 checked both extractions.
+
+| Interpreter | Proof | Frontend heartbeats | Kernel heartbeats | Proof objects | Elapsed ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Base | Universal contract | 67,714 | 4,355 | 273 | 7 |
+| Canonical at 97b318f7 | Universal contract | 1,674,992 | 477,046 | 361 | 145 |
+| Canonical with literal broadcast signature | Universal contract | 494,340 | 130,729 | 361 | 42 |
+| Base | Direct witness | 719,384 | 141,620 | 97 | 62 |
+| Canonical | Direct witness | 4,727,138 | 1,216,915 | 97 | 437 |
+| Base | Consumer using contract | 59,649 | 6,157 | 511 | 6 |
+| Canonical | Consumer using contract | 59,636 | 6,157 | 511 | 8 |
+
+The witness uses inputs one and two and returns two in unchanged memory. Direct reduction
+uses 16 fuel. The other consumer instantiates the all-input contract at the same words and
+memory. Both modules passed standalone kernel replay. On the canonical model, proving that
+the extracted body has the broadcast helper's method shape took 366,114 kernel heartbeats
+in isolation. Comparing just the broadcast member with the name formatted from its width
+cost 363,912 kernel heartbeats. Using its literal metadata name took 2,119. The optimized
+contract uses the same 361 proof objects and retains the 6,157-heartbeat consumer. Stepping
+the four resolved call sites separately took 194,168 kernel heartbeats, 9,079 proof objects
+and 648 ms of elaboration.
+
+
 ## Reusing an in-place vector swap contract
 
 On Lean 4.35.0, the `arm64-advsimd` extraction of `DivisionIntrinsics.SwapHalves` exchanges
