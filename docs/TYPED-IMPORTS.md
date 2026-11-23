@@ -59,8 +59,11 @@ computed from the selected module, and `ImportedLocalLayoutsBound` in
 slot that publishes its identity. Imported entries carry no interfaces, so they
 cannot satisfy a generic constraint.
 
-The public catalog is a signature closure. It is not the full implementation layout
-table. Private layouts can occur before or between its entries. The generated
+The public catalog contains the layouts reached from the exported signature.
+The extractor matches each referenced struct to a unique definition in the pinned
+implementation by assembly, namespace and enclosing types. Export and import use
+that definition for field offsets and alignment. Private layouts can occur before
+or between the public entries in the implementation table. The generated
 export audit kernel-checks `LayoutProjectionValid`, which reindexes nested
 aggregate references, checks raw metadata equality and equates each public
 computed layout with its selected implementation layout. The caller's required

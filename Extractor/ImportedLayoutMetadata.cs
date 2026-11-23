@@ -8,11 +8,13 @@ internal sealed record ContractLayout(string Identity, string Scope, string Name
 
 internal static class ImportedLayoutMetadata
 {
-    internal static ContractLayout[] ForType(TypeReference reference, ModuleDefinition selected, string architecture)
+    /// <summary>One sidecar layout and the pinned TypeDef that supplies its fields and offsets.</summary>
+    internal sealed record SelectedLayout(TypeDefinition Definition, ContractLayout Layout);
+
+    internal static SelectedLayout[] ForType(TypeReference reference, ModuleDefinition selected, string architecture)
     {
-        List<ContractLayout> layouts = [];
-        Include(Definition(reference, selected), selected, architecture, layouts,
-            new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
+        List<SelectedLayout> layouts = [];
+        Include(Definition(reference, selected), selected, architecture, layouts, [], []);
         return layouts.ToArray();
     }
 
@@ -36,7 +38,7 @@ internal static class ImportedLayoutMetadata
         }
     }
 
-    internal static ContractLayout[] Signature(MethodReference method, ModuleDefinition selected, string architecture)
+    internal static SelectedLayout[] Signature(MethodReference method, ModuleDefinition selected, string architecture)
     {
         List<TypeDefinition> roots = [];
         foreach (TypeReference parameter in CallReturnType.Parameters(method))
@@ -50,9 +52,9 @@ internal static class ImportedLayoutMetadata
         TypeReference returned = CallReturnType.Resolve(method);
         if (returned.MetadataType != MetadataType.Void && !ContractMethodMetadata.Primitive(returned))
             throw new InvalidDataException("Imported returns require void or a primitive integer.");
-        List<ContractLayout> layouts = [];
-        HashSet<string> active = new(StringComparer.Ordinal);
-        HashSet<string> included = new(StringComparer.Ordinal);
+        List<SelectedLayout> layouts = [];
+        HashSet<TypeDefinition> active = [];
+        HashSet<TypeDefinition> included = [];
         foreach (TypeDefinition root in roots.OrderBy(type => type.FullName, StringComparer.Ordinal))
             Include(root, selected, architecture, layouts, active, included);
         return layouts.ToArray();
@@ -60,20 +62,22 @@ internal static class ImportedLayoutMetadata
 
     internal static TypeDefinition Definition(TypeReference reference, ModuleDefinition selected)
     {
-        bool scope = reference.Scope is ModuleDefinition module ? ReferenceEquals(module, selected) :
-            reference.Scope is AssemblyNameReference assembly && assembly.FullName == selected.Assembly.Name.FullName;
+        // A sidecar names layouts by full name. Its entry must be unique in the selected assembly.
         TypeDefinition[] matches = selected.GetTypes().Where(type => type.FullName == reference.FullName).ToArray();
-        if (!scope || reference is TypeSpecification || !reference.IsValueType || matches.Length != 1 || !matches[0].IsValueType)
+        if (reference.Scope is ModuleDefinition module && !ReferenceEquals(module, selected) ||
+            reference.Scope is not (ModuleDefinition or AssemblyNameReference) ||
+            reference is TypeSpecification || !reference.IsValueType || matches.Length != 1 || !matches[0].IsValueType ||
+            StructuralSignatures.Current.Type(reference) != StructuralSignatures.Current.Type(matches[0]))
             throw new InvalidDataException("Imported value type is not directly defined in its pinned implementation: " + reference.FullName);
         return matches[0];
     }
 
-    static void Include(TypeDefinition type, ModuleDefinition selected, string architecture, List<ContractLayout> layouts,
-        HashSet<string> active, HashSet<string> included)
+    static void Include(TypeDefinition type, ModuleDefinition selected, string architecture, List<SelectedLayout> layouts,
+        HashSet<TypeDefinition> active, HashSet<TypeDefinition> included)
     {
         string identity = LayoutEvidence.Identity(type);
-        if (included.Contains(identity)) return;
-        if (active.Count >= 128 || !active.Add(identity))
+        if (included.Contains(type)) return;
+        if (active.Count >= 128 || !active.Add(type))
             throw new InvalidDataException("Recursive imported layout: " + identity);
         MetadataValidation.Layout(type, selected, architecture);
         foreach (MetadataValidation.InstanceField field in MetadataValidation.Fields(type))
@@ -85,11 +89,11 @@ internal static class ImportedLayoutMetadata
             return new ContractLayoutField(field.Name, ContractType.Read(field.Type), Storage(field.Type, selected),
                 field.Definition.Offset < 0 ? null : field.Definition.Offset);
         }).ToArray();
-        layouts.Add(new(identity, selected.Assembly.Name.FullName, type.FullName, type.IsValueType,
+        layouts.Add(new(type, new(identity, selected.Assembly.Name.FullName, type.FullName, type.IsValueType,
             ContractType.Read(type.BaseType), type.IsExplicitLayout, type.IsAutoLayout,
-            type.PackingSize, type.ClassSize, fields));
-        active.Remove(identity);
-        included.Add(identity);
+            type.PackingSize, type.ClassSize, fields)));
+        active.Remove(type);
+        included.Add(type);
     }
 
     static string Storage(TypeReference type, ModuleDefinition selected)
@@ -128,10 +132,11 @@ internal static class ImportedLayoutMetadata
         return $"[{string.Join(", ", rows)}]";
     }
 
-    internal static string ComputedLean(ContractLayout[] layouts, ModuleDefinition selected, string architecture) =>
+    internal static string ComputedLean(SelectedLayout[] layouts, string architecture) =>
         "#[" + string.Join(", ", layouts.Select(layout =>
         {
-            TypeDefinition type = Definition(new TypeReference("", layout.Name, selected, selected) { IsValueType = true }, selected);
+            TypeDefinition type = layout.Definition;
+            var selected = type.Module;
             MetadataValidation.AggregateInfo computed = MetadataValidation.AggregateLayout(type, selected, architecture);
             return "⟨⟨" + computed.Size + ", [" + string.Join(", ", MetadataValidation.Fields(type).Select(field =>
                 "⟨" + computed.Offsets[field.Definition.FullName] + ", " +

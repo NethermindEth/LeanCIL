@@ -214,14 +214,16 @@ internal sealed class ImportResolution : IDisposable
         (string Identity, string Profile) key = (identity, profile.Name);
         if (!validatedMetadata.TryGetValue(key, out ValidatedMetadata metadata))
         {
+            ImportedLayoutMetadata.SelectedLayout[] selected = [];
             ContractLayout[] actualLayouts = [];
             if (library.Interface.FormatVersion == 2)
             {
-                actualLayouts = ImportedLayoutMetadata.Signature(selection.Reference, library.Module, profile.Architecture);
+                selected = ImportedLayoutMetadata.Signature(selection.Reference, library.Module, profile.Architecture);
+                actualLayouts = [.. selected.Select(item => item.Layout)];
                 if (!MetadataEqual(export.TypedSignature, selection.Signature) || !MetadataEqual(export.Layouts, actualLayouts))
                     throw new InvalidDataException("Contract import typed signature or raw layout differs from selected implementation metadata.");
             }
-            metadata = new(actualLayouts, ImportedLayoutMetadata.ComputedLean(actualLayouts, library.Module, profile.Architecture));
+            metadata = new(actualLayouts, ImportedLayoutMetadata.ComputedLean(selected, profile.Architecture));
         }
         StaticIdentity.ValidateFields(certification.StaticIdentities, library.Module);
         if (library.Interface.IsReferenceAssembly &&
@@ -331,9 +333,8 @@ internal sealed class ImportResolution : IDisposable
         TypeDefinition definition = ImportedLayoutMetadata.Definition(type, library.Module);
         if (MetadataValidation.IsByRefLike(definition))
             throw new InvalidDataException("Unsupported byref-like imported aggregate local: " + type.FullName);
-        foreach (ContractLayout layout in PublishedClosure(definition, library, profile, requirePublished: true))
-            localLayouts.TryAdd(layout.Identity, library.Module.GetTypes()
-                .Single(candidate => LayoutEvidence.Identity(candidate) == layout.Identity));
+        foreach (var item in PublishedClosure(definition, library, profile, requirePublished: true))
+            localLayouts.TryAdd(item.Layout.Identity, item.Definition);
         return true;
     }
 
@@ -371,12 +372,13 @@ internal sealed class ImportResolution : IDisposable
     }
 
     // Every layout in the selected closure must equal each published copy; locals also need one.
-    ContractLayout[] PublishedClosure(TypeReference element, Library library, FeatureProfile profile,
+    ImportedLayoutMetadata.SelectedLayout[] PublishedClosure(TypeReference element, Library library, FeatureProfile profile,
         bool requirePublished)
     {
-        ContractLayout[] actual = ImportedLayoutMetadata.ForType(element, library.Module, profile.Architecture);
-        foreach (ContractLayout layout in actual)
+        var actual = ImportedLayoutMetadata.ForType(element, library.Module, profile.Architecture);
+        foreach (var item in actual)
         {
+            var layout = item.Layout;
             ContractLayout[] published = library.Interface.Exports.SelectMany(export => export.Layouts ?? [])
                 .Where(candidate => candidate.Identity == layout.Identity).ToArray();
             if (requirePublished && published.Length == 0)

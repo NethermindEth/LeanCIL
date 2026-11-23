@@ -317,8 +317,9 @@ partial class Program
         if (!IsExportableMethod(method))
             throw new InvalidDataException(
                 "Contract exports require a public or protected static, non-virtual, closed method.");
-        ContractLayout[] layouts = ImportedLayoutMetadata.Signature(selection.Reference, module, profile.Architecture);
-        string computedLayouts = ImportedLayoutMetadata.ComputedLean(layouts, module, profile.Architecture);
+        var selectedLayouts = ImportedLayoutMetadata.Signature(selection.Reference, module, profile.Architecture);
+        ContractLayout[] layouts = [.. selectedLayouts.Select(item => item.Layout)];
+        string computedLayouts = ImportedLayoutMetadata.ComputedLean(selectedLayouts, profile.Architecture);
         string[] layoutIdentities = identity.GetProperty("layoutIdentities").Deserialize<string[]>()!;
         int[] projection = ImportedLayoutMetadata.Projection(layouts, layoutIdentities);
         if (FeatureProfile.Select(profile.Name) != profile)
