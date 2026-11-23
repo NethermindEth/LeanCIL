@@ -82,26 +82,26 @@ internal abstract record LocalKind
         };
     }
 
-    /// <summary>A callable pointer of the given signature (a Lean term).</summary>
-    internal sealed record MethodPointer(string Signature) : LocalKind
+    /// <summary>A callable pointer of the given metadata signature.</summary>
+    internal sealed record MethodPointer(CallableSignature Signature) : LocalKind
     {
-        internal override string ToLean() => $".methodPointer {Signature}";
+        internal override string ToLean() => $".methodPointer {Signature.Lean}";
 
         internal override InitialValue Initial() => InitialValue.NullRef;
     }
 
     /// <summary>A table of callable pointers of the given signature.</summary>
-    internal sealed record MethodTable(string Signature) : LocalKind
+    internal sealed record MethodTable(CallableSignature Signature) : LocalKind
     {
-        internal override string ToLean() => $".methodTable {Signature}";
+        internal override string ToLean() => $".methodTable {Signature.Lean}";
 
         internal override InitialValue Initial() => InitialValue.NullRef;
     }
 
     /// <summary>A native address into a table of callable pointers; only the evaluation stack holds one.</summary>
-    internal sealed record NativeMethodTable(string Signature) : LocalKind
+    internal sealed record NativeMethodTable(CallableSignature Signature) : LocalKind
     {
-        internal override string ToLean() => $".nativeMethodTable {Signature}";
+        internal override string ToLean() => $".nativeMethodTable {Signature.Lean}";
     }
 
     /// <summary>A span or span reference over an enumeration element; only the evaluation stack holds one.</summary>

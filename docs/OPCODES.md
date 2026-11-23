@@ -139,8 +139,9 @@ only if some extracted body takes that closed address. Each entry binds the scop
 identity, generic arguments and program index to an extracted body, and pointer identities
 survive linking. Supported signatures have primitive integer, enum, reference-free aggregate or
 integer-vector parameters and results, managed references to those types, and void results.
-Closed generic structs keep their exact scoped identity, and calling conventions are checked
-exactly.
+The extractor matches catalog entries and stack slots by the calling convention, receiver flags,
+result and ordered parameter types in pinned metadata. Named types retain their assembly,
+namespace and nesting. Closed generic structs retain their type arguments.
 
 Supplied immutable `nint*` tables admit byte-offset addition in either operand order, `ldind.i`
 and native target locals. Offsets are int32 or native integers; other scalar types are rejected.

@@ -32,8 +32,8 @@ internal static class LeanEmitter
     {
         layouts?.Require(module, architecture);
         if (ManagedPointers.Signature(type) is { } pointer)
-            return type is ArrayType ? new LocalKind.MethodTable(ManagedPointers.SignatureEvidence(pointer))
-                : new LocalKind.MethodPointer(ManagedPointers.SignatureEvidence(pointer));
+            return type is ArrayType ? new LocalKind.MethodTable(new(pointer))
+                : new LocalKind.MethodPointer(new(pointer));
         if (type is ByReferenceType or PointerType) return new LocalKind.Reference();
         if (ObjectTypes.Reference(type) || ReferenceArrays.Is(type)) return new LocalKind.Object();
         if (Arrays.Of(type, architecture) is { } element) return new LocalKind.Array(element);

@@ -234,6 +234,20 @@ using (var pinned = new PinnedMetadata(extractor, path))
     var pointer = new FunctionPointerType { ReturnType = split[0] };
     var otherPointer = new FunctionPointerType { ReturnType = split[0] };
     Equal(pointer, otherPointer, true, "Equal function pointers differ");
+    var standalone = new CallSite(split[0]);
+    var callable = signatureType.GetMethod("Callable", Instance)!;
+    object Callable(IMethodSignature signature) => callable.Invoke(signatures, [signature])!;
+    Require(Callable(standalone).Equals(Signature(pointer)), "Call site and pointer type have different keys");
+    var pointers = extractor.GetType("Nethermind.LeanCIL.ManagedPointers", true)!;
+    var same = pointers.GetMethod("SameSignature", Static)!;
+    bool Matches(IMethodSignature right) => (bool)same.Invoke(null, [standalone, right])!;
+    Require(Matches(pointer), "Equivalent managed signatures failed to match");
+    standalone.Parameters.Add(new ParameterDefinition(new ByReferenceType(module.TypeSystem.UInt32)));
+    Require(!Matches(pointer), "A missing managed reference parameter matched");
+    pointer.Parameters.Add(new ParameterDefinition(new ByReferenceType(module.TypeSystem.UInt32)));
+    Require(Matches(pointer) && Callable(standalone).Equals(Signature(pointer)),
+        "Equivalent managed reference parameters failed to match");
+    pointer.Parameters.Clear();
     otherPointer.HasThis = true;
     Equal(pointer, otherPointer, false, "Function pointer flags were erased");
     otherPointer.HasThis = false;

@@ -44,7 +44,7 @@ internal static class NativeOperands
         internal Kind Kind => CallableKind(Metadata) ?? shape;
 
         /// <summary>The signature of a callable pointer or table.</summary>
-        internal string Signature => Metadata switch
+        internal CallableSignature Signature => Metadata switch
         {
             LocalKind.MethodPointer pointer => pointer.Signature,
             LocalKind.MethodTable table => table.Signature,
@@ -92,7 +92,7 @@ internal static class NativeOperands
 
     static StackType CallableType(IMethodSignature signature, bool table = false)
     {
-        var evidence = ManagedPointers.SignatureEvidence(signature);
+        var evidence = new CallableSignature(signature);
         return table ? new(Kind.MethodTable, new LocalKind.MethodTable(evidence))
             : new(Kind.MethodPointer, new LocalKind.MethodPointer(evidence));
     }

@@ -165,6 +165,12 @@ internal sealed class StructuralSignatures(PinnedAssemblies owner)
 
     sealed record Snapshot(long[] Prefix, TypeReference[] Children);
 
+    /// <summary>CLI calling convention, receiver flags, result and ordered parameter types.</summary>
+    static Snapshot CallableShape(IMethodSignature signature) =>
+        new([13, (int)signature.CallingConvention, signature.HasThis ? 1 : 0,
+            signature.ExplicitThis ? 1 : 0, signature.Parameters.Count],
+            [signature.ReturnType, .. signature.Parameters.Select(parameter => parameter.ParameterType)]);
+
     Snapshot Describe(TypeReference type)
     {
         switch (type)
@@ -203,10 +209,7 @@ internal sealed class StructuralSignatures(PinnedAssemblies owner)
                     bounds.Add(dimension.UpperBound ?? 0);
                 }
                 return new([.. bounds], [array.ElementType]);
-            case FunctionPointerType pointer:
-                return new([13, (int)pointer.CallingConvention, pointer.HasThis ? 1 : 0,
-                    pointer.ExplicitThis ? 1 : 0, pointer.Parameters.Count],
-                    [pointer.ReturnType, .. pointer.Parameters.Select(parameter => parameter.ParameterType)]);
+            case FunctionPointerType pointer: return CallableShape(pointer);
             case TypeSpecification:
                 throw new InvalidDataException("Unsupported structural type specification");
             default: return new([], []);
@@ -216,6 +219,14 @@ internal sealed class StructuralSignatures(PinnedAssemblies owner)
     /// <summary>A fresh iterative snapshot observes every mutable wrapper once and rejects cycles.</summary>
     internal Signature Type(TypeReference type)
         => new(this, Types([type])[0]);
+
+    /// <summary>The same signature node for a standalone call site, a method or its pointer type.</summary>
+    internal Signature Callable(IMethodSignature signature)
+    {
+        var shape = CallableShape(signature);
+        var types = Types(shape.Children);
+        return new(this, Intern(shape.Prefix.Concat(types.Select(id => (long)id))));
+    }
 
     /// <summary>An ordered signature list shares one snapshot across all of its roots.</summary>
     internal Signature Ordered(IEnumerable<TypeReference> roots)

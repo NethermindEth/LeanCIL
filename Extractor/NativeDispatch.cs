@@ -33,7 +33,7 @@ internal sealed class NativeDispatch
         if (signature is null) return null;
         var table = type is PointerType pointer && Native(pointer.ElementType);
         if (!table && !(local is { } index && pointerLocals.Contains(index) && Native(type))) return null;
-        var evidence = ManagedPointers.SignatureEvidence(signature);
+        var evidence = new CallableSignature(signature);
         return table ? new LocalKind.MethodTable(evidence) : new LocalKind.MethodPointer(evidence);
     }
 

@@ -4,6 +4,16 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
+/// <summary>A callable stack slot compares by its pinned metadata and carries its Lean rendering for emission.</summary>
+internal sealed class CallableSignature(IMethodSignature signature) : IEquatable<CallableSignature>
+{
+    readonly StructuralSignatures.Signature key = StructuralSignatures.Current.Callable(signature);
+    internal string Lean { get; } = ManagedPointers.SignatureEvidence(signature);
+    public bool Equals(CallableSignature? other) => other is not null && key == other.key;
+    public override bool Equals(object? other) => other is CallableSignature signature && Equals(signature);
+    public override int GetHashCode() => key.GetHashCode();
+}
+
 /// <summary>
 /// A managed method a callable pointer may name: its identity as a Lean term and its index in the extraction.
 /// </summary>
@@ -19,12 +29,13 @@ internal static class ManagedPointers
 {
     sealed class CatalogCache(IReadOnlyDictionary<MethodDefinition, int> methods)
     {
-        internal readonly Dictionary<string, KeyValuePair<MethodDefinition, int>[]> Targets = methods
+        internal readonly Dictionary<StructuralSignatures.Signature, KeyValuePair<MethodDefinition, int>[]> Targets = methods
             .Where(pair => !pair.Key.HasThis && !pair.Key.ExplicitThis &&
                 pair.Key.CallingConvention == MethodCallingConvention.Default)
-            .GroupBy(pair => SignatureEvidence(pair.Key), StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
-        internal readonly Dictionary<string, ValueList<ManagedTarget>> Catalogs = new(StringComparer.Ordinal);
+            .GroupBy(pair => StructuralSignatures.Current.Callable(pair.Key))
+            .ToDictionary(group => group.Key, group => group.ToArray());
+        internal readonly Dictionary<(StructuralSignatures.Signature Signature, int Caller), ValueList<ManagedTarget>>
+            Catalogs = [];
     }
 
     static readonly ConditionalWeakTable<IReadOnlyDictionary<MethodDefinition, int>, CatalogCache> Catalogs = new();
@@ -65,7 +76,7 @@ internal static class ManagedPointers
         MetadataValidation.Type(type, module, returns: result, architecture: architecture);
     }
 
-    internal static string TypeEvidence(TypeReference type)
+    static string TypeEvidence(TypeReference type)
     {
         if (type is ByReferenceType reference) return $".byref ({TypeEvidence(reference.ElementType)})";
         if (type.MetadataType == MetadataType.Void) return ".void";
@@ -103,9 +114,7 @@ internal static class ManagedPointers
         !left.HasThis && !right.HasThis && !left.ExplicitThis && !right.ExplicitThis &&
         left.CallingConvention == MethodCallingConvention.Default &&
         right.CallingConvention == MethodCallingConvention.Default &&
-        TypeEvidence(left.ReturnType) == TypeEvidence(right.ReturnType) &&
-        left.Parameters.Select(parameter => TypeEvidence(parameter.ParameterType))
-            .SequenceEqual(right.Parameters.Select(parameter => TypeEvidence(parameter.ParameterType)));
+        StructuralSignatures.Current.Callable(left) == StructuralSignatures.Current.Callable(right);
 
     // Inspect a closed address signature before attempting to admit its body or constraints.
     internal static IMethodSignature ReferenceSignature(MethodReference target)
@@ -128,8 +137,8 @@ internal static class ManagedPointers
     internal static ValueList<ManagedTarget> Catalog(IMethodSignature signature,
         IReadOnlyDictionary<MethodDefinition, int> methods, int caller, bool tail)
     {
-        var signatureKey = SignatureEvidence(signature);
-        var key = signatureKey + ":" + (tail ? -1 : caller);
+        var signatureKey = StructuralSignatures.Current.Callable(signature);
+        var key = (signatureKey, tail ? -1 : caller);
         var cache = Catalogs.GetValue(methods, static values => new(values));
         if (cache.Catalogs.TryGetValue(key, out var catalog)) return catalog;
         var targets = cache.Targets.GetValueOrDefault(signatureKey, [])

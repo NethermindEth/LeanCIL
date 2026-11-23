@@ -484,7 +484,7 @@ internal static class MetadataValidation
         Dictionary<MethodDefinition, MethodDefinition[]> chains = [];
         Dictionary<MethodDefinition, List<(MethodDefinition Method, bool Deferred)>> dependencies = [];
         MethodReference[]? addressedMethods = null;
-        Dictionary<string, MethodDefinition[]> indirectTargets = new(StringComparer.Ordinal);
+        Dictionary<StructuralSignatures.Signature, MethodDefinition[]> indirectTargets = [];
         // Call sites already reported, or whose callee was not analysed, have no translation to check.
         HashSet<Instruction> skipped = [];
         bool Check(MethodDefinition method, Instruction? at, Action check, bool named = false)
@@ -773,7 +773,7 @@ internal static class MetadataValidation
                             throw new InvalidDataException(
                                 "Unsupported indirect call in a referenced assembly: " + method.FullName);
                         ManagedPointers.Validate(site, module, profile.Architecture);
-                        var signature = ManagedPointers.SignatureEvidence(site);
+                        var signature = StructuralSignatures.Current.Callable(site);
                         if (!indirectTargets.TryGetValue(signature, out var targets))
                         {
                             // An open address is reached only through a specialized body's own ldftn. A
