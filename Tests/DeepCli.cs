@@ -285,7 +285,8 @@ void CheckGenericConstraints()
         {
             public static int Read<T>(int n) where T : struct, IClosed<int> => n + 1;
             public static int ReadWide<T>(int n) where T : struct, IClosed<long> => n + 1;
-            public static int Entry(int n) => ReadWide<Pair<int, long>>(Read<Both>(n));
+            public static int Identity<T, U>(int n) where T : struct, IClosed<U> where U : unmanaged => n;
+            public static int Entry(int n) => ReadWide<Pair<int, long>>(Read<Both>(Identity<Both, int>(n)));
         }
         """);
     var extracted = fixture.Artifact("GenericExtraction");
@@ -324,13 +325,15 @@ void CheckDispatchCatalogs()
         var assembly = fixture.Build(build, "DeepCli.Dispatch", $$"""
             namespace Geometry;
             public interface IShapeTag { int Tag(); int OtherTag(); }
+            public interface IScale<T, U> { }
             public interface IColour { }
             public abstract class Shape { public abstract int Sides(); }
             public class Triangle : Shape, IShapeTag, IColour {
                 public override int Sides() => 3;
                 public int ReadScale(ref int scale) => scale;
                 public T Load<T>(ref T value) => value;
-                public static U Pick<T, U>(T first, U second) => second;
+                public static U Pick<T, U>(T first, U second)
+                    where T : class, IScale<U, T>, new() where U : struct => second;
                 int IShapeTag.Tag() => 1;
                 int IShapeTag.OtherTag() => 2;
             }

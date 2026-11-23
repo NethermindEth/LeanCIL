@@ -29,6 +29,9 @@ structure DispatchMethod where
   overrides : List (Nat × TypeExpr)
   owner : TypeExpr := .void
   ownerArguments : List TypeExpr := []
+  /-- Method type parameters in declaration order, with the constraints on each slot. -/
+  genericParameters : List GenericConstraint :=
+    List.replicate genericArity { flags := 0, types := [] }
   deriving DecidableEq, Repr
 
 /-- Direct interfaces and declared methods of one metadata type; no inherited dispatch table. -/

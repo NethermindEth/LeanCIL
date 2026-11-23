@@ -53,8 +53,8 @@ def ordinaryTypeName (space name : String) : Bool :=
     (metadataChars space).all (fun c => component c || c == '.')
 
 /-- A top-level TypeDef or AssemblyRef-scoped TypeRef with its physical assembly identity. -/
-private def constraintTypeName (image : PreparedImage) (token : Nat) :
-    Except AuditError String := do
+private def constraintTypeParts (image : PreparedImage) (token : Nat) :
+    Except AuditError (String × String) := do
   let cell := image.layout.cell image.view token
   let space ← image.layout.stringAt image.view (← cell typeNamespaceColumn)
   let name ← image.layout.stringAt image.view (← cell typeNameColumn)
@@ -74,7 +74,13 @@ private def constraintTypeName (image : PreparedImage) (token : Nat) :
       referenceIdentity image (← checkedTokenOf Table.assemblyRef (coded / 4) .rowOverflow)
     | _ => throw .uncoveredConstraint
   let fullName := if namespaceText.isEmpty then nameText else namespaceText ++ "." ++ nameText
-  return scope ++ "::" ++ fullName
+  return (scope, fullName)
+
+/-- The scoped identity of a closed constraint type. -/
+private def constraintTypeName (image : PreparedImage) (token : Nat) :
+    Except AuditError String := do
+  let (scope, name) ← constraintTypeParts image token
+  return scope ++ "::" ++ name
 
 /-- Physical constraint identity. A VAR in an implemented interface refers to the corresponding
     closed argument of its declaring type. -/
@@ -107,37 +113,82 @@ private def constraintIdentity (image : PreparedImage) (token : Nat)
     return name
   | _ => throw .uncoveredConstraint
 
-/-- Every GenericParamConstraint owned by this GenericParam, in metadata order. -/
-private def parameterTypes (image : PreparedImage) (parameter : Nat) :
-    Except AuditError (List String) := do
+/-- An open generic interface constraint with direct method parameters and primitive arguments.
+    The local TypeDef fixes its scope, interface kind and number of type arguments. -/
+private def openMethodConstraint? (image : PreparedImage) (owner arity token : Nat) :
+    Except AuditError (Option TypeExpr) := do
+  if tableOf token != Table.typeSpec then return none
+  let blob ← image.layout.blobAt image.view (← image.layout.cell image.view token 0)
+  let .ok (.genericInst false head arguments) := decodeTypeSpec blob | return none
+  let args := arguments.toList
+  unless args.any (fun arg => arg matches .mvar _) do return none
+  unless tableOf owner == Table.methodDef do throw (.constraintMismatch owner)
+  unless tableOf head == Table.typeDef do throw .uncoveredConstraint
+  let (kind, count) ← physicalTypeShape image (head % 2^24)
+  unless kind == .interface && count == args.length do throw .uncoveredConstraint
+  let (_, name) ← constraintTypeParts image head
+  let mut applied := TypeExpr.objectConstructor image.identity name
+  for arg in args do
+    let element ← match arg with
+      | .mvar index => do
+        unless index < arity do throw (.constraintMismatch owner)
+        pure (.parameter index)
+      | .primitive code => do
+        let some name := (primitiveName code).bind spelled? | throw .uncoveredConstraint
+        if code == 1 then throw .uncoveredConstraint
+        pure (.atom (← primitiveScope image) name)
+      | _ => throw .uncoveredConstraint
+    applied := .apply applied element
+  return some applied
+
+/-- Flags and every constraint of one physical GenericParam, in metadata order within each
+    of the closed and open lists carried by the extraction. -/
+private def parameterConstraint (image : PreparedImage) (owner arity row : Nat)
+    (expectedFlags : Option Nat := none) :
+    Except AuditError GenericConstraint := do
+  let flags ← image.layout.cellOfRow image.view Table.genericParam row 1
+  if expectedFlags.any (· != flags) then throw (.constraintMismatch owner)
   let cell := image.layout.cellOfRow image.view constraintTable
   let mut types := #[]
+  let mut interfaces := #[]
   for index in [:image.layout.rowCount constraintTable] do
+    let constraint := index + 1
+    if (← cell constraint 0) != row then continue
+    let target ← constraintTarget image (← cell constraint 1)
+    if let some applied ← openMethodConstraint? image owner arity target then
+      interfaces := interfaces.push applied
+    else
+      types := types.push (← constraintIdentity image target)
+  return { flags, types := types.toList, interfaces := interfaces.toList }
+
+/-- Physical GenericParam rows of one owner, in ordinal order and at its declared arity. -/
+private def parameterRows (image : PreparedImage) (owner arity : Nat) :
+    Except AuditError (List Nat) := do
+  let tag := if tableOf owner == Table.methodDef then 1 else 0
+  let ownerKey := 2 * (owner % 2^24) + tag
+  let cell := image.layout.cellOfRow image.view Table.genericParam
+  let mut rows := #[]
+  for index in [:image.layout.rowCount Table.genericParam] do
     let row := index + 1
-    if (← cell row 0) == parameter then
-      types := types.push (← constraintIdentity image (← constraintTarget image (← cell row 1)))
-  return types.toList
+    if (← cell row 2) != ownerKey then continue
+    unless (← cell row 0) == rows.size do throw (.constraintMismatch owner)
+    rows := rows.push row
+  unless rows.size == arity do throw (.constraintMismatch owner)
+  return rows.toList
+
+/-- All flags and constraints declared on the type or method, in parameter order. -/
+def readParameterDeclarations (image : PreparedImage) (owner arity : Nat) :
+    Except AuditError (List GenericConstraint) := do
+  let rows ← parameterRows image owner arity
+  rows.mapM fun row => parameterConstraint image owner arity row
 
 /-- Compare the complete parameter list for a physical TypeOrMethodDef owner. -/
 def parameterDeclarations (image : PreparedImage) (owner : Nat)
     (expected : List GenericConstraint) : Except AuditError Unit := do
-  let tag := if tableOf owner == Table.methodDef then 1 else 0
-  let ownerKey := 2 * (owner % 2^24) + tag
-  let cell := image.layout.cellOfRow image.view Table.genericParam
-  let mut remaining := expected
-  let mut ordinal := 0
-  for index in [:image.layout.rowCount Table.genericParam] do
-    let row := index + 1
-    if (← cell row 2) == ownerKey then
-      let parameter :: tail := remaining | throw (.constraintMismatch owner)
-      unless (← cell row 0) == ordinal && (← cell row 1) == parameter.flags do
-        throw (.constraintMismatch owner)
-      let types ← parameterTypes image row
-      unless parameter.interfaces.isEmpty && parameter.types == types do
-        throw (.constraintMismatch owner)
-      remaining := tail
-      ordinal := ordinal + 1
-  unless remaining.isEmpty do throw (.constraintMismatch owner)
+  let rows ← parameterRows image owner expected.length
+  for (row, claim) in rows.zip expected do
+    let actual ← parameterConstraint image owner expected.length row (some claim.flags)
+    unless actual == claim do throw (.constraintMismatch owner)
 
 /-- Locate the physical TypeDef whose MethodList range contains this MethodDef. -/
 def methodDeclaringType (image : PreparedImage) (method : Nat) : Except AuditError Nat := do

@@ -406,10 +406,13 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }
 
     // A constraint naming generic parameters, such as `T : I<T>`, is closed per instantiation in Lean.
-    string ParameterConstraint(GenericParameter parameter)
+    string ParameterConstraint(GenericParameter parameter) => DeclaredParameterConstraint(parameter, methodParameterCount);
+
+    string DeclaredParameterConstraint(GenericParameter parameter, int methodArity)
     {
         var types = parameter.Constraints.Select(constraint => constraint.ConstraintType).ToArray();
-        var open = types.Where(type => type.ContainsGenericParameter).Select(Type).ToArray();
+        var open = types.Where(type => type.ContainsGenericParameter)
+            .Select(type => RenderType(type, false, false, methodArity, layouts)).ToArray();
         return $"{{ flags := {(uint)parameter.Attributes}, " +
             $"types := {List(types.Where(type => !type.ContainsGenericParameter).Select(Constraint))}" +
             (open.Length == 0 ? "" : $", interfaces := {List(open)}") + " }";
@@ -918,6 +921,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             ArrayType array => new ArrayType(Closed(array.ElementType), array.Rank),
             _ => TypeSubstitution.Components(type, Closed)
         };
+        var constraints = method.GenericParameters.Any(parameter => parameter.Attributes != 0 || parameter.HasConstraints)
+            ? $", genericParameters := {List(method.GenericParameters.Select(parameter =>
+                DeclaredParameterConstraint(parameter, method.GenericParameters.Count)))}" : "";
         var specialization = owner is null ? "" :
             $", owner := {Head(owner)} {Scope(owner.ElementType)} {Quote(owner.ElementType.FullName)}, " +
             $"ownerArguments := {List(owner.GenericArguments.Select(Type))}";
@@ -925,7 +931,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         $"{{ token := {method.MetadataToken.ToUInt32()}, name := {Quote(method.Name)}, " +
         $"hasThis := {Bool(method.HasThis)}, isPublic := {Bool(method.IsPublic)}, " +
         $"isAbstract := {Bool(method.IsAbstract)}, isVirtual := {Bool(method.IsVirtual)}, " +
-        $"hasBody := {Bool(method.HasBody)}, genericArity := {method.GenericParameters.Count}, " +
+        $"hasBody := {Bool(method.HasBody)}, genericArity := {method.GenericParameters.Count}{constraints}, " +
         $"explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, " +
         $"attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, " +
         $"returnType := {Type(InitAccessors.Return(Closed(method.ReturnType)))}, " +

@@ -43,6 +43,28 @@ theorem wrongGenericByref : rejected (Extracted.methodEvidence.map fun item =>
         else method } }) = true := by decide +kernel
 #print axioms wrongGenericByref
 
+/-- Alter only the constraints of Pick's first type parameter in the proposed catalog. -/
+private def changeConstraint (change : GenericConstraint → GenericConstraint) :
+    List MethodEvidence := Extracted.methodEvidence.map fun item =>
+  { item with dispatchTypes := item.dispatchTypes.map fun type =>
+    { type with methods := type.methods.map fun method =>
+      if method.name == "Pick" then
+        { method with genericParameters := method.genericParameters.modify 0 change }
+      else method } }
+
+/-- Dropping the reference-type and default-constructor flags contradicts the GenericParam row. -/
+theorem wrongParameterFlags :
+    rejected (changeConstraint fun claim => { claim with flags := 0 }) = true := by decide +kernel
+#print axioms wrongParameterFlags
+
+/-- Swapping the two arguments of IScale contradicts the TypeSpec of the constraint. -/
+theorem wrongConstraintArguments : rejected (changeConstraint fun claim =>
+    { claim with interfaces := claim.interfaces.map fun constraint =>
+      match constraint with
+      | .apply (.apply head first) second => .apply (.apply head second) first
+      | other => other }) = true := by decide +kernel
+#print axioms wrongConstraintArguments
+
 /-- Changing either operand while retaining its original body contradicts the physical token. -/
 private def crossed (opcode : Nat) (item : MethodEvidence) : MethodEvidence :=
   {item with original := {item.original with code := item.original.code.map fun instruction =>
@@ -92,5 +114,34 @@ theorem changedPhysicalClass : changedClassRejected false = some true := by deci
 /-- A different name in the string heap identifies the contradicting TypeDef token. -/
 theorem changedPhysicalName : changedClassRejected true = some true := by decide +kernel
 #print axioms changedPhysicalName
+
+/-- Flip a flag in the first physical GenericParam of Pick and retain the selected method body. -/
+private def changedFlags (mask : Nat) : Option (Except AuditError Bool) := do
+  let pin ← images.head?
+  let original ← (prepareOne pin).toOption
+  let types := Extracted.methodEvidence.flatMap (·.dispatchTypes)
+  let pick ← (types.flatMap (·.methods)).find? (·.name == "Pick")
+  let cell := original.layout.cellOfRow original.view Table.genericParam
+  let ownerKey := 2 * (pick.token % 2^24) + 1
+  let index ← (List.range (original.layout.rowCount Table.genericParam)).find? fun i =>
+    (cell (i+1) 2).toOption == some ownerKey && (cell (i+1) 0).toOption == some 0
+  let parameter := StrictBinding.tokenOf Table.genericParam (index + 1)
+  let (offset, _) ← (original.layout.cellAt parameter 1).toOption
+  let altered := {pin with image := Tests.StrictBinding.flipByte pin.image offset mask}
+  let prepared ← (prepareOne altered).toOption
+  let _ ← (bodyBound prepared Extracted.method0Original.token Extracted.method0Body.bytes).toOption
+  return ClassDispatch.check [altered] Extracted.assemblies
+    Extracted.methodEvidence Extracted.imports
+
+/-- Removing the default-constructor flag contradicts the catalog even though the IL still binds. -/
+theorem changedPhysicalConstraint : (match changedFlags 0x10 with
+    | some (.error (.dispatchMismatch token)) => token == Extracted.method0Original.token
+    | _ => false) = true := by decide +kernel
+#print axioms changedPhysicalConstraint
+
+/-- An unsupported variance flag on a method type parameter leaves coverage incomplete. -/
+theorem variantMethodParameter : (changedFlags 1).bind Except.toOption = some false := by
+  decide +kernel
+#print axioms variantMethodParameter
 
 end ClassTestCases

@@ -441,10 +441,11 @@ interface slot, the MethodImpl row must name the implementing class and two loca
 with matching nongeneric instance signatures. The catalog records the interface and the exact
 declaration token. A class outside the selected hierarchy may implement an external interface
 when its body MethodDef belongs to that class.
-For an unconstrained generic method, Lean checks the signature's generic flag, the number and
-order of its GenericParam rows, and the ordinal of every method parameter in the supported
-signature types. It retains byrefs in both the return and parameter types. A declaration with
-generic parameter flags or constraint rows leaves this catalog uncovered.
+For a generic method, Lean checks the signature's generic flag and arity, its byrefs and the
+position of each method type parameter. It reconstructs the owning GenericParam rows in
+ordinal order, with their flags and GenericParamConstraint rows. For an open local interface
+such as `IScale<U, T>`, Lean checks the interface TypeDef, arity and each TypeSpec argument.
+An open generic constraint from another assembly leaves the catalog uncovered.
 Each selected method uses the physical image matching its own assembly identity. A single
 extraction can use class tests and local virtual slots in several assemblies. At a foreign class test,
 Lean reads the TypeRef and its enclosing TypeRefs from the caller, checks the full AssemblyRef

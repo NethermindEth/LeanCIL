@@ -92,30 +92,7 @@ private def formalType (image : PreparedImage) (arity : Nat) : SigType → Readi
     return .byref value
   | element => formalElement image arity element
 
-/-- Check GenericParam ordinals and arity against the signature. A constraint on a catalog
-    method leaves its declaration uncovered until the catalog can describe that constraint. -/
-private def methodParameters (image : PreparedImage) (row arity : Nat) : Reading Unit := do
-  let token := StrictBinding.tokenOf Table.methodDef row
-  if arity == 0 then return ← physical (parameterDeclarations image token [])
-  let cell := image.layout.cellOfRow image.view Table.genericParam
-  let ownerKey := 2 * row + 1
-  let mut ordinal := 0
-  let mut unrestricted := true
-  for i in [:image.layout.rowCount Table.genericParam] do
-    let parameter := i + 1
-    if (← physical (cell parameter 2)) != ownerKey then continue
-    unless (← physical (cell parameter 0)) == ordinal do
-      throwThe AuditError (.constraintMismatch token)
-    ordinal := ordinal + 1
-    if (← physical (cell parameter 1)) != 0 then unrestricted := false
-  unless ordinal == arity do throwThe AuditError (.constraintMismatch token)
-  guard unrestricted
-  let constraintTable := 0x2c
-  for i in [:image.layout.rowCount constraintTable] do
-    let parameter ← physical (image.layout.cellOfRow image.view constraintTable (i+1) 0)
-    guard ((← physical (cell parameter 2)) != ownerKey)
-
-/-- A managed MethodDef with its physical flags, signature and unconstrained type parameters. -/
+/-- A managed MethodDef with its physical flags, signature and type parameter declarations. -/
 private def classMethod (image : PreparedImage) (row : Nat) : Reading DispatchMethod := do
   let cell := image.layout.cellOfRow image.view Table.methodDef row
   let implementation ← physical (cell 1)
@@ -128,7 +105,14 @@ private def classMethod (image : PreparedImage) (row : Nat) : Reading DispatchMe
   guard (sig.convention == convention || sig.convention == convention + hasThisFlag)
   guard (implementation == 0)
   let token := StrictBinding.tokenOf Table.methodDef row
-  methodParameters image row sig.genericArity
+  let genericParameters ← match readParameterDeclarations image token sig.genericArity with
+    | .ok declarations => pure declarations
+    | .error .uncoveredConstraint => failure
+    | .error error => throwThe AuditError error
+  -- Method parameters are invariant. Other bits and conflicting class/struct constraints
+  -- lie outside the catalog's supported declarations.
+  guard (genericParameters.all fun parameter =>
+    parameter.flags &&& 0x3c == parameter.flags && parameter.flags &&& 0x0c != 0x0c)
   let isAbstract := attributes &&& 0x400 != 0
   let hasBody := (← physical (cell 0)) != 0
   let hasThis := sig.convention == convention + hasThisFlag
@@ -136,7 +120,8 @@ private def classMethod (image : PreparedImage) (row : Nat) : Reading DispatchMe
   return {
     token, name, hasThis, isPublic := attributes % 8 == 6,
     isAbstract, isVirtual := attributes &&& virtualMethodAttribute != 0, hasBody,
-    genericArity := sig.genericArity, explicitThis := false, callingConvention := convention,
+    genericArity := sig.genericArity, genericParameters, explicitThis := false,
+    callingConvention := convention,
     attributes, implementation, returnType := ← formalType image sig.genericArity sig.result,
     parameters := ← sig.parameters.mapM (formalType image sig.genericArity),
     overrides := [] }
