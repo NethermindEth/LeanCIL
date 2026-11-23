@@ -2,31 +2,37 @@ import Extracted
 import CIL.Safety.MethodContract
 /-! A compiled class test follows the forwarding facade to the defining assembly. -/
 namespace ForwardedClass
-open CIL CIL.Safety
+open CIL CIL.Extraction CIL.Safety
 
-/-- Both allocations have their runtime class in the implementation assembly. -/
+/-- Both derived classes have the same public base in the implementation assembly. -/
+private def instanceOf (name : String) (bases : List TypeExpr) : Allocation :=
+  ⟨.object ⟨.object Extracted.assembly2.identity name, bases⟩, ⟨8, 8, []⟩, true, []⟩
+
 private def before : Safety.Memory := { Safety.Memory.empty with
   allocations := fun id =>
-    if id == 0 then some ⟨.object ⟨.object Extracted.assembly2.identity "Forward.Shape", []⟩,
-      ⟨8, 8, []⟩, true, []⟩
-    else if id == 1 then some ⟨.object ⟨.object Extracted.assembly2.identity "Forward.Second",
-      [.object Extracted.assembly2.identity "Forward.Shape"]⟩, ⟨8, 8, []⟩, true, []⟩
-    else none
-  nextIdentity := 2 }
+    let bases := [.object Extracted.assembly2.identity "Forward.Shape"]
+    match id with
+    | 0 => some (instanceOf "Forward.Shape" [])
+    | 1 => some (instanceOf "Forward.Second" bases)
+    | 2 => some (instanceOf "Forward.Family/Child" bases)
+    | _ => none
+  nextIdentity := 3 }
 
-/-- Three receiver cases for the compiled class test. -/
-inductive Input where | null | base | child
+/-- References distinguish the base, both forwarded subclasses and null. -/
+inductive Input where | null | base | second | child
 
 private def reference : Input → ManagedReference
   | .null => .null
   | .base => .address ⟨0, 0⟩
-  | .child => .address ⟨1, 0⟩
+  | .second => .address ⟨1, 0⟩
+  | .child => .address ⟨2, 0⟩
 
 private def expected : Input → W32
-  | .child => 1
+  | .second => 1
+  | .child => 2
   | _ => 0
 
-/-- The caller retains both objects and receives one exactly for a derived instance. -/
+/-- The class tests preserve all three allocations and identify which subclass the caller passed. -/
 def contract : MethodContract Input W32 where
   args input := [.object (reference input)]
   results value := [.scalar (.i32 value)]
@@ -34,7 +40,7 @@ def contract : MethodContract Input W32 where
   footprint _ := []
   post input initial final value := final = initial ∧ value = expected input
 
-/-- All three cases return at the original entry without a write. -/
+/-- All four cases return at the original entry without a write. -/
 theorem correctness : contract.Holds Extracted.program 0 := by
   rintro input _ rfl
   have ran : invoke Extracted.program 16 0 (contract.args input) before =

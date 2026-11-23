@@ -671,7 +671,8 @@ private def littleUnits : Nat → List Nat → Option (List Nat)
   | _ + 1, [_] => none
 
 /-- The UTF-16 code units of a `#US` entry. Its length counts the units' bytes and the
-    terminal byte, which is 1 exactly when a unit needs the flag. -/
+    terminal byte. For U+0080 through U+00FF, the .NET metadata writer sets the flag even
+    when ECMA-335 II.24.2.4 permits zero. Both encodings carry the same UTF-16 units. -/
 def userStringUnits (entries : SearchTree (List Nat)) (offset : Nat) :
     Except MetadataError (List Nat) := do
   let bytes ← heapEntry userStringHeap entries offset
@@ -682,8 +683,11 @@ def userStringUnits (entries : SearchTree (List Nat)) (offset : Nat) :
   let terminal := rest.getLast?.getD 2
   let some units := littleUnits payload.length payload
     | throw (.malformedUserString offset)
-  let flagged := units.any userStringFlag
-  if terminal != (if flagged then 1 else 0) then throw (.malformedUserString offset)
+  let validFlag := match terminal with
+    | 0 => !units.any userStringFlag
+    | 1 => units.any fun unit => unit ≥ 0x80 || userStringFlag unit
+    | _ => false
+  unless validFlag do throw (.malformedUserString offset)
   .ok units
 
 /-! ## Rows by token -/
@@ -920,18 +924,29 @@ def MetadataIndex.assemblyRefIdentity (index : MetadataIndex) (token : Nat) :
   return assemblySpelling parts.name version.major version.minor version.build version.revision
     parts.culture spelled
 
-/-- Read a top-level type forwarder and its destination AssemblyRef from the facade bytes.
-    A file export or a nested export does not identify a destination assembly. -/
+/-- Follow the exported name pairs from the innermost class through its enclosing exports.
+    Only the outer forwarder names the destination assembly. -/
 def MetadataIndex.forwardedAssembly (index : MetadataIndex) (token : Nat)
-    (parts : List (List Nat)) : Except MetadataError (List Nat) := do
-  let [flags, typeDefId, name, namespace_, implementation] ← index.columnsOf Table.exportedType token
-    | throw (.operandMismatch token)
-  unless flags == 0x00200000 && typeDefId == 0 do throw (.operandMismatch token)
-  let destination ← decodeCoded [0x26, Table.assemblyRef, Table.exportedType] 2 implementation
-  unless metadataTableOf destination == Table.assemblyRef && tokenRow destination != 0 do
-    throw (.operandMismatch token)
-  unless [← index.string namespace_, ← index.string name] == parts do throw (.operandMismatch token)
-  index.assemblyRefIdentity destination
+    (parts : List (List Nat)) : Except MetadataError (List Nat) :=
+  walk token parts.reverse
+where
+  walk (exported : Nat) : List (List Nat) → Except MetadataError (List Nat)
+    | expectedName :: expectedSpace :: enclosing => do
+      let [flags, typeDefId, name, space, implementation] ← index.columnsOf Table.exportedType exported
+        | throw (.operandMismatch exported)
+      unless typeDefId == 0 && (← index.string name) == expectedName &&
+          (← index.string space) == expectedSpace do throw (.operandMismatch exported)
+      let target ← decodeCoded [0x26, Table.assemblyRef, Table.exportedType] 2 implementation
+      unless tokenRow target != 0 do throw (.operandMismatch exported)
+      if enclosing.isEmpty then
+        unless flags == 0x00200000 && metadataTableOf target == Table.assemblyRef do
+          throw (.operandMismatch exported)
+        index.assemblyRefIdentity target
+      else
+        unless flags == 0 && expectedSpace.isEmpty && metadataTableOf target == Table.exportedType do
+          throw (.operandMismatch exported)
+        walk target enclosing
+    | _ => .error (.operandMismatch exported)
 
 /-- The assembly identity when its name and culture fit the expected identity's byte lengths. -/
 def MetadataIndex.assemblyRefName (index : MetadataIndex) (token : Nat) (expected : AssemblyName) :

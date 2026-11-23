@@ -18,25 +18,35 @@ set_option maxRecDepth 32768
 private def forwarded (flags := 0x00200000) (typeDefId := 0) (implementation := 5)
     (forwardName := "InvalidOperationException") (targetName := "Core")
     (declaredName := "InvalidOperationException") (visibility := 1)
-    (forwarderSlice := 1) (carry := true) : Option (List Nat) := do
+    (forwarderSlice := 1) (carry := true) (nested := false) (childParent := 6)
+    (childFlags := 0) (childVisibility := 2) (childExportName := "Child") : Option (List Nat) := do
   let identity := fun (name : String) => name ++ ", Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
   let make := fun (name : String) (entries : Step Nat) => build entries (bytesOf name) (identity name)
   let (library, definition) := make "Core" do
     let name ← string declaredName
     let ns ← string "System"
-    row Table.typeDef [visibility, name, ns, 0, 1, 1]
+    let outer ← row Table.typeDef [visibility, name, ns, 0, 1, 1]
+    if !nested then return outer
+    let child ← row Table.typeDef [childVisibility, ← string "Child", 0, 0, 1, 1]
+    let nesting ← row Table.nestedClass [tokenRow child, tokenRow outer]
+    link linkNesting child 2 nesting
+    return child
   let (facade, exported) := make "Facade" do
     let dest ← string targetName
     let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, dest, 0, 0]
     let name ← string forwardName
     let ns ← string "System"
-    row Table.exportedType [flags, typeDefId, name, ns, implementation]
+    let outer ← row Table.exportedType [flags, typeDefId, name, ns, implementation]
+    if !nested then return outer
+    row Table.exportedType [childFlags, 0, ← string childExportName, 0, childParent]
   let (caller, reference) := make "Caller" do
     let scope ← string "Facade"
     let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, scope, 0, 0]
     let name ← string "InvalidOperationException"
     let ns ← string "System"
-    let reference ← row Table.typeRef [6, name, ns]
+    let outer ← row Table.typeRef [6, name, ns]
+    let reference ← if nested then row Table.typeRef [4 * tokenRow outer + 3, ← string "Child", 0]
+      else pure outer
     link linkDefinition reference 2 definition
     if carry then link linkForwarder reference forwarderSlice exported
     return reference
@@ -56,6 +66,16 @@ theorem checked_forwarder :
      forwarded (forwarderSlice := 0), forwarded (carry := false)].all Option.isNone := by
   decide +kernel
 #print axioms checked_forwarder
+
+/-- The nested export must point to its enclosing export, whose AssemblyRef reaches a public
+    outer and public nested definition. Wrong names, parent tags, cycles and visibility fail. -/
+theorem checked_nested_forwarder :
+    forwarded (nested := true) = some (bytesOf "Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null") ∧
+    [forwarded (nested := true) (childParent := 10), forwarded (nested := true) (childParent := 5),
+     forwarded (nested := true) (childFlags := 0x00200000), forwarded (nested := true) (visibility := 0),
+     forwarded (nested := true) (childVisibility := 3), forwarded (nested := true) (childExportName := "Other"),
+     forwarded (nested := true) (targetName := "Other")].all Option.isNone := by decide +kernel
+#print axioms checked_nested_forwarder
 
 /-- Prefix matching agrees with the prefix predicate, including overlapping and empty prefixes. -/
 theorem prefixes :

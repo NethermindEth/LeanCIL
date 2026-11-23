@@ -493,6 +493,16 @@ theorem rejects_a_wrong_user_string_terminal_byte :
       (·.userString 7)) [104, 105] := by decide +kernel
 #print axioms rejects_a_wrong_user_string_terminal_byte
 
+/-- Latin-1 text has both ECMA and .NET writer encodings. A flag required by another
+    unit remains mandatory, and the terminal byte must be zero or one. -/
+theorem latin1_user_string_flags :
+    let read := fun bytes => ({ examplesSlice with userStrings := [(7, bytes)] }).index.bind (·.userString 7)
+    gives (read [3, 0xE9, 0, 0]) [0xE9] ∧ gives (read [3, 0xE9, 0, 1]) [0xE9] ∧
+    failsWith (read [3, 0xE9, 0, 2]) (.malformedUserString 7) = true ∧
+    failsWith (read [5, 0xE9, 0, 0, 1, 0]) (.malformedUserString 7) = true ∧
+    gives (read [5, 0xE9, 0, 0, 1, 1]) [0xE9, 0x100] := by decide +kernel
+#print axioms latin1_user_string_flags
+
 /-- A user string with an odd byte count. -/
 theorem rejects_a_user_string_of_odd_length :
     failsWith (({ examplesSlice with userStrings := [(7, [4, 104, 0, 105, 0])] }).index.bind

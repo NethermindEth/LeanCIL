@@ -9,7 +9,7 @@ open CIL.Extraction
 /-- A matching top-level ExportedType must be a unique forwarder to an AssemblyRef. Nested
     exports have an ExportedType as their implementation and belong to their enclosing export. -/
 private def forwardedScope? (image : PreparedImage) (space name : List Nat) :
-    Except AuditError (Option (List Nat)) := do
+    Except AuditError (Option (Nat × List Nat)) := do
   let exportedType := 0x27
   let cell := image.layout.cellOfRow image.view exportedType
   let mut target := none
@@ -23,8 +23,28 @@ private def forwardedScope? (image : PreparedImage) (space name : List Nat) :
         (← cell row 0) &&& 0x00200000 == 0 then throw (.typeDefMismatch row .typeName)
     let token ← checkedTokenOf Table.assemblyRef (implementation / 4) .rowOverflow
     let identity ← assemblyIdentityAt image.view image.layout token 0
-    target := some (bytesOf (String.ofList (identity.map Char.ofNat)))
+    target := some (row, bytesOf (String.ofList (identity.map Char.ofNat)))
   return target
+
+/-- Find each nested export by its enclosing ExportedType and its exact namespace/name pair. -/
+private def nestedExports (image : PreparedImage) (parent : Nat) :
+    List (List Nat) → Except AuditError Unit
+  | [] => pure ()
+  | space :: name :: rest => do
+    unless space.isEmpty do throw (.typeDefMismatch parent .typeName)
+    let cell := image.layout.cellOfRow image.view Table.exportedType
+    let mut selected := none
+    for i in [:image.layout.rowCount Table.exportedType] do
+      let row := i + 1
+      unless (← cell row 4) == parent * 4 + 2 do continue
+      unless ← stringFound image (← cell row 2) (name ++ [0]) do continue
+      unless ← stringFound image (← cell row 3) (space ++ [0]) do continue
+      if selected.isSome || (← cell row 0) != 0 || (← cell row 1) != 0 then
+        throw (.typeDefMismatch row .typeName)
+      selected := some row
+    let some child := selected | throw (.typeDefMismatch parent .typeName)
+    nestedExports image child rest
+  | _ => throw (.typeDefMismatch parent .typeName)
 
 inductive DefinitionRoute where
   | defined (row : Nat)
@@ -42,7 +62,9 @@ def definitionRoute (image : PreparedImage) (parts : List (List Nat)) :
     if nested.isEmpty then return .defined row
     let some child ← enumDefinition? image row nested | throw (.typeDefMismatch row .typeName)
     return .defined child
-  | none, some target => return .forwarded target
+  | none, some (exported, target) =>
+    nestedExports image exported nested
+    return .forwarded target
   | _, _ => throw (.typeDefMismatch 0 .typeName)
 
 /-- The physical definition, or an uncovered assembly when a scope on the path is missing. -/

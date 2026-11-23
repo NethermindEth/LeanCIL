@@ -140,6 +140,20 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     File.WriteAllText(mutated, forged);
     rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
         "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
+    if (name == "Percent")
+    {
+        using var translated = ModuleDefinition.ReadModule(assembly);
+        var percent = translated.GetType("Examples.Throws").Methods.Single(candidate => candidate.Name == name);
+        var literals = percent.Body.Instructions.Where(site => site.OpCode.Code == Code.Ldstr).ToArray();
+        if (literals.Length != 2) throw new InvalidOperationException("Expected parameter and message literals");
+        literals[0].Operand = "valeur";
+        literals[1].Operand = "La valeur dépasse la limite.";
+        var image = Path.Combine(folder, "Examples.dll");
+        translated.Write(image);
+        queue.Add(new(selector, proof, Path.Combine(root, "Percent-Translated"), Assembly: image), () =>
+            Console.WriteLine("PASS Percent: the same boundary proof checks with translated exception literals"));
+    }
+
     if (name is "Null" or "Inner" or "ArgumentInner" or "ActualValue")
     {
         var nullPc = body.IndexOf(body.First(site => site.OpCode.Code == Code.Ldnull));

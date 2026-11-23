@@ -375,10 +375,11 @@ What `MetadataResolution` and `MetadataBinding` check:
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a
   `void` return, module references and `AssemblyRef` rows with a public key flag.
-- A top-level `TypeRef` may follow one forwarder between pinned assemblies. Lean reads the facade’s
-  `ExportedType` row, verifies the namespace, name, forwarding flag and destination `AssemblyRef`,
-  and checks that the defining slice contains the public `TypeDef` of the same name. Nested exports,
-  file exports and multi-hop forwarding chains are outside this binding.
+- A public top-level or nested type can be forwarded through one pinned facade. Lean checks the
+  caller's TypeRef name and scope at each level. In the facade, each nested ExportedType must name
+  its enclosing export. The outer forwarder names the defining assembly through its AssemblyRef.
+  In that image Lean checks every public TypeDef and each NestedClass link against the same name
+  chain. File exports and multi-hop forwarding chains remain outside extraction.
 - A custom modifier binds its assembly and full name, including the namespace of each nested
   segment. A local nested `TypeDef` requires its enclosing `NestedClass` rows. Each enclosing
   type occupies a nonzero, earlier row in the same `TypeDef` table. A `TypeRef`
@@ -443,13 +444,14 @@ when its body MethodDef belongs to that class.
 Each selected method uses the physical image matching its own assembly identity. A single
 extraction can use class tests and local virtual slots in several assemblies. At a foreign class test,
 Lean reads the TypeRef and its enclosing TypeRefs from the caller, checks the full AssemblyRef
-identity, and locates the top-level or nested TypeDef in the pinned destination. For a forwarded top-level class,
-Lean checks each ExportedType and its destination AssemblyRef through to the defining TypeDef. When more than one
+identity, and locates the top-level or nested TypeDef in the pinned destination. For a forwarded
+class, Lean checks the outer ExportedType and its destination AssemblyRef. Each nested export
+must name the same enclosing export and class as the caller's reference. When more than one
 image is pinned, each selected hierarchy must belong to a non-core image. Class parents in the
 other images must resolve locally or name the core Object, ValueType or Enum. The audit checks
 parent chains for cycles and file tables for additional metadata modules. The physical-catalog
 theorem identifies the image and the reconstructed catalog for every selected method.
-Nested forwarded class tests, constrained calls, interface dispatch,
+Constrained calls, interface dispatch,
 cross-image dispatch, other override forms on selected classes, additional metadata modules
 and unsupported signatures leave this fact uncovered.
 With all direct reference images supplied, the audit checks each AssemblyRef against its target's

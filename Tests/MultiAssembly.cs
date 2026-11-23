@@ -262,12 +262,13 @@ Proved("ScaledGenericPlain", "MultiFixture.Application::ScaledGenericPlain(ulong
 (string Caller, string[] References) ProveForwardedCall()
 {
     const string facadeName = "ForwardFacade";
-    const string classes = " public class Shape { } public sealed class Second : Shape { }";
+    const string classes = " public class Shape { } public sealed class Second : Shape { } " +
+        "public static class Family { public sealed class Child : Shape { } }";
     fixture.Build("OriginalFacade", facadeName,
         "namespace Forward; public static class Value { public static int Next(int input) => input; }" + classes);
     var caller = fixture.Build("ForwardCaller", "ForwardCaller",
         "namespace Forward; public static class Entry { public static int Run(int value) => Value.Next(value); " +
-        "public static int Test(Shape value) => value is Second ? 1 : 0; }",
+        "public static int Test(Shape value) => value is Second ? 1 : value is Family.Child ? 2 : 0; }",
         references: """<ProjectReference Include="../OriginalFacade/OriginalFacade.csproj" />""");
     var implementation = fixture.Build("ForwardImplementation", "ForwardImplementation",
         "namespace Forward; public static class Value { public static int Next(int input) => input + 1; }" + classes);
@@ -276,6 +277,7 @@ Proved("ScaledGenericPlain", "MultiFixture.Application::ScaledGenericPlain(ulong
         [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Value))]
         [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Shape))]
         [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Second))]
+        [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Family))]
         """,
         references: """<ProjectReference Include="../ForwardImplementation/ForwardImplementation.csproj" />""");
     var artifact = Artifact("ForwardedCall");
@@ -303,7 +305,15 @@ Proved("ScaledGenericPlain", "MultiFixture.Application::ScaledGenericPlain(ulong
     if (fact.GetProperty("status").GetString() != "reconfirmed" ||
         fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
         throw new InvalidDataException("Expected the forwarded class test to bind the defining TypeDef: " + fact);
-    Console.WriteLine("PASS a forwarded class test distinguishes null, base and derived objects");
+    var renamedFacade = Path.Combine(fixture.Root, "RenamedNestedExport.dll");
+    using (var image = Mono.Cecil.ModuleDefinition.ReadModule(facade))
+    {
+        image.ExportedTypes.Single(row => row.FullName == "Forward.Family/Child").Name = "Renamed";
+        image.Write(renamedFacade);
+    }
+    fixture.RejectedExtract("renamed nested class export", "Missing type forwarder: Forward.Family/Child",
+        caller, "Forward.Entry::Test(Forward.Shape)", [.. Reference(renamedFacade), .. Reference(implementation)]);
+    Console.WriteLine("PASS forwarded class tests distinguish null, base, top-level and nested derived objects");
     return (caller, [facade, implementation]);
 }
 

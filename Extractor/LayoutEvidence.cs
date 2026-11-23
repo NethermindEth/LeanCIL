@@ -49,6 +49,20 @@ internal sealed class LayoutEvidence
         return [.. ordered];
     }
 
+    /// <summary>The original TypeRef and its declaring types, with the outermost type on top.</summary>
+    internal static Stack<TypeReference> ForwardingPath(TypeReference type)
+    {
+        var path = new Stack<TypeReference>();
+        var seen = new HashSet<TypeReference>(ReferenceEqualityComparer.Instance);
+        for (var level = type; level is not null; level = level.DeclaringType)
+        {
+            if (!seen.Add(level))
+                throw new InvalidDataException("Cyclic forwarding scope at " + level.MetadataToken);
+            path.Push(level);
+        }
+        return path;
+    }
+
     internal static string Scope(TypeReference type)
     {
         if (type.Scope is not AssemblyNameReference assembly) return type.Module.Assembly.Name.FullName;
@@ -58,7 +72,8 @@ internal sealed class LayoutEvidence
         var module = pins?.ModuleOf(type);
         if (module is not { HasExportedTypes: true }) return assembly.FullName;
         var element = type.GetElementType();
-        if (!module.ExportedTypes.Any(export => export.IsForwarder && export.FullName == element.FullName))
+        var outer = element.DeclaringType is null ? element : ForwardingPath(element).Peek();
+        if (!module.ExportedTypes.Any(export => export.IsForwarder && export.FullName == outer.FullName))
             return assembly.FullName;
         return element.Resolve()?.Module.Assembly.Name.FullName ??
             throw new InvalidDataException("Unresolved forwarded type: " + element.FullName);

@@ -397,30 +397,45 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             else target.Token(definition.MetadataToken.ToUInt32());
         }
 
-        /// <summary>The single top-level ExportedType row forwarding this name to the pinned implementation.</summary>
+        /// <summary>Carry the unique ExportedType chain from the public facade to the defining assembly.</summary>
         uint Forwarder(TypeReference type, string implementation)
         {
-            uint token = 0;
-            foreach (var handle in Reader.ExportedTypes)
+            uint parent = 0;
+            foreach (var entry in LayoutEvidence.ForwardingPath(type))
             {
-                var row = Reader.GetExportedType(handle);
-                if (!Reader.StringComparer.Equals(row.Name, type.Name) ||
-                    !Reader.StringComparer.Equals(row.Namespace, type.Namespace)) continue;
-                if (token != 0 || type.DeclaringType is not null || !row.IsForwarder ||
-                    row.Implementation.Kind != HandleKind.AssemblyReference)
-                    throw new InvalidDataException("Ambiguous or unsupported forwarded type: " + type.FullName);
-                var destination = TokenOf(row.Implementation);
-                var reference = module.AssemblyReferences.SingleOrDefault(assembly =>
-                    assembly.MetadataToken.ToUInt32() == destination);
-                if (reference?.FullName != implementation)
-                    throw new InvalidDataException("Forwarder destination mismatch: " + type.FullName);
-                token = TokenOf(handle);
-                Row(token);
-                Text(row.Name);
-                Text(row.Namespace);
-                Token(destination);
+                uint selected = 0;
+                foreach (var handle in Reader.ExportedTypes)
+                {
+                    var row = Reader.GetExportedType(handle);
+                    if (!Reader.StringComparer.Equals(row.Name, entry.Name) ||
+                        !Reader.StringComparer.Equals(row.Namespace, entry.Namespace)) continue;
+                    var nested = row.Implementation.Kind == HandleKind.ExportedType;
+                    if (nested != (parent != 0) || (nested && TokenOf(row.Implementation) != parent)) continue;
+                    if (selected != 0 || row.GetTypeDefinitionId() != 0)
+                        throw new InvalidDataException("Ambiguous or unsupported forwarded type: " + type.FullName);
+                    if (parent == 0)
+                    {
+                        if (!row.IsForwarder || row.Implementation.Kind != HandleKind.AssemblyReference)
+                            throw new InvalidDataException("Unsupported type forwarder: " + type.FullName);
+                        var destination = TokenOf(row.Implementation);
+                        var reference = module.AssemblyReferences.SingleOrDefault(assembly =>
+                            assembly.MetadataToken.ToUInt32() == destination);
+                        if (reference?.FullName != implementation)
+                            throw new InvalidDataException("Forwarder destination mismatch: " + type.FullName);
+                        Token(destination);
+                    }
+                    else if (row.Attributes != 0 || !Reader.StringComparer.Equals(row.Namespace, ""))
+                        throw new InvalidDataException("Unsupported nested type export: " + type.FullName);
+                    selected = TokenOf(handle);
+                    Row(selected);
+                    Text(row.Name);
+                    Text(row.Namespace);
+                }
+                if (selected == 0)
+                    throw new InvalidDataException("Missing type forwarder: " + type.FullName);
+                parent = selected;
             }
-            return token != 0 ? token : throw new InvalidDataException("Missing type forwarder: " + type.FullName);
+            return parent;
         }
 
         /// <summary>

@@ -197,6 +197,63 @@ theorem throwFold_eq_takeWhile (code : List RawInstruction) :
 
 #print axioms throwFold_eq_takeWhile
 
+/-- Replace the text at each `ldstr` site, preserving the instruction offset and operand form. -/
+def RawInstruction.mapLiteral (translate : Nat → String → String) (raw : RawInstruction) :
+    RawInstruction :=
+  { raw with operand := match raw.opcode, raw.operand with
+      | 114, .text text => .text (translate raw.offset text)
+      | _, operand => operand }
+
+/-- Translating any subset of string loads preserves the recognised exception type and the
+    number of argument instructions consumed, for every body and constructor signature. -/
+theorem throwFold_map_literals (translate : Nat → String → String) (code : List RawInstruction) :
+    throwFold (code.map (RawInstruction.mapLiteral translate)) = throwFold code := by
+  let change := RawInstruction.mapLiteral translate
+  have sameLoad : messageLoad ∘ change = messageLoad := by
+    funext raw
+    obtain ⟨offset, opcode, operand⟩ := raw
+    by_cases literal : opcode = 114
+    · subst opcode
+      cases operand <;> rfl
+    · simp [change, RawInstruction.mapLiteral, literal]
+  have sameConstructor (count : Nat) (args : List RawInstruction) (raw : RawInstruction) :
+      raisedType count (args.map change) (change raw) = raisedType count args raw := by
+    obtain ⟨offset, opcode, operand⟩ := raw
+    by_cases literal : opcode = 114
+    · subst opcode
+      cases operand <;> rfl
+    · by_cases constructor : opcode = 115
+      · subst opcode
+        cases operand <;> simp [change, RawInstruction.mapLiteral, raisedType]
+        rw [List.length_map, List.zip_map_left, List.all_map]
+        rfl
+      · simp [change, RawInstruction.mapLiteral, literal, raisedType, constructor]
+  change throwFold (code.map change) = _
+  rw [throwFold_eq_takeWhile, throwFold_eq_takeWhile, List.takeWhile_map, sameLoad,
+    List.length_map]
+  simp only [← List.map_drop, ← List.map_take]
+  generalize (code.takeWhile messageLoad).length = count
+  cases code.drop count with
+  | nil => rfl
+  | cons ctor tail =>
+    cases tail with
+    | nil => rfl
+    | cons next rest =>
+      obtain ⟨offset, opcode, operand⟩ := next
+      by_cases literal : opcode = 114
+      · subst opcode
+        cases operand <;> rfl
+      · have fixed : change ⟨offset, opcode, operand⟩ = ⟨offset, opcode, operand⟩ := by
+          simp [change, RawInstruction.mapLiteral, literal]
+        simp only [List.map_cons, fixed]
+        by_cases throws : opcode = 122
+        · subst opcode
+          cases operand <;> try rfl
+          simp only [sameConstructor]
+        · simp [throws]
+
+#print axioms throwFold_map_literals
+
 /-- An instruction's part in a folded sequence. -/
 inductive FoldRole where
   /-- The first instruction of the sequence, which may be a branch target. -/

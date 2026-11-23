@@ -481,6 +481,25 @@ def MetadataIndex.methodGenericParameters (index : MetadataIndex)
       (index.link linkGenericParams method).isNone then .ok []
   else index.genericParameters position method
 
+/-- A forwarded class and every enclosing class are public in the destination image.
+    Each NestedClass row must join the checked TypeDefs at the same metadata position. -/
+private def publicForwarded (index : MetadataIndex) (position token : Nat) :
+    List (List Nat) → Except MetadataError Unit
+  | name :: space :: enclosing => do
+    let row ← index.typeDef token
+    unless (← index.string row.name) == name && (← index.string row.namespace_) == space do
+      throw (.operandMismatch token)
+    if enclosing.isEmpty then
+      unless row.flags % 8 == 1 do throw (.operandMismatch token)
+    else
+      unless row.flags % 8 == 2 && space.isEmpty do throw (.operandMismatch token)
+      let some (linked, nesting) := index.link linkNesting token | throw (.unresolvedType token)
+      unless linked == position do throw (.unresolvedType token)
+      let nested ← index.nestedClass nesting
+      unless nested.nested == token do throw (.operandMismatch token)
+      publicForwarded index position nested.enclosing enclosing
+  | _ => .error (.operandMismatch token)
+
 /-- Resolve a definition link in the referenced assembly or through a top-level forwarder.
     The facade's AssemblyRef names the implementation slice and its exported name matches
     the original TypeRef. -/
@@ -496,8 +515,8 @@ private def checkedDefinitionLink (env : MetadataEnv) (index : MetadataIndex)
   let destination ← source.forwardedAssembly exported parts
   if env.identities[destination]? != some linked then throw (.operandMismatch token)
   let implementation ← env.slice linked definition
-  let row ← implementation.typeDef definition
-  if implementation.identity != destination || row.flags % 8 != 1 then throw (.operandMismatch token)
+  if implementation.identity != destination then throw (.operandMismatch token)
+  publicForwarded implementation linked definition parts.reverse
   return (linked, definition, destination)
 
 /-- A carried reference binds the qualified name in the checked defining assembly. -/

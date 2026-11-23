@@ -820,7 +820,8 @@ not decode, or with a live call or construction whose operation differs from the
 gives, and names that instruction's IL offset, opcode and pc. A constrained prefix decodes with its
 adjacent instance `callvirt` or static `call`. A bare `ldstr` decodes to a string literal with
 the text bound to its metadata token. Lean checks the exact UTF-16 code units of the `#US` entry,
-including both units of a supplementary character. A recognized throw erases its message and constructor,
+including both units of a supplementary character. For U+0080 through U+00FF, Lean accepts
+both the ECMA-335 terminal flag and the flag emitted by the .NET metadata writer. A recognized throw erases its message and constructor,
 then raises the constructed exception at the raw `throw` pc. A folded type test over closed
 type arguments produces its decided word or branch. A branch or switch into a fold's interior
 disables that fold. A direct managed tail call retains its prefix and target. An indirect call

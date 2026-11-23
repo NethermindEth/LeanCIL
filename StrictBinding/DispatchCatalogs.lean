@@ -239,7 +239,7 @@ private def referencedClass (image : PreparedImage) : Nat → Nat → List (List
     | _ => failure
 
 /-- Locate a class at its TypeDef or through an AssemblyRef in the body that tests it.
-    A top-level forwarder requires the full chain of pinned images. -/
+    Every forwarded declaration requires the full chain of pinned images. -/
 private def testDefinition (prepared : List PreparedImage) (home : PreparedImage) (token : Nat) :
     Reading (PreparedImage × Nat) := do
   let _ ← physical (home.layout.rowAt token)
@@ -251,7 +251,6 @@ private def testDefinition (prepared : List PreparedImage) (home : PreparedImage
   match ← physical (definitionRoute target parts) with
   | .defined row => return (target, row)
   | .forwarded scope =>
-    guard (parts.length == 2)
     for image in prepared do singleModule image
     let some destination ← physical (findPinnedDefinition prepared parts scope prepared.length) | failure
     return destination
