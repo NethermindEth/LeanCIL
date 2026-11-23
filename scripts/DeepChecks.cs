@@ -62,8 +62,7 @@ partial class Program
 
         internal void RequireIdentity(ExtractionIdentity identity)
         {
-            if (IdentitySha256 != identity.Sha256 ||
-                IdentitySha256 != Sha(Path.Combine(identity.Output, "identity.json")))
+            if (IdentitySha256 != identity.Sha256 || !identity.ManifestUnchanged())
                 throw new InvalidDataException("Deep-check extraction identity changed.");
         }
 

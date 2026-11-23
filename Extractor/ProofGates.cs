@@ -532,8 +532,18 @@ partial class Program
         PrepareGateRows(gates, selected);
         if (options.CheckOnly && selected.Any(row => row.Expect == "rejected"))
             throw new ArgumentException("--check cannot evaluate mutation rejection expectations.");
+        var decoderInputs = new Dictionary<string, TemplateEmitter.Variant>(StringComparer.Ordinal);
+        TemplateEmitter.Variant Input(string output)
+        {
+            if (!decoderInputs.TryGetValue(output, out var input))
+            {
+                input = Nethermind.LeanCIL.Program.ReadDecoderInput(output, gateInput: true);
+                decoderInputs.Add(output, input);
+            }
+            return input;
+        }
         foreach (var row in selected.Where(row => row.ProgramBase is not null && !row.Failed))
-            CompareGateProgram(row, row.ProgramBase!);
+            CompareGateProgram(row, row.ProgramBase!, Input);
 
         foreach (var row in selected.Where(row => row.Failed && !options.Json))
         {
@@ -1013,67 +1023,79 @@ partial class Program
     }
 
     /// <summary>Fails `row` unless its program relates to its base row's as the manifest says.</summary>
-    static void CompareGateProgram(GateRow row, GateRow origin)
+    static void CompareGateProgram(GateRow row, GateRow origin, Func<string, TemplateEmitter.Variant> input)
     {
         try
         {
             if (origin.Failed)
                 throw new InvalidDataException($"The extraction of {origin.Name} is unavailable: {origin.Stage} " +
                     "failed.");
-            var relation = ProgramRelation(origin.Output, row.Output);
+            var relation = ProgramRelation(input(origin.Output), input(row.Output));
             if (relation != row.ExpectedProgram)
                 throw new InvalidDataException($"Expected the program to be {row.ExpectedProgram} with respect " +
                     $"to {origin.Variant}, but it is {relation}.");
             row.ProgramStatus = "passed";
         }
-        catch (Exception error) when (error is IOException or InvalidDataException)
+        catch (Exception error) when (error is IOException or InvalidDataException or InvalidOperationException)
         {
             row.ProgramStatus = "failed";
             row.Fail("program comparison", error.Message);
         }
     }
 
-    /// <summary>
-    /// How the program extracted into `variant` relates to the one in `production`: `same` when the method
-    /// bodies (each `def methodN : Method`, or for a method defined from its decoder its raw definition, in order)
-    /// and method signatures are equal, `renamed` when only the signatures differ, otherwise `different`.
-    /// Everything else in Extracted.lean is ignored, including the assembly identity, digests, paths and metadata
-    /// tokens.
-    /// </summary>
-    static string ProgramRelation(string production, string variant)
+    /// <summary>Compare the typed raw bodies and the canonical methods they produce at this profile.</summary>
+    static string ProgramRelation(TemplateEmitter.Variant left, TemplateEmitter.Variant right)
     {
-        static (string[] Bodies, string[] Signatures) Methods(string output)
+        if (left.Methods.Length != right.Methods.Length) return "different";
+        for (var index = 0; index < left.Methods.Length; index++)
+            if (!left.Methods[index].Opcodes.AsSpan().SequenceEqual(right.Methods[index].Opcodes))
+                return "different";
+        var namesMatch = left.Methods.Select(method => method.Identity)
+            .SequenceEqual(right.Methods.Select(method => method.Identity), StringComparer.Ordinal);
+        if (left.DecoderInputs == right.DecoderInputs) return namesMatch ? "same" : "renamed";
+
+        var checks = Enumerable.Range(0, left.Methods.Length).Select(index => $"""
+            (body Left.method{index}Original == body Right.method{index}Original &&
+             body Left.method{index}Closed == body Right.method{index}Closed &&
+             decide (Left.method{index} = Right.method{index}))
+            """);
+        var size = Math.Max(left.Methods.Max(method => method.Opcodes.Length),
+            right.Methods.Max(method => method.Opcodes.Length));
+        const string marker = "Gate bodies equal: ";
+        var query = $$"""
+            import CIL.Extraction.TemplateCode
+            import CIL.Extraction.Translation
+
+            namespace GateComparison
+            open CIL
+            set_option maxRecDepth {{LeanEmitter.RecursionDepth(size)}}
+            namespace Left
+            {{left.DecoderInputs}}
+            end Left
+            namespace Right
+            {{right.DecoderInputs}}
+            end Right
+
+            /-- A gate permits renumbering or renaming the body being compared. -/
+            private def body (raw : Extraction.RawMethod) : Extraction.RawMethod :=
+              { raw with token := 0, owner := "" }
+            #eval IO.println ("{{marker}}" ++ toString ([{{string.Join(",\n  ", checks)}}].all id))
+            end GateComparison
+            """;
+        using var verifier = new Program();
+        var session = verifier.Library(CommonInputs());
+        var probe = Path.Combine(session, "GateComparison.lean");
+        File.WriteAllText(probe, query);
+        var answer = Run([verifier.LeanExecutable, probe], cwd: session, leanPath: verifier.SessionLeanPath(session));
+        var result = answer.Split('\n', StringSplitOptions.TrimEntries).Single(line => line.StartsWith(marker,
+            StringComparison.Ordinal));
+        return result[marker.Length..] switch
         {
-            var text = File.ReadAllText(Path.Combine(output, "Extracted.lean")).ReplaceLineEndings("\n");
-            var originals = RawDefinition.Matches(text).ToDictionary(match => match.Groups["number"].Value,
-                match => RawIdentity.Replace(match.Groups["value"].Value, ""));
-            string[] bodies = [.. MethodBody.Matches(text).Select(match =>
-                match.Groups["decoded"].Success ? originals[match.Groups["decoded"].Value] : match.Value)];
-            if (bodies.Length == 0)
-                throw new InvalidDataException("No method bodies in " + CliPaths.Display(output));
-            return (bodies, [.. MethodSignature.Matches(text).Select(match => match.Value)]);
-        }
-        var (bodies, signatures) = Methods(production);
-        var (variantBodies, variantSignatures) = Methods(variant);
-        return !bodies.SequenceEqual(variantBodies) ? "different"
-            : signatures.SequenceEqual(variantSignatures) ? "same" : "renamed";
+            "true" => namesMatch ? "same" : "renamed",
+            "false" => "different",
+            _ => throw new InvalidDataException("Lean returned an invalid gate comparison.")
+        };
     }
-
-    [GeneratedRegex(@"^def method\d+ : Method := .*?(?=^\S)|" +
-        @"^cil_decoded_method method(?<decoded>\d+) (?:\[[^\]\n]*\] )?:= [^\n]*",
-        RegexOptions.Multiline | RegexOptions.Singleline)]
-    private static partial Regex MethodBody { get; }
-
-    [GeneratedRegex(@"^def method(?<number>\d+)Original : Extraction\.RawMethod := (?<value>[^\n]*)$",
-        RegexOptions.Multiline)]
-    private static partial Regex RawDefinition { get; }
-
-    // The token and owner of a raw definition name its assembly, which the program relation ignores.
-    [GeneratedRegex(@"\btoken := \d+, owner := ""[^""]*"", ")]
-    private static partial Regex RawIdentity { get; }
-
-    [GeneratedRegex(@"^def method\d+Signature : String := .*$", RegexOptions.Multiline)]
-    private static partial Regex MethodSignature { get; }
 
     /// <summary>
     /// The result of `row`: its verdict, its proof's outcome, its refutation's when it has one, and how its

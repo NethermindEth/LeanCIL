@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:package Mono.Cecil
+#:include ContractVariants.cs
 #:include ../scripts/Verification.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
@@ -68,20 +69,52 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 Compare(zeroed, "Read", "-Zeroed");
 queue.Flush();
 
-var contract = At("Examples/Proofs/ConstructorValue.lean");
-verification.Verify(assembly, "Examples", "Constructors::Return(ulong)", contract, Path.Combine(root, "UniversalValue"));
-var wrongOutput = Path.Combine(root, "WrongValue");
-var failed = false;
-try
+var entries = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Constructors")!;
+ulong FieldAtMax(string name)
 {
-    verification.Verify(assembly, "Examples", "Constructors::WrongReturn(ulong)", contract, wrongOutput);
+    var value = entries.GetMethod(name)!.Invoke(null, [ulong.MaxValue])!;
+    return (ulong)value.GetType().GetField("Value")!.GetValue(value)!;
 }
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    failed = true;
-}
-if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect constructed value accepted");
+if (FieldAtMax("Return") != ulong.MaxValue || FieldAtMax("WrongReturn") != 0)
+    throw new InvalidOperationException("Constructors disagree with the wraparound counterexample.");
+
+verification.VerifyContractVariant(assembly, "Examples", "Constructors::Return(ulong)",
+    Path.Combine(root, "UniversalValue"),
+    assembly, "Constructors::WrongReturn(ulong)", Path.Combine(root, "WrongValue"),
+    """
+    /-- The returned struct contains the eight little-endian bytes of its UInt64 argument. -/
+    def counterValue : MethodContract W64 where
+      args input := [.scalar (.i64 input)]
+      pre _ memory := memory = Memory.empty
+      footprint _ := []
+      post input _ _ values := values = [.scalar (.aggregate (numberBytes input.toNat 8))]
+    """, """
+    theorem correctness : counterValue.Holds Extracted.program 0 := by
+      intro input initial empty
+      change initial = Memory.empty at empty
+      subst initial
+      have bytes := ExampleProof.correctness input
+      cases returned : invoke Extracted.program 16 0 [.scalar (.i64 input)] Memory.empty with
+      | error fault => rw [returned] at bytes; cases bytes
+      | ok result =>
+        obtain ⟨final, values⟩ := result
+        rw [returned] at bytes
+        have framed : Confined [] Memory.empty final := by
+          constructor
+          · exact Nat.zero_le _
+          all_goals intro id bound; exact (Nat.not_lt_zero id bound).elim
+        exact MethodContract.Holds.intro (c := counterValue) (input := input) final values
+          ⟨16, returned⟩ framed (Except.ok.inj bytes)
+    """, """
+    /-- Adding one wraps at UInt64.MaxValue, leaving a struct whose eight bytes are zero. -/
+    theorem correctness : counterValue.Refuted Extracted.program 0 :=
+      .of_return (input := -1) (initial := Memory.empty) rfl
+        (rfl : invoke Extracted.program 16 0 (counterValue.args (-1)) Memory.empty = .ok _)
+        (by
+          rintro ⟨-, _, rfl, wrong⟩
+          exact (by decide : [Value.scalar (.aggregate (numberBytes 0 8))] ≠
+            [Value.scalar (.aggregate (numberBytes (2^64 - 1) 8))]) wrong)
+    """, example: At("Examples/Proofs/ConstructorValue.lean"));
 
 // Writes Examples with Counter or its constructor rewritten by one named mutation.
 string Mutate(string mutation, string output)

@@ -3517,17 +3517,28 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     // Inside the extractor, its own commands run in this process instead of starting another runtime.
-    static void RunExtractor(string[] command)
+    static Sha256Digest? RunExtractor(string[] command, Func<Sha256Digest, Sha256Digest>? receiveDigest = null)
     {
 #if LEANCIL_TOOL
         if (command is ["dotnet", var path, .. var arguments] && path == ExtractorPath)
-        {
-            Nethermind.LeanCIL.Program.RunQuietly(arguments);
-            return;
-        }
+            return Nethermind.LeanCIL.Program.RunQuietly(arguments);
 #endif
+        if (command is ["dotnet", _, "check", ..])
+        {
+            var result = Execute([.. command, "--format", "json"]);
+            if (result.Code != 0)
+                throw new InvalidOperationException($"Command failed ({result.Code}): {result.Output}");
+            var json = JsonSerializer.Deserialize<JsonElement>(result.Stdout);
+            var digest = Sha256Digest.Parse(json.GetProperty("identitySha256").GetString(), "extractor check result");
+            return receiveDigest?.Invoke(digest) ?? digest;
+        }
         Run(command);
+        return null;
     }
+
+    static Sha256Digest CheckManifest(string[] command, Func<Sha256Digest, Sha256Digest>? receiveDigest = null) =>
+        RunExtractor(command, receiveDigest)
+        ?? throw new InvalidDataException("Extraction check returned no manifest digest.");
 
     static string[] Extract(string mode, string assembly, string? identity, string entry, string output, string profile = "scalar") =>
         ["dotnet", ExtractorPath, mode, assembly, entry, output, profile,
@@ -3834,6 +3845,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     // One read of identity.json and of the import sources it pins; staging, keys and reports all derive from it.
     internal sealed record ExtractionIdentity(string Output, string Sha256, JsonElement Root, SortedDictionary<string, string> Sources)
     {
+        internal string GeneratedSha256 => Root.GetProperty("generatedSha256").GetString()
+            ?? throw new InvalidDataException("Missing generated source digest.");
+
+        internal void RequireDigest(Sha256Digest checkedDigest)
+        {
+            if (Sha256 != checkedDigest.ToString())
+                throw new InvalidDataException("Extraction identity changed during verification.");
+        }
+
+        // Deep diagnostics also require the original manifest to remain present and byte-identical.
+        internal bool ManifestUnchanged() => File.ReadAllBytes(Path.Combine(Output, "identity.json")).AsSpan()
+            .SequenceEqual(Encoding.UTF8.GetBytes(Root.GetRawText()));
+
         internal JsonElement[] Imports => Root.TryGetProperty("imports", out JsonElement imports) ? [.. imports.EnumerateArray()] : [];
         internal JsonElement[] Graph => Root.TryGetProperty("importGraph", out JsonElement graph) ? [.. graph.EnumerateArray()] : [];
 
@@ -4702,8 +4726,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     Report Verify(string assembly, string identity, string entry, string proof, string output,
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
         string? settings = null, Action<string>? stage = null, DeepCheckInputs? deepChecks = null,
-        DeepCheckRun? deepRun = null)
+        DeepCheckRun? deepRun = null, Func<Sha256Digest, Sha256Digest>? receiveDigest = null)
     {
+        Sha256Digest RunCheck(string[] command) => CheckManifest(command, receiveDigest);
         deepRun = DeepCheckRun.Claim(deepChecks, deepRun);
         assembly = Path.GetFullPath(assembly);
         proof = Path.GetFullPath(proof);
@@ -4720,10 +4745,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         {
             var old = ReadCertificate(File.ReadAllText(reportPath), BindingMode.Default, out var problem) ??
                 throw new InvalidOperationException("Stale verification report: " + problem);
-            RunExtractor(Extract("check", assembly, identity, entry, output, profile));
+            var accepted = RunCheck(Extract("check", assembly, identity, entry, output, profile));
 
             if (string.IsNullOrWhiteSpace(old.extractionAudit) || !Same(old.inputs, Inputs(proof, settings)) ||
-                old.identitySha256 != Sha(Path.Combine(output, "identity.json")) ||
+                old.identitySha256 != accepted.ToString() ||
                 old.theorem != theorem || old.assemblySha256 != Sha(assembly) ||
                 (old.batchSourceSha256 is not null && (string.IsNullOrWhiteSpace(old.batchTheorem) ||
                     old.batchSourceSha256 != Sha(Path.Combine(output, "Batch.lean")))))
@@ -4737,12 +4762,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         ProofMessages = null;
         VerifiedStatement = null;
         stage?.Invoke("extraction integrity");
-        if (existingArtifacts)
-            RunExtractor(["dotnet", ExtractorPath, "check", output]);
-        else EnsureExtractorBuilt();
-
+        string[] checkCommand = existingArtifacts ? ["dotnet", ExtractorPath, "check", output]
+            : Extract("check", assembly, identity, entry, output, profile);
+        Sha256Digest? initialDigest = existingArtifacts ? RunCheck(checkCommand) : null;
         if (!existingArtifacts)
+        {
+            EnsureExtractorBuilt();
             Run(Extract("extract", assembly, identity, entry, output, profile));
+        }
         byte[] proofSourceBytes = File.ReadAllBytes(proof);
         string proofSourceHash = Convert.ToHexStringLower(SHA256.HashData(proofSourceBytes));
         string proofSource;
@@ -4758,6 +4785,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         if (before["proof:" + proof] != proofSourceHash)
             throw new InvalidOperationException("Proof inputs changed before their source snapshot");
         ExtractionIdentity extraction = ExtractionIdentity.Read(output);
+        if (initialDigest is { } acceptedDigest) extraction.RequireDigest(acceptedDigest);
+        Sha256Digest RecheckManifest()
+        {
+            var digest = RunCheck(checkCommand);
+            extraction.RequireDigest(digest);
+            return digest;
+        }
         referenceOnlyAuthoring = ReferenceOnlyImports(extraction);
         string[] selected = SelectionModules.Selected(
             SourceImport.Matches(proofSource).Select(import => import.Groups[1].Value), extraction.Root, proof);
@@ -4842,7 +4876,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         RequireDeepBindingStable();
 
         RequireOriginalProofSources();
-        var identityHash = extraction.Sha256;
 
         // Isolate generated code and the selected proof, then audit the named theorem.
         var fresh = Path.Combine(output, "proof-" + Guid.NewGuid().ToString("N"));
@@ -4869,7 +4902,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         try
         {
             File.Copy(Path.Combine(output, "Extracted.lean"), Path.Combine(fresh, "Extracted.lean"));
-            if (Sha(Path.Combine(fresh, "Extracted.lean")) != extraction.Root.GetProperty("generatedSha256").GetString())
+            if (Sha(Path.Combine(fresh, "Extracted.lean")) != extraction.GeneratedSha256)
                 throw new InvalidOperationException("Inputs changed during verification");
             copies.Add(Path.Combine(fresh, "Extracted.lean"), Path.Combine(output, "Extracted.lean"));
             string[] importModules = StageImportSources(extraction, fresh);
@@ -5052,8 +5085,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 RequireOriginalProofSources();
                 if (!Same(before, Inputs(proof, settings)))
                     throw new InvalidOperationException("Inputs changed during verification");
-                RunExtractor(existingArtifacts ? ["dotnet", ExtractorPath, "check", output]
-                    : Extract("check", assembly, identity, entry, output, profile));
+                RecheckManifest();
                 RequireCertifiedLibraryContents();
                 RequireDeepStable();
             }
@@ -5177,8 +5209,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 RequireOriginalProofSources();
                 if (!Same(before, Inputs(proof, settings)))
                     throw new InvalidOperationException("Inputs changed during verification");
-                RunExtractor(existingArtifacts ? ["dotnet", ExtractorPath, "check", output]
-                    : Extract("check", assembly, identity, entry, output, profile));
+                RecheckManifest();
                 RequireCertifiedLibraryContents();
             }
             RequireDeepStable();
@@ -5194,7 +5225,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             RequireOriginalProofSources();
             RequireStagedProofSources();
             RequireOriginalProofSources();
-            if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
+            if (!Same(before, Inputs(proof, settings)))
                 throw new InvalidOperationException("Inputs changed during verification");
             // The display is published only here, after every check above, and never feeds a check.
             if (viewsStatement)
@@ -5211,21 +5242,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
                 PublishSuccess(proofKey, publication);
             }
-            if (!proofRestored && deep is null) PublishProof();
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
-            if (extractionPublication is not null && deep is null)
-            {
-                PublishSuccess(extractedKey, extractionPublication);
-            }
             fullResult = fullImportAudit?.Invoke(output, fresh, "Proof", leanPath);
 
             // Bind the report only after confirming inputs stayed unchanged.
             stage?.Invoke("extraction integrity");
-            RunExtractor(existingArtifacts ? ["dotnet", ExtractorPath, "check", output]
-                : Extract("check", assembly, identity, entry, output, profile));
+            var identityHash = RecheckManifest().ToString();
 
             RequireOriginalProofSources();
-            if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
+            if (!Same(before, Inputs(proof, settings)))
                 throw new InvalidOperationException("Inputs changed during verification");
             // An editor package requires the same library by path and may have built into it meanwhile.
             RequireUnchangedLibrary();
@@ -5250,8 +5275,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireDeepStable();
             var deepPublication = deep is null ? null : StageDeepResult(deep, fresh);
-            if (!proofRestored && deep is not null) PublishProof();
-            if (deep is not null && extractionPublication is not null)
+            if (!proofRestored) PublishProof();
+            if (extractionPublication is not null)
                 PublishSuccess(extractedKey, extractionPublication);
             if (deepPublication is not null) PublishSuccess(deep!.ResultKey!, deepPublication);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");

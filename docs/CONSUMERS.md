@@ -144,11 +144,13 @@ A named profile is a custom profile file that results, generated paths and `--pr
 name, while extraction reads the file. The name must not be a built-in profile name, retired ones
 included.
 
-`program` compares the method bodies of the variant's `Extracted.lean` with those of production's
-extraction, or of the `programOf` variant's, for the same gate and profile: `same` when the bodies
-(for a method defined from its decoder, its raw definition) and the method signatures are equal, `renamed` when only the signatures differ, `different`
-otherwise. Assembly identities, digests, paths and metadata tokens are ignored. A comparison that
-does not hold fails the variant at stage `program comparison`, and its proof is not checked.
+`program` compares the variant with production or the selected `programOf` variant on the same
+profile. For each method in program order, the gate compares its original and specialized raw
+body and the complete decoded method, including layouts, links, locals and static field sites.
+The raw body comparison ignores the method's own token and declaring owner. The gate compares
+method signatures separately. Equal bodies and signatures give `same`. A signature change alone
+gives `renamed`, and a body or layout change gives `different`. A mismatch stops the variant at
+`program comparison` before proof checking.
 
 A template is a text file under `proofRoot`, or the name of a `templates` entry, whose `values`
 the use's own `values` replace name by name. A `template` string that names an entry refers to

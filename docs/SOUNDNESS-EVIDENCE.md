@@ -115,10 +115,13 @@ See [runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions).
 
 ### Method body decoding
 
-`CIL.Extraction.decodeSingleCatch` reads a fat method body with one small typed catch clause.
+`CIL.Extraction.decodeSingleCatch` reads a fat method body with one small or fat typed catch
+clause. The fat format uses 32-bit offsets and lengths for both ranges.
 It checks the class token against the supplied metadata and the protected and handler ranges
-against the decoded instruction boundaries. It accepts aligned sections with nonempty,
-disjoint ranges. The public execution checker still rejects methods with exception sections.
+against the decoded instruction boundaries. Each clause has nonempty, disjoint ranges.
+`CIL.Extraction.decodeCatchFinally` reads a typed catch inside a finally. The outer try
+must contain the inner try and catch handler, and the cleanup handler must end at an
+`endfinally` instruction. Public execution requires a section-free body.
 
 Each method's evidence holds the bytes the extractor emitted for its body (the header and the
 code, not extra sections) and a token table. `BodyDecodes` decodes the bytes in the kernel
@@ -410,6 +413,9 @@ enclosing TypeDefs. An external enum may reach its definition through several fo
 assemblies. Each must be supplied for complete coverage.
 For local virtual class slots, Lean follows each physical TypeDef parent,
 including abstract intermediates, and checks the MethodDefs and signatures of every descendant.
+For `castclass` and `isinst` with a supported local TypeDef operand, Lean checks the opcode and
+token at the instruction's byte offset in its MethodDef body. The scoped target name and its
+catalog declaration must match that physical TypeDef.
 For a nested declaration it checks each enclosing type and the name at every level.
 A managed-reference signature must match the physical element type and its byref marker.
 It compares the complete declarations of each method's catalog and validates each reachable
@@ -423,7 +429,7 @@ each additional image must resolve locally or name the core Object, ValueType or
 The audit checks each chain for cycles and each file table for additional metadata modules.
 The selected hierarchy must then belong to a non-core image. The physical-catalog theorem
 identifies that image and establishes the closed parent chains of the others.
-Casts, constrained calls, interface dispatch,
+Nonlocal class tests, constrained calls, interface dispatch,
 cross-image dispatch, other override forms on selected classes, additional metadata modules
 and unsupported signatures leave this fact uncovered.
 With all direct reference images supplied, the audit checks each AssemblyRef against its target's

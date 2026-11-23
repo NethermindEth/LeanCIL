@@ -1,6 +1,6 @@
 import StrictBinding.GenericConstraints
 
-/-! Check the physical catalogs of local virtual class calls and rule out foreign descendants. -/
+/-! Check the physical catalogs of local virtual calls and class tests against pinned metadata. -/
 
 namespace StrictBinding.ClassDispatch
 open CIL CIL.Extraction
@@ -183,9 +183,9 @@ private def localParents (image : PreparedImage) : Reading (Array Nat) := do
   for i in [:count] do parents := parents.push (← parentRow image (i+1))
   return parents
 
-/-- Enumerate every physical descendant, including abstract intermediates, and every MethodDef
-    each one owns, including explicit implementations of direct local interface slots. -/
-def physicalHierarchy (image : PreparedImage) (owner : Nat) :
+/-- The owner's physical declaration, with its MethodDefs and direct interface implementations.
+    Virtual calls also require every descendant, including abstract intermediates. -/
+def physicalHierarchy (image : PreparedImage) (owner : Nat) (includeDerived := true) :
     OptionT (Except AuditError) (List DispatchType) := do
   guard (image.layout.rowCount 5 == 0)
   let count := image.layout.rowCount Table.typeDef
@@ -195,6 +195,7 @@ def physicalHierarchy (image : PreparedImage) (owner : Nat) :
   let mut types := #[]
   for i in [:count] do
     let row := i+1
+    unless includeDerived || row == owner do continue
     unless ← descends parents owner count row false do continue
     let cell := image.layout.cellOfRow image.view Table.typeDef row
     let flags ← physical (cell 0)
@@ -214,14 +215,43 @@ def physicalHierarchy (image : PreparedImage) (owner : Nat) :
       interfaces := owned, methods := methods.toList }
   return types.toList
 
-/-- The union of all physical class hierarchies selected by a method's original callvirt sites.
+/-- Read the token at a class-test instruction boundary in the physically bound method body. -/
+private def testedClass (image : PreparedImage) (instruction : RawInstruction) (code : Array Nat) :
+    Reading DispatchType := do
+  let .type target := instruction.operand | failure
+  let #[op, a, b, c, d] := code.extract instruction.offset (instruction.offset + 5) | failure
+  guard (op == instruction.opcode)
+  let token := a + 256 * (b + 256 * (c + 256 * d))
+  guard (tableOf token == Table.typeDef)
+  let row := token % 2^24
+  let _ ← physical (image.layout.rowAt token)
+  unless target == (← className image row) do throwThe AuditError (.dispatchMismatch token)
+  let [entry] ← physicalHierarchy image row false | failure
+  return entry
+
+/-- The union of all physical class hierarchies and tested classes selected by the original body.
     Live sites must dispatch through the exact target table validated against that hierarchy. -/
 private def selected (image : PreparedImage) (item : MethodEvidence)
     (methods : List SpecializedMethod) : Reading (List DispatchType) := do
   guard (item.assembly.identity == image.identity)
+  let mut code := #[]
+  if item.original.code.any (fun i => i.opcode == 0x74 || i.opcode == 0x75) then
+    let bytes := item.body.bytes
+    physical (bodyBound image item.original.token bytes)
+    let .ok env := item.body.environment | failure
+    let .ok decoded := decodeBody env item.original.genericParameters.length
+      item.original.ownerParameters.length item.body | failure
+    unless decoded.code == item.original.code do
+      throwThe AuditError (.dispatchMismatch item.original.token)
+    let first :: _ := bytes | failure
+    code := (bytes.drop (if first % 4 == 2 then 1 else 12)).toArray
   let mut types : List DispatchType := []
   for (instruction, pc) in item.original.code.zipIdx do
-    if [0xfe16, 0x74, 0x75].contains instruction.opcode then failure
+    if instruction.opcode == 0xfe16 then failure
+    if instruction.opcode == 0x74 || instruction.opcode == 0x75 then
+      let entry ← testedClass image instruction code
+      unless types.contains entry do types := entry :: types
+      continue
     unless instruction.opcode == 0x6f do continue
     let .call site := instruction.operand
       | throwThe AuditError (.dispatchMismatch item.original.token)
@@ -249,7 +279,7 @@ def CatalogBound (image : PreparedImage) (item : MethodEvidence)
     (methods : List SpecializedMethod) : Prop :=
   ∃ actual, (selected image item methods).run = .ok (some actual) ∧ actual.Perm item.dispatchTypes
 
-/-- Whether this method is covered and whether it selects any virtual class hierarchy. -/
+/-- Whether this method is covered and whether its instructions select any class declarations. -/
 private def checkItem (image : PreparedImage) (methods : List SpecializedMethod)
     (item : MethodEvidence) : Except AuditError (Bool × Bool) := do
   let some actual ← (selected image item methods).run | return (false, false)

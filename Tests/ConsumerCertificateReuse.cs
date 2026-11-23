@@ -142,9 +142,80 @@ partial class Program
         Console.WriteLine("Measurements: " + Path.Combine(directory, "timings.json"));
     }
 
+    // The checker authenticates the bytes it read. Every verification mode must use that digest.
+    static void CheckManifestDigest(string[] cli, string package, string output, string proof)
+    {
+        var path = Path.Combine(output, "identity.json");
+        var bytes = File.ReadAllBytes(path);
+        var expected = Sha256Digest.Of(bytes);
+        var checkedManifest = Run([.. cli, "check", output, "--format", "json"]);
+        if (JsonSerializer.Deserialize<JsonElement>(checkedManifest).GetProperty("identitySha256").GetString() !=
+            expected.ToString())
+            throw new InvalidDataException("Check reported a different manifest digest.");
+        try
+        {
+            File.WriteAllBytes(path, [0xef, 0xbb, 0xbf, .. bytes]);
+            if (Execute([.. cli, "check", output]).Code == 0)
+                throw new InvalidDataException("Check accepted a different UTF-8 encoding of the manifest.");
+        }
+        finally { File.WriteAllBytes(path, bytes); }
+
+        var reportPath = Path.Combine(output, "verified.json");
+        var assembly = At("Examples/Assembly/bin/Examples.dll");
+        const string mismatch = "Extraction identity changed during verification.";
+        int checkCount = 0, mismatchAt = 0;
+        Sha256Digest Receive(Sha256Digest actual)
+        {
+            if (actual != expected) throw new InvalidDataException("The fixture manifest changed.");
+            return ++checkCount == mismatchAt ? Sha256Digest.Of([]) : actual;
+        }
+        foreach (var check in new[] { 1, 2 })
+        {
+            using var verifier = new Program();
+            checkCount = 0;
+            mismatchAt = check;
+            try
+            {
+                verifier.Verify(assembly, "Examples", "Arithmetic::Add(ulong,ulong)", proof, output,
+                    existingArtifacts: true, receiveDigest: Receive);
+                throw new InvalidDataException("Standalone verification accepted a different digest.");
+            }
+            catch (InvalidDataException error) when (error.Message == mismatch) { }
+            if (checkCount != check || File.Exists(reportPath))
+                throw new InvalidDataException("Standalone digest mismatch left a certificate or ran further checks.");
+        }
+
+        ConsumerOutcome Batch(bool compile, int mismatchOn)
+        {
+            using var verifier = new Program();
+            checkCount = 0;
+            mismatchAt = mismatchOn;
+            ConsumerRequest request = new(assembly, output, proof, "ExampleProof.correctness", null);
+            return verifier.VerifyConsumerRequests(package, [request], null, batch: true,
+                checkOnly: compile, receiveDigest: Receive).Single();
+        }
+        var refusedCompile = Batch(true, 1);
+        if (refusedCompile.Error?.Message != mismatch || refusedCompile.Checked || checkCount != 1)
+            throw new InvalidDataException("Compile check accepted an inconsistent digest.", refusedCompile.Error);
+        var fresh = Batch(false, 0);
+        var cached = Batch(false, 0);
+        if (fresh.Report?.identitySha256 != expected.ToString() || cached.Report?.identitySha256 != expected.ToString() ||
+            cached.Report.libraryBuild != "consumer-proof-cache" || checkCount != 2)
+            throw new InvalidDataException("The checked digest was missing from the fresh or cached certificate.",
+                fresh.Error ?? cached.Error);
+        var refusedCache = Batch(false, 2);
+        if (refusedCache.Error?.Message != mismatch || checkCount != 2 || File.Exists(reportPath))
+            throw new InvalidDataException("A cached certificate survived a different digest.", refusedCache.Error);
+        var compiled = Batch(true, 0);
+        if (!compiled.Checked || compiled.Error is not null || File.Exists(reportPath))
+            throw new InvalidDataException("Compile check failed on the original manifest.", compiled.Error);
+        Console.WriteLine("PASS exact manifest bytes bind standalone, batch, cached and compile-only checks");
+    }
+
     static void CheckConsumerExtractionIntegrity(string[] cli, string directory, string package,
         string output, string proof)
     {
+        CheckManifestDigest(cli, package, output, proof);
         var cleanProof = Path.Combine(package, "CleanProof.lean");
         File.Copy(proof, cleanProof);
         var other = Path.Combine(directory, "OtherExtraction");

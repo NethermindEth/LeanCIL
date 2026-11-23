@@ -91,8 +91,8 @@ For a matched comparison, .NET 10 and .NET 11 compiled the two equality methods 
 a Release assembly. Each method has the same nine bytes in both builds, including its tiny
 header, call token and return. Neither method has locals. The baseline uses the CIL.Op
 interpreter at `27953edb`. Both models check identical contract and high-bit consumer sources
-at each width. The resolved-call proof uses the canonical extraction's `method0_model2`
-theorem at the call between the two argument loads and the Boolean return.
+at each width. The resolved-call proof uses the runtime-model theorem generated for instruction
+2, the equality call between the two argument loads and the Boolean return.
 
 | Width | Proof | Baseline kernel heartbeats | Canonical kernel heartbeats |
 | ---: | --- | ---: | ---: |

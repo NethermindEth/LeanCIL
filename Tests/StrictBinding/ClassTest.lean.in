@@ -1,0 +1,52 @@
+import Extracted
+import CIL.Safety.MethodContract
+
+/-! A cast and a nonthrowing type test preserve a null reference or an exact Triangle. -/
+
+namespace ClassTest
+open CIL CIL.Extraction CIL.Safety
+
+/-- The runtime type of the fixture's sole object. -/
+private def triangle := TypeExpr.object Extracted.assembly0.identity "Geometry.Triangle"
+/-- The static base class accepted by both branches. -/
+private def shape := TypeExpr.object Extracted.assembly0.identity "Geometry.Shape"
+
+/-- The caller owns one exact Triangle at allocation zero. -/
+private def caller : Safety.Memory := { Safety.Memory.empty with
+  allocations := fun id =>
+    if id == 0 then some ⟨.object ⟨triangle, [shape]⟩, ⟨8,8,[]⟩, true, []⟩ else none
+  nextIdentity := 1 }
+
+/-- The method receives either the caller's Triangle or null. -/
+private def reference (present : Bool) : ManagedReference :=
+  if present then .address ⟨0,0⟩ else .null
+
+/-- Either branch returns the same reference and preserves the caller's allocation. -/
+def contract : MethodContract (Bool × Bool) ManagedReference where
+  args input := [.object (reference input.1), .scalar (.i32 (if input.2 then 1 else 0))]
+  results value := [.object value]
+  pre _ memory := memory = caller
+  footprint _ := []
+  post input initial final value := final = initial ∧ value = reference input.1
+
+/-- Execution of the selected implementation for every reference and branch of the fixture. -/
+theorem holds (ran : ∀ input, invoke Extracted.program 16 0 (contract.args input) caller =
+    .ok (caller, contract.results (reference input.1))) : contract.Holds Extracted.program 0 := by
+  rintro input _ rfl
+  exact MethodContract.Holds.intro (c := contract) _ _ ⟨16, ran input⟩
+    (Confined.refl [] _) ⟨rfl, rfl⟩
+#print axioms holds
+
+/-- Testing an exact Triangle for its subclass can return null on the nonthrowing branch. -/
+theorem refuted (ran : invoke Extracted.program 16 0 (contract.args (true, false)) caller =
+    .ok (caller, [.object .null])) : contract.Refuted Extracted.program 0 := by
+  apply MethodContract.Refuted.of_return (c := contract) (input := (true, false)) rfl ran
+  rintro ⟨_, result, encoded, _, rfl⟩
+  cases encoded
+#print axioms refuted
+
+/-- A failing strict cast on the same Triangle independently refutes the return contract. -/
+theorem refutedCast (ran : invoke Extracted.program 16 0 (contract.args (true, true)) caller =
+    .error ⟨0, 6, .thrown .invalidCast⟩) : contract.Refuted Extracted.program 0 :=
+  MethodContract.Refuted.of_fault (c := contract) (input := (true, true)) rfl (by decide) ran
+#print axioms refutedCast

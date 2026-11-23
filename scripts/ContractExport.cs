@@ -300,8 +300,9 @@ partial class Program
     static PreparedContractExport PrepareContractExport(ContractExportManifest manifest, ModuleDefinition module,
         ContractExportRequest request)
     {
-        RunExtractor(["dotnet", ExtractorPath, "check", request.Artifact, "--assembly-path", manifest.Assembly]);
+        var digest = CheckManifest(["dotnet", ExtractorPath, "check", request.Artifact, "--assembly-path", manifest.Assembly]);
         ExtractionIdentity extraction = ExtractionIdentity.Read(request.Artifact);
+        extraction.RequireDigest(digest);
         JsonElement identity = extraction.Root;
         FeatureProfile profile = identity.GetProperty("profile").Deserialize<FeatureProfile>()
             ?? throw new InvalidDataException("Missing export profile.");

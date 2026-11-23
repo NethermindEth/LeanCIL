@@ -1167,7 +1167,7 @@ partial class Program
 
     ConsumerSession PrepareConsumerSession(string session, string root, ConsumerDependency[] dependencies,
         SortedDictionary<string, string> snapshot, string certifiedLibrary, ExtractionIdentity extraction,
-        IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols,
+        IReadOnlyList<(string Module, string Proof)> proofs, string? symbols,
         IReadOnlyDictionary<string, string>? exportAudits = null,
         IReadOnlyDictionary<string, string>? generatedSources = null,
         ExtractionComponents? components = null, bool checkRejectedProofs = false)
@@ -1205,10 +1205,8 @@ partial class Program
         // Components replace this copy with generated text, which then fails the byte comparison and stays unmapped.
         var extractedCopy = (Path.Combine(generatedPackage, "Extracted.lean"),
             Path.Combine(extraction.Output, "Extracted.lean"));
-        foreach (var output in proofs.Select(proof => proof.Output).Distinct())
-            if (generated != JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")))
-                .GetProperty("generatedSha256").GetString())
-                throw new InvalidDataException("Generated CIL changed during consumer snapshot.");
+        if (generated != extraction.GeneratedSha256)
+            throw new InvalidDataException("Generated CIL changed during consumer snapshot.");
         AddConsumerLibrary(generatedPackage, "Extracted");
         var componentPaths = new List<string>();
         if (components is { Sources.Count: > 0 })
@@ -1281,7 +1279,7 @@ partial class Program
                 copied.Add(path);
             }
         }
-        foreach ((string module, string proof, string _) in proofs)
+        foreach ((string module, string proof) in proofs)
         {
             string target = Path.Combine(session, module + ".lean");
             if (File.Exists(target)) throw new InvalidDataException(module + " is reserved for the selected proof.");
@@ -1418,7 +1416,7 @@ partial class Program
     ConsumerOutcome[] VerifyConsumerRequests(string root, IReadOnlyList<ConsumerRequest> requests,
         Action<int, string>? stage, bool batch, int parallelism = 1,
         Action<int, ConsumerOutcome>? finished = null, bool checkOnly = false, DeepCheckInputs? deepChecks = null,
-        DeepCheckRun? deepRun = null)
+        DeepCheckRun? deepRun = null, Func<Sha256Digest, Sha256Digest>? receiveDigest = null)
     {
         deepRun = DeepCheckRun.Claim(deepChecks, deepRun);
         if (deepChecks is not null && (batch || checkOnly || requests.Count != 1 ||
@@ -1468,7 +1466,7 @@ partial class Program
         }
         var comparer = CollidingLocationComparer;
         var all = Enumerable.Range(0, requests.Count).ToArray();
-        var identities = new string[requests.Count];
+        var identities = new Sha256Digest[requests.Count];
         var extractions = new ExtractionIdentity[requests.Count];
         IReadOnlyList<DeepCheckInputs.Pin>? matchedPins = null;
         var proofKeys = new string[requests.Count];
@@ -1506,11 +1504,29 @@ partial class Program
             // Grouped by exact resolved spelling, so every directory is checked whatever its volume's case rule.
             Parallel.ForEach(Pending(members).GroupBy(i => locations[i], StringComparer.Ordinal), parallel, group =>
             {
-                try { RunExtractor(["dotnet", ExtractorPath, "check", outputs[group.First()]]); }
-                catch (Exception error) { Fail(group, error); }
+                try
+                {
+                    var digest = CheckManifest(["dotnet", ExtractorPath, "check", outputs[group.First()]], receiveDigest);
+                    foreach (var member in group)
+                        if (extractions[member] is null) identities[member] = digest;
+                        else if (identities[member] != digest)
+                            Fail([member],
+                                new InvalidDataException("Extraction identity changed during verification."));
+                }
+                catch (Exception error)
+                {
+                    Fail(group, error);
+                }
             });
         }
         CheckExtractions(all);
+        foreach (var i in Pending(all))
+            try
+            {
+                extractions[i] = ExtractionIdentity.Read(outputs[i]);
+                extractions[i].RequireDigest(identities[i]);
+            }
+            catch (Exception error) { Fail([i], error); }
         // Cache eligibility is local to each request/group, including parallel groups.
         referenceOnlyAuthoring = false;
         var live = Pending(all);
@@ -1558,8 +1574,7 @@ partial class Program
                         }
                         symbols[i] = Sha(path);
                     }
-                    selections[i] = ConsumerSelectedModules(proofs[i], snapshot, root, JsonSerializer
-                        .Deserialize<JsonElement>(File.ReadAllText(Path.Combine(outputs[i], "identity.json"))));
+                    selections[i] = ConsumerSelectedModules(proofs[i], snapshot, root, extractions[i].Root);
                 }
                 catch (Exception error) { Fail([i], error); }
         }
@@ -1580,7 +1595,6 @@ partial class Program
                 SortedDictionary<string, string> common = Common(ConsumerSnapshot(root, excluded, fullBundleDependencies));
                 foreach (var i in members)
                     if (!Same(before[i], BoundRequestInputs(i, common)) ||
-                        identities[i] != Sha(Path.Combine(outputs[i], "identity.json")) ||
                         (symbols[i] is not null && (!File.Exists(Path.Combine(outputs[i], "Symbols.lean")) ||
                             symbols[i] != Sha(Path.Combine(outputs[i], "Symbols.lean")))))
                         Fail([i], new InvalidOperationException("Inputs changed during consumer verification"));
@@ -1597,7 +1611,6 @@ partial class Program
             Stage(live, "arguments");
             try
             {
-                extractions[0] = ExtractionIdentity.Read(outputs[0]);
                 matchedPins = deepRun.Begin(extractions[0]);
             }
             catch (Exception error)
@@ -1616,7 +1629,13 @@ partial class Program
             Library(Inputs(proofs[live[0]], requests[live[0]].Settings));
             if (deepChecks is not null)
             {
-                deepRun!.Attempt!.RequireIdentity(ExtractionIdentity.Read(outputs[0]));
+                deepRun!.Attempt!.RequireIdentity(extractions[0]);
+                foreach (var (module, source) in extractions[0].Sources)
+                {
+                    var path = Path.Combine(outputs[0], module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+                    if (File.ReadAllText(path) != source)
+                        throw new InvalidDataException($"Imported interface source changed: {module}");
+                }
                 PrepareBindingLibrary(this.session!);
             }
             certifiedLibrary = library!;
@@ -1638,8 +1657,6 @@ partial class Program
         {
             try
             {
-                extractions[i] ??= ExtractionIdentity.Read(outputs[i]);
-                identities[i] = extractions[i].Sha256;
                 // PDB names bind only proofs that import them; identity.json does not cover the PDB.
                 // A result cached without a statement view must not satisfy a run that prints one.
                 proofKeys[i] = ConsumerCacheKey("proof", before[i], SemanticExtractionIdentity(extractions[i]) + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
@@ -1677,7 +1694,7 @@ partial class Program
                 JsonElement current = extractions[i].Root;
                 var report = JsonSerializer.Deserialize<Report>(outcomes[i].Detail!)! with
                 {
-                    identitySha256 = identities[i],
+                    identitySha256 = identities[i].ToString(),
                     assemblySha256 = Sha(requests[i].Assembly), inputs = before[i], imports = PublishedImports(current),
                     contractImports = ContractImportAssumptions(current), contractDependencies = DeploymentDependencies(current)
                 };
@@ -1696,8 +1713,12 @@ partial class Program
         foreach (var i in Pending(all))
             try
             {
-                var key = Sha(Path.Combine(outputs[i], "Extracted.lean")) + (symbols[i] is null ? "" : "\n" + symbols[i]) +
-                    "\n" + JsonSerializer.Serialize(extractions[i].Sources) + "\nreferenceOnly=" + ReferenceOnlyImports(extractions[i]);
+                var key = $"""
+                    {extractions[i].GeneratedSha256}
+                    {symbols[i]}
+                    {JsonSerializer.Serialize(extractions[i].Sources)}
+                    referenceOnly={ReferenceOnlyImports(extractions[i])}
+                    """;
                 if (!groups.TryGetValue(key, out var members)) groups[key] = members = [];
                 members.Add(i);
             }
@@ -1757,7 +1778,9 @@ partial class Program
             }
             var components = componentPlans[members[0]];
             bool checkRejectedProofs = members.Any(index => requests[index].ExpectRejection);
-            Dictionary<string, string> bound = new(WithExtraction(sources, Sha(Path.Combine(outputs[members[0]], "Extracted.lean"))), StringComparer.Ordinal);
+            var groupExtraction = extractions[members[0]];
+            Dictionary<string, string> bound = new(WithExtraction(sources, groupExtraction.GeneratedSha256),
+                StringComparer.Ordinal);
             foreach (var (module, source) in components.Sources)
                 bound["<generated>/" + module + ".lean"] = ContentKey(source);
             if (checkRejectedProofs)
@@ -1784,8 +1807,9 @@ partial class Program
                 .ToDictionary(pair => pair.member, pair => pair.module);
             // Groups share one Symbols.lean hash or none.
             var symbolHash = symbols[members[0]];
-            var prepared = PrepareConsumerSession(session, root, dependencies, snapshot, certifiedLibrary, extractions[members[0]],
-                members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray(), symbolHash,
+            var prepared = PrepareConsumerSession(session, root, dependencies, snapshot, certifiedLibrary,
+                groupExtraction,
+                members.Select((i, k) => (names[k], proofs[i])).ToArray(), symbolHash,
                 members.Where(i => requests[i].ExportAudit is not null).ToDictionary(
                     i => requestModules[i], i => requests[i].ExportAudit!.Source, StringComparer.Ordinal),
                 generatedSources: generatedSources, components: components, checkRejectedProofs: checkRejectedProofs);
@@ -1887,7 +1911,7 @@ partial class Program
             if (supportKey.Length > 0) RestoreCertificateSupport(supportKey, dependent: true);
             if (checkOnly)
             {
-                CheckGroup(members, session, names, bound, first, share);
+                CheckGroup(members, session, names, bound, first, share, prepared);
                 return;
             }
             Dictionary<string, AuditedClosure>? checkedClosures = deepChecks is null ? null : [];
@@ -2587,7 +2611,7 @@ partial class Program
                     ? assumptions.Deserialize<string[]>() : [];
                 RequireImplementationImports(extractions[i]);
                 fullResults.TryGetValue(i, out FullImportResult? fullResult);
-                var report = new Report(CertificateSchema, Sha(requests[i].Assembly), identities[i],
+                var report = new Report(CertificateSchema, Sha(requests[i].Assembly), identities[i].ToString(),
                     requests[i].Theorem, audits[i].Axioms, audits[i].Audit, before[i],
                     deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
                         deep!.Requests, new(bindingSourcesKey!,
@@ -2637,7 +2661,7 @@ partial class Program
 
         // Compiled support stays inside this invocation; it is never published as certified support.
         void CheckGroup(int[] members, string session, string[] names,
-            IReadOnlyDictionary<string, string> bound, bool first, bool share)
+            IReadOnlyDictionary<string, string> bound, bool first, bool share, ConsumerSession prepared)
         {
             if (!first)
                 foreach (var file in CacheFiles(support).Keys.Where(file => file != ConsumerSupportRecordName))
@@ -2652,6 +2676,8 @@ partial class Program
                 internalErrors: false);
             FailInternalErrors(members, names, command, build.Code, build.Output);
             var (directories, _) = ConsumerImportDirectories(session);
+            if (prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
+                throw new InvalidDataException("Consumer sources changed during the compile check.");
             for (var index = 0; index < members.Length; index++)
             {
                 var member = members[index];

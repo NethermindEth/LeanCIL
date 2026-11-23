@@ -259,6 +259,72 @@ verification.VerifyContractVariant(assembly, "Examples", selectors["And"], Path.
     """, profile: "x64-v3", imports: "import CIL.Safety.IntrinsicExecution");
 Console.WriteLine("PASS AVX2 AND contract and certified OR replacement at (1, 2)");
 
+// Truncating the vector count to a byte turns 256 into zero before AVX2 sees it.
+var shortCount = Path.Combine(root, "TruncatedShiftCount");
+Directory.CreateDirectory(shortCount);
+var shortCountAssembly = Path.Combine(shortCount, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var methods = variant.GetType("Examples.DivisionIntrinsics").Methods;
+    foreach (var name in new[] { "ShiftLeft", "ShiftRight" })
+    {
+        var method = methods.Single(candidate => candidate.Name == name);
+        var load = method.Body.Instructions.First();
+        if (load.OpCode != OpCodes.Ldarg_1) throw new InvalidDataException("Expected the shift count first.");
+        var il = method.Body.GetILProcessor();
+        var truncate = il.Create(OpCodes.Conv_U1);
+        il.InsertAfter(load, truncate);
+        il.InsertAfter(truncate, il.Create(OpCodes.Conv_U8));
+    }
+    variant.Write(shortCountAssembly);
+}
+var truncated = Assembly.Load(File.ReadAllBytes(shortCountAssembly)).GetType("Examples.DivisionIntrinsics")!;
+foreach (var (name, lane, operation, shift, model) in new[]
+    { ("ShiftLeft", 0, "shl64Count", "<<<", "shiftLeft"), ("ShiftRight", 3, "shr64Count", ">>>", "shiftRight") })
+{
+    if (Avx2.IsSupported)
+    {
+        var original = runtime.GetMethod(name)!.CreateDelegate<Func<ulong, ulong, ulong>>();
+        var changed = truncated.GetMethod(name)!.CreateDelegate<Func<ulong, ulong, ulong>>();
+        foreach (ulong count in new ulong[] { 0, 1, 63, 64, 255, 256, 257, ulong.MaxValue })
+        {
+            const ulong value = 0x8000000000000001;
+            ulong Expected(ulong n) => n >= 64 ? 0 : lane == 0 ? value << (int)n : value >> (int)n;
+            if (original(value, count) != Expected(count) || changed(value, count) != Expected((byte)count))
+                throw new InvalidOperationException($"{name} disagrees with the full or truncated count {count}.");
+        }
+    }
+    verification.VerifyContractVariant(assembly, "Examples", selectors[name], Path.Combine(root, name + "Contract"),
+        shortCountAssembly, selectors[name], Path.Combine(shortCount, name), $$"""
+        /-- The vector shift uses all 64 count bits and preserves caller memory. -/
+        def shifted : MethodContract (W64 × W64) W64 where
+          args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+          results word := [.scalar (.i64 word)]
+          pre _ _ := True
+          footprint _ := []
+          post input before after word := after = before ∧
+            word = if input.2.toNat >= 64 then 0 else input.1 {{shift}} input.2.toNat
+        """, $$"""
+        theorem correctness : shifted.Holds Extracted.program 0 := by
+          rintro ⟨value, count⟩ memory -
+          let word := if count.toNat >= 64 then 0 else value {{shift}} count.toNat
+          apply MethodContract.Holds.intro (c := shifted) (input := (value, count)) memory word ?_
+            (Confined.refl _ _) ⟨rfl, rfl⟩
+          exact ⟨256, invoke_broadcastShift Extracted.profile .{{operation}} {{lane}} value count word memory
+            rfl rfl rfl Extracted.method0_model6 rfl (by decide) (checked_broadcast_{{model}} value count)⟩
+        """, """
+        /-- Truncation returns one for a count of 256. The contract requires zero. -/
+        theorem correctness : shifted.Refuted Extracted.program 0 := by
+          apply MethodContract.Refuted.of_return (c := shifted) (input := (1, 256))
+            (initial := Memory.empty) (fuel := 256) (final := Memory.empty)
+            (values := [.scalar (.i64 1)]) trivial (by rfl)
+          rintro ⟨_, word, encoded, _, rfl⟩
+          revert encoded
+          decide
+        """, profile: "x64-v3", imports: "import CIL.Safety.IntrinsicExecution");
+}
+Console.WriteLine("PASS AVX2 shift contracts and certified truncated-count replacements at 256");
+
 foreach (var (name, width, zero, highBit) in new (string, int, object, object)[]
 {
     ("EqualBytes256", 256, Vector256<byte>.Zero, Vector256<byte>.Zero.WithElement(31, (byte)0x80)),

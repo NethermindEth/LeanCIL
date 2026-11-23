@@ -25,7 +25,7 @@ internal static partial class Program
         "       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] " +
         "[--assembly 'assembly name or full identity'] [--reference Lib.dll]...\n" +
         "       leancil check output-directory [--assembly-path assembly.dll] " +
-        "[--assembly 'assembly name or full identity']\n" +
+        "[--assembly 'assembly name or full identity'] [--format json]\n" +
         "       leancil new-proof extraction-directory proof.lean\n" +
         "       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] " +
         "[--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]... " +
@@ -54,11 +54,14 @@ internal static partial class Program
     /// a rejection throws instead of returning an exit code. A batch shares the files read by earlier runs, and
     /// `definitions` receives the extracted methods.
     /// </summary>
-    internal static void RunQuietly(string[] args, ExtractionBatch? batch = null,
+    internal static Sha256Digest? RunQuietly(string[] args, ExtractionBatch? batch = null,
         Action<MethodDefinitions>? definitions = null)
     {
         if (args is not ["extract" or "check", ..]) throw new ArgumentException(Usage);
-        Run(args, batch, report: TextWriter.Null, rethrow: true, definitions: definitions);
+        Sha256Digest? accepted = null;
+        Run(args, batch, report: TextWriter.Null, rethrow: true, definitions: definitions,
+            checkedManifest: digest => accepted = digest);
+        return accepted;
     }
 
     /// <summary>
@@ -78,7 +81,7 @@ internal static partial class Program
     static int Run(string[] args, ExtractionBatch? batch = null,
         Action<TemplateEmitter.Variant>? checkedTemplate = null, TextWriter? report = null, bool rethrow = false,
         Action<ProofOutline.Extraction>? inspect = null, bool refresh = false,
-        Action<MethodDefinitions>? definitions = null)
+        Action<MethodDefinitions>? definitions = null, Action<Sha256Digest>? checkedManifest = null, bool gateInput = false)
     {
         report ??= Console.Out;
         if (args.Length == 0 || args is ["--help"] or ["-h"])
@@ -193,6 +196,7 @@ internal static partial class Program
             List<string> entryTypeArguments = [];
             List<string> referencePaths = [];
             var initializedTypes = new SortedSet<string>(StringComparer.Ordinal);
+            var jsonResult = false;
             for (var index = 1; index < args.Length; index++)
             {
                 if (ImportOptions.Names(args[index]))
@@ -236,6 +240,13 @@ internal static partial class Program
                         throw new ArgumentException("--assembly-path requires a DLL path.");
                     assemblyOverride = args[index];
                 }
+                else if (args[index] == "--format" && args[0] == "check")
+                {
+                    if (jsonResult || ++index == args.Length || args[index] != "json")
+                        throw new ArgumentException("check accepts --format json once.");
+                    jsonResult = true;
+                    report = TextWriter.Null;
+                }
                 else if (args[index].StartsWith("--", StringComparison.Ordinal))
                     throw new ArgumentException($"Unknown option: {args[index]}\n{Usage}");
                 else
@@ -248,8 +259,9 @@ internal static partial class Program
             var output = Path.GetFullPath(recordedCheck ? positional[0] : positional[2]);
             var identityPath = Path.Combine(output, "identity.json");
             stage = "extraction integrity";
-            JsonElement? recorded = args[0] == "check"
-                ? JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(identityPath)) : null;
+            byte[]? identityBytes = args[0] == "check" ? File.ReadAllBytes(identityPath) : null;
+            JsonElement? recorded = identityBytes is null ? null :
+                JsonSerializer.Deserialize<JsonElement>(identityBytes);
             if (recorded is { } assumptions && assumptions.TryGetProperty("initializedTypes", out var recordedTypes))
             {
                 var names = recordedTypes.Deserialize<string[]>() ?? throw new InvalidDataException("Missing initialization assumptions.");
@@ -365,7 +377,7 @@ internal static partial class Program
             stage = "metadata and CIL validation";
             LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, pinned, callSites, imports,
                 staticIdentities, collectOutlines: inspect is not null,
-                templateInputs: checkedTemplate is not null);
+                templateInputs: checkedTemplate is not null, compareOriginal: gateInput);
             string source = emitted.Source;
             var loadedValues = methods.SelectMany(m => Reachability.Analyze(m, profile)).Where(StaticValues.IsLoad)
                 .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture)).ToArray();
@@ -457,7 +469,7 @@ internal static partial class Program
                 foreach ((string name, string content) in importModules)
                     if (File.ReadAllText(Path.Combine(output, name.Replace('.', Path.DirectorySeparatorChar) + ".lean")) != content)
                         throw new InvalidDataException("Stale or mismatched contract interface source: " + name);
-                if (File.ReadAllText(identityPath) != manifest)
+                if (!identityBytes.AsSpan().SequenceEqual(Encoding.UTF8.GetBytes(manifest)))
                     throw new InvalidDataException($"Stale or mismatched verification artifact: {CliPaths.Display(identityPath)} differs from regenerated assembly, extractor or configuration metadata.");
                 if (symbolSource is not null && File.Exists(symbolPath) && File.ReadAllText(symbolPath) != symbolSource)
                     throw new InvalidDataException($"Stale or mismatched verification artifact: {CliPaths.Display(symbolPath)} differs from the regenerated PDB names and locations.\n  Assembly: {CliPaths.Display(assemblyPath)}\n  Method: {methods[0].FullName}");
@@ -502,14 +514,20 @@ internal static partial class Program
                     "loads read the caller's static binding.");
             if (checkedTemplate is not null)
             {
-                var frames = global::Program.TemplateVectorFrames(source, emitted.Templates);
+                var frames = gateInput ? emitted.Templates : global::Program.TemplateVectorFrames(source, emitted.Templates);
                 checkedTemplate(new(output, assemblyHash, profile, frames) { DecoderInputs = emitted.TemplateInputs });
             }
             definitions?.Invoke(new(methods));
             if (args[0] == "check" && !refresh)
+            {
                 inspect?.Invoke(new(methods, emitted.Outlines, emitted.Views,
                     emitted.ClassFields.ToDictionary(access => (access.Method, access.Pc), access => access.Operation),
                     profile.Architecture, emitted.Layouts));
+                var digest = Sha256Digest.Of(identityBytes);
+                checkedManifest?.Invoke(digest);
+                if (jsonResult)
+                    Console.WriteLine(JsonSerializer.Serialize(new { identitySha256 = digest.ToString() }));
+            }
         }
         catch (Exception exception)
         {
@@ -529,10 +547,13 @@ internal static partial class Program
     }
 
     // Capture only after the ordinary check has matched every extraction artifact.
-    static TemplateEmitter.Variant ReadTemplate(string directory)
+    static TemplateEmitter.Variant ReadTemplate(string directory) => ReadDecoderInput(directory, gateInput: false);
+
+    internal static TemplateEmitter.Variant ReadDecoderInput(string directory, bool gateInput)
     {
         TemplateEmitter.Variant? variant = null;
-        if (Run(["check", directory], checkedTemplate: value => variant = value) != 0 || variant is null)
+        if (Run(["check", directory], checkedTemplate: value => variant = value,
+            report: gateInput ? TextWriter.Null : null, gateInput: gateInput) != 0 || variant is null)
             throw new InvalidDataException("Template input failed exact extraction checking: " + directory);
         return variant;
     }

@@ -338,6 +338,9 @@ void CheckDispatchCatalogs()
             public sealed class UnrelatedResource : System.IDisposable { void System.IDisposable.Dispose() { } }
             public static class Reader {
                 public static int Total(Shape shape, Solid solid) => shape.Sides() + solid.Faces() + shape.Sides();
+                public static Triangle Select(Shape shape, bool strict) =>
+                    strict ? ({{(changed ? "Polygons.Equilateral" : "Triangle")}})shape :
+                        shape as {{(changed ? "Polygons.Equilateral" : "Triangle")}};
             }
             """);
         var pins = Path.Combine(fixture.Root, build + ".sha256");
@@ -361,6 +364,7 @@ void CheckDispatchCatalogs()
             "#print axioms correctness\nend DispatchGate\n");
         string[] binding = changed ? [] : ["--deep-checks", pins];
         Run([.. cli, "verify", output, "--proof", proof, "--theorem", "DispatchGate.correctness", .. binding]);
+        CheckClassTests(assembly, build, changed);
         using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "verified.json")));
         if (changed)
         {
@@ -388,8 +392,47 @@ void CheckDispatchCatalogs()
     }
 }
 
+void CheckClassTests(string assembly, string build, bool changed)
+{
+    const string selector = "Geometry.Reader::Select(Geometry.Shape,System.Boolean)";
+    var output = fixture.Artifact(build + "Select");
+    Run([.. cli, "extract", assembly, selector, output]);
+    var proof = Path.Combine(output, "Proof.lean");
+    var template = File.ReadAllText(At("Tests/StrictBinding/ClassTest.lean.in"));
+    var claim = changed ? "Refuted" : "Holds";
+    var evidence = changed ? "refuted rfl" :
+        "holds (by rintro ⟨present, strict⟩; cases present <;> cases strict <;> rfl)";
+    var strictCast = changed
+        ? "\ntheorem strictCast : contract.Refuted Extracted.program 0 := refutedCast rfl\n#print axioms strictCast\n"
+        : "";
+    File.WriteAllText(proof, template + strictCast +
+        $"\ntheorem correctness : contract.{claim} Extracted.program 0 := {evidence}\n" +
+        "#print axioms correctness\nend ClassTest\n");
+    var pins = Path.Combine(output, "inputs.sha256");
+    File.WriteAllText(pins, Sha(assembly) + "  " + assembly + "\n");
+    string[] binding = changed ? [] : ["--deep-checks", pins];
+    Run([.. cli, "verify", output, "--proof", proof, "--theorem", "ClassTest.correctness", .. binding]);
+    using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "verified.json")));
+    if (changed)
+    {
+        var method = report.RootElement.GetProperty("refutation").GetProperty("method");
+        if (method.GetProperty("assemblySha256").GetString() != Sha(assembly) ||
+            !method.GetProperty("signature").GetString()!.Contains(selector, StringComparison.Ordinal))
+            throw new InvalidOperationException("Unexpected class-test counterexample: " + method);
+        return;
+    }
+    var fact = report.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+        .Single(item => item.GetProperty("id").GetString() == "dispatch-catalogs");
+    if (fact.GetProperty("status").GetString() != "reconfirmed" ||
+        fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
+        throw new InvalidOperationException("Incorrect class-test binding: " + fact);
+    ReplayImageCases(output, assembly, "TypeTestImage", At("Tests/StrictBinding/ClassTestCases.lean"),
+        ["StrictBinding.DispatchCatalogs", "Tests.StrictBinding.Mutation"]);
+}
+
 void CheckLayoutContent()
 {
+    var assemblies = new List<string>();
     foreach (bool changed in new[] { false, true })
     {
         var build = changed ? "RelocatedFields" : "OriginalFields";
@@ -410,6 +453,7 @@ void CheckLayoutContent()
                 public static uint ReadPacked(ref Packed row) => row.Count;
             }
             """);
+        assemblies.Add(assembly);
         var pins = Path.Combine(fixture.Root, build + ".sha256");
         File.WriteAllText(pins, Sha(assembly) + "  " + assembly + Environment.NewLine);
         foreach (var (method, type, offset) in new[] { ("Read", "Overlay", "8"), ("ReadPacked", "Packed", "2") })
@@ -444,6 +488,37 @@ void CheckLayoutContent()
                 throw new InvalidOperationException("Incorrect layout binding report: " + fact);
         }
     }
+    // Both assemblies contain the same ReadPacked instructions. The changed packing moves Count.
+    var manifest = Path.Combine(fixture.Root, "layout-gates.json");
+    var results = Path.Combine(fixture.Root, "layout-results.json");
+    File.WriteAllText(manifest, JsonSerializer.Serialize(new
+    {
+        schema = 1, proofRoot = fixture.Artifact("OriginalFieldsReadPacked"), outputRoot = "layout-gates",
+        gates = new[] { new
+        {
+            name = "packed", method = "Gates.Reader::ReadPacked(Gates.Packed&)", profiles = new[] { "scalar" },
+            assembly = assemblies[0], proof = "Proof.lean", theorem = "LayoutGate.correctness",
+            variants = new[]
+            {
+                new { name = "identical", assembly = assemblies[0], expect = "unchanged", program = "same" },
+                new { name = "moved", assembly = assemblies[1], expect = "unchanged", program = "different" },
+                new { name = "claimed-same", assembly = assemblies[1], expect = "unchanged", program = "same" }
+            }
+        } }
+    }));
+    var compared = Execute([.. cli, "gates", manifest, "--only", "packed/scalar/identical",
+        "--only", "packed/scalar/moved", "--only", "packed/scalar/claimed-same", "--results", results]);
+    if (compared.Code != 1) throw new InvalidOperationException(compared.Output);
+    using var receipt = JsonDocument.Parse(File.ReadAllText(results));
+    var rows = receipt.RootElement.GetProperty("rows").EnumerateArray().ToDictionary(row =>
+        row.GetProperty("variant").GetString()!);
+    if (rows["identical"].GetProperty("status").GetString() != "unchanged" ||
+        rows["moved"].GetProperty("status").GetString() != "unchanged" ||
+        rows["claimed-same"].GetProperty("status").GetString() != "failed" ||
+        rows["claimed-same"].GetProperty("stage").GetString() != "program comparison" ||
+        !rows["claimed-same"].GetProperty("error").GetString()!.Contains("but it is different.", StringComparison.Ordinal))
+        throw new InvalidOperationException(compared.Output);
+    Console.WriteLine("PASS unchanged ReadPacked IL with a relocated field compares as a different program");
 }
 
 void CheckEnumStorage()

@@ -488,7 +488,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,
-        IReadOnlySet<Instruction> reachable, int methodCount, string staticInput, StringBuilder? decoderInputs = null)
+        IReadOnlySet<Instruction> reachable, int methodCount, string staticInput, StringBuilder? decoderInputs = null,
+        bool compareOriginal = false)
     {
         var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
         var originalEvidence = Method(original, original, method, reachable, staticInput);
@@ -497,7 +498,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         closedTypes.Clear();
         var closedEvidence = Method(method, original, method, reachable, staticInput, closedTypes);
         ExternalIdentities.Emit(lean, decoderInputs);
-        lean.AppendLine($"def method{number}Original : Extraction.RawMethod := {originalEvidence}");
+        var originalInput = $"def method{number}Original : Extraction.RawMethod := {originalEvidence}";
+        lean.AppendLine(originalInput);
+        if (compareOriginal) decoderInputs!.AppendLine(originalInput);
         lean.AppendLine(body.Bytes);
         if (body.Slices.Length > 0)
             foreach (var line in body.Slices.Split('\n')) lean.AppendLine(line);

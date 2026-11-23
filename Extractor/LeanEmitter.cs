@@ -184,7 +184,8 @@ internal static class LeanEmitter
 
     internal static Emission Emit(MethodDefinition[] methods, FeatureProfile profile, PinnedAssemblies pinned,
         ResolvedCallSites callSites, ImportResolution? importResolution = null,
-        StaticIdentityRecord[]? staticIdentities = null, bool collectOutlines = false, bool templateInputs = false)
+        StaticIdentityRecord[]? staticIdentities = null, bool collectOutlines = false, bool templateInputs = false,
+        bool compareOriginal = false)
     {
         var methodIndices = methods.Select((method, index) => (method, index))
             .ToDictionary(pair => pair.method, pair => pair.index);
@@ -323,7 +324,7 @@ internal static class LeanEmitter
                 staticInput = $"staticFields := {table}, ";
             }
             inputs?.Append(lean, inputStart, lean.Length - inputStart);
-            genericEvidence.EmitMethod(lean, m, n, reachable, methods.Length, staticInput, inputs);
+            genericEvidence.EmitMethod(lean, m, n, reachable, methods.Length, staticInput, inputs, compareOriginal);
             // A field access names its operand's definition, so stepping reads that operand's shape fact.
             var (naming, objectProof) = operandShapes.RecordMethod(m, n, reachable, genericEvidence);
             if (GenericEvidence.FirstDecodeRefusal(m, reachable, callSites, importResolution) is { } refusal)

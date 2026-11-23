@@ -456,6 +456,59 @@ theorem malformed_catch_refused :
   ⟨by decide +kernel, by cil_kernel_rfl⟩
 #print axioms malformed_catch_refused
 
+/-- A 262-byte try requires a fat clause. The handler pops the exception and leaves to ret. -/
+private def wideCatch : List Nat :=
+  let code := List.replicate 260 0 ++ [0x14, 0x7A, 0x26, 0xDE, 0, 0x2A]
+  [0x0B, 0x30, 1, 0] ++ token code.length ++ [0,0,0,0] ++ code ++ [0,0] ++
+    [0x41,28,0,0] ++ token 0 ++ token 0 ++ token 262 ++ token 262 ++ token 3 ++
+    token tokens.boxRef
+
+set_option maxRecDepth 8192 in
+/-- The upper length byte belongs to the try, and the upper offset byte to the handler. -/
+theorem wide_catch_ranges :
+    ((readCatch wideCatch).toOption.map Prod.snd) = some ⟨0, 262, 262, 265, tokens.boxRef⟩ := by
+  decide +kernel
+#print axioms wide_catch_ranges
+
+set_option maxRecDepth 8192 in
+/-- A fat section must have the exact size, flags and ranges and resolve the catch type. -/
+theorem malformed_wide_catch_refused :
+    ([wideCatch.set 280 0xC1, wideCatch.set 281 27, wideCatch.set 282 1,
+      wideCatch.set 287 1, wideCatch.set 294 1, wideCatch.set 297 0,
+      wideCatch.take 307, wideCatch ++ [0]].all fun bytes =>
+        readCatch bytes matches .error .invalidCatchSection) = true ∧
+    readCatch wideCatch (.object ownIdentity "Program") =
+      .error (.metadata (.operandMismatch tokens.boxRef)) :=
+  ⟨by decide +kernel, by cil_kernel_rfl⟩
+#print axioms malformed_wide_catch_refused
+
+/-- The catch leaves its enclosing try. The outer handler ends immediately before the return. -/
+private def nestedCatchBytes : List Nat :=
+  [0x0B,0x30,1,0,7,0,0,0,0,0,0,0, 0x14,0x7A,0x26,0xDE,1,0xDC,0x2A,0,
+   1,28,0,0, 0,0,0,0,2,2,0,3] ++ token tokens.boxRef ++ [2,0,0,0,5,5,0,1,0,0,0,0]
+
+/-- The typed catch and the enclosing finally in the original encoded body. -/
+private def readNested (bytes : List Nat) : Except BodyError (CatchClause × ExceptionRanges) := do
+  let body := evidence bytes
+  let env ← body.environment.mapError BodyError.metadata
+  let (_, caught, cleanup) ← decodeCatchFinally env 0 0 body (.object libScope "Lib.Box")
+  return (caught, cleanup)
+
+/-- The inner leave crosses the outer try, and a single-clause request rejects the extra clause. -/
+theorem nested_catch_finally :
+    readNested nestedCatchBytes = .ok (⟨0,2,2,5,tokens.boxRef⟩, ⟨0,5,5,6⟩) ∧
+    readCatch nestedCatchBytes = .error .invalidCatchSection :=
+  ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
+#print axioms nested_catch_finally
+
+/-- The cleanup kind, reserved operand, nesting, endfinally, section flag and length all bind. -/
+theorem malformed_nested_finally_refused :
+    ([nestedCatchBytes.set 36 4, nestedCatchBytes.set 44 1, nestedCatchBytes.set 40 4,
+      nestedCatchBytes.set 17 0, nestedCatchBytes.set 20 0x81, nestedCatchBytes.take 47].all
+        fun bytes => readNested bytes matches .error .invalidCatchSection) = true := by
+  decide +kernel
+#print axioms malformed_nested_finally_refused
+
 /-- In `ldarg.0; volatile.; ldind.i4`, the prefix starts at byte one and the load at three.
     A protected range may start at the prefix, but cannot skip it by starting at the load. -/
 theorem catch_boundary_respects_prefixes :

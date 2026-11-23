@@ -23,9 +23,9 @@ stay trusted.
 Opcodes use the numbering of `RawInstruction`: one-byte opcodes keep their byte and two-byte
 opcodes `0xFE nn` are `0xFE00 + nn`. Branch operands become instruction indices, and a branch may
 not enter a prefixed instruction after its first prefix, so the decoded code satisfies
-`PrefixEntryFree` (`checkBody_prefixEntryFree`). Executable methods require section-free bodies. The separate
-`decodeSingleCatch` reader binds a small typed exception clause for proofs about the protected
-range and handler.
+`PrefixEntryFree` (`checkBody_prefixEntryFree`). Executable methods require section-free bodies.
+The exception-section readers bind a typed catch and an optional enclosing finally for proofs
+about their protected ranges and handlers.
 -/
 
 namespace CIL.Extraction
@@ -602,32 +602,91 @@ structure CatchClause where
   classToken : Nat
   deriving Repr, DecidableEq
 
-/-- Read the code and one small typed catch (II.25.4.6). Both half-open ranges end at
-    instruction boundaries or the end of code. A boundary in a prefix group must precede
-    its first prefix. -/
-def decodeSingleCatch (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
-    (catchType : TypeExpr) : Except BodyError (DecodedBody × CatchClause) := do
+/-- The protected range and handler range of a CLI exception clause, in IL byte offsets. -/
+structure ExceptionRanges where
+  tryStart : Nat
+  tryEnd : Nat
+  handlerStart : Nat
+  handlerEnd : Nat
+  deriving Repr, DecidableEq
+
+/-- The flags select the interpretation of the final four bytes of an EH clause. -/
+private structure EncodedClause where
+  flags : Nat
+  ranges : ExceptionRanges
+  operand : Nat
+
+/-- Read one small or fat clause, leaving the bytes of subsequent clauses in the section. -/
+private def readClause (fat : Bool) (fields : List Nat) :
+    Except BodyError (EncodedClause × List Nat) := do
+  let offsetSize := if fat then 4 else 2
+  let lengthSize := if fat then 4 else 1
+  let (flags, fields) ← readUnsigned 0 offsetSize fields
+  let (tryStart, fields) ← readUnsigned 0 offsetSize fields
+  let (tryLength, fields) ← readUnsigned 0 lengthSize fields
+  let (handlerStart, fields) ← readUnsigned 0 offsetSize fields
+  let (handlerLength, fields) ← readUnsigned 0 lengthSize fields
+  let (operand, tail) ← readUnsigned 0 4 fields
+  return (⟨flags, ⟨tryStart, tryStart + tryLength, handlerStart, handlerStart + handlerLength⟩,
+    operand⟩, tail)
+
+/-- Both ranges must be nonempty, disjoint, and aligned with legal instruction boundaries. -/
+private def ExceptionRanges.valid (range : ExceptionRanges) (boundary : Nat → Bool) : Bool :=
+  range.tryStart < range.tryEnd && range.handlerStart < range.handlerEnd &&
+    (range.tryEnd ≤ range.handlerStart || range.handlerEnd ≤ range.tryStart) &&
+    [range.tryStart, range.tryEnd, range.handlerStart, range.handlerEnd].all boundary
+
+/-- Decode the original instructions and the aligned EH section (II.25.4.6). The covered
+    shapes are one typed catch and a typed catch enclosed by one finally. -/
+private def decodeTypedCatch (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
+    (catchType : TypeExpr) (withFinally : Bool) :
+    Except BodyError (DecodedBody × CatchClause × Option ExceptionRanges) := do
   unless body.bytes.all (· < 256) do throw .invalidByte
   let (header, payload) ← decodeHeader true body.bytes
   let (code, tail) := payload.splitAt header.codeSize
   let decoded ← decodeCode env arity ownerArity body header code
   let padding := (4 - header.codeSize % 4) % 4
-  let [1, 16, 0, 0, 0, 0, start0, start1, tryLength, handler0, handler1, handlerLength,
-        token0, token1, token2, table] := tail.drop padding | throw .invalidCatchSection
-  unless table ∈ [Table.typeRef, Table.typeDef, Table.typeSpec] && catchType matches .object .. do
+  let kind :: size :: 0 :: 0 :: fields := tail.drop padding | throw .invalidCatchSection
+  let fat := kind == 0x41
+  let width := if fat then 24 else 12
+  let count := if withFinally then 2 else 1
+  unless (fat || kind == 1) && size == 4 + count * width && size == 4 + fields.length do
     throw .invalidCatchSection
-  let classToken := token0 + 256 * (token1 + 256 * (token2 + 256 * table))
+  let (caught, rest) ← readClause fat fields
+  let table := caught.operand / 2^24
+  unless caught.flags == 0 && table ∈ [Table.typeRef, Table.typeDef, Table.typeSpec] &&
+      catchType matches .object .. do throw .invalidCatchSection
   let frame ← (env.frame arity ownerArity).mapError BodyError.metadata
-  let _ ← (checkTypeOperand env frame classToken catchType).mapError BodyError.metadata
-  let tryStart := start0 + 256 * start1
-  let handlerStart := handler0 + 256 * handler1
-  let tryEnd := tryStart + tryLength
-  let handlerEnd := handlerStart + handlerLength
+  let _ ← (checkTypeOperand env frame caught.operand catchType).mapError BodyError.metadata
   let starts := indexStarts decoded.code 0 false {}
   let boundary := fun offset => offset == code.length || (starts[offset]?).any (!·.2)
-  unless 0 < tryLength && 0 < handlerLength && (tryEnd ≤ handlerStart || handlerEnd ≤ tryStart) &&
-      [tryStart, tryEnd, handlerStart, handlerEnd].all boundary do throw .invalidCatchSection
-  return (decoded, ⟨tryStart, tryEnd, handlerStart, handlerEnd, classToken⟩)
+  let inner := caught.ranges
+  unless inner.valid boundary do throw .invalidCatchSection
+  let clause := ⟨inner.tryStart, inner.tryEnd, inner.handlerStart, inner.handlerEnd, caught.operand⟩
+  unless withFinally do return (decoded, clause, none)
+  let (cleanup, _) ← readClause fat rest
+  let outer := cleanup.ranges
+  unless cleanup.flags == 2 && cleanup.operand == 0 && outer.valid boundary &&
+      outer.tryStart ≤ min inner.tryStart inner.handlerStart &&
+      max inner.tryEnd inner.handlerEnd ≤ outer.tryEnd &&
+      decoded.code.any (fun i => i.offset + 1 == outer.handlerEnd && i.opcode == 0xDC) do
+    throw .invalidCatchSection
+  return (decoded, clause, some outer)
+
+/-- Read the code and one small or fat typed catch. Both half-open ranges end at instruction
+    boundaries or the end of code. A boundary inside a prefix group is refused. -/
+def decodeSingleCatch (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
+    (catchType : TypeExpr) : Except BodyError (DecodedBody × CatchClause) := do
+  let (decoded, clause, _) ← decodeTypedCatch env arity ownerArity body catchType false
+  return (decoded, clause)
+
+/-- Read a typed catch nested inside a finally. The outer try contains the entire inner try
+    and handler. The finally handler ends with the original endfinally instruction. -/
+def decodeCatchFinally (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
+    (catchType : TypeExpr) : Except BodyError (DecodedBody × CatchClause × ExceptionRanges) := do
+  let (decoded, clause, some cleanup) ← decodeTypedCatch env arity ownerArity body catchType true
+    | throw .invalidCatchSection
+  return (decoded, clause, cleanup)
 
 /-- The metadata environment and imported layouts used to check the body's own tokens. -/
 def BodyEvidence.environment (body : BodyEvidence) : Except MetadataError MetadataEnv := do

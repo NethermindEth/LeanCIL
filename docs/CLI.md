@@ -303,11 +303,16 @@ Paths under the current directory are displayed relative to it; paths outside it
 
 `check` reads the assembly path, method and profile from the manifest, regenerates the extraction
 in memory, and compares it with the saved files without overwriting them. It runs no Lean.
+The bytes of `identity.json` must match the regenerated UTF-8 manifest exactly, including the
+absence of a byte-order mark. Each verification certificate records the SHA-256 returned by the
+integrity check. Every check for that request must accept the same digest. Consumer compile checks
+stage the generated Lean source and import sources pinned by that manifest.
 
 | Option | Meaning |
 | --- | --- |
 | `--assembly-path path/to/Examples.dll` | Use a DLL that moved. Assembly paths are stored relative to the artifact directory; the DLL's identity and content must match the manifest. |
 | `--assembly name-or-identity` | Require that assembly name or identity, as for `extract`. |
+| `--format json` | On success, print a JSON object with the accepted manifest's lowercase `identitySha256`. |
 | `--import-implementation`, `--import-sha256`, `--import-interface-sha256` | Override a recorded import's path or pin; see [contract interfaces](CONTRACT-INTERFACES.md). |
 
 `check` replays the recorded `--reference` assemblies and rejects that option. A changed assembly
