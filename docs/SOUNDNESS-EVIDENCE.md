@@ -443,12 +443,13 @@ when its body MethodDef belongs to that class.
 Each selected method uses the physical image matching its own assembly identity. A single
 extraction can use class tests and local virtual slots in several assemblies. At a foreign class test,
 Lean reads the TypeRef and its enclosing TypeRefs from the caller, checks the full AssemblyRef
-identity, and locates the top-level or nested TypeDef in the pinned destination. When more than one
+identity, and locates the top-level or nested TypeDef in the pinned destination. For a forwarded top-level class,
+Lean checks each ExportedType and its destination AssemblyRef through to the defining TypeDef. When more than one
 image is pinned, each selected hierarchy must belong to a non-core image. Class parents in the
 other images must resolve locally or name the core Object, ValueType or Enum. The audit checks
 parent chains for cycles and file tables for additional metadata modules. The physical-catalog
 theorem identifies the image and the reconstructed catalog for every selected method.
-Forwarded class tests, constrained calls, interface dispatch,
+Nested forwarded class tests, constrained calls, interface dispatch,
 cross-image dispatch, other override forms on selected classes, additional metadata modules
 and unsupported signatures leave this fact uncovered.
 With all direct reference images supplied, the audit checks each AssemblyRef against its target's

@@ -262,15 +262,21 @@ Proved("ScaledGenericPlain", "MultiFixture.Application::ScaledGenericPlain(ulong
 (string Caller, string[] References) ProveForwardedCall()
 {
     const string facadeName = "ForwardFacade";
+    const string classes = " public class Shape { } public sealed class Second : Shape { }";
     fixture.Build("OriginalFacade", facadeName,
-        "namespace Forward; public static class Value { public static int Next(int input) => input; }");
+        "namespace Forward; public static class Value { public static int Next(int input) => input; }" + classes);
     var caller = fixture.Build("ForwardCaller", "ForwardCaller",
-        "namespace Forward; public static class Entry { public static int Run(int value) => Value.Next(value); }",
+        "namespace Forward; public static class Entry { public static int Run(int value) => Value.Next(value); " +
+        "public static int Test(Shape value) => value is Second ? 1 : 0; }",
         references: """<ProjectReference Include="../OriginalFacade/OriginalFacade.csproj" />""");
     var implementation = fixture.Build("ForwardImplementation", "ForwardImplementation",
-        "namespace Forward; public static class Value { public static int Next(int input) => input + 1; }");
+        "namespace Forward; public static class Value { public static int Next(int input) => input + 1; }" + classes);
     var facade = fixture.Build("ForwardFacade", facadeName,
-        "[assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Value))]",
+        """
+        [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Value))]
+        [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Shape))]
+        [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Second))]
+        """,
         references: """<ProjectReference Include="../ForwardImplementation/ForwardImplementation.csproj" />""");
     var artifact = Artifact("ForwardedCall");
     Run([.. cli, "extract", caller, "Entry::Run(int)", artifact, .. Reference(facade), .. Reference(implementation)]);
@@ -284,6 +290,20 @@ Proved("ScaledGenericPlain", "MultiFixture.Application::ScaledGenericPlain(ulong
         #print axioms forwarded_call
         """);
     evidence.Add(proof, "PASS a facade binds the implementation used by a compiled caller");
+    var classTest = Artifact("ForwardedClass");
+    Run([.. cli, "extract", caller, "Forward.Entry::Test(Forward.Shape)", classTest,
+        .. Reference(facade), .. Reference(implementation)]);
+    var pins = Path.Combine(classTest, "inputs.sha256");
+    File.WriteAllLines(pins, new[] { caller, facade, implementation }.Select(path => Sha(path) + "  " + path));
+    Run([.. cli, "verify", classTest, "--proof", At("Tests/MultiAssembly/ForwardedClass.lean"),
+        "--theorem", "ForwardedClass.correctness", "--deep-checks", pins]);
+    using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(classTest, "verified.json")));
+    var fact = report.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+        .Single(item => item.GetProperty("id").GetString() == "dispatch-catalogs");
+    if (fact.GetProperty("status").GetString() != "reconfirmed" ||
+        fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
+        throw new InvalidDataException("Expected the forwarded class test to bind the defining TypeDef: " + fact);
+    Console.WriteLine("PASS a forwarded class test distinguishes null, base and derived objects");
     return (caller, [facade, implementation]);
 }
 

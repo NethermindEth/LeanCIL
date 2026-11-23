@@ -7,6 +7,7 @@
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
+#:include ContractVariants.cs
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -31,7 +32,85 @@ foreach (var (source, entry) in new[]
     Console.WriteLine($"PASS {proof}: {entry}");
 }
 
-foreach (var mutation in new[] { "read", "surrogate", "argumentAddress", "localAddress", "byref", "modified" })
+// The compiled #US entry contains controls and both ends of the supplementary scalar range.
+const string scalarText = "A\0\b\f\uFFFF\U00010000\U0010FFFFZ";
+var unicode = Path.Combine(root, "Unicode");
+Directory.CreateDirectory(unicode);
+var changedAssembly = Path.Combine(unicode, "Examples.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var load = module.GetType("Examples.Strings").Methods.Single(method => method.Name == "OrNone")
+        .Body.Instructions.Single(site => site.OpCode.Code == Code.Ldstr);
+    load.Operand = scalarText;
+    module.Write(changedAssembly);
+}
+var wrongDirectory = Path.Combine(unicode, "Modified");
+Directory.CreateDirectory(wrongDirectory);
+var wrongAssembly = Path.Combine(wrongDirectory, "Examples.dll");
+var image = File.ReadAllBytes(changedAssembly);
+var payload = System.Text.Encoding.Unicode.GetBytes(scalarText);
+var offset = image.AsSpan().IndexOf(payload);
+if (offset < 0 || image.AsSpan().LastIndexOf(payload) != offset)
+    throw new InvalidDataException("Expected a unique physical Unicode fixture literal");
+// Change only the low surrogate of U+10000, giving U+10001 in the same #US entry.
+var lowSurrogate = offset + (scalarText.IndexOf("\U00010000", StringComparison.Ordinal) + 1) * sizeof(char);
+image[lowSurrogate]++;
+File.WriteAllBytes(wrongAssembly, image);
+
+foreach (var (dll, expected) in new[] { (changedAssembly, scalarText),
+    (wrongAssembly, scalarText.Replace("\U00010000", "\U00010001", StringComparison.Ordinal)) })
+{
+    var strings = System.Reflection.Assembly.Load(File.ReadAllBytes(dll)).GetType("Examples.Strings")!;
+    if (!Equals(strings.GetMethod("OrNone")!.Invoke(null, [null]), expected))
+        throw new InvalidOperationException("The CLR did not load the expected UTF-16 literal");
+}
+const string loadSelector = "Strings::OrNone(System.String)";
+verification.VerifyContractVariant(changedAssembly, "Examples", loadSelector, Path.Combine(unicode, "Original"),
+    wrongAssembly, loadSelector, Path.Combine(unicode, "Changed"), """
+    private def text (point : Nat) :=
+      String.ofList ([65, 0, 8, 12, 65535, point, 1114111, 90].map Char.ofNat)
+
+    /-- Passing null returns the original literal's interned object and preserves caller memory. -/
+    def originalLiteral : MethodContract Reference Reference where
+      args _ := [.object .null]
+      results found := [.object (.address found)]
+      pre expected memory := memory.literals.lookup (text 65536) = some expected ∧
+        formObject memory (.address expected) = .ok (.object (.address expected))
+      footprint _ := []
+      post expected before after found := after = before ∧ found = expected
+    """, """
+    theorem correctness : originalLiteral.Holds Extracted.program 0 := by
+      intro expected memory ready
+      obtain ⟨bound, formed⟩ := ready
+      apply MethodContract.Holds.intro (c := originalLiteral) (input := expected) memory expected ?_
+        (Confined.refl _ _) ⟨rfl, rfl⟩
+      change ∃ fuel, invoke Extracted.program fuel 0 [.object .null] memory =
+        .ok (memory, [.object (.address expected)])
+      cil_checked_steps [formed]
+      have atSite : Extracted.method0.code[4]? = some (.ldstr (text 65536)) := by decide +kernel
+      apply Eq.trans (run_next (body := Extracted.method0) rfl atSite (by
+        rw [step_ldstr_eq, literalObject_of_lookup bound, formed]
+        rfl))
+      cil_checked_steps [formed]
+    """, """
+    private def strings : Memory := { Memory.empty with
+      allocations := fun id => if id < 2 then some {
+        kind := .object ⟨.object CIL.Extraction.coreLibraryScope "System.String", []⟩
+        layout := ⟨16, 8, []⟩ } else none
+      nextIdentity := 2
+      literals := [(text 65536, ⟨0, 0⟩), (text 65537, ⟨1, 0⟩)] }
+
+    theorem correctness : originalLiteral.Refuted Extracted.program 0 := by
+      apply MethodContract.Refuted.of_return (c := originalLiteral) (input := ⟨0, 0⟩)
+        (initial := strings) (fuel := 8) (values := [.object (.address ⟨1, 0⟩)])
+        (And.intro rfl rfl) rfl
+      rintro ⟨_, found, encoded, _, rfl⟩
+      revert encoded
+      decide +kernel
+    """, imports: "import CIL.Safety.SymbolicExecution");
+Console.WriteLine("PASS exact UTF-16 literal binding and verified one-byte surrogate-pair counterexample");
+
+foreach (var mutation in new[] { "read", "highSurrogate", "lowSurrogate", "argumentAddress", "localAddress", "byref", "modified" })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
@@ -53,10 +132,10 @@ foreach (var mutation in new[] { "read", "surrogate", "argumentAddress", "localA
                 il.InsertBefore(start, il.Create(OpCodes.Pop));
                 expected = "Rejected external call: System.Boolean System.String::IsNullOrEmpty(System.String)";
                 break;
-            case "surrogate":
-                il.InsertBefore(start, il.Create(OpCodes.Ldstr, "\uD800"));
+            case "highSurrogate" or "lowSurrogate":
+                il.InsertBefore(start, il.Create(OpCodes.Ldstr, mutation == "highSurrogate" ? "\uD800" : "\uDC00"));
                 il.InsertBefore(start, il.Create(OpCodes.Pop));
-                expected = "Unsupported string literal: a surrogate, backspace or form feed";
+                expected = "Unsupported string literal: an unpaired UTF-16 surrogate";
                 break;
             case "argumentAddress":
                 il.InsertBefore(start, il.Create(OpCodes.Ldarga_S, method.Parameters[1]));

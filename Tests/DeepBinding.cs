@@ -140,7 +140,8 @@ partial class Program
             $"axiom cheat : {statement}\ntheorem bodies : {statement} := cheat"),
             "axiom", BindingFact.BodyBytes);
         Mutation("digest of other bytes", application.Module,
-            _ => ImageModuleSource(application with { Bytes = reference.Bytes }), "replay");
+            _ => ImageModuleSource(application with { Bytes = reference.Bytes }), "replay",
+            BindingFact.BodyBytes, rejectedStage: "replay diagnostics");
         Mutation("digest theorem about another constant", reference.Module, source => source
             .Replace("import StrictBinding.Sha256", "import StrictBinding.Sha256\nimport " + application.Module,
                 StringComparison.Ordinal)

@@ -383,12 +383,6 @@ private def emit (value : Instruction)
       | exact @List.instReflBEq Nat _ ⟨Nat.beq_refl _⟩ |>.rfl) :
     Option DecodedValue := some ⟨value, valid⟩
 
-/-- A bare literal admits BMP text except backspace and form feed. -/
-private def literalTextSupported (text : String) : Bool :=
-  text.toUTF8.data.toList.all fun byte =>
-    let value := byte.toNat
-    value != 0x08 && value != 0x0C && Nat.blt value 0xF0
-
 /-- The value of an instruction with an immediate, branch, slot or absent operand. -/
 private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction) :
     Option DecodedValue :=
@@ -400,8 +394,7 @@ private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction
   | 42, .none => emit .ret
   -- Constants, with the operand ranges ECMA-335 gives each form.
   | 20, .none => emit .ldnull
-  | 114, .text text =>
-    if literalTextSupported text then emit (.ldstr text) else none
+  | 114, .text text => emit (.ldstr text)
   | 21, .none => emit (.ldc_i4 (BitVec.ofInt 32 (-1)))
   | 31, .integer value =>
     if -128 <= value && value < 128 then emit (.ldc_i4 (BitVec.ofInt 32 value)) else none

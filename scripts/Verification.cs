@@ -5136,6 +5136,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (replays)
                 {
                     RequireStagedProofSources();
+                    bool jointReplayRejected = false;
                     if (Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
                     {
                         try
@@ -5143,25 +5144,39 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                             audited = AuditOleans(leanPath, auditModules, proofAudits,
                                 ImportPremise(extraction), replayTargets: replay);
                         }
-                        catch (InvalidOperationException) { }
+                        catch (InvalidOperationException error)
+                        {
+                            jointReplayRejected = error.Message.Contains(
+                                "while replaying declaration", StringComparison.Ordinal);
+                        }
                     }
-                    // A rejected combined replay retains the original checker diagnostics.
                     if (audited is null)
                     {
                         if (deep is not null) RequireReplayDiagnosticInputs();
+                        Dictionary<string, string>? isolatedFailures = null;
+                        if (deep is not null && jointReplayRejected)
+                        {
+                            // The fused check already rejected this set. Replay each target against its own imports.
+                            try { isolatedFailures = ReplayConsumerModulesSeparately(fresh, replay, leanPath, false); }
+                            catch (InvalidOperationException) { }
+                            RequireReplayDiagnosticInputs();
+                        }
                         try
                         {
-                            ReplayCheckedModules(replay, leanPath,
-                                (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
+                            if (isolatedFailures is not { Count: > 0 })
+                                ReplayCheckedModules(replay, leanPath,
+                                    (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
+                            else
+                                throw new InvalidOperationException("Kernel replay rejected " +
+                                    string.Join("\n", isolatedFailures.Select(pair => pair.Key + ": " + pair.Value)));
                         }
                         catch (InvalidOperationException) when (deep is not null)
                         {
                             RequireReplayDiagnosticInputs();
                             Dictionary<string, ReplayRejection>? rejections = null;
-                            Dictionary<string, string>? isolatedFailures = null;
                             try
                             {
-                                isolatedFailures = ReplayConsumerModulesSeparately(fresh, replay, leanPath, false);
+                                isolatedFailures ??= ReplayConsumerModulesSeparately(fresh, replay, leanPath, false);
                             }
                             catch (Exception) { }
                             RequireReplayDiagnosticInputs();

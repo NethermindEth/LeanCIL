@@ -163,7 +163,7 @@ internal static class InstructionOperands
 
     internal static void ValidateLiteral(string text)
     {
-        if (text.Any(character => char.IsSurrogate(character) || character is '\b' or '\f'))
-            throw new InvalidDataException("Unsupported string literal: a surrogate, backspace or form feed");
+        if (!IdentityText.WellFormed(text))
+            throw new InvalidDataException("Unsupported string literal: an unpaired UTF-16 surrogate");
     }
 }

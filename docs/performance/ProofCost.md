@@ -275,6 +275,24 @@ profile in each checkout, use its loop proof as `Proof.lean` and the consumer ab
 `Consumer.lean`. Use the frontend below to measure `Proof` and `Consumer` with that checkout's
 compiled library and extraction on the Lean search path.
 
+## Decoding an ordinary string load
+
+Both certified libraries checked the same reflexivity proof that opcode 114 decodes to
+`ldstr` of its operand. Each operand was a named ASCII string literal. The counts cover kernel
+checking of that decoding equation. Checking the physical UTF-16 bytes in the assembly's
+`#US` heap is separate work.
+
+| Literal length | With the character filter | Without the filter |
+| ---: | ---: | ---: |
+| 8 | 31,296 | 13,463 |
+| 32 | 74,841 | 13,352 |
+| 128 | 249,465 | 13,352 |
+| 512 | 947,963 | 13,352 |
+| 2,048 | 3,741,953 | 13,352 |
+
+The counts are raw kernel heartbeats. The decoder accepts every Lean string, so the same
+reflexivity proof also checks for a symbolic operand of arbitrary length.
+
 ## Measuring one module of another package
 
 The frontend runs without the C# driver, from any Lake package that depends on LeanCIL. From the

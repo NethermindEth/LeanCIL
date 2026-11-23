@@ -605,8 +605,8 @@ must form as a live object; an unbound text stops as unsupported rather than loa
 never null. A literal is an opaque string like any other, so nothing reads its length or
 characters. Each bound literal must name an issued identity (`Memory.LiteralsBounded`) for a
 contract to transfer across [allocation renaming](PROOFS-BINDING.md), since a literal names the
-caller's object and not one the method allocates. The extractor rejects a text containing a
-surrogate, backspace or form feed, which a Lean string literal cannot carry exactly.
+caller's object and not one the method allocates. The extractor accepts well-formed UTF-16, including surrogate pairs and control characters.
+An unpaired UTF-16 surrogate has no corresponding Unicode scalar and is rejected.
 
 ## Argument guards
 

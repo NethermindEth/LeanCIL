@@ -38,27 +38,27 @@ private def raw (code : List RawInstruction) : RawMethod := {
 private def state (stack : List (Option W32)) : Option FeatureState := some ⟨stack, []⟩
 
 -- The exact encoding folds; extra loads, a wrong arity or a non-runtime type do not.
-example : foldRoles [i 114 (.text "zero"), i 115 argument, i 122] =
-    [some .head, some .interior, some (.raise .argument)] := by decide
+example (message : String) : foldRoles [i 114 (.text message), i 115 argument, i 122] =
+    [some .head, some .interior, some (.raise .argument)] := rfl
 example : foldRoles [i 115 divide, i 122] = [some .head, some (.raise .divideByZero)] := by
   decide
-example : foldRoles [i 20, i 114 (.text "zero"), i 115 argument, i 122] =
-    [none, some .head, some .interior, some (.raise .argument)] := by decide
+example (message : String) : foldRoles [i 20, i 114 (.text message), i 115 argument, i 122] =
+    [none, some .head, some .interior, some (.raise .argument)] := rfl
 example : throwFold [i 115 argument, i 122] = none := by decide
 example : throwFold [i 115 (ctor owner "Fixture.Failure" 0), i 122] = none := by decide
 example : throwFold [i 115 divide, i 38, i 122] = none := by decide
 
 /-- A throw message has the operand of a string or null load. -/
-theorem message_operands :
+theorem message_operands (text : String) :
     throwFold [i 114, i 115 argument, i 122] = none ∧
-    throwFold [i 20 (.text "forged"), i 115 argument, i 122] = none := by decide
+    throwFold [i 20 (.text text), i 115 argument, i 122] = none := ⟨rfl, rfl⟩
 #print axioms message_operands
 
 /-- An ordinary string load retains its text, while the thrown type is independent of the message. -/
-theorem string_and_throw (message : String) :
-    let closed := raw [i 114 (.text "keep"), i 38, i 114 (.text message), i 115 argument, i 122]
+theorem string_and_throw (ordinary message : String) :
+    let closed := raw [i 114 (.text ordinary), i 38, i 114 (.text message), i 115 argument, i 122]
     methodCode .scalar {} [] (List.replicate 5 true) closed =
-      [.ldstr "keep", .pop, .nop, .nop, .throw .argument] := rfl
+      [.ldstr ordinary, .pop, .nop, .nop, .throw .argument] := rfl
 #print axioms string_and_throw
 
 /-- The two string loads and constructor preceding the range exception's throw. -/
@@ -92,8 +92,8 @@ theorem message_only_body : foldRoles (List.replicate 128 (i 20)) =
 theorem rejects_non_exception : throwFold [i 115 (ctor runtime "System.Object" 0), i 122] = none := by decide
 #print axioms rejects_non_exception
 
-theorem rejects_missing_constructor :
-    throwFold [i 114 (.text "a"), i 114 (.text "b"), i 115 (ctor runtime "System.DivideByZeroException" 2), i 122] = none := by decide
+theorem rejects_missing_constructor (first second : String) :
+    throwFold [i 114 (.text first), i 114 (.text second), i 115 (ctor runtime "System.DivideByZeroException" 2), i 122] = none := rfl
 #print axioms rejects_missing_constructor
 
 private def wrongParameter : RawOperand := .call {
@@ -107,8 +107,8 @@ private def wrongParameter : RawOperand := .call {
   typeArguments := [], parameterCount := 1, returnsValue := false }
 
 /-- A constructor whose declared parameter count differs from its closed parameters is refused. -/
-theorem rejects_parameter_count :
-    throwFold [i 114 (.text "a"), i 115 wrongParameter, i 122] = none := by decide
+theorem rejects_parameter_count (message : String) :
+    throwFold [i 114 (.text message), i 115 wrongParameter, i 122] = none := rfl
 #print axioms rejects_parameter_count
 
 /-- The call operand with one field of its site changed. -/
@@ -144,9 +144,9 @@ theorem exact_exception_certificate :
 #print axioms exact_exception_certificate
 
 /-- An Int32 parameter outside the allowlisted constructor signatures is refused. -/
-theorem rejects_int32_parameter :
-    throwFold [i 114 (.text "a"), i 115 (changeSite wrongParameter fun site =>
-      { site with method.parameters := [intType] }), i 122] = none := by decide
+theorem rejects_int32_parameter (message : String) :
+    throwFold [i 114 (.text message), i 115 (changeSite wrongParameter fun site =>
+      { site with method.parameters := [intType] }), i 122] = none := rfl
 #print axioms rejects_int32_parameter
 
 /-- An allowlisted exception name in another scope raises nothing, whether the owner or the
@@ -166,9 +166,9 @@ theorem rejects_named_other_member :
       { site with method.name := name!"Other" }), i 122] = none := by decide
 #print axioms rejects_named_other_member
 
-theorem accepts_two_strings :
-    throwFold [i 20, i 114 (.text "message"), i 115 (ctor runtime "System.ArgumentOutOfRangeException" 2), i 122] =
-      some (2, .argumentOutOfRange) := by decide
+theorem accepts_two_strings (message : String) :
+    throwFold [i 20, i 114 (.text message), i 115 (ctor runtime "System.ArgumentOutOfRangeException" 2), i 122] =
+      some (2, .argumentOutOfRange) := rfl
 #print axioms accepts_two_strings
 
 theorem rejects_non_exception_certificate :
@@ -178,32 +178,41 @@ theorem rejects_non_exception_certificate :
 #print axioms rejects_non_exception_certificate
 
 -- 0: ldarg.0; 1: brtrue 5; 2: ldstr; 3: newobj ArgumentException(string); 4: throw; 5: ldarg.0; 6: ret
-private def guardRaw := raw [i 2, i 45 (.target 5), i 114 (.text "zero"), i 115 argument, i 122, i 2, i 42]
+private def guardRaw (message : String) := raw [i 2, i 45 (.target 5), i 114 (.text message), i 115 argument, i 122, i 2, i 42]
 private def guardStates : FeatureCertificate :=
   [state [], state [none], state [], state [none], state [none], state [], state [none]]
 private def guardCode : List Instruction :=
   [.ldarg 0, .brtrue 5, .nop, .nop, .throw .argument, .ldarg 0, .ret]
 
-example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) guardRaw .scalar guardStates
-    (List.replicate 7 true) guardCode := by decide
+example (message : String) : FeatureFlowValid #[] (fun _ => none) (fun _ => none) (guardRaw message) .scalar guardStates
+    (List.replicate 7 true) guardCode := by
+  apply of_decide_eq_true
+  with_unfolding_all rfl
 -- The raised type is the constructed one, and the fold cannot be emitted as a hole.
-example : ∀ other ∈ ExceptionType.all, other ≠ .argument → ¬ FeatureFlowValid #[] (fun _ => none)
+set_option maxHeartbeats 1500000 in
+example (message : String) : ∀ other ∈ ExceptionType.all, other ≠ .argument → ¬ FeatureFlowValid #[] (fun _ => none)
     (fun _ => none)
-    guardRaw .scalar guardStates (List.replicate 7 true)
-    (guardCode.set 4 (.throw other)) := by decide +kernel
-example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none)
-    guardRaw .scalar guardStates (List.replicate 7 true)
-    (guardCode.set 4 (.unadmitted 122)) := by decide
+    (guardRaw message) .scalar guardStates (List.replicate 7 true)
+    (guardCode.set 4 (.throw other)) := by
+  apply of_decide_eq_true
+  with_unfolding_all rfl
+example (message : String) : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none)
+    (guardRaw message) .scalar guardStates (List.replicate 7 true)
+    (guardCode.set 4 (.unadmitted 122)) := by
+  apply of_decide_eq_true
+  with_unfolding_all rfl
 
 -- A branch to the raw `throw` would raise whatever object it carries, so it is rejected.
-private def enteredRaw := raw [i 2, i 37, i 45 (.target 6), i 38, i 114 (.text "zero"), i 115 argument, i 122]
-example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) enteredRaw .scalar
+private def enteredRaw (message : String) := raw [i 2, i 37, i 45 (.target 6), i 38, i 114 (.text message), i 115 argument, i 122]
+example (message : String) : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (enteredRaw message) .scalar
     [state [], state [none], state [none, none], state [none], state [], state [none], state [none]]
     (List.replicate 7 true) [.ldarg 0, .dup, .brtrue 6, .pop, .nop, .nop,
-        .throw .argument] := by decide
+        .throw .argument] := by
+  apply of_decide_eq_true
+  with_unfolding_all rfl
 
 /-- An adjacent raw null is the only operand admitted by the null-throw fold. -/
-theorem null_throw_encoding :
+theorem null_throw_encoding (text : String) :
     foldRoles [i 20, i 122] =
       [some .head, some (.raise .nullReference)] ∧
     FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20, i 122]) .scalar
@@ -212,12 +221,14 @@ theorem null_throw_encoding :
       [state [], state [none]] [true, true] [.nop, .throw .nullReference] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 22, i 122]) .scalar
       [state [], state [some 0]] [true, true] [.ldnull, .throw .nullReference] ∧
-    ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20 (.text "forged"), i 122])
+    ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20 (.text text), i 122])
       .scalar
       [state [], state [none]] [true, true] [.ldnull, .throw .nullReference] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20, i 0, i 122]) .scalar
       [state [], state [none], state [none]] [true, true, true]
-      [.ldnull, .nop, .throw .nullReference] := by decide +kernel
+      [.ldnull, .nop, .throw .nullReference] := by
+  apply of_decide_eq_true
+  with_unfolding_all rfl
 #print axioms null_throw_encoding
 
 

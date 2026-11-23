@@ -240,14 +240,9 @@ theorem literal_operands :
     Instruction.ofRaw? none ⟨0, 208, classOperand⟩ = none := by decide +kernel
 #print axioms literal_operands
 
-/-- Bare string loads accept ordinary escapes and BMP text, and reject unsupported characters
-    anywhere in the literal. -/
-theorem literal_characters :
-    let decode := fun text => Instruction.ofRaw? none ⟨0, 114, .text text⟩
-    let supported := "a\t\n\r\uFFFF"
-    decode supported = some (.ldstr supported) ∧
-      decode "a\x08b" = none ∧ decode "a\x0cb" = none ∧
-      decode (String.singleton (Char.ofNat 0x10000)) = none := by decide +kernel
+/-- A bare string load retains every Unicode scalar of the decoded user-string entry. -/
+theorem literal_characters (text : String) :
+    Instruction.ofRaw? none ⟨0, 114, .text text⟩ = some (.ldstr text) := rfl
 #print axioms literal_characters
 
 /-- Fold results bind their Boolean, branch target or exception. Direct and indirect tail calls
