@@ -383,10 +383,10 @@ For `dispatch-catalogs`, supply the method images and the images defining the cl
 test. For `isinst` and `castclass`, Lean reads the token at the original instruction offset.
 A TypeDef names a class in the method's image. For a TypeRef, Lean follows enclosing TypeRefs
 to the AssemblyRef, then locates each named TypeDef in the pinned defining image.
-For a virtual class slot, Lean checks the owner's descendants, methods, local interfaces and
-supported explicit interface implementations in the slot's own image. It checks every reachable
-virtual site's selected targets. Multiple selected methods can have catalogs in different images.
-Each other pinned image must have locally closed parent chains ending at recognized core roots.
+For a virtual class slot declared in the calling module, supply every assembly whose classes
+can be receivers in the extraction. Lean follows TypeDef and TypeRef parents across the pins,
+including forwarded declarations, and checks each descendant's methods and local interfaces in
+its defining module. Every reachable target must select the implementation for that receiver.
 The catalog reads the core assembly scope for primitive parameters and results from the image.
 At the supported System.Runtime scope, a string and a byref to a string retain their reference
 type. A changed core AssemblyRef version disagrees with the original numeric slot signature.
@@ -396,7 +396,7 @@ nested generic classes and interfaces. For example, in `IScale<Box<ICode<U>>, T>
 checks all three definitions, their arities and the order of their arguments. Supply the
 defining and forwarding images for every referenced head.
 
-Missing pins, constrained calls, unsupported constraint types, interface dispatch, cross-image overrides,
+Missing pins, constrained calls, unsupported constraint types, interface dispatch, external slot operands,
 additional metadata modules and unsupported signatures leave the fact `not covered`. Conflicting
 class identities, supported catalogs or target tables fail verification.
 

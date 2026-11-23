@@ -283,7 +283,7 @@ def classChain (find : TypeExpr → Option DispatchType) : Nat → TypeExpr → 
     with the class declaring it: the nearest class from `runtime` up to the slot's class with a
     virtual method of the slot's name and signature (ECMA-335 II.10.3.2). The slot must
     introduce itself (`NewSlot`) in a non-generic class; every class on the chain is a pinned
-    class of the slot's assembly, and none has a `MethodImpl` naming a class of the chain. A
+    class in its own assembly, and none has a `MethodImpl` naming a class of the chain. A
     nearer match that starts its own slot (hiding), is abstract or is ambiguous fails rather
     than select a less specific body. -/
 def resolveVirtualWith (find : TypeExpr → Option DispatchType) (fuel : Nat) (runtime : TypeExpr)
@@ -297,7 +297,6 @@ def resolveVirtualWith (find : TypeExpr → Option DispatchType) (fuel : Nat) (r
   let chain ← classChain find fuel runtime site.declaringType
   let classes := chain.map (·.identity)
   if !(chain.all fun entry => entry.pinned && !entry.valueType && !entry.interfaceType &&
-      entry.assembly == declaring.assembly &&
       entry.methods.all fun method =>
         method.overrides.all fun (_, owner) => !classes.contains owner)
     then none else pure ()

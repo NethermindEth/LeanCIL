@@ -388,18 +388,68 @@ void CheckDispatchCatalogs()
         if (fact.GetProperty("status").GetString() != "reconfirmed" ||
             fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
             throw new InvalidOperationException("Incorrect dispatch binding report: " + fact);
-        var derived = fixture.Build("ExternalParent", "DeepCli.Neighbour", """
-            namespace Neighbours;
-            public sealed class NewShape : Geometry.Shape { public override int Sides() => 7; }
-            """, references: """<ProjectReference Include="../SixFaces/SixFaces.csproj" />""");
-        fixture.RejectedExtract("foreign descendant", "Neighbours.NewShape overrides from another assembly",
-            assembly, selector, MultiAssemblyFixture.Reference(derived));
+        var derived = CheckForeignOverride(assembly, selector, changed: false);
+        CheckForeignOverride(assembly, selector, changed: true);
         ReplayImageCases(output, assembly, "DispatchImage", At("Tests/StrictBinding/DispatchOverrideCases.lean"),
             ["StrictBinding.DispatchCatalogs", "Tests.StrictBinding.Mutation"],
             ("NeighbourImage", neighbour!), ("DerivedImage", derived));
         Console.WriteLine("PASS physical dispatch binds nested owners, byrefs and other pinned images");
     }
     CheckTwoAssemblyCatalogs();
+}
+
+string CheckForeignOverride(string assembly, string selector, bool changed)
+{
+    var build = changed ? "EightSides" : "SevenSides";
+    var image = fixture.Build(build, "DeepCli.Neighbour", $$"""
+        namespace Neighbours;
+        public sealed class NewShape : Geometry.Shape { public override int Sides() => {{(changed ? 8 : 7)}}; }
+        """, references: """<ProjectReference Include="../SixFaces/SixFaces.csproj" />""");
+    var context = new System.Runtime.Loader.AssemblyLoadContext(build, isCollectible: true);
+    try
+    {
+        var home = context.LoadFromAssemblyPath(assembly);
+        var foreign = context.LoadFromAssemblyPath(image);
+        var total = home.GetType("Geometry.Reader", throwOnError: true)!.GetMethod("Total")!;
+        var cube = Activator.CreateInstance(home.GetType("Geometry.Cube", throwOnError: true)!);
+        var triangle = Activator.CreateInstance(home.GetType("Geometry.Triangle", throwOnError: true)!);
+        var shape = Activator.CreateInstance(foreign.GetType("Neighbours.NewShape", throwOnError: true)!);
+        if (!Equals(total.Invoke(null, [triangle, cube]), 12) ||
+            !Equals(total.Invoke(null, [shape, cube]), changed ? 22 : 20))
+            throw new InvalidOperationException("Unexpected CLR dispatch results for " + build);
+    }
+    finally { context.Unload(); }
+
+    var output = fixture.Artifact(build + "Total");
+    Run([.. cli, "extract", assembly, selector, output, .. MultiAssemblyFixture.Reference(image)]);
+    var proof = Path.Combine(output, "Proof.lean");
+    var template = File.ReadAllText(At("Tests/StrictBinding/ForeignOverride.lean.in"));
+    var claim = changed ? "Refuted" : "Holds";
+    var evidence = changed ? "refuted rfl" : "holds (by intro shape; cases shape <;> rfl)";
+    File.WriteAllText(proof, template +
+        $"\ntheorem correctness : contract.{claim} Extracted.program 0 := {evidence}\n" +
+        "#print axioms correctness\nend ForeignOverride\n");
+    var pins = Path.Combine(output, "inputs.sha256");
+    File.WriteAllLines(pins, new[] { assembly, image }.Select(path => Sha(path) + "  " + path));
+    string[] binding = changed ? [] : ["--deep-checks", pins];
+    Run([.. cli, "verify", output, "--proof", proof, "--theorem", "ForeignOverride.correctness", .. binding]);
+    using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "verified.json")));
+    if (changed)
+    {
+        var method = report.RootElement.GetProperty("refutation").GetProperty("method");
+        if (method.GetProperty("assemblySha256").GetString() != Sha(assembly) ||
+            method.GetProperty("signature").GetString() != "System.Int32 " + selector)
+            throw new InvalidOperationException("Unexpected foreign override counterexample: " + method);
+    }
+    else
+    {
+        var fact = report.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+            .Single(item => item.GetProperty("id").GetString() == "dispatch-catalogs");
+        if (fact.GetProperty("status").GetString() != "reconfirmed" ||
+            fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
+            throw new InvalidOperationException("Expected a physically bound foreign override: " + fact);
+    }
+    return image;
 }
 
 void CheckTwoAssemblyCatalogs()

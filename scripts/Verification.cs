@@ -4484,7 +4484,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         ObjectFields,
         /// <summary>The raw layouts are the contents of their TypeDefs.</summary>
         LayoutContent,
-        /// <summary>Each dispatch catalog lists every class of the slot's image that reaches the slot.</summary>
+        /// <summary>Each dispatch catalog lists every class of the pinned images that reaches the slot.</summary>
         DispatchCatalogs,
         /// <summary>The RVA static field bytes are the image's.</summary>
         StaticData,

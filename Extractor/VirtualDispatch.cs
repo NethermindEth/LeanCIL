@@ -33,9 +33,6 @@ internal static class VirtualDispatch
         var table = new List<Entry>();
         foreach (var candidate in Hierarchy(reference))
         {
-            if (candidate.Module != declaring.Module)
-                throw Rejected(reference, candidate.FullName + " overrides from another assembly, which the model " +
-                    "does not resolve.");
             if (!ObjectTypes.Is(candidate))
                 throw Rejected(reference, candidate.FullName + " derives from " + declaring.FullName +
                     " but is not an admitted class, so the table would miss its instances.");
@@ -43,7 +40,7 @@ internal static class VirtualDispatch
         }
         if (table.Count == 0)
             throw Rejected(reference, "No admitted class implements the slot.");
-        return [.. table.OrderBy(entry => entry.Class.FullName, StringComparer.Ordinal)];
+        return [.. table.OrderBy(entry => LayoutEvidence.Identity(entry.Class), StringComparer.Ordinal)];
     }
 
     /// <summary>
@@ -125,9 +122,9 @@ internal static class VirtualDispatch
 
     static bool SameSignature(MethodDefinition method, MethodDefinition slot) =>
         method.HasThis == slot.HasThis && !method.HasGenericParameters &&
-        method.ReturnType.FullName == slot.ReturnType.FullName &&
-        method.Parameters.Select(parameter => parameter.ParameterType.FullName)
-            .SequenceEqual(slot.Parameters.Select(parameter => parameter.ParameterType.FullName));
+        StructuralSignatures.Current.Type(method.ReturnType) == StructuralSignatures.Current.Type(slot.ReturnType) &&
+        method.Parameters.Select(parameter => StructuralSignatures.Current.Type(parameter.ParameterType))
+            .SequenceEqual(slot.Parameters.Select(parameter => StructuralSignatures.Current.Type(parameter.ParameterType)));
 
     // The caller names the call site; this states why its hierarchy is not modelled.
     static InvalidDataException Rejected(MethodReference reference, string detail) =>

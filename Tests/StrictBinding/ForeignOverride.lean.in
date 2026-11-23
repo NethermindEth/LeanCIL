@@ -1,0 +1,70 @@
+import Extracted
+import CIL.Safety.MethodContract
+
+/-! The same caller dispatches to a local implementation or a pinned foreign override. -/
+
+namespace ForeignOverride
+open CIL CIL.Extraction CIL.Safety
+
+/-- Dropping the defining assembly of the override invalidates the translation's catalog pins. -/
+theorem foreignPinRequired :
+    DispatchPinsValid [Extracted.assembly0] Extracted.methodEvidence = false := by decide +kernel
+#print axioms foreignPinRequired
+
+/-- The foreign receiver needs its own body in the virtual table at the first call. -/
+private def foreignTargets : Option (Bool × Bool × Bool) := do
+  let instruction ← Extracted.method0Original.code[1]?
+  let .call site := instruction.operand | none
+  let .virtual targets := Extracted.method0Link1 | none
+  let foreignType := TypeExpr.object Extracted.assembly1.identity "Neighbours.NewShape"
+  let triangle := TypeExpr.object Extracted.assembly0.identity "Geometry.Triangle"
+  let (_, localBody) ← targets.find? (·.1 == triangle)
+  let types := Extracted.method0DispatchTypes
+  let valid table := virtualTableValid types (findDispatchType types)
+    (fun index => Extracted.specializedMethods[index]?) site table site.argumentCount
+  return (valid targets, valid (targets.filter (·.1 != foreignType)),
+    valid (targets.map fun (owner, body) => (owner, if owner == foreignType then localBody else body)))
+
+theorem exactForeignTarget : foreignTargets = some (true, false, false) := by decide +kernel
+#print axioms exactForeignTarget
+
+/-- A receiver whose type is declared in the entry assembly. -/
+private def localClass (name : String) :=
+  TypeExpr.object Extracted.assembly0.identity ("Geometry." ++ name)
+
+/-- The shape and cube occupy separate live objects in caller memory. -/
+private def caller (foreignShape : Bool) : Safety.Memory := { Safety.Memory.empty with
+  allocations := fun id =>
+    if id == 0 then
+      let shape := if foreignShape then .object Extracted.assembly1.identity "Neighbours.NewShape"
+        else localClass "Triangle"
+      some ⟨.object ⟨shape, [localClass "Shape"]⟩, ⟨8,8,[]⟩, true, []⟩
+    else if id == 1 then some ⟨.object ⟨localClass "Cube", [localClass "Solid"]⟩, ⟨8,8,[]⟩, true, []⟩
+    else none
+  nextIdentity := 2 }
+
+/-- The caller counts each shape twice and adds the six faces of a cube. -/
+def contract : MethodContract Bool W32 where
+  args _ := [.object (.address ⟨0,0⟩), .object (.address ⟨1,0⟩)]
+  results value := [.scalar (.i32 value)]
+  pre shape memory := memory = caller shape
+  footprint _ := []
+  post shape initial final value := final = initial ∧ value = (if shape then 20 else 12)
+
+/-- Both implementations preserve memory and return the expected number of sides. -/
+theorem holds (ran : ∀ shape, invoke Extracted.program 50 0 (contract.args shape) (caller shape) =
+    .ok (caller shape, contract.results (if shape then 20 else 12))) :
+    contract.Holds Extracted.program 0 := by
+  rintro shape _ rfl
+  exact MethodContract.Holds.intro (c := contract) _ _ ⟨50, ran shape⟩
+    (Confined.refl [] _) ⟨rfl, rfl⟩
+#print axioms holds
+
+/-- An override returning eight gives a concrete counterexample on the foreign receiver. -/
+theorem refuted (ran : invoke Extracted.program 50 0 (contract.args true) (caller true) =
+    .ok (caller true, [.scalar (.i32 22)])) : contract.Refuted Extracted.program 0 := by
+  apply MethodContract.Refuted.of_return (c := contract) (input := true) rfl ran
+  rintro ⟨_, value, encoded, _, rfl⟩
+  revert encoded
+  decide +kernel
+#print axioms refuted

@@ -131,13 +131,50 @@ theorem reversedPins : DispatchCatalogsChecked (images DispatchImage.image).reve
     Extracted.assemblies Extracted.methodEvidence Extracted.imports true := by decide +kernel
 #print axioms reversedPins
 
-/-- An actual descendant in a second assembly or a missing pin leaves the catalog uncovered. -/
-theorem incompleteHierarchy :
+/-- The foreign override has an implicit primitive result and no System.Object TypeRef.
+    A competing core name on an unsigned AssemblyRef cannot supply that result's identity. -/
+private def foreignCore : Option Bool := do
+  let pin := neighbour DerivedImage.image
+  let image ← (prepareOne pin).toOption
+  let refCell := image.layout.cellOfRow image.view Table.typeRef
+  for index in [:image.layout.rowCount Table.typeRef] do
+    let name ← (refCell (index + 1) typeNameColumn >>= image.layout.stringAt image.view).toOption
+    let space ← (refCell (index + 1) typeNamespaceColumn >>= image.layout.stringAt image.view).toOption
+    guard (space != StrictBinding.systemNamespace || name != objectName)
+  guard ((primitiveScope image).toOption == some runtimeScope)
+  let refs := (List.range (image.layout.rowCount Table.assemblyRef)).map
+    (fun index => StrictBinding.tokenOf Table.assemblyRef (index + 1))
+  let core ← refs.find? (fun token => (referenceIdentity image token).toOption == some runtimeScope)
+  let base ← refs.find? (fun token =>
+    (referenceIdentity image token).toOption == some Extracted.assembly0.identity)
+  let coreName ← (image.layout.cell image.view core 6).toOption
+  let baseName ← (image.layout.cell image.view base 6).toOption
+  let (offset, width) ← (image.layout.cellAt base 6).toOption
+  let changed := Tests.StrictBinding.flipBytes pin.image ((List.range width).map fun i =>
+    (offset + i, (coreName ^^^ baseName) / 256^i % 256))
+  let altered ← (prepareOne {pin with image := changed}).toOption
+  return Tests.StrictBinding.failsWith (primitiveScope altered) .uncoveredConstraint
+
+theorem implicitForeignPrimitive : foreignCore = some true := by decide +kernel
+#print axioms implicitForeignPrimitive
+
+/-- A second image with an unlisted descendant conflicts at the original virtual slot. -/
+private def unlisted : Option Bool := do
+  let call ← Extracted.method0Original.code[1]?
+  let .call site := call.operand | none
+  let .managed slot := site.target | none
+  let home : PinnedImage := ⟨Extracted.assembly0.identity, DispatchImage.image⟩
+  return mismatch (ClassDispatch.check [home, neighbour DerivedImage.image] Extracted.assemblies
+    Extracted.methodEvidence Extracted.imports) slot
+
+theorem unlistedDescendant : unlisted = some true := by decide +kernel
+#print axioms unlistedDescendant
+
+/-- Omitting the neighboring assembly cannot certify the parent graph over both pins. -/
+theorem missingPin :
     let home : PinnedImage := ⟨Extracted.assembly0.identity, DispatchImage.image⟩
-    DispatchCatalogsChecked [home, neighbour DerivedImage.image] Extracted.assemblies
-        Extracted.methodEvidence Extracted.imports false ∧
-      DispatchCatalogsChecked [home] Extracted.assemblies
-        Extracted.methodEvidence Extracted.imports false := by decide +kernel
-#print axioms incompleteHierarchy
+    DispatchCatalogsChecked [home] Extracted.assemblies
+      Extracted.methodEvidence Extracted.imports false := by decide +kernel
+#print axioms missingPin
 
 end DispatchOverrideCases

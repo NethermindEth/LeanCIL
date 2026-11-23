@@ -506,6 +506,10 @@ private instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
 abbrev programArchitecture (program : Program) : Architecture :=
   ((program.head?).map fun method => method.profile.architecture).getD .scalar
 
+/-- Every type in a dispatch catalog comes from one of the certificate's input assemblies. -/
+def DispatchPinsValid (pins : List AssemblyPin) (evidence : List MethodEvidence) : Bool :=
+  evidence.all fun item => item.dispatchTypes.all fun type => pins.contains type.assembly
+
 /-- The certificate covers the entire emitted program, with no optional method list; calls
     past it must match `imports`, and every body is checked against the one list of `pins` and
     the one list of `platform` definitions. -/
@@ -521,13 +525,13 @@ def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayo
   StaticIdentitiesValid program (evidence.map (·.body)) ∧
   ImportedLayoutsValid imports (programArchitecture program) ∧
   ImportedLocalLayoutsBound rawLayouts layouts imports ∧
-  AttributionValid (bodyOwners evidence) = true
+  AttributionValid (bodyOwners evidence) = true ∧ DispatchPinsValid pins evidence = true
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (pins : List AssemblyPin) (platform : PlatformTable) (evidence : List MethodEvidence)
     (imports : List ImportSlot) (program : Program) :
     Decidable (TranslationValid rawLayouts layouts pins platform evidence imports program) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Compose independently checked methods without reducing their validators again. -/
 inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
@@ -552,6 +556,7 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
     (importLayouts : ImportedLayoutsValid imports (programArchitecture program))
     (importedLocals : ImportedLocalLayoutsBound rawLayouts layouts imports)
     (attribution : AttributionValid (bodyOwners evidence) = true)
+    (dispatchPins : DispatchPinsValid pins evidence = true)
     (methods : MethodsChecked rawLayouts layouts pins platform evidence imports evidence program) :
     TranslationValid rawLayouts layouts pins platform evidence imports program := by
   have compose {items code}
@@ -568,7 +573,7 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
       | zero => exact valid
       | succ index => exact ih.2 ⟨index, Nat.lt_of_succ_lt_succ bound⟩
   exact ⟨layout, (compose methods).1, (compose methods).2, statics, identities, importLayouts,
-    importedLocals, attribution⟩
+    importedLocals, attribution, dispatchPins⟩
 
 /-- Each method of a valid translation passes every per-method validator. -/
 theorem translation_method_checked {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}

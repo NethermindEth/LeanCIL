@@ -442,7 +442,10 @@ with matching nongeneric instance signatures. The catalog records the interface 
 declaration token. A class outside the selected hierarchy may implement an external interface
 when its body MethodDef belongs to that class.
 Primitive slot signatures use the image's core assembly identity, including its version and
-public key token. The result can be void. A System.Runtime string parameter, result or byref
+public key token. An implicit numeric signature can use the unique recognized core AssemblyRef
+even when the module has no System.Object TypeRef. A competing core identity or a core name
+with the wrong publisher leaves the signature uncovered. The result can be void.
+A System.Runtime string parameter, result or byref
 element carries its string reference type.
 For a generic method, Lean checks the signature's generic flag and arity, its byrefs and the
 position of each method type parameter. It reconstructs the owning GenericParam rows in
@@ -458,13 +461,14 @@ Lean reads the TypeRef and its enclosing TypeRefs from the caller, checks the fu
 identity, and locates the top-level or nested TypeDef in the pinned destination. For a forwarded
 class, Lean checks the outer ExportedType and its destination AssemblyRef. Each nested export
 must name the same enclosing export and class as the caller's reference. When more than one
-image is pinned, each selected hierarchy must belong to a non-core image. Class parents in the
-other images must resolve locally or name the core Object, ValueType or Enum. The audit checks
-parent chains for cycles and file tables for additional metadata modules. The physical-catalog
-theorem identifies the image and the reconstructed catalog for every selected method.
-Constrained calls, interface dispatch,
-cross-image dispatch, other override forms on selected classes, additional metadata modules
-and unsupported signatures leave this fact uncovered.
+image is pinned, each selected hierarchy must belong to a non-core image. Each TypeDef has a distinct graph index within the supplied
+modules. Lean resolves a foreign base through the defining or forwarding AssemblyRef. It
+checks all parent chains for cycles and each file table for additional metadata modules. For
+every concrete descendant of a selected slot it checks the target index, the body MethodDef
+and its assembly-qualified owner. Omitting a foreign override conflicts with the physical
+target table. The translation certificate also checks that every catalog assembly is pinned.
+Constrained calls, interface dispatch, virtual slots named by external MemberRefs, unsupported
+override forms, additional metadata modules and unsupported signatures leave this fact uncovered.
 With all direct reference images supplied, the audit checks each AssemblyRef against its target's
 full publisher key or unsigned definition. It also compares each carried AssemblyRef token with
 the physical row in its source assembly. For scalar static generic calls on top-level classes with

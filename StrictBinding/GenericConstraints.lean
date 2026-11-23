@@ -26,20 +26,19 @@ def referenceIdentity (image : PreparedImage) (token : Nat) :
   let text ← assemblyIdentityAt image.view image.layout token 0
   return String.ofList (text.map Char.ofNat)
 
-/-- The unambiguous core assembly used to spell primitive elements in this module. -/
+/-- The defining core library or the unique trusted core AssemblyRef used by implicit
+    signature primitives. A module can have primitive signatures without a System.Object TypeRef. -/
 def primitiveScope (image : PreparedImage) : Except AuditError String := do
-  if ← platformAssembly image then return image.identity
-  let cell := image.layout.cellOfRow image.view Table.typeRef
+  let count := image.layout.rowCount Table.assemblyRef
+  if count == 0 && (← platformAssembly image) then return image.identity
   let mut found := none
-  for index in [:image.layout.rowCount Table.typeRef] do
-    let row := index + 1
-    unless (← image.layout.stringAt image.view (← cell row typeNameColumn)) == bytesOf "Object" &&
-      (← image.layout.stringAt image.view (← cell row typeNamespaceColumn)) == systemNamespace do
-      continue
-    let scope ← cell row 0
-    unless scope % 4 == 2 do continue
-    let token ← checkedTokenOf Table.assemblyRef (scope / 4) .rowOverflow
-    unless ← coreAssemblyAt image token 0 do continue
+  for index in [:count] do
+    let token ← checkedTokenOf Table.assemblyRef (index + 1) .rowOverflow
+    let cell := image.layout.cell image.view token
+    let bytes ← image.layout.stringAt image.view (← cell 6)
+    let some name := CIL.MetadataName.ofBytes? bytes | throw .uncoveredConstraint
+    unless (coreLibraryKey? name).isSome do continue
+    unless ← coreAssemblyAt image token 0 do throw .uncoveredConstraint
     let identity ← referenceIdentity image token
     if found.any (· != identity) then throw .uncoveredConstraint
     found := some identity
