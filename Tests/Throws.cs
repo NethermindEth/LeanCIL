@@ -29,7 +29,7 @@ using var exampleModule = ModuleDefinition.ReadModule(assembly);
 var throwMethods = exampleModule.GetType("Examples.Throws").Methods;
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.Safety.Execution");
 
-// Every fault is located at the folded `throw` and names the type .NET raises.
+// Compare the exception type and throw site with the compiled method.
 foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
 {
     ("Null", "Throws::Null(uint)", [[0], [1]]),
@@ -116,13 +116,14 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var nullEquations = string.Join('\n', nullLoads.Select(item =>
         $"example : Extracted.method{method}.code[{item.index}]? = some .ldnull := " +
         $"Extracted.method{method}_instruction{item.index}"));
+    var raisedInstruction = name == "Null" ? ".throw" : $"(.throw (some .{label}))";
     var proof = Path.Combine(folder, "BoundaryProof.lean");
     File.WriteAllText(proof, $$"""
         import Extracted
         import CIL.Safety.Execution
         namespace ExampleProof
         {{nullEquations}}
-        example : Extracted.method{{method}}.code[{{pc}}]? = some (.throw .{{label}}) :=
+        example : Extracted.method{{method}}.code[{{pc}}]? = some {{raisedInstruction}} :=
           Extracted.method{{method}}_instruction{{pc}}
         theorem correctness :
           {{string.Join(" \u2227\n  ", claims)}} := by
@@ -135,7 +136,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
 
     // A forged type must fail the feature certificate, independently of the instruction lemma.
     var forgedLabel = label == "invalidOperation" ? "divideByZero" : "invalidOperation";
-    var forged = ForgeDecodedInstruction(source, method, pc, $"fun _ => .throw .{forgedLabel}");
+    var forged = ForgeDecodedInstruction(source, method, pc, $"fun _ => .throw (some .{forgedLabel})");
     var mutated = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(mutated, forged);
     rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
@@ -179,13 +180,15 @@ queue.Flush();
 controls.Check(replay: false);
 rejected.Check();
 
-// Anything other than the exact encoding without handlers stays unsupported.
+// Exercise stack-based throws, constructor signatures and control flow in compiled images.
 foreach (var (mutation, marker) in new[]
 {
     ("handler", "Unsupported method metadata"),
     ("no-throw", "Contract imports support call only, not callvirt, newobj or ldftn."),
-    ("separated-null", "Unsupported instruction"),
-    ("null-interior-branch", "Branch into a folded throw"),
+    ("separated-null", ""),
+    ("null-branch", ""),
+    ("empty-throw-branch", "Invalid evaluation stack"),
+    ("scalar-throw", "Throw requires an object on the evaluation stack"),
     ("interior-branch", "Branch into a folded throw"),
     ("non-exception", "Unsupported exception constructor"),
     ("dead-non-exception", ""),
@@ -228,10 +231,19 @@ foreach (var (mutation, marker) in new[]
                 il.Replace(code[0], il.Create(OpCodes.Ldnull));
                 il.InsertBefore(code[1], il.Create(OpCodes.Nop));
                 break;
-            case "null-interior-branch":
+            case "null-branch":
                 il.Replace(code[0], il.Create(OpCodes.Ldnull));
-                il.InsertBefore(code[0], il.Create(OpCodes.Br, code[1]));
-                il.InsertBefore(code[0], il.Create(OpCodes.Ldnull));
+                var targetThrow = code[1];
+                il.InsertBefore(targetThrow, il.Create(OpCodes.Br_S, targetThrow));
+                il.InsertBefore(targetThrow, il.Create(OpCodes.Nop));
+                break;
+            case "empty-throw-branch":
+                var deadLoad = il.Create(OpCodes.Ldnull);
+                il.Replace(code[0], deadLoad);
+                il.InsertBefore(deadLoad, il.Create(OpCodes.Br, code[1]));
+                break;
+            case "scalar-throw":
+                il.Replace(code[0], il.Create(OpCodes.Ldc_I4_1));
                 break;
             case "non-exception":
             case "dead-non-exception":
@@ -275,18 +287,43 @@ foreach (var (mutation, marker) in new[]
         }
         module.Write(dll);
     }
-    if (mutation is "non-exception" or "missing-constructor")
+    if (mutation is "non-exception" or "missing-constructor" or "separated-null" or "null-branch")
     {
-        var expected = mutation == "non-exception" ? "System.Runtime.CompilerServices.RuntimeWrappedException" : "System.MissingMethodException";
+        var expected = mutation switch
+        {
+            "separated-null" or "null-branch" => "System.NullReferenceException",
+            "non-exception" => "System.Runtime.CompilerServices.RuntimeWrappedException",
+            _ => "System.MissingMethodException"
+        };
         try
         {
             Assembly.Load(File.ReadAllBytes(dll)).GetType("Examples.Throws")!.GetMethod("Quotient")!.Invoke(null, [1u, 0u]);
             throw new InvalidOperationException("The runtime fixture unexpectedly returned: " + mutation);
         }
         catch (TargetInvocationException error) when (error.InnerException?.GetType().FullName == expected) { }
-        Console.WriteLine($"PASS runtime throws {expected} for {mutation}; it must not be folded as the constructed type");
+        Console.WriteLine($"PASS runtime throws {expected} for {mutation}");
     }
     var result = Execute(Extract("extract", dll, "Examples", "Throws::Quotient(uint,uint)", output));
+    if (mutation is "separated-null" or "null-branch")
+    {
+        if (result.Code != 0) throw new InvalidOperationException(result.Output);
+        var proof = Path.Combine(output, "StackThrow.lean");
+        int throwPc = mutation == "separated-null" ? 2 : 3;
+        File.WriteAllText(proof, $$"""
+            import Extracted
+            import CIL.Safety.Execution
+            namespace ExampleProof
+            theorem correctness :
+                (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i32 1), .scalar (.i32 0)]
+                  CIL.Safety.Memory.empty).map Prod.snd = .error ⟨1, {{throwPc}}, .thrown .nullReference⟩ := by
+              decide +kernel
+            #print axioms correctness
+            end ExampleProof
+            """);
+        queue.Add(new("Throws::Quotient(uint,uint)", proof, Path.Combine(root, mutation + "-Verified"),
+            Assembly: dll), () => Console.WriteLine("PASS stack-based null throw: " + mutation));
+        continue;
+    }
     if (mutation == "dead-non-exception")
     {
         if (result.Code != 0) throw new InvalidOperationException("Unreachable unsupported throw blocked extraction: " + result.Output);
@@ -299,4 +336,5 @@ foreach (var (mutation, marker) in new[]
         throw new InvalidOperationException("Incorrect throw rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
+queue.Flush();
 Console.WriteLine("PASS folded throws, located faults, runtime comparisons, forged types and exact-pattern rejection");

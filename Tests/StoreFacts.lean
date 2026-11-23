@@ -161,7 +161,7 @@ theorem contract_normalize_once (words : Nat → Nat) (memory : Memory) (_zero :
   exact ⟨rfl, rfl⟩
 
 @[cil_code] def twentySevenRaises : CIL.Method :=
-  { code := List.replicate 26 .nop ++ [.throw .baseException], locals := [],
+  { code := List.replicate 26 .nop ++ [.throw (some .baseException)], locals := [],
     returnsValue := false }
 
 @[cil_code] def twentySevenRaisesProgram : CIL.Program := [twentySevenRaises]

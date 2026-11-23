@@ -58,7 +58,7 @@ theorem message_operands (text : String) :
 theorem string_and_throw (ordinary message : String) :
     let closed := raw [i 114 (.text ordinary), i 38, i 114 (.text message), i 115 argument, i 122]
     methodCode .scalar {} [] (List.replicate 5 true) closed =
-      [.ldstr ordinary, .pop, .nop, .nop, .throw .argument] := rfl
+      [.ldstr ordinary, .pop, .nop, .nop, .throw (some .argument)] := rfl
 #print axioms string_and_throw
 
 /-- The two string loads and constructor preceding the range exception's throw. -/
@@ -139,7 +139,7 @@ theorem exact_exception_signatures :
 theorem exact_exception_certificate :
     let accepts := fun operand => FeatureFlowValid #[] (fun _ => none) (fun _ => none)
       (raw [i 115 operand, i 122]) .scalar [state [], state [none]] [true, true]
-      [.nop, .throw .divideByZero]
+      [.nop, .throw (some .divideByZero)]
     accepts divide ∧ ∀ operand ∈ alteredConstructors, ¬ accepts operand := by decide +kernel
 #print axioms exact_exception_certificate
 
@@ -182,7 +182,7 @@ private def guardRaw (message : String) := raw [i 2, i 45 (.target 5), i 114 (.t
 private def guardStates : FeatureCertificate :=
   [state [], state [none], state [], state [none], state [none], state [], state [none]]
 private def guardCode : List Instruction :=
-  [.ldarg 0, .brtrue 5, .nop, .nop, .throw .argument, .ldarg 0, .ret]
+  [.ldarg 0, .brtrue 5, .nop, .nop, .throw (some .argument), .ldarg 0, .ret]
 
 example (message : String) : FeatureFlowValid #[] (fun _ => none) (fun _ => none) (guardRaw message) .scalar guardStates
     (List.replicate 7 true) guardCode := by
@@ -207,42 +207,41 @@ private def enteredRaw (message : String) := raw [i 2, i 37, i 45 (.target 6), i
 example (message : String) : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (enteredRaw message) .scalar
     [state [], state [none], state [none, none], state [none], state [], state [none], state [none]]
     (List.replicate 7 true) [.ldarg 0, .dup, .brtrue 6, .pop, .nop, .nop,
-        .throw .argument] := by
+        .throw (some .argument)] := by
   apply of_decide_eq_true
   with_unfolding_all rfl
 
-/-- An adjacent raw null is the only operand admitted by the null-throw fold. -/
+/-- The raw decoder binds the null load and the throw independently, including a separated pair. -/
 theorem null_throw_encoding (text : String) :
-    foldRoles [i 20, i 122] =
-      [some .head, some (.raise .nullReference)] ∧
+    foldRoles [i 20, i 122] = [none, none] ∧
     FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20, i 122]) .scalar
-      [state [], state [none]] [true, true] [.ldnull, .throw .nullReference] ∧
+      [state [], state [none]] [true, true] [.ldnull, .throw] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20, i 122]) .scalar
-      [state [], state [none]] [true, true] [.nop, .throw .nullReference] ∧
+      [state [], state [none]] [true, true] [.nop, .throw] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 22, i 122]) .scalar
-      [state [], state [some 0]] [true, true] [.ldnull, .throw .nullReference] ∧
+      [state [], state [some 0]] [true, true] [.ldnull, .throw] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20 (.text text), i 122])
       .scalar
-      [state [], state [none]] [true, true] [.ldnull, .throw .nullReference] ∧
-    ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20, i 0, i 122]) .scalar
+      [state [], state [none]] [true, true] [.ldnull, .throw] ∧
+    FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20, i 0, i 122]) .scalar
       [state [], state [none], state [none]] [true, true, true]
-      [.ldnull, .nop, .throw .nullReference] := by
+      [.ldnull, .nop, .throw] := by
   apply of_decide_eq_true
   with_unfolding_all rfl
 #print axioms null_throw_encoding
 
 
-/-- A branch may enter at the null load, but not skip it to reach the folded throw. -/
+/-- A branch can carry an already loaded null directly to the throw instruction. -/
 theorem null_throw_entry :
     FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw
       [i 20, i 43 (.target 2), i 20, i 122]) .scalar
       [state [], state [none], state [none], state [none, none]]
       [true, true, true, true]
-      [.ldnull, .br 2, .ldnull, .throw .nullReference] ∧
-    ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw
+      [.ldnull, .br 2, .ldnull, .throw] ∧
+    FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw
       [i 20, i 43 (.target 3), i 20, i 122]) .scalar
       [state [], state [none], none, state [none]] [true, true, false, true]
-      [.ldnull, .br 3, .unadmitted 20, .throw .nullReference] :=
+      [.ldnull, .br 3, .unadmitted 20, .throw] :=
   by decide +kernel
 #print axioms null_throw_entry
 
@@ -256,18 +255,18 @@ theorem decoded_throw_entry :
     let refused := fun edge =>
       let code := methodCode .scalar {} [] mask (source edge)
       decode edge = none ∧ code[5]? = some (.unadmitted 122) ∧
-        code[7]? = some (.throw .divideByZero)
-    let raised := some (Instruction.throw .divideByZero)
+        code[7]? = some (.throw (some .divideByZero))
+    let raised := some (Instruction.throw (some .divideByZero))
     decode (i 43 (.target 4)) = some (raised, raised) ∧
       refused (i 43 (.target 5)) ∧ refused (i 69 (.targets [4, 5])) := by decide +kernel
 
 #print axioms decoded_throw_entry
 
--- A null throw cannot claim another exception type.
-example : ∀ other ∈ ExceptionType.all, other ≠ .nullReference → ¬ FeatureFlowValid #[]
+-- A bare throw cannot carry a folded type, including NullReferenceException itself.
+example : ∀ kind ∈ ExceptionType.all, ¬ FeatureFlowValid #[]
     (fun _ => none) (fun _ => none) (raw [i 20, i 122]) .scalar [state [], state [none]] [true,
       true]
-    [.ldnull, .throw other] := by decide +kernel
+    [.ldnull, .throw (some kind)] := by decide +kernel
 
 /-- Types outside the constructor allowlist cannot form a throw fold. -/
 theorem rejects_unadmitted_owners :
@@ -322,6 +321,39 @@ theorem literal_constructor_allocation (name message : String) (nameRef messageR
     positive, List.mapM_cons, List.mapM_nil, bind, Except.bind, pure, Except.pure]
 #print axioms literal_constructor_allocation
 
+/-- A method body with the given evaluation-stack instructions. -/
+private def throwBody (ops : List Instruction) : Method :=
+  { code := ops, locals := [], returnsValue := false }
+
+/-- A displaced throw raises at its own pc and accepts null across a control-flow edge. -/
+theorem null_sites :
+    invoke [throwBody [.ldnull, .nop, .throw]] 12 0 [] Safety.Memory.empty =
+      .error ⟨0, 2, .thrown .nullReference⟩ ∧
+    invoke [throwBody [.ldnull, .br 3, .unadmitted 0, .throw]] 12 0 [] Safety.Memory.empty =
+      .error ⟨0, 3, .thrown .nullReference⟩ ∧
+    invoke [throwBody [.throw]] 12 0 [] Safety.Memory.empty = .error ⟨0, 0, .invalidState⟩ ∧
+    invoke [throwBody [.ldc_i4 1, .throw]] 12 0 [] Safety.Memory.empty =
+      .error ⟨0, 1, .invalidState⟩ := by
+  exact ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+#print axioms null_sites
+
+/-- One live object of the supplied runtime class. -/
+private def exceptionMemory (type : TypeExpr) : Safety.Memory :=
+  { Safety.Memory.empty with
+    nextIdentity := 1
+    allocations := fun id => if id = 0 then some ⟨.object ⟨type, []⟩, ⟨8, 8, []⟩, true, []⟩
+      else none }
+
+/-- A CoreLib exception raises its type. A caller's same-named class is inconclusive. -/
+theorem scoped_object :
+    let raise := fun type => invoke [throwBody [.ldarg 0, .throw]] 12 0
+      [.object (.address ⟨0, 0⟩)] (exceptionMemory type)
+    raise (.object coreLibraryScope "System.ArgumentException") =
+      .error ⟨0, 1, .thrown .argument⟩ ∧
+    (raise (.object "Other" "System.ArgumentException") matches
+      .error ⟨0, 1, .unsupported _⟩) = true := by
+  exact ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
+#print axioms scoped_object
 end
 
 end Tests.ThrowEvidence

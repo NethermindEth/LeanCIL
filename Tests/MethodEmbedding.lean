@@ -223,11 +223,11 @@ theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
 
 /-- Jumps to a throw. -/
 def thrower : Method :=
-  { code := [.br 1, .throw .overflow], locals := [], returnsValue := false }
+  { code := [.br 1, .throw (some .overflow)], locals := [], returnsValue := false }
 
 /-- `thrower` with a dead block before the throw and unused reference and span locals. -/
 def throwerDead : Method := {
-  code := [.br 2, .unadmitted 0, .throw .overflow]
+  code := [.br 2, .unadmitted 0, .throw (some .overflow)]
   locals := [.nullRef, .nullRef], localKinds := [.reference, .span 1 false], returnsValue := false }
 
 /-- A throw of the expected body is raised by the extraction with the dead local. -/

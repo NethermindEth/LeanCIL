@@ -38,7 +38,7 @@ theorem profiles_valid : avx2Profile.Valid ∧ avx512Profile.Valid ∧ narrowPro
   [{ profile := avx2Profile, returnsValue := true, locals := [],
      code := [.call (Tests.supportedGetter "X86.Avx2"), .ret] },
    { profile := avx2Profile, returnsValue := false, locals := [],
-     code := [.throw .notSupported] }]
+     code := [.throw (some .notSupported)] }]
 
 /-- Calling with no arguments returns `1` and changes no memory. -/
 def avx2Contract : MethodContract Unit where
@@ -70,7 +70,7 @@ theorem narrow_holds : avx2Contract.Holds (reprofile program narrowProfile) 0 :=
   [{ profile := avx512Profile, returnsValue := true, locals := [],
      code := [.call (Tests.supportedGetter "X86.Avx2"), .ret] },
    { profile := avx512Profile, returnsValue := false, locals := [],
-     code := [.throw .notSupported] }]
+     code := [.throw (some .notSupported)] }]
 
 /-- A per-profile program is certified once it is shown to be the reprofiling. -/
 theorem extraction_holds : avx2Contract.Holds avx512Program 0 := by

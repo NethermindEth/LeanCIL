@@ -72,12 +72,14 @@ File.WriteAllText(path, $$"""
 
     /-- A null throw needs both the null load and the throw opcode. -/
     theorem throw_opcodes :
-        let code := [RawInstruction.mk 0 {{OpCodes.Ldnull.Value}} .none,
-          RawInstruction.mk 1 {{OpCodes.Throw.Value}} .none]
+        let loadNull := RawInstruction.mk 0 {{OpCodes.Ldnull.Value}} .none
+        let raise := RawInstruction.mk 1 {{OpCodes.Throw.Value}} .none
+        let code := [loadNull, raise]
         let nop := RawInstruction.mk 0 {{OpCodes.Nop.Value}} .none
-        foldRoles code == [some .head, some (.raise .nullReference)] &&
-          (folded code 1 matches some (.throw .nullReference)) &&
-          ([0, 1].all fun pc => foldRoles (code.set pc nop) == [none, none]) := by
+        foldRoles code == [none, none] &&
+          (Instruction.ofRaw? none loadNull matches some .ldnull) &&
+          (Instruction.ofRaw? (some loadNull) raise matches some (.throw none)) &&
+          (Instruction.ofRaw? none nop matches some .nop) := by
       decide +kernel
     #print axioms throw_opcodes
 

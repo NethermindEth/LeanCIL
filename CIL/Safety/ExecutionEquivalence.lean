@@ -217,6 +217,19 @@ theorem Memory.Equivalent.newArray {m n : Memory} (same : m.Equivalent n)
     | split
 #print axioms Memory.Equivalent.newArray
 
+/-- Throwing a live exception depends on its allocation metadata. -/
+theorem Memory.Equivalent.throwFault {m n : Memory} (same : m.Equivalent n) (stack : List Value) :
+    CIL.Safety.throwFault m stack = CIL.Safety.throwFault n stack := by
+  cases stack with
+  | nil => rfl
+  | cons value rest =>
+    cases value <;> try rfl
+    case object ref =>
+      cases ref <;>
+        simp only [CIL.Safety.throwFault, runtimeTypeOf, liveAllocation, same.allocations]
+
+#print axioms Memory.Equivalent.throwFault
+
 /-- Virtual dispatch reads only allocation metadata, which equivalent memories share. -/
 theorem Memory.Equivalent.virtualTarget {m n : Memory} (same : m.Equivalent n)
     (targets : List (CIL.Extraction.TypeExpr × Nat)) (receiver : Reference) :
@@ -428,7 +441,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     same.loadArgument, same.addressArgument, same.callArguments, same.viewOperands,
     same.referenceNonNull, same.referenceEqual, same.referenceDifference,
     same.referenceLess, same.referenceSubtract, same.objectNonNull, same.objectEqual,
-    same.objectAboveNull, same.virtualTarget, same.objectTest]
+    same.objectAboveNull, same.virtualTarget, same.objectTest, same.throwFault]
   all_goals repeat' first
     | exact same.calliStep _ _ _ _ _
     | unfold returnFrom

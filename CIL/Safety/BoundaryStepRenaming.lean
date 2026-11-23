@@ -99,6 +99,39 @@ private theorem Memory.Renamed.runtimeTypeOf {mapping : AllocationRenaming}
           | exact .ok rfl
 #print axioms Memory.Renamed.runtimeTypeOf
 
+/-- Renaming a thrown reference preserves its runtime class and relocates memory faults. -/
+private theorem Memory.Renamed.throwFault {mapping : AllocationRenaming} {indices : LocalIndexMap}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
+    CIL.Safety.throwFault target (stack.map (indices.value mapping)) =
+      mapping.fault (CIL.Safety.throwFault source stack) := by
+  cases stack with
+  | nil => rfl
+  | cons value rest =>
+    cases value <;> try rfl
+    case object reference =>
+      cases reference with
+      | null => rfl
+      | address receiver =>
+        have typed := related.runtimeTypeOf receiver (bounds _ (List.mem_cons_self ..))
+        simp only [List.map_cons, LocalIndexMap.value, AllocationRenaming.value,
+          AllocationRenaming.managedReference, CIL.Safety.throwFault]
+        generalize CIL.Safety.runtimeTypeOf source receiver = left at typed ⊢
+        generalize CIL.Safety.runtimeTypeOf target (mapping.reference receiver) = right at typed ⊢
+        cases typed with
+        | error => rfl
+        | ok same =>
+          cases same
+          rename_i runtime
+          dsimp only [AllocationRenaming.reference]
+          by_cases away : (receiver.offset != 0) = true
+          · simp only [away, ite_true]; rfl
+          · simp only [away, ite_false]
+            cases CIL.Extraction.runtimeException? runtime.identity <;> rfl
+
+#print axioms Memory.Renamed.throwFault
+
 /-- Renaming keeps a live object's runtime class, so a virtual call selects the same body and
     fails with the same, renamed, fault. -/
 private theorem Memory.Renamed.virtualTarget {mapping : AllocationRenaming}
@@ -783,6 +816,17 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       (step sourceBody operation pc arguments sourceFrame stack source)
       (step targetBody operation pc (arguments.map mapping.value)
         targetFrame (stack.map (indices.value mapping)) target) := by
+  by_cases raising : ∃ folded, operation = .throw folded
+  · obtain ⟨folded, rfl⟩ := raising
+    cases folded with
+    | some exception => exact .error (.thrown exception)
+    | none =>
+      change ResultRenamed mapping _ (.error (CIL.Safety.throwFault source stack))
+        (.error (CIL.Safety.throwFault target (stack.map (indices.value mapping))))
+      rw [related.throwFault stack bounds]
+      exact .error _
+  have noThrow (folded : Option ExceptionType) : operation ≠ .throw folded :=
+    fun equal => raising ⟨folded, equal⟩
   by_cases isAddress : ∃ identity signature, operation = .ldftn identity signature
   · rcases isAddress with ⟨identity, signature, rfl⟩
     exact .ok (.next related frames)
@@ -815,6 +859,7 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
   ·
     allocation_fixed_step (
       first
+      | exact False.elim (noThrow _ rfl)
       | exact False.elim (isAddress ⟨_, _, rfl⟩)
       | exact False.elim (indirect ⟨_, _, rfl⟩)
       | exact False.elim (direct ⟨_, _, rfl⟩)

@@ -121,7 +121,7 @@ def Instruction.valueOpcode (opcode : Nat) : Bool :=
     (40 <= opcode && opcode <= 41) ||
     (42 <= opcode && opcode <= 77) || (82 <= opcode && opcode <= 85) ||
     (88 <= opcode && opcode <= 106) || (109 <= opcode && opcode <= 117) ||
-    (123 <= opcode && opcode <= 139) ||
+    (122 <= opcode && opcode <= 139) ||
     opcode == 141 || (142 <= opcode && opcode <= 151) ||
     (154 <= opcode && opcode <= 159) || (162 <= opcode && opcode <= 164) ||
     (179 <= opcode && opcode <= 186) || (208 <= opcode && opcode <= 219) || opcode == 223 ||
@@ -255,6 +255,7 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .dup => (emitted matches .dup)
   | .pop => (emitted matches .pop)
   | .ret => (emitted matches .ret)
+  | .throw none => (emitted matches .throw none)
   -- Constants, arguments and locals compare their operand.
   | .ldc_i4 expected => match emitted with | .ldc_i4 actual => expected == actual | _ => false
   | .ldc_i8 expected => match emitted with | .ldc_i8 actual => expected == actual | _ => false
@@ -410,6 +411,7 @@ private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction
   | 37, .none => emit .dup
   | 38, .none => emit .pop
   | 42, .none => emit .ret
+  | 122, .none => emit .throw
   -- Constants, with the operand ranges ECMA-335 gives each form.
   | 20, .none => emit .ldnull
   | 114, .text text => emit (.ldstr text)

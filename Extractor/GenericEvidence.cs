@@ -535,7 +535,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// <summary>The decoded value opcodes whose operands need no storage, model or target resolution.</summary>
     internal static readonly FrozenSet<Code> SimpleOpcodes = new[]
     {
-        Code.Nop, Code.Dup, Code.Pop, Code.Ret,
+        Code.Nop, Code.Dup, Code.Pop, Code.Ret, Code.Throw,
         Code.Ldarg_0, Code.Ldarg_1, Code.Ldarg_2, Code.Ldarg_3,
         Code.Ldloc_0, Code.Ldloc_1, Code.Ldloc_2, Code.Ldloc_3,
         Code.Stloc_0, Code.Stloc_1, Code.Stloc_2, Code.Stloc_3,

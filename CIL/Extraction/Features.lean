@@ -384,7 +384,7 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     (instruction : RawInstruction) (emitted : Instruction) : Bool :=
     Id.run do
   -- These terminal/transfer encodings have no admitted emitted counterpart.
-  if instruction.opcode ∈ [39, 122, 220, 65041, 65044, 65050] then return false
+  if instruction.opcode ∈ [39, 220, 65041, 65044, 65050] then return false
   if (match emitted with
     | .call _ prefixes => prefixes.tail | .calli _ true => true | _ => false) then
     return false
@@ -450,10 +450,11 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     | 55, .target x, .blt_un y | 68, .target x, .blt_un y => x == y
     | 69, .targets x, .switch y => x == y
     | 42, _, .ret => true
+    | 20, .none, .ldnull | 122, .none, .throw none => true
     -- No other raw instruction may emit control flow, a feature test or a hole.
-    | _, _, .unadmitted _ | _, _, .throw _ | _, _, .br _ | _, _, .switch _
+    | _, _, .ldnull | _, _, .unadmitted _ | _, _, .throw _ | _, _, .br _ | _, _, .switch _
     | _, _, .brfalse _ | _, _, .brtrue _ => false
-    | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 42] ||
+    | opcode, _, _ => !(opcode ∈ [20, 37, 42, 95, 96, 97, 122] ||
         (65025 <= opcode && opcode <= 65029) || (43 <= opcode && opcode <= 69)) &&
         fallbackFeatureEffect instruction emitted
 
@@ -469,7 +470,7 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
     instruction.opcode == 20 && instruction.operand == .none
   | some .typeHead, _ | some .typeOperand, _ | some (.result _), _ | some (.typeBranch _), _ =>
     valueEncodingMatches previous instruction emitted
-  | some (.raise raised), .throw exception => raised == exception
+  | some (.raise raised), .throw folded => some raised == folded
   | some .tailCall, .call method prefixes => match instruction.operand with
     | .call site => prefixes.tail && site.returnType == raw.returnType &&
       featureOpMatches layouts raw instruction (.call method { prefixes with tail := false })

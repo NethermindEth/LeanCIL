@@ -44,7 +44,7 @@ example (program : CIL.Program) (method : Nat) (pre : List Value → Memory → 
 @[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.br 0] }
 @[cil_code] def done : CIL.Method := { returnsValue := false, locals := [], code := [.ret] }
 @[cil_code] def other : CIL.Method :=
-  { returnsValue := false, locals := [], code := [.throw .argument] }
+  { returnsValue := false, locals := [], code := [.throw (some .argument)] }
 
 variable (post : Memory → List Value → Prop) (frame : Frame) (m : Memory)
 

@@ -937,7 +937,9 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .ldstr text, _ => do
     let (memory, values) ← stringLiteralInstruction text stack m
     return .next (pc + 1) values frame memory
-  | .throw exception, _ => .error (.thrown exception)
+  | .throw folded, _ => .error (match folded with
+    | some exception => .thrown exception
+    | none => throwFault m stack)
   | .ret, _ => returnFrom body.returnNarrow body.returnsValue stack m
   | _, _ =>
     match pureArity op with

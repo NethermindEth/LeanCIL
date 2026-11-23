@@ -173,3 +173,59 @@ theorem ownerName_injective : Function.Injective ownerName := by
 end ExceptionType
 
 end CIL
+
+namespace CIL.Extraction
+
+/-- The member a constructor's owner spells, the scope compared once; `none` for any other type. -/
+def exceptionOwner? : TypeExpr → Option ExceptionType
+  | .atom scope name =>
+    if scope == runtimeScope then ExceptionType.all.find? (·.ownerName == name) else none
+  | _ => none
+
+/-- A constructor owner that names a member is that member's runtime type. -/
+theorem exceptionOwner?_eq_some {type : TypeExpr} {raised : ExceptionType}
+    (found : exceptionOwner? type = some raised) : type = .atom runtimeScope raised.ownerName := by
+  cases type with
+  | atom scope name =>
+    simp only [exceptionOwner?] at found
+    split at found
+    next sameScope =>
+      have named := List.find?_some found
+      simp only [beq_iff_eq] at named sameScope
+      rw [sameScope, named]
+    next => simp at found
+  | _ => simp [exceptionOwner?] at found
+
+#print axioms exceptionOwner?_eq_some
+
+/-- Each member's owner name identifies that member: no member shadows another. -/
+theorem exceptionOwner?_ownerName (raised : ExceptionType) :
+    exceptionOwner? (.atom runtimeScope raised.ownerName) = some raised := by
+  have sameOwner : ∀ other : ExceptionType,
+      (other.ownerName == raised.ownerName) = (other == raised) := by
+    intro other
+    by_cases equal : other = raised
+    · subst equal
+      simp
+    · have names : other.ownerName ≠ raised.ownerName := ExceptionType.ownerName_injective.ne equal
+      simp only [beq_eq_false_iff_ne.mpr names, beq_eq_false_iff_ne.mpr equal]
+  simp only [exceptionOwner?, beq_self_eq_true, ↓reduceIte, sameOwner]
+  cases raised <;> decide
+
+#print axioms exceptionOwner?_ownerName
+
+/-- The exception carried by a heap object, using the platform reference or the defining class. -/
+def runtimeException? (identity : TypeExpr) : Option ExceptionType :=
+  match identity with
+  | .object scope name =>
+    if scope == coreLibraryScope then exceptionOwner? (.atom runtimeScope name) else none
+  | other => exceptionOwner? other
+
+/-- A pinned CoreLib class and the platform reference identify the same named exception. -/
+theorem runtimeException?_definingClass (raised : ExceptionType) :
+    runtimeException? (.object coreLibraryScope raised.ownerName) = some raised := by
+  simp [runtimeException?, exceptionOwner?_ownerName]
+
+#print axioms runtimeException?_definingClass
+
+end CIL.Extraction

@@ -64,44 +64,6 @@ private def messageLoad : RawInstruction → Bool
   | ⟨_, 114, .text _⟩ | ⟨_, 20, .none⟩ => true
   | _ => false
 
-/-- The member a constructor's owner spells, the scope compared once; `none` for any other type. -/
-def exceptionOwner? : TypeExpr → Option ExceptionType
-  | .atom scope name =>
-    if scope == runtimeScope then ExceptionType.all.find? (·.ownerName == name) else none
-  | _ => none
-
-/-- A constructor owner that names a member is that member's runtime type. -/
-theorem exceptionOwner?_eq_some {type : TypeExpr} {raised : ExceptionType}
-    (found : exceptionOwner? type = some raised) : type = .atom runtimeScope raised.ownerName := by
-  cases type with
-  | atom scope name =>
-    simp only [exceptionOwner?] at found
-    split at found
-    next sameScope =>
-      have named := List.find?_some found
-      simp only [beq_iff_eq] at named sameScope
-      rw [sameScope, named]
-    next => simp at found
-  | _ => simp [exceptionOwner?] at found
-
-#print axioms exceptionOwner?_eq_some
-
-/-- Each member's owner name identifies that member: no member shadows another. -/
-theorem exceptionOwner?_ownerName (raised : ExceptionType) :
-    exceptionOwner? (.atom runtimeScope raised.ownerName) = some raised := by
-  have sameOwner : ∀ other : ExceptionType,
-      (other.ownerName == raised.ownerName) = (other == raised) := by
-    intro other
-    by_cases equal : other = raised
-    · subst equal
-      simp
-    · have names : other.ownerName ≠ raised.ownerName := ExceptionType.ownerName_injective.ne equal
-      simp only [beq_eq_false_iff_ne.mpr names, beq_eq_false_iff_ne.mpr equal]
-  simp only [exceptionOwner?, beq_self_eq_true, ↓reduceIte, sameOwner]
-  cases raised <;> decide
-
-#print axioms exceptionOwner?_ownerName
-
 /-- The `System.String` parameter of an exception constructor: a message or a parameter name. -/
 def messageParameter : TypeExpr := .object runtimeScope "System.String"
 
@@ -287,7 +249,7 @@ def Instruction.ofRole? (role : FoldRole) (previous : Option RawInstruction)
       if raw.operand == .none then some .ldnull else none
     else some .nop
   | .typeHead | .typeOperand | .result _ | .typeBranch _ => Instruction.ofRaw? previous raw
-  | .raise exception => some (.throw exception)
+  | .raise exception => some (.throw (some exception))
   | .argument => Instruction.ofRaw? previous raw
   | .tailCall => if raw.opcode == 40 || raw.opcode == 41 then Instruction.ofRaw? previous raw
       else none
@@ -312,7 +274,9 @@ def Instruction.withSiteDecoder (roles : Array (Option FoldRole))
     let role := (indexedRead? roles pc).join
     if boundSite raw && !foldOwnsSite role then decodeSite pc previous raw
     else match role with
-    | none | some .blocked => Instruction.ofClosedValue previous raw
+    | none => Instruction.ofClosedValue previous raw
+    | some .blocked =>
+      if raw.opcode == 122 then .unadmitted raw.opcode else Instruction.ofClosedValue previous raw
     | some role => (Instruction.ofRole? role previous raw).getD (.unadmitted raw.opcode)
 
 /-- The raw head determines which bounded instruction window can form a fold. -/
@@ -331,9 +295,7 @@ private def foldAt (a : RawInstruction) (tail : List RawInstruction) :
     Option (List (Option FoldRole)) :=
   match foldHead? a.opcode with
   | some .exception =>
-    if a.opcode == 20 && a.operand == .none && (tail.head? matches some ⟨_, 122, .none⟩) then
-      some [some .head, some (.raise .nullReference)]
-    else (throwFold (a :: tail)).map fun (count, raised) =>
+    (throwFold (a :: tail)).map fun (count, raised) =>
       some .head :: List.replicate count (some .interior) ++ [some (.raise raised)]
   | some .tailPrefix => match a.operand, tail with
     | .none, ⟨_, 41, .indirectCall _ _ false false 0⟩ :: ⟨_, 42, .none⟩ :: _ =>

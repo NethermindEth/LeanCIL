@@ -101,6 +101,7 @@ private def predecessor (raw : RawInstruction) : Option RawInstruction :=
 def named : List (RawInstruction × Instruction) := [
   -- Stack shuffling and return.
   (⟨0, 0, .none⟩, .nop), (⟨0, 37, .none⟩, .dup), (⟨0, 38, .none⟩, .pop), (⟨0, 42, .none⟩, .ret),
+  (⟨0, 122, .none⟩, .throw),
   -- Constants.
   (⟨0, 114, .text "literal"⟩, .ldstr "literal"),
   (⟨0, 20, .none⟩, .ldnull), (⟨0, 21, .none⟩, .ldc_i4 (-1)), (⟨0, 22, .none⟩, .ldc_i4 0),
@@ -222,9 +223,8 @@ def named : List (RawInstruction × Instruction) := [
   (⟨6, 111, .call instanceSite⟩, .call instanceSite.method { constrained := some int32 }),
   (⟨0, 115, .call accountConstruction⟩, .newobj accountConstruction.method)]
 
-/-- Constructors no opcode decodes to: the families outside the value opcodes. -/
-def undecoded : List Name := [
-  ``Instruction.throw, ``Instruction.unadmitted]
+/-- The explicit hole for an unadmitted opcode. -/
+def undecoded : List Name := [``Instruction.unadmitted]
 
 /-- What each named opcode decodes to after its predecessor. -/
 def decodedNamed : List (Option Instruction) :=
@@ -281,8 +281,8 @@ theorem role_decodings :
       decoded (.typeBranch true) branch = some (.beq 9) ∧
       decoded (.typeBranch true) branch ≠ some (.beq 8) ∧
       decoded (.typeBranch false) branch = some (.beq 9) ∧
-      decoded (.raise .argument) ⟨0, 122, .none⟩ = some (.throw .argument) ∧
-      decoded (.raise .argument) ⟨0, 122, .none⟩ ≠ some (.throw .overflow) ∧
+      decoded (.raise .argument) ⟨0, 122, .none⟩ = some (.throw (some .argument)) ∧
+      decoded (.raise .argument) ⟨0, 122, .none⟩ ≠ some (.throw (some .overflow)) ∧
       decoded .argument ⟨0, 2, .none⟩ = some (.ldarg 0) ∧
       Instruction.ofRole? .tailCall (some tailPrefix) call =
         some (.call callSite.method { tail := true }) ∧
@@ -771,7 +771,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 99, undecoded 2 of 101 constructors -/
+/-- info: decoded 100, undecoded 1 of 101 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

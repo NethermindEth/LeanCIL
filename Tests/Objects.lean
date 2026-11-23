@@ -519,7 +519,7 @@ theorem named_reference_load_evidence (memory otherMemory : CIL.Safety.Memory)
   {
   declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
   returnsValue := true, locals := [], code := [
-    .ldarg 0, .brtrue 3, .throw .nullReference, .ldarg 0, .ldc_i4 1,
+    .ldarg 0, .brtrue 3, .throw (some .nullReference), .ldarg 0, .ldc_i4 1,
     .callvirt (.arity 1), .ret], links := [(5, .direct 1)] },
   {
   declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },

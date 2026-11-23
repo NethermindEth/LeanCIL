@@ -476,7 +476,7 @@ output can lose admission without invalidating a theorem over an already admitte
 | --- | --- | --- |
 | Closed `typeof` equality/inequality calls, reference `ceq` and comparison branches | Exact type handles, runtime helper identities, substituted types, result and selected target; all encoded targets validated and no branch into the interior | Forwarding/scoped identity ambiguities, decorated names and arbitrary runtime `System.Type` use remain unsupported. Reference comparison relies on [CoreCLR runtime type equality](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Type.cs) and [GetTypeFromHandle](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/System.Private.CoreLib/src/System/Type.CoreCLR.cs). |
 | `throw new E(...)` | Allowlisted type/constructor, permitted literal/null arguments and final throw; no branch into the interior | No exception-object identity, observable constructor effects, handlers or resource-exhaustion model. |
-| `ldnull; throw` | Adjacent operand-free null load and throw, bound to `System.NullReferenceException`; no branch into the throw | No general exception-object evaluation or handlers. |
+| `throw` | Operand-free opcode and the top object reference. Null raises `System.NullReferenceException`. A live object raises its supported runtime exception class, checked against the platform reference or defining CoreLib scope. | An unknown class is inconclusive. Handler execution and rethrow are unsupported. |
 
 For a recognized exception constructor, the contract identifies the exception type on the throwing
 path. A proof can use the same contract in every locale. The kernel theorem

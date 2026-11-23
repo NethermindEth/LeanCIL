@@ -43,7 +43,7 @@ def method9Signature : String :=
     [.ldarg 0, .call (Tests.callee 1) {}, .ldc_i4 1, .conv_i8, .add, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
   [.ldarg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
-    .throw .argumentOutOfRange, .ldarg 0, .ret] }
+    .throw (some .argumentOutOfRange), .ldarg 0, .ret] }
 @[cil_code] def method2 : Method := { returnsValue := false, locals := [], code :=
   [.ldarg 2, .ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8, .add, .stind .i8, .ret] }
 @[cil_code] def method3 : Method := { returnsValue := false, locals := [], code :=

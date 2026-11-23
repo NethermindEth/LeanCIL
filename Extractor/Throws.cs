@@ -3,7 +3,7 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// Folds constructed exceptions and `throw null` into named faults. This mirrors
+// Folds recognized exception constructors into named faults. This mirrors
 // CIL.Extraction.foldRoles; Lean rechecks every raised type. The constructor is not run.
 internal static class Throws
 {
@@ -73,26 +73,13 @@ internal static class Throws
         var analysis = new Analysis([], [], []);
         for (int at = 0; at < code.Count; at++)
         {
-            int raise;
-            ExceptionType raised;
-            if (code[at].OpCode.Code == Code.Ldnull && at + 1 < code.Count &&
-                code[at + 1].OpCode.Code == Code.Throw)
-            {
-                raise = at + 1;
-                raised = ExceptionType.NullReference;
-            }
-            else
-            {
-                int count = 0;
-                // One past the maximum arity bounds each prefix scan, including rejected prefixes.
-                while (count < ArgumentLimit && at + count < code.Count &&
-                    code[at + count].OpCode.Code is Code.Ldstr or Code.Ldnull) count++;
-                raise = at + count + 1;
-                if (count == ArgumentLimit || raise >= code.Count || code[raise].OpCode.Code != Code.Throw ||
-                    Raised(code[at + count], code, at, count) is not ExceptionType constructed)
-                    continue;
-                raised = constructed;
-            }
+            int count = 0;
+            while (count < ArgumentLimit && at + count < code.Count &&
+                code[at + count].OpCode.Code is Code.Ldstr or Code.Ldnull) count++;
+            int raise = at + count + 1;
+            if (count == ArgumentLimit || raise >= code.Count || code[raise].OpCode.Code != Code.Throw ||
+                Raised(code[at + count], code, at, count) is not ExceptionType raised)
+                continue;
             for (int k = at; k < raise; k++) analysis.Operands.Add(code[k]);
             for (int k = at + 1; k <= raise; k++) analysis.Interior.Add(code[k]);
             analysis.Raises.Add(code[raise], raised);

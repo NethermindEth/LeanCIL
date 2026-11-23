@@ -209,7 +209,7 @@ def method1Signature : String := "System.UInt64 Outcomes.Calls::Strict(System.UI
 @[cil_code] def method1 : Method := {
   returnsValue := true, locals := [], links := [(1, .direct 2)], code :=
     [.ldarg 0, .call (Tests.callee 1) {}, .brfalse 5, .ldarg 0, .ret, .nop, .nop,
-      .throw .argument] }
+      .throw (some .argument)] }
 @[cil_code] def program : Program := [method0, method1]
 def signatures : List String := [method0Signature, method1Signature]
 
@@ -317,7 +317,7 @@ theorem root_given :
 
 @[cil_code] def percentBody : CIL.Method := { returnsValue := true, locals := [], code :=
   [.ldarg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
-    .throw .argumentOutOfRange, .ldarg 0, .ret] }
+    .throw (some .argumentOutOfRange), .ldarg 0, .ret] }
 @[cil_code] def linkedProgram : CIL.Program := Extracted.program ++ [percentBody]
 
 theorem percent_linked : importsPercent linkedProgram := by

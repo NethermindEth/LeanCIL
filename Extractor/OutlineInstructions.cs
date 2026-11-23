@@ -42,7 +42,7 @@ internal static class OutlineInstructions
             Code.Div or Code.Div_Un or Code.Rem or Code.Rem_Un or Code.Dup or Code.Pop or Code.Ldnull or
             Code.Ldind_I1 or Code.Ldind_U1 or Code.Ldind_I2 or Code.Ldind_U2 or Code.Ldind_I4 or Code.Ldind_U4 or
             Code.Ldind_I8 or Code.Ldind_I or Code.Stind_I1 or Code.Stind_I2 or Code.Stind_I4 or Code.Stind_I8 or
-            Code.Stind_I or Code.Ret;
+            Code.Stind_I or Code.Ret or Code.Throw;
 
     static void ValidateCore(Instruction i, MethodDefinition m,
         IReadOnlyDictionary<MethodDefinition, int> methods, InstructionIndex instructions,

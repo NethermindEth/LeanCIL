@@ -95,7 +95,7 @@ def thrower : Method := {
   locals := [.unmodeled]
   localKinds := [.word64]
   returnsValue := true
-  code := [.throw .invalidOperation] }
+  code := [.throw (some .invalidOperation)] }
 
 /-- The same parent embedding also transports calls to a throwing child. -/
 theorem throwing_embeds : MethodEmbeds [actual, thrower] 0 expected := by cil_embed

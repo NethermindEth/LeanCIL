@@ -1488,7 +1488,7 @@ theorem step_appendLocals_ret :
 #print axioms step_appendLocals_ret
 
 /-- `throw` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_throw (exception : ExceptionType) :
+theorem step_appendLocals_throw (exception : Option ExceptionType) :
     StepAppendLocals (.throw exception) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped

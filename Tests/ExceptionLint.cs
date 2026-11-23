@@ -61,6 +61,14 @@ Document("M:Examples.Throws.Percent(System.UInt32)", "System.ArgumentOutOfRangeE
 if (!Potential(Lint()).SequenceEqual(["System.ArgumentOutOfRangeException"]))
     throw new InvalidOperationException("Explicit folded exception name was lost.");
 
+Extract("Examples.Throws::Null(uint)");
+Document("M:Examples.Throws.Null(System.UInt32)", "System.NullReferenceException");
+var nullThrow = Lint();
+if (!Potential(nullThrow).SequenceEqual(["System.NullReferenceException"]) ||
+    !nullThrow.GetProperty("sites").EnumerateArray()
+        .Any(site => site.GetProperty("origin").GetString() == "throw of null"))
+    throw new InvalidOperationException("The reachable ldnull and throw must identify a null-reference fault.");
+
 string compilerDocumentation = Path.ChangeExtension(assembly, ".xml");
 foreach ((string Selector, string[] Expected) item in new (string, string[])[]
 {

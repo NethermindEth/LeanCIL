@@ -19,10 +19,10 @@ def method2Signature : String := "System.UInt64 Outcomes.Calls::Percent(System.U
 @[cil_code] def method1 : Method := { links := [(1, .direct 2)], returnsValue := true,
                                       locals := [], code :=
   [.ldarg 0, .call (Tests.callee 1) {}, .brfalse 5, .ldarg 0, .ret, .nop, .nop,
-      .throw .argument] }
+      .throw (some .argument)] }
 @[cil_code] def method2 : Method := { returnsValue := true, locals := [], code :=
   [.ldarg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
-    .throw .argumentOutOfRange, .ldarg 0, .ret] }
+    .throw (some .argumentOutOfRange), .ldarg 0, .ret] }
 @[cil_code] def program : Program := [method0, method1, method2]
 def signatures : List String := [method0Signature, method1Signature, method2Signature]
 
@@ -31,6 +31,18 @@ end Extracted
 namespace Tests.OutcomeContract
 
 open CIL.Safety
+
+/-- Load the caller's exception reference and throw it at the next instruction. -/
+@[cil_code] private def raiseArgument : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.ldarg 0, .throw] }
+
+/-- Any live supported exception raises its own type, independently of its fields. -/
+theorem raises_argument (memory : Memory) (reference : Reference) (kind : CIL.ExceptionType)
+    (object : ExceptionObject memory reference kind) :
+    Raises [raiseArgument] 0 [.object (.address reference)] memory kind := by
+  cil_raise_steps [object.forms, object.thrown []]
+
+#print axioms raises_argument
 
 bind_method root rootBody := "System.UInt64 Outcomes.Calls::Root(System.UInt64)"
 bind_callee strict strictBody := "System.UInt64 Outcomes.Calls::Strict(System.UInt64)" from rootBody

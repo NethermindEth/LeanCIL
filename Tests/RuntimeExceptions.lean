@@ -164,7 +164,7 @@ theorem thrown_still_named (exception : CIL.ExceptionType) :
 #print axioms invalid_state_never_named
 
 -- A throw raises its member, and a checked overflow surfaces as the overflow member.
-example : Raises [{ code := [.throw .overflow], locals := [], returnsValue := false }] 0 []
+example : Raises [{ code := [.throw (some .overflow)], locals := [], returnsValue := false }] 0 []
     empty .overflow :=
   ⟨1, ⟨0, 0, .thrown .overflow⟩, rfl, rfl⟩
 

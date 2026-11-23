@@ -61,6 +61,9 @@ internal static partial class ExceptionLint
                 if (!reachable.Contains(instruction)) continue;
                 if (folded.Raises.TryGetValue(instruction, out var exception))
                     sites.Add(new(method.FullName, instruction.Offset, exception, "folded throw"));
+                else if (instruction.OpCode.Code == Code.Throw && instruction.Previous is { } previous &&
+                    previous.OpCode.Code == Code.Ldnull && reachable.Contains(previous))
+                    sites.Add(new(method.FullName, instruction.Offset, ExceptionType.NullReference, "throw of null"));
                 if (Faults(method, instruction, profile) is not { } faults) continue;
                 var origin = $"interpreter operation: {instruction}";
                 foreach (var named in RuntimeExceptions(faults))
@@ -79,7 +82,10 @@ internal static partial class ExceptionLint
         string report = JsonSerializer.Serialize(new
         {
             schema = 1, note = Notice,
-            coverage = "Profile-reachable admitted methods; folded throws and named arithmetic/span faults. No path feasibility, preconditions, runtime-completeness or proof analysis. Invalid state, invalid operands/bounds, memory faults, unsupported operations and fuel exhaustion have no CLR mapping here.",
+            coverage = "Profile-reachable admitted methods; folded constructors, adjacent null throws and named " +
+                "arithmetic/span faults. No path feasibility, preconditions, runtime-completeness or proof " +
+                "analysis. Invalid state, invalid operands/bounds, memory faults, unsupported operations " +
+                "and fuel exhaustion have no CLR mapping here.",
             documentationBinding = "XML assembly name and compiler member ID matched. The XML hash records supplied bytes; it does not establish that the XML came from this DLL build.",
             assemblyIdentity = module.Assembly.Name.FullName, assemblySha256 = Hash(assembly),
             documentationSha256 = Hash(xml), generatedSha256 = regeneratedHash,

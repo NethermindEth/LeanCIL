@@ -79,6 +79,8 @@ internal sealed class InstructionAdmission(MethodDefinition method, FeatureProfi
                     Unsupported static field store: {site}
                       Static fields are written only by their static constructor, which is never extracted.
                     """.ReplaceLineEndings("\n"));
+            case Code.Throw:
+                return;
             case Code.Ldstr:
                 InstructionOperands.ValidateLiteral((string)site.Operand);
                 return;

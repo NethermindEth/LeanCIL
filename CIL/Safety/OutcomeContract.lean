@@ -457,7 +457,8 @@ elab_rules : tactic
       cilFetchedOp ``CIL.Safety.run_next_raises some 4 facts.getElems
     evalTactic (← if operation == ``CIL.Instruction.throw then
         `(tactic|
-          cil_strict exact CIL.Safety.run_throw_raises $methodSyntax $instructionSyntax rfl)
+          cil_strict exact CIL.Safety.run_throw_raises $methodSyntax $instructionSyntax
+            (by first | rfl | cil_checked_step_normalized [$facts,*]))
       else
         `(tactic| (
           cil_strict cil_refine_by CIL.Safety.run_next_raises $methodSyntax $instructionSyntax

@@ -1442,7 +1442,8 @@ Malformed documentation or stale extraction fails and removes an old lint report
 
 The report keeps potential modeled sites and XML declarations separate. It
 compares the selected entry's declarations with its profile-reachable method
-closure. It includes folded throws, integer divide/overflow, signed Abs, X86
+closure. It includes folded exception constructors, a reachable `ldnull` immediately before
+`throw`, integer divide/overflow, signed Abs, X86
 DivRem and span indexing faults. For an arithmetic or span fault, the site's origin includes the IL
 offset, opcode and operand. A call operand names the overload. Clamp invalid bounds remain a model
 fault without a CLR exception mapping. Memory faults, invalid

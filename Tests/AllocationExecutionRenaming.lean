@@ -117,7 +117,7 @@ def allocationPrefix : List CIL.Instruction :=
 def returningCode : List CIL.Instruction := allocationPrefix ++ [.ldloc 0, .ldloc 1, .add, .ret]
 
 /-- The exceptional fixture raises after both the nested call and dynamic allocation finish. -/
-def throwingCode : List CIL.Instruction := allocationPrefix ++ [.throw .invalidOperation]
+def throwingCode : List CIL.Instruction := allocationPrefix ++ [.throw (some .invalidOperation)]
 
 /-- Both methods use the same declaration transformation and preserve their callable indices. -/
 def sourceProgram (code : List CIL.Instruction) : CIL.Program :=

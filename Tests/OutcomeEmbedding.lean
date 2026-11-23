@@ -143,15 +143,15 @@ example : (⟨1, 6, .thrown outOfRange⟩ : LocatedFault).relocate
 /-! A changed reachable throw condition or exception type neither embeds nor satisfies the contract. -/
 
 def renamedException : Method :=
-  { extractedCheck with code := extractedCheck.code.set 7 (.throw .argument) }
+  { extractedCheck with code := extractedCheck.code.set 7 (.throw (some .argument)) }
 def lowerBound : Method := { extractedCheck with code := extractedCheck.code.set 1 (.ldc_i4 50) }
 
 /--
 error: cil_embed: the expected body does not embed into the extracted method
 method index 1
 expected pc 6 maps to actual pc 7
-  expected: CIL.Instruction.throw (CIL.ExceptionType.argumentOutOfRange)
-  actual:   CIL.Instruction.throw (CIL.ExceptionType.argument)
+  expected: CIL.Instruction.throw (some (CIL.ExceptionType.argumentOutOfRange))
+  actual:   CIL.Instruction.throw (some (CIL.ExceptionType.argument))
   the instructions differ
 -/
 #guard_msgs (substring := true) in

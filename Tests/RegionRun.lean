@@ -49,7 +49,7 @@ def caller : Method :=
   { code := [.ldc_i4 5, .ret, .ldarg 0, .call (Tests.callee 1) {}, .ret],
     links := [(3, .direct 1)], locals := [], returnsValue := true }
 def rewritten : Method :=
-  { caller with code := [.unadmitted 0, .throw .baseException,
+  { caller with code := [.unadmitted 0, .throw (some .baseException),
       .ldarg 0, .call (Tests.callee 1) {}, .ret], links := [(3, .direct 1)] }
 
 abbrev calling : Nat → Nat → Prop := fun method pc => inStarts [(0, 2), (1, 0)] method pc = true

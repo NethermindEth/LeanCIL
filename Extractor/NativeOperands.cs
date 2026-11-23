@@ -279,6 +279,14 @@ internal static class NativeOperands
                 if (code == Code.Newobj || InitAccessors.Return(callee.ReturnType).MetadataType != MetadataType.Void)
                     stack.Add(code == Code.Newobj ? Type(callee.DeclaringType) : CallType(callee, profile));
             }
+            else if (code == Code.Throw)
+            {
+                var value = Pop();
+                if (value.Kind is not (Kind.Object or Kind.NullObject) &&
+                    !Throws.Analyze(method).Raises.ContainsKey(instruction))
+                    throw new InvalidDataException(
+                        $"Throw requires an object on the evaluation stack: {method.FullName}");
+            }
             else if (code == Code.Ret)
             {
                 var returned = InitAccessors.Return(method.ReturnType);

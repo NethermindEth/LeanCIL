@@ -39,6 +39,51 @@ def runtimeTypeOf (memory : Memory) (receiver : Reference) : ExecutionResult Run
   | .object type => .ok type
   | _ => .error .invalidState
 
+/-- The fault raised by `throw` at the top of the evaluation stack. A live object raises its
+    exact runtime exception type. A class outside the exception model is inconclusive. -/
+def throwFault (memory : Memory) : List Value → ExecutionFault
+  | .object .null :: _ => .thrown .nullReference
+  | .object (.address receiver) :: _ =>
+    match runtimeTypeOf memory receiver with
+    | .error fault => fault
+    | .ok type =>
+      if receiver.offset != 0 then .invalidState else
+      match CIL.Extraction.runtimeException? type.identity with
+      | some exception => .thrown exception
+      | none => .unsupported "Thrown object has an unmodelled runtime exception type"
+  | _ => .invalidState
+
+/-- A reference to the start of a live object of the named runtime exception class. -/
+structure ExceptionObject (memory : Memory) (reference : Reference)
+    (exception : CIL.ExceptionType) : Prop where
+  start : reference.offset = 0
+  classOf : ∃ type, runtimeTypeOf memory reference = .ok type ∧
+    CIL.Extraction.runtimeException? type.identity = some exception
+
+/-- A live exception object is a valid argument to a method taking an object reference. -/
+theorem ExceptionObject.forms {memory reference exception}
+    (object : ExceptionObject memory reference exception) :
+    formObject memory (.address reference) = .ok (.object (.address reference)) := by
+  obtain ⟨type, live, _⟩ := object.classOf
+  unfold runtimeTypeOf at live
+  unfold formObject
+  cases checked : checkedAt (.address reference) 0
+      (liveAllocation memory reference.allocation) with
+  | error fault => simp [checked, bind, Except.bind] at live
+  | ok allocation =>
+    cases kind : allocation.kind <;> simp_all [bind, Except.bind, object.start]
+
+#print axioms ExceptionObject.forms
+
+/-- Throwing the object reports its exact exception class and discards the rest of the stack. -/
+theorem ExceptionObject.thrown {memory reference exception}
+    (object : ExceptionObject memory reference exception) (rest : List Value) :
+    throwFault memory (.object (.address reference) :: rest) = .thrown exception := by
+  obtain ⟨type, live, named⟩ := object.classOf
+  simp [throwFault, live, object.start, named]
+
+#print axioms ExceptionObject.thrown
+
 /-- The model fault of a virtual call on an instance of a class its dispatch table omits: the
     class is outside the extraction's closed set, so the model selects no body for it. -/
 def outsideDispatchTable : ExecutionFault :=

@@ -108,7 +108,7 @@ external enum dependencies are not supported.
 | `call` | Partial | Acyclic calls to supported static methods, reference-free struct instance methods (including direct constructor calls) or instance methods and constructors of admitted classes, which run the named body on an object-reference `this` ([class instances](SOUNDNESS-RUNTIME.md#class-instances)), in the same assembly or a pinned `--reference` assembly ([CLI](CLI.md#extract-from-referenced-assemblies)), concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist, including integer BinaryPrimitives byte-span transfers and no-read span/array accessors. Closed generic declaring types are admitted for static calls, including nested owners; validated closed sequential structs also admit direct instance methods and constructors. No arbitrary external calls, instance methods of classes that are not admitted or virtual dispatch through `call`. |
 | `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. An unlinked `newobj` runs the exact external constructor model and pushes its result. This covers `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage for supported integer, enum, aggregate and integer-vector elements, from a single reference, `(void*, int)`, an array, or `(array, start, length)`. Also constructors of admitted non-abstract classes, which allocate a fresh [class instance](SOUNDNESS-RUNTIME.md#class-instances) charged to `Memory.heapBudget` (`allocationFailure` when short) and push it once the constructor returns; the constructor's `System.Object::.ctor()` call runs a runtime model that only consumes its receiver. Unsupported generic constructors and cyclic dependencies are rejected. |
 | `ldtoken` | Partial | A type token pushes its scoped runtime handle in a decided closed type test. A static data field token supplies the field address for `RuntimeHelpers.CreateSpan<T>` (see below). Other tokens are rejected. |
-| `throw` | Partial | Exact `throw new E(...)` with `ldstr`/`ldnull` arguments raises a located `.thrown raised` fault, where `raised` is the `CIL.ExceptionType` member for `E`. Adjacent `ldnull; throw` raises `.nullReference`. Other throws are rejected. |
+| `throw` | Partial | Exact `throw new E(...)` with `ldstr`/`ldnull` arguments raises a located `.thrown raised` fault, where `raised` is the `CIL.ExceptionType` member for `E`. An operand-free `throw` reads the top object reference. Null raises `.nullReference`. A live supported exception raises its runtime type. |
 | `constrained.`, `callvirt` | Partial | Adjacent prefix and `callvirt` (instance slot) or `call` (static interface slot) resolving to a concrete struct implementation or, for a static slot, the most specific interface-level body, within the extracted and pinned assemblies; see [constrained struct calls](#constrained-struct-calls). No boxing. Without the prefix, `callvirt` of a non-virtual method of an admitted class calls it after a receiver null check that throws `System.NullReferenceException` ([class instances](SOUNDNESS-RUNTIME.md#class-instances)); `callvirt` of a virtual method of an admitted class dispatches on the receiver's runtime type through a table Lean rechecks ([virtual dispatch](SOUNDNESS-EXECUTION.md#virtual-dispatch)). Interface calls and slots declared outside the extracted assemblies are rejected by name. |
 | `castclass`, `isinst` | Partial | Test an object reference, or an opaque reference a field typed `object` or as a generic class instance held, against an admitted class other than `System.Object`: null passes, and an instance whose lineage lacks the class gives null (`isinst`) or throws `System.InvalidCastException` (`castclass`); see [class instances](SOUNDNESS-RUNTIME.md#class-instances). Interfaces, `System.Object`, value types and classes that are not admitted are rejected by name. |
 | `ldftn` | Partial | Exact static same-assembly managed method addresses, retaining scoped identity and closed signature. Callable values have no numeric address representation. See typed indirect dispatch below. |
@@ -267,7 +267,7 @@ examples of rejected opcodes and forms.
 | Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*` |
 | Objects, arrays and metadata | `ldstr` of text containing an unpaired UTF-16 surrogate, `box`, `unbox`, `unbox.any`, `castclass` and `isinst` of interfaces, `System.Object`, value types or classes that are not admitted, byref-like, floating-point and non-class reference `newarr`, floating-point `ldelem.*`/`stelem.*` and `ldelem.ref`/`stelem.ref` outside arrays of classes, arrays of interfaces, `object` or other classes outside the model, `ldtoken` of a method or of a type outside a decided type test |
 | Static field values | `stsfld`, `ldsfld` and `ldsflda` of fields outside the admitted readonly subset |
-| Dispatch and exceptions | Unconstrained `callvirt` of interface methods, of methods declared outside the extracted assemblies, or of virtual methods whose hierarchy the table cannot close, `jmp`, `ldvirtftn`, `throw` outside a folded throw, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
+| Dispatch and exceptions | Unconstrained `callvirt` of interface methods, of methods declared outside the extracted assemblies, or of virtual methods whose hierarchy the table cannot close, `jmp`, `ldvirtftn`, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
 | Floating-point constants | `ldc.r4`, `ldc.r8` |
 
 ### Type tests
@@ -296,13 +296,18 @@ outside this subset.
 `ldnull` pushes the null object reference. The string loads and `newobj` emit `nop`. The
 `throw` raises the `CIL.ExceptionType` for `E` at the original instruction position. A `[DoesNotReturn]`
 helper containing only this pattern is an ordinary call.
-Other arguments, any instruction between the parts, a branch past the first part, rethrowing a
-stored exception and exception handlers are rejected.
+The constructor fold checks every argument and requires the constructor and throw to be contiguous.
+Each branch into the folded sequence must target its first instruction.
 
-In the adjacent `ldnull; throw` form, `ldnull` pushes the null object reference and the
-following `throw` raises `.nullReference` at its original position. A branch may target the null load,
-but cannot enter at the throw. Nulls passed through locals, arguments or intervening instructions
-do not satisfy this exact fold.
+An operand-free `throw` reads the object reference on top of the evaluation stack. Null raises
+`.nullReference` at the throw's original position, including when a branch carries the reference
+to the throw. For a live exception object, the model checks the runtime class and its assembly
+scope. An unknown class produces an unsupported outcome. An empty stack, a scalar operand or an
+interior object address produces an invalid-state fault. Exception handlers remain unsupported.
+
+In hand-written Lean, `.throw` reads the stack. The constructor fold emits
+`.throw (some raised)` for its checked exception type. Contracts express either raised outcome
+as `.thrown raised`.
 
 In addition to the admitted string constructors, `Exception`, `InvalidOperationException`,
 `ArgumentException` and `ArgumentOutOfRangeException` admit a message with a null inner exception.

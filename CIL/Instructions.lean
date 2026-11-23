@@ -289,8 +289,9 @@ inductive Instruction where
   /-- `ldtoken`: the runtime handle of the token `operand` names. -/
   | ldtoken (operand : TokenOperand)
   | ret
-  /-- Raises an exception of the named type; there are no handlers. -/
-  | throw (exception : ExceptionType)
+  /-- Throw the object on the evaluation stack. A recognized constructor fold supplies the
+      exception type established by its checked operands. -/
+  | throw (folded : Option ExceptionType := none)
   /-- A hole carrying the raw `opcode` at its pc: an opcode no instruction family admits, or one
       outside the code the extractor reaches under the selected profile. It faults when stepped. -/
   | unadmitted (opcode : Nat)

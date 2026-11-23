@@ -570,7 +570,8 @@ theorem step_relabel_unadmitted (opcode : Nat) : StepRelabel (.unadmitted opcode
   explicit_intro
   cases h
 
-theorem step_relabel_throw (exception : ExceptionType) : StepRelabel (.throw exception) := by
+theorem step_relabel_throw (exception : Option ExceptionType) :
+    StepRelabel (.throw exception) := by
   explicit_intro
   cases h
 

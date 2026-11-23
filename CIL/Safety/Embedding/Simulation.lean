@@ -136,8 +136,8 @@ theorem step_unadmitted_ne_ok {body : CIL.Method} {opcode : Nat} {pc : Nat} {arg
 #print axioms step_unadmitted_ne_ok
 
 /-- `.throw` never steps successfully. -/
-theorem step_throw {body : CIL.Method} {exception : ExceptionType} {pc : Nat} {args : List Value}
-    {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
+theorem step_throw {body : CIL.Method} {exception : Option ExceptionType} {pc : Nat}
+    {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body (.throw exception) pc args frame stack m = .ok action) : False := by
   cases h
 
