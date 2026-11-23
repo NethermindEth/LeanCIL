@@ -826,7 +826,7 @@ theorem caller_returns (memory : Safety.Memory) (left right : W32) :
 #print axioms caller_returns
 
 /-- The table `callerMethod`'s link indexes: the caller at 0 and its callee at 1. -/
-private def callTable : List SpecializedMethod := [⟨[], callerRaw⟩, ⟨[], summingRaw⟩]
+private def callTable : List SpecializedMethod := [⟨[], callerRaw, ⟨ownIdentity⟩⟩, ⟨[], summingRaw, ⟨ownIdentity⟩⟩]
 
 /-- The call check accepts the link the decoder was given and rejects a forged one: another
     method with the same signature but another token, an index past the table, or a link of

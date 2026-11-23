@@ -81,6 +81,7 @@ theorem local_reference_helper_name :
     let instruction := RawInstruction.mk 0 40 (.call localAreSame)
     let emitted := Instruction.call localAreSame.method {}
     let callee : SpecializedMethod := {
+      assembly := ⟨"Fixture"⟩
       arguments := [word], closed := { raw localAreSame with
         token := 23, owner := "Fixture::System.Runtime.CompilerServices.Unsafe",
         parameters := localAreSame.parameterTypes, returnType := localAreSame.returnType } }

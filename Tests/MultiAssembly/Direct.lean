@@ -38,26 +38,24 @@ theorem step_summary :
 
 /-- The caller's MemberRef resolves to Step's MethodDef in the referenced library's slice. -/
 theorem direct_member_resolution :
-    ∃ env site position,
+    ∃ env site position index row,
       Extracted.method0Body.environment = .ok env ∧
       env.methodSite Extracted.method0Body.tokens.operands[0].1 = .ok site ∧
       site.definition = some (position, Extracted.method1Original.token) ∧
-      Extracted.method0Body.identities[position]? =
-        some (bytesOf Extracted.assembly1.identity) := by
-  obtain ⟨token, env, frame, site, position, listed, built, _, resolved, _, definition⟩ :=
-    Extracted.method0_body_validated.callManagedTarget (pc := 1)
-      (target := Extracted.method1Original.token) rfl rfl rfl
-  have singleton : Extracted.method0Body.tokens.operands =
-      [Extracted.method0Body.tokens.operands[0]] := rfl
-  rw [singleton, List.mem_singleton] at listed
-  have same := congrArg Prod.fst listed
+      env.slices.find? position = some index ∧
+      index.identity = bytesOf Extracted.assembly1.identity ∧
+      index.methodDef Extracted.method1Original.token = .ok row := by
+  obtain ⟨token, env, site, position, index, row, listed, built, resolved, defined,
+    lookup, pin, methodRow⟩ :=
+    Extracted.translation_valid.direct_definition ⟨0, by decide⟩ ⟨1, by decide⟩
+      (pc := 1) (target := Extracted.method1Original.token) (scope := Extracted.assembly1.identity)
+      Extracted.program_method0 rfl rfl rfl rfl rfl rfl rfl rfl
+  have same := congrArg Prod.fst (List.mem_singleton.mp
+    (show (_, _) ∈ [Extracted.method0Body.tokens.operands[0]] from listed))
   change token = _ at same
   subst token
-  refine ⟨env, site, position, built, resolved, definition, ?_⟩
-  cases built
-  cases resolved
-  cases definition
-  rfl
+  exact ⟨env, site, position, index, row, built, resolved, defined, lookup,
+    pin, methodRow⟩
 
 #print axioms direct_member_resolution
 
@@ -68,10 +66,20 @@ theorem direct_callee_identity {pin : AssemblyPin} {token : Nat} {arguments : Li
       Extracted.environment 1 pin token arguments) :
     pin.identity = Extracted.assembly1.identity ∧ token = Extracted.method0Original.token ∧
       arguments = [] :=
-  bound.direct_site Extracted.attribution_validated Extracted.method0_calls_validated
-    (pc := 1) rfl rfl rfl rfl rfl rfl rfl (by decide +kernel)
+  bound.direct_site Extracted.method0_calls_validated
+    (pc := 1) rfl rfl rfl rfl rfl rfl rfl
 
 #print axioms direct_callee_identity
+
+/-- Changing only the callee's pin rejects the direct link, even though both DLLs use the
+same MethodDef token. Its original body, owner, signature and type arguments are unchanged. -/
+theorem switched_link_pin_refused :
+    let callee := { Extracted.specializedMethods[1] with assembly := Extracted.assembly0 }
+    ¬ ManagedCallsValid (Extracted.specializedMethods.set 1 callee) Extracted.imports
+      (callModelled Extracted.method0) Extracted.method0Closed Extracted.method0Reachable
+      Extracted.method0 := by decide +kernel
+
+#print axioms switched_link_pin_refused
 
 /-- The identical token in the calling assembly cannot certify the summary of the library call. -/
 theorem app_pin_refused :

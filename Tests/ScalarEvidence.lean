@@ -392,12 +392,12 @@ private def site : CallSite := {
 /-- The call linked to method 0 that names `site`'s method, as the extractor emits it. -/
 private def emittedCall (site : CallSite) : Instruction := .call site.method
 private def linkedZero : Option Link := some (.direct 0)
-example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call site)) true linkedZero
+example : validateManagedCall [⟨[], addRaw, scope⟩] [] (i 40 (.call site)) true linkedZero
     (emittedCall site) = true := by decide
-example : validateManagedCall [⟨[], addRaw⟩] [] (i 40
+example : validateManagedCall [⟨[], addRaw, scope⟩] [] (i 40
     (.call { site with method.returnType := intType }))
     true linkedZero (emittedCall { site with method.returnType := intType }) = false := by decide
-example : validateManagedCall [⟨[], { addRaw with returnType := intType }⟩] []
+example : validateManagedCall [⟨[], { addRaw with returnType := intType }, scope⟩] []
     (i 40 (.call site)) true linkedZero (emittedCall site) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call { site with
     target := .external "Scope::System.Int32 Owner::M()", parameterCount := 0,
@@ -422,7 +422,7 @@ private theorem generic_return_cases :
 
 #print axioms generic_return_cases
 
-example : validateManagedCall [⟨[], addRaw⟩] []
+example : validateManagedCall [⟨[], addRaw, scope⟩] []
     (i 40 (.call { site with method.parameters := [intType, word] })) true linkedZero
       (emittedCall { site with method.parameters := [intType, word] }) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call site)) [.word64, .word64] = some [.word64] := by decide
@@ -810,7 +810,7 @@ private def unsignedSite : CallSite := {
     owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
     parameters := [] },
   target := .managed 0x06000001, typeArguments := [], parameterCount := 2, returnsValue := true }
-example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true linkedZero
+example : validateManagedCall [⟨[], addRaw, scope⟩] [] (i 40 (.call unsignedSite)) true linkedZero
     (emittedCall unsignedSite) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call unsignedSite)) [.word64, .word64] = none := by decide
 /-- External unsigned signatures retain their exact parameter and return metadata. -/

@@ -4,6 +4,7 @@ import CIL.SIMD.UnspecifiedLanes
 import CIL.Safety.IntrinsicExecution
 import Tests.Support
 import Tests.Support.RawDecoding
+import Tests.ExactIntrinsics.WordContracts
 
 open CIL CIL.Extraction
 

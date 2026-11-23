@@ -3,18 +3,24 @@ using Nethermind.LeanCIL;
 
 partial class Program
 {
-    /// <summary>Require alternatives with the same observed flags to have identical decoded code and links.</summary>
+    /// <summary>Check callable slots across profiles and the decoded code and links at equal flags.</summary>
     internal static void CheckTemplateBodies(string decoderInputs, string space,
-        List<(string Identity, string Left, string Right)> comparisons)
+        List<(string Identity, string Left, string Right)> comparisons,
+        List<(string Identity, string Left, string Right)> slots)
     {
         using var verifier = new Program();
         var session = verifier.Library(CommonInputs());
         var checks = comparisons.Select(pair =>
             $"MethodBinding.firstCodeOrLinkDifference {pair.Left} {pair.Right}");
+        var slotChecks = slots.Select(pair =>
+            $"({pair.Left}.localKinds == {pair.Right}.localKinds && {pair.Left}.parameterHomes == {pair.Right}.parameterHomes)");
+        const string slotMarker = "template storage ";
         const string marker = "template differences ";
         var query = $"""
             import CIL.MethodBinding
             {decoderInputs}
+            #eval IO.println ("{slotMarker}" ++ (Lean.toJson
+              ([{string.Join(",\n    ", slotChecks)}] : List Bool)).compress)
             #eval IO.println ("{marker}" ++ (Lean.toJson
               ([{string.Join(",\n    ", checks)}] : List (Option Nat))).compress)
             end {space}
@@ -22,7 +28,16 @@ partial class Program
         var probe = Path.Combine(session, "TemplateComparisons.lean");
         File.WriteAllText(probe, query);
         var output = Run([verifier.LeanExecutable, probe], cwd: session, leanPath: verifier.SessionLeanPath(session));
-        var line = output.Split('\n').Single(line => line.StartsWith(marker, StringComparison.Ordinal));
+        var lines = output.Split('\n');
+        var slotLine = lines.Single(line => line.StartsWith(slotMarker, StringComparison.Ordinal));
+        var sameSlots = JsonSerializer.Deserialize<bool[]>(slotLine[slotMarker.Length..]);
+        if (sameSlots is null || sameSlots.Length != slots.Count)
+            throw new InvalidDataException("Lean did not compare every callable frame.");
+        for (var index = 0; index < sameSlots.Length; index++)
+            if (!sameSlots[index])
+                throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
+                    slots[index].Identity);
+        var line = lines.Single(line => line.StartsWith(marker, StringComparison.Ordinal));
         var differences = JsonSerializer.Deserialize<int?[]>(line[marker.Length..]);
         if (differences is null || differences.Length != comparisons.Count)
             throw new InvalidDataException("Lean did not compare every requested template alternative.");

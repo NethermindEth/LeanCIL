@@ -541,7 +541,8 @@ For example, the compiled `Bump` updates a live account's balance and raises
 | `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call or `cil_loop_call` at a call in a loop |
 | `DecodedSummary.reprofile` | Reuses the contract and method identity at an agreeing profile once the same evidence decodes to the reprofiled program |
 | `DecodedSummary.site` | At a live direct managed call, identifies the summary's MethodDef token and type arguments. |
-| `DecodedAt.direct_site` | For a declaring type with an explicit assembly scope, identifies the callee's pin, MethodDef token and type arguments using the call link and validated assembly attribution. Apply it to the `bound` field of a method or outcome summary. |
+| `DecodedAt.direct_site` | For a declaring type with an explicit assembly scope, identifies the callee's pin, MethodDef token and type arguments using the assembly pin of the linked program entry. Apply it to the `bound` field of a method or outcome summary. |
+| `TranslationValid.direct_definition` | At a live direct call, identifies the physical MethodDef row and assembly of the linked body after generic instantiation. The site must retain its operand through constrained dispatch. |
 | `BodyDecodes.callManagedTarget` | Resolves the caller's operand through its checked metadata to a MethodDef token and slice position. The caller's MemberRef and the target MethodDef can have different token values. |
 
 For an extracted method, `DecodedSummary.of_translation` takes `Extracted.translation_valid`, the
@@ -564,11 +565,10 @@ An extraction supplies each `BodiesDecode.cons` premise from its generated facts
 `(Method.ofBody?_of_decodes Extracted.method{n}_body_validated).trans Extracted.method{n}_decoded`
 for a method defined from its decoder, and `site` its `ManagedCallsValid` premise from
 `Extracted.method{n}_calls_validated` of the caller and its instruction and link premises from a
-`bind_call` site's `call` and `link` facts. For a call into a reference assembly, pass
-`Extracted.attribution_validated` to `DecodedAt.direct_site` and identify the declaring type's
-`headScope`. The scope must be nonempty and contain no colon. This distinguishes definitions in
-different assemblies even when both use the same MethodDef token. For an aggregate, Lean reads
-the assembly scope before the first `::`, even when generic arguments name types in another assembly.
+`bind_call` site's `call` and `link` facts. For a call into a referenced assembly,
+supply the declaring type's `headScope` to `DecodedAt.direct_site`. The linker compares that
+scope with the assembly pin of the selected callee. Two assemblies may use the same MethodDef
+token. For an aggregate, the assembly scope precedes the first `::` in its layout identity.
 
 The proof of `decodedProgram?_eq_some` adds one
 constructor per record, so its cost is linear in the methods of the extraction

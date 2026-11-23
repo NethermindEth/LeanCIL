@@ -165,7 +165,7 @@ internal static class VerificationSelection
         inputs["closures"].UnionWith(["Tests/ProgramClosures/Proof.lean",
             "Tests/ProgramClosures/Assembly/ProgramClosures.csproj", "Tests/ProgramClosures/Assembly/Closure.cs"]);
         inputs["unsafe"].UnionWith(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
-        inputs["intrinsics"].Add("Tests/ExactIntrinsics.lean");
+        inputs["intrinsics"].UnionWith(["Tests/ExactIntrinsics.lean", "Tests/ExactIntrinsics/WordContracts.lean"]);
         inputs["stepping"].Add("scripts/ProofCost.lean");
         // Self-admission scans the extractor itself, so every source compiled into it can change the result.
         inputs["blockers"].UnionWith(["Tests/SelfAdmissionBaseline.txt", "Tests/canonical-methods.txt",

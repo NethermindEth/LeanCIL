@@ -24,7 +24,8 @@ def imageMethods : List RawMethod := Source.raw :: coreBytes.map Prod.snd
 
 /-- All physical call targets, including the resource getter on the null-message path. -/
 def table : List SpecializedMethod :=
-  (imageMethods ++ [RangeResource.raw]).map (⟨[], ·⟩)
+  ⟨[], Source.raw, ⟨Source.assembly0Metadata.identity⟩⟩ ::
+    (coreBytes.map Prod.snd ++ [RangeResource.raw]).map (⟨[], ·, ⟨coreLibraryScope⟩⟩)
 
 /-- Admit a managed call or allocation only if the raw site selects its unique physical target. -/
 def linked (table : List SpecializedMethod) (raw : RawInstruction) : Option Link := do

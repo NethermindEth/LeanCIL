@@ -16,7 +16,7 @@ def callee : RawMethod := {
   returnType := word, parameters := [word], locals := [], initLocals := true, maxStack := 1,
   genericParameters := [], code := [⟨0, 2, .none⟩, ⟨1, 42, .none⟩] }
 /-- One extracted method, so slot 0 is method index 1. -/
-def methods : List SpecializedMethod := [⟨[], callee⟩]
+def methods : List SpecializedMethod := [⟨[], callee, ⟨"Test"⟩⟩]
 def slot : ImportSlot := { identity := addToIdentity, closureDigest := "digest", parameterCount := 3, hasThis := false, returnsValue := false }
 def imports : List ImportSlot := [slot]
 def site : CallSite := {
@@ -182,7 +182,7 @@ example (raw : RawInstruction) (method : MethodRef) (prefixes : CallPrefixes) (t
 
 /-- Imported slot zero follows all extracted methods, even with a larger indexed table. -/
 theorem indexed_import_valid :
-    ManagedCallsValid (List.replicate 64 ⟨[], callee⟩) imports (fun _ => false)
+    ManagedCallsValid (List.replicate 64 ⟨[], callee, ⟨"Test"⟩⟩) imports (fun _ => false)
       { callee with code := [call site] } [true]
       { locals := [], returnsValue := false, code := [emits site],
         links := [(0, .direct 64)] } := by decide +kernel
@@ -190,7 +190,7 @@ theorem indexed_import_valid :
 
 /-- A target before the import table cannot borrow its slot zero by truncated subtraction. -/
 theorem indexed_import_underflow_rejected :
-    ¬ ManagedCallsValid (List.replicate 64 ⟨[], callee⟩) imports (fun _ => false)
+    ¬ ManagedCallsValid (List.replicate 64 ⟨[], callee, ⟨"Test"⟩⟩) imports (fun _ => false)
       { callee with code := [call site] } [true]
       { locals := [], returnsValue := false, code := [emits site],
         links := [(0, .direct 63)] } := by decide +kernel
@@ -198,7 +198,7 @@ theorem indexed_import_underflow_rejected :
 
 /-- A missing imported slot is rejected rather than replaced with a default descriptor. -/
 theorem indexed_import_missing_rejected :
-    ¬ ManagedCallsValid (List.replicate 64 ⟨[], callee⟩) imports (fun _ => false)
+    ¬ ManagedCallsValid (List.replicate 64 ⟨[], callee, ⟨"Test"⟩⟩) imports (fun _ => false)
       { callee with code := [call site] } [true]
       { locals := [], returnsValue := false, code := [emits site],
         links := [(0, .direct 65)] } := by decide +kernel

@@ -255,39 +255,13 @@ theorem DecodedSummary.site {Input Output : Type} {contract : MethodContract Inp
 
 #print axioms DecodedSummary.site
 
-/-- A declaring type with an explicit assembly scope keeps that scope in the closed owner
-    identity, including when the type is instantiated. -/
-private theorem managedOwner_scoped {owner : TypeExpr} {scope identity : String}
-    {arguments : List TypeExpr} (hasScope : owner.headScope = some scope)
-    (named : managedOwner owner = some (identity, arguments)) : ownedBy scope identity = true := by
-  induction owner generalizing identity arguments with
-  | apply head argument ih _ =>
-    cases headOwner : managedOwner head with
-    | none => simp [managedOwner, headOwner] at named
-    | some pair =>
-      obtain ⟨base, parameters⟩ := pair
-      simp [managedOwner, headOwner] at named
-      exact named.1 ▸ ih hasScope headOwner
-  | aggregate flat _ =>
-    change flatOwnerScope? flat = some scope at hasScope
-    change some (flat, []) = some (identity, arguments) at named
-    cases named
-    exact flatOwnerScope?_prefix hasScope
-  | _ =>
-    simp_all [TypeExpr.headScope, TypeExpr.explicitHeadScope, managedOwner]
-    all_goals
-      rw [← named.1]
-      simp [ownedBy, metadataChars_eq, List.isPrefixOf_iff_prefix, List.IsPrefix]
-
-#print axioms managedOwner_scoped
-
 /-- At a live direct managed call whose declaring type carries an assembly scope, the method
     entered by its link has that assembly identity, definition token and type arguments. -/
 theorem DecodedAt.direct_site {program : Program} {evidence : List MethodEvidence}
     {profile : FeatureProfile} {environment : LayoutEnvironment} {index token : Nat}
     {pin : AssemblyPin} {arguments : List TypeExpr}
     (bound : DecodedAt program evidence profile environment index pin token arguments)
-    (attributed : AttributionValid (bodyOwners evidence) = true) {imports : List ImportSlot}
+    {imports : List ImportSlot}
     {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod} {reachable : List Bool}
     {caller : Method} {pc siteToken : Nat} {method : MethodRef} {prefixes : CallPrefixes}
     {instruction : RawInstruction} {site : CallSite} {scope : String}
@@ -296,7 +270,7 @@ theorem DecodedAt.direct_site {program : Program} {evidence : List MethodEvidenc
     (live : reachable[pc]? = some true) (rawFound : raw.code[pc]? = some instruction)
     (operand : instruction.operand = .call site) (managed : site.target = .managed siteToken)
     (linked : caller.linkAt pc = some (.direct index))
-    (hasScope : site.declaringType.headScope = some scope) (validScope : pinIdentityValid scope) :
+    (hasScope : site.declaringType.headScope = some scope) :
     pin.identity = scope ∧ token = siteToken ∧ arguments = site.typeArguments := by
   obtain ⟨item, recorded, rfl, rfl, rfl, instantiated, _⟩ := bound
   obtain ⟨_, callee, selected, fits⟩ :=
@@ -304,20 +278,60 @@ theorem DecodedAt.direct_site {program : Program} {evidence : List MethodEvidenc
   simp only [specializationTable, List.getElem?_map, recorded, Option.map_some,
     Option.some.injEq] at selected
   subst selected
+  have scopeEq : site.declaringType.headScope = some item.assembly.identity :=
+    beq_iff_eq.mp (Bool.and_eq_true_iff.mp fits).2
   simp only [calleeMatchesSite, Bool.and_eq_true, beq_iff_eq, and_assoc] at fits
-  obtain ⟨owner, sameToken, sameArguments, _⟩ := fits
-  refine ⟨?_, (instantiateMethod_token instantiated).symm.trans sameToken, sameArguments⟩
-  have listed : (item.assembly, item.closed.owner) ∈ bodyOwners evidence := by
-    exact List.mem_flatMap.mpr ⟨item, List.mem_of_getElem? recorded, by simp⟩
-  have assigned := Bool.and_eq_true_iff.mp (List.all_eq_true.mp attributed _ listed)
-  cases named : managedOwner site.declaringType with
-  | none => simp [managedOwnerMatches, named] at owner
-  | some pair =>
-    obtain ⟨identity, params⟩ := pair
-    simp only [managedOwnerMatches, named, Bool.and_eq_true, beq_iff_eq, and_assoc] at owner
-    exact ownedBy_unique assigned.1 validScope assigned.2
-      (owner.1 ▸ managedOwner_scoped hasScope named)
+  exact ⟨Option.some.inj (scopeEq.symm.trans hasScope),
+    (instantiateMethod_token instantiated).symm.trans fits.2.1, fits.2.2.1⟩
 
 #print axioms DecodedAt.direct_site
+
+/-- In a validated program, an ordinary live direct call enters the MethodDef row in the
+assembly selected by its original operand. A constrained slot can select an override, so the
+ordinary-site premise checks that dispatch preserved this instruction at this position. -/
+theorem _root_.CIL.Extraction.TranslationValid.direct_definition
+    {rawLayouts layouts pins platform evidence imports program}
+    (valid : TranslationValid rawLayouts layouts pins platform evidence imports program)
+    (caller callee : Fin evidence.length) {body : Method} {pc target : Nat} {scope : String}
+    {before : RawInstruction} {source : CallSite} {method : MethodRef} {prefixes : CallPrefixes}
+    (present : program[caller.val]? = some body)
+    (fetched : evidence[caller].original.code[pc]? = some before)
+    (operand : before.operand = .call source) (managed : source.target = .managed target)
+    (named : source.declaringType.headScope = some scope)
+    (ordinary : (lowerConstrainedRaw evidence[caller].dispatchTypes evidence[caller].closed).code[pc]? =
+      evidence[caller].closed.code[pc]?)
+    (live : evidence[caller].reachable[pc]? = some true)
+    (called : body.code[pc]? = some (.call method prefixes))
+    (linked : body.linkAt pc = some (.direct callee.val)) :
+    ∃ operandToken env site position index row,
+      (operandToken, RawOperand.call source) ∈ evidence[caller].body.tokens.operands ∧
+      evidence[caller].body.environment = .ok env ∧ env.methodSite operandToken = .ok site ∧
+      site.definition = some (position, evidence[callee].original.token) ∧
+      env.slices.find? position = some index ∧
+      index.identity = bytesOf evidence[callee].assembly.identity ∧
+      index.methodDef evidence[callee].original.token = .ok row := by
+  have checked := translation_method_checked valid caller body present
+  have calls := checked.2.2.2.2.1
+  have inside := (List.getElem?_eq_some_iff.mp called).1
+  rw [← calls.2.2.2.1] at inside
+  have rawAt := List.getElem?_eq_getElem inside
+  obtain ⟨closedSite, closedOperand, closedTarget, closedScope⟩ :=
+    instantiateMethod_managedSite checked.1.1 fetched operand managed (scope := scope) named
+      (ordinary ▸ rawAt : evidence[caller].closed.code[pc]? = _)
+  have calleeInside : callee.val < program.length := valid.2.1 ▸ callee.isLt
+  have bound := DecodedAt.of_translation valid callee (List.getElem?_eq_getElem calleeInside)
+  obtain ⟨pinEq, tokenEq, _⟩ := bound.direct_site calls called live rawAt closedOperand
+    closedTarget linked closedScope
+  have callerBound := DecodedAt.of_translation valid caller present
+  obtain ⟨item, entry, _, _, _, _, ⟨_, decodes⟩, _⟩ := callerBound
+  have itemEq := Option.some.inj ((List.getElem?_eq_getElem caller.isLt).symm.trans entry)
+  subst item
+  obtain ⟨operandToken, env, site, position, index, row, listed, built, resolved, definition,
+    lookup, methodRow, scopeEq⟩ := decodes.callManagedDefinition fetched operand managed
+  rw [tokenEq, pinEq]
+  exact ⟨operandToken, env, site, position, index, row, listed, built, resolved, definition,
+    lookup, scopeEq scope named, methodRow⟩
+
+#print axioms CIL.Extraction.TranslationValid.direct_definition
 
 end CIL.Safety

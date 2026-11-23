@@ -164,6 +164,14 @@ internal static partial class TemplateEmitter
         if (problems.Count > 0) throw new InvalidDataException(string.Join("\n", problems));
     }
 
+    // Callable signature keys belong to the extraction that interned them. Templates compare
+    // these slots on the decoded methods, which retain their types across metadata sessions.
+    static bool HasCallableSlots(FrameMetadata frame) =>
+        frame.LocalKinds.Any(Callable) || frame.ParameterHomes.Any(home => Callable(home.Kind));
+
+    static bool Callable(LocalKind kind) =>
+        kind is LocalKind.MethodPointer or LocalKind.MethodTable or LocalKind.NativeMethodTable;
+
     static string Flag(Feature feature) => FeatureProfile.LeanFeature(feature)[1..];
 
     static string CalleeIdentity(Variant variant, int index) => index >= 0 && index < variant.Methods.Length
@@ -197,7 +205,11 @@ internal static partial class TemplateEmitter
                 { Body = row.Body, RelocatedLinks = Relocate(Callee) + ".links" };
         }).ToArray();
         // Frames compare once their callees share the template's numbering, as each body does.
-        if (rows.Any(row => row.Frame != rows[0].Frame))
+        var firstFrame = rows[0].Frame;
+        var stableFrame = firstFrame with { LocalKinds = [], ParameterHomes = [] };
+        if (rows.Skip(1).Any(row => HasCallableSlots(firstFrame) || HasCallableSlots(row.Frame)
+                ? (row.Frame with { LocalKinds = [], ParameterHomes = [] }) != stableFrame
+                : row.Frame != firstFrame))
             throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
                 identity);
         return new(identity, rows[0].Frame, features, callees, rows, first.Opcodes);
@@ -249,9 +261,14 @@ internal static partial class TemplateEmitter
         }
         var decoderLength = lean.Length;
         List<(string Identity, string Left, string Right)> comparisons = [];
+        List<(string Identity, string Left, string Right)> slots = [];
         for (var index = 0; index < templates.Length; index++)
         {
             var template = templates[index];
+            var first = template.Rows[0];
+            foreach (var other in template.Rows.AsSpan(1))
+                if (HasCallableSlots(first.Frame) || HasCallableSlots(other.Frame))
+                    slots.Add((template.Identity, first.Body, other.Body));
             Line($"/-- The stable managed identity of `method{index}`. -/");
             Line($"def method{index}Signature : String := {IdentityText.Quote(template.Identity)}");
             Line("/-- A fixed-PC template for the selected flag combinations, with explicit callee indices. -/");
@@ -293,8 +310,8 @@ internal static partial class TemplateEmitter
             }
             Line();
         }
-        if (comparisons.Count != 0)
-            global::Program.CheckTemplateBodies(lean.ToString(0, decoderLength), space, comparisons);
+        if (comparisons.Count != 0 || slots.Count != 0)
+            global::Program.CheckTemplateBodies(lean.ToString(0, decoderLength), space, comparisons, slots);
         Line($"end {space}");
         return lean.ToString();
     }

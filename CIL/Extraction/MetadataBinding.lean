@@ -110,19 +110,6 @@ def userStringMatches (index : MetadataIndex) (token : Nat) (text : String) :
 
 /-! ## Types -/
 
-/-- The separate assembly name on a metadata type head. Flat owners carry it inside the name. -/
-def TypeExpr.explicitHeadScope : TypeExpr → Option String
-  | .atom scope _ | .object scope _ | .constructor scope _ | .objectConstructor scope _ =>
-    some scope
-  | .apply head _ => head.explicitHeadScope
-  | _ => none
-
-/-- The assembly of the declaring type, including a scope embedded in an aggregate or enum name. -/
-def TypeExpr.headScope : TypeExpr → Option String
-  | .aggregate identity _ | .enum identity _ => flatOwnerScope? identity
-  | .apply head _ => head.headScope
-  | type => type.explicitHeadScope
-
 /-- Check a `.type` operand: the token's type is the one the extractor spells. -/
 def checkTypeOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (expr : TypeExpr) :
     Except MetadataError TokenFacts := do
@@ -557,6 +544,145 @@ def methodFullName (result owner name : List Nat) (parameters : List (List Nat))
   result ++ [32] ++ owner ++ [58, 58] ++ name ++ [40] ++ (parameters.intersperse [44]).flatten ++
     [41]
 
+/-- A successful metadata read supplies the value used by the remaining checks. -/
+private theorem metadataBind_ok {α β : Type} {read : Except MetadataError α}
+    {next : α → Except MetadataError β} {result : β} :
+    (read >>= next) = .ok result ↔ ∃ value, read = .ok value ∧ next value = .ok result := by
+  cases read <;> simp [Bind.bind, Except.bind]
+
+#print axioms metadataBind_ok
+
+/-- A resolved declaring TypeDef takes its scope from the assembly of its physical slice. -/
+private theorem definition_scope {env : MetadataEnv} {position fuel token : Nat} {owner : NamedType}
+    (found : typeDefNamed env position fuel token = .ok owner) :
+    ∃ index, env.slice position token = .ok index ∧ index.identity = owner.scope := by
+  unfold typeDefNamed at found
+  simp only [metadataBind_ok] at found
+  obtain ⟨index, slice, row, _, parts, _, named⟩ := found
+  cases names : partsName parts with
+  | none => simp [names, throw, throwThe, MonadExceptOf.throw] at named
+  | some name =>
+    simp only [names, metadataBind_ok] at named
+    obtain ⟨kind, _, same⟩ := named
+    cases same
+    exact ⟨index, slice, rfl⟩
+
+#print axioms definition_scope
+
+/-- The resolved owner's assembly and the MethodDef row selected in that assembly. -/
+def ResolvedType.DefinesMethod (owner : ResolvedType) (env : MetadataEnv)
+    (position token : Nat) : Prop :=
+  ∃ head index row, owner.head = some head ∧ env.slices.find? position = some index ∧
+    index.identity = head.scope ∧ index.methodDef token = .ok row
+
+/-- A successful slice lookup returns the entry at that position, independently of the token. -/
+private theorem slice_found {env : MetadataEnv} {position token} {index : MetadataIndex}
+    (read : env.slice position token = .ok index) : env.slices.find? position = some index := by
+  unfold MetadataEnv.slice at read
+  split at read <;> simp_all
+
+#print axioms slice_found
+
+/-- A MemberRef definition link resolves to the MethodDef row of the operand owner's assembly. -/
+private theorem member_definition {env : MetadataEnv} {operand position token : Nat}
+    {owner : NamedType} {name signature}
+    (found : env.methodDefinition operand owner name signature = .ok (some (position, token))) :
+    ResolvedType.DefinesMethod (.named owner) env position token := by
+  unfold MetadataEnv.methodDefinition at found
+  split at found
+  · simp [pure, Except.pure] at found
+  simp only [metadataBind_ok] at found
+  obtain ⟨own, _, linked⟩ := found
+  split at linked
+  next linkedPosition definition link =>
+    simp only [metadataBind_ok] at linked
+    obtain ⟨index, slice, row, rowRead, declaring, declared, check⟩ := linked
+    split at check
+    · contradiction
+    next agrees =>
+      simp only [metadataBind_ok] at check
+      obtain ⟨_, _, _, _, _, _, check⟩ := check
+      split at check
+      · contradiction
+      cases check
+      unfold MetadataEnv.ownerOf at declared
+      obtain ⟨_, _, named⟩ := metadataBind_ok.mp declared
+      obtain ⟨ownerIndex, ownerSlice, scopeEq⟩ := definition_scope named
+      have lookup := slice_found slice
+      have same := (slice_found ownerSlice).symm.trans lookup
+      cases Option.some.inj same
+      simp only [Bool.or_eq_true, bne_iff_ne, not_or] at agrees
+      exact ⟨owner, index, row, rfl, lookup, scopeEq.trans (by simpa using agrees.1), rowRead⟩
+  · contradiction
+
+#print axioms member_definition
+
+/-- The owner of a local MethodDef has the scope of the slice containing its row. -/
+private theorem plain_owner_scope {env : MetadataEnv} {token : Nat} {owner : NamedType}
+    (found : env.plainOwnerOf token = .ok owner) :
+    ∃ index, env.slices.find? 0 = some index ∧ index.identity = owner.scope := by
+  unfold MetadataEnv.plainOwnerOf at found
+  simp only [metadataBind_ok] at found
+  obtain ⟨_, _, selected, named, _, _, same⟩ := found
+  cases same
+  obtain ⟨index, slice, scopeEq⟩ := definition_scope named
+  exact ⟨index, slice_found slice, scopeEq⟩
+
+#print axioms plain_owner_scope
+
+/-- Both a direct MethodDef token and a resolved MemberRef identify a physical method row. -/
+private theorem member_site_definition {env : MetadataEnv} {operand position token : Nat}
+    {site : MethodSite} {linked}
+    (found : env.readMemberSite operand linked = .ok site)
+    (definition : site.definition = some (position, token)) :
+    site.owner.DefinesMethod env position token := by
+  unfold MetadataEnv.readMemberSite at found
+  obtain ⟨index, slice, found⟩ := metadataBind_ok.mp found
+  split at found
+  · simp only [metadataBind_ok] at found
+    obtain ⟨row, method, _, _, _, _, owner, declared, _, _, same⟩ := found
+    cases same
+    cases definition
+    obtain ⟨ownerIndex, ownerSlice, scopeEq⟩ := plain_owner_scope declared
+    have lookup := slice_found slice
+    cases Option.some.inj (ownerSlice.symm.trans lookup)
+    exact ⟨owner, index, row, rfl, lookup, scopeEq, method⟩
+  · simp only [metadataBind_ok] at found
+    obtain ⟨_, _, owner, _, _, _, _, _, _, _, tail⟩ := found
+    cases head : owner.head with
+    | none => simp [head, Bind.bind, Except.bind] at tail
+    | some name =>
+      simp only [head, metadataBind_ok] at tail
+      obtain ⟨location, resolved, same⟩ := tail
+      cases same
+      change location = some (position, token) at definition
+      subst location
+      obtain ⟨other, index, row, named, lookup, scopeEq, method⟩ := member_definition resolved
+      change some name = some other at named
+      cases Option.some.inj named
+      exact ⟨name, index, row, head, lookup, scopeEq, method⟩
+  · contradiction
+
+#print axioms member_site_definition
+
+/-- Resolving a MethodSpec preserves the defining slice, owner and MethodDef row of its member. -/
+theorem MetadataEnv.methodSite_definition {env : MetadataEnv} {operand position token : Nat}
+    {site : MethodSite} (found : env.methodSite operand = .ok site)
+    (definition : site.definition = some (position, token)) :
+    site.owner.DefinesMethod env position token := by
+  unfold MetadataEnv.methodSite MetadataEnv.readMethodSite at found
+  split at found
+  · simp only [metadataBind_ok] at found
+    obtain ⟨_, _, _, _, member, read, _, _, _, _, rest⟩ := found
+    split at rest
+    · contradiction
+    obtain ⟨_, _, same⟩ := metadataBind_ok.mp rest
+    cases same
+    exact member_site_definition (site := member) read definition
+  · exact member_site_definition found definition
+
+#print axioms MetadataEnv.methodSite_definition
+
 /-- The identity an external call target spells: the declaring type's scope, then Cecil's full
     name of the method. -/
 def MethodSite.externalName (site : MethodSite) : Option (List Nat) := do
@@ -657,7 +783,7 @@ def checkCallReference (env : MetadataEnv) (frame : Frame) (token : Nat) (site :
       call.method.methodArguments != siteMethodArguments call then
     throw (.genericMismatch token)
   -- The full flat identity is checked by located.admits below.
-  if call.declaringType.explicitHeadScope.any (bytesOf · != head.scope) then
+  if call.declaringType.headScope.any (bytesOf · != head.scope) then
     throw (.scopeMismatch token)
   let located := { frame with anchor := head.scope }
   if head.kind == .importedOwner then
@@ -689,6 +815,21 @@ def checkCallReference (env : MetadataEnv) (frame : Frame) (token : Nat) (site :
     | throw (.operandMismatch token)
   if !parametersAdmitted closed parameters call.parameterTypes then throw (.operandMismatch token)
   return ()
+
+/-- A scoped call operand agrees with the assembly of its resolved declaring type. -/
+theorem checkCallReference_scope {env : MetadataEnv} {frame : Frame} {token : Nat}
+    {site : MethodSite} {call : CallSite} {head : NamedType} {scope : String}
+    (checked : checkCallReference env frame token site call = .ok ())
+    (declared : site.owner.head = some head)
+    (named : call.declaringType.headScope = some scope) : bytesOf scope = head.scope := by
+  by_cases different : bytesOf scope = head.scope
+  · exact different
+  exfalso
+  have bad : (bytesOf scope != head.scope) = true := by simpa using different
+  simp [checkCallReference, declared, named, bad, throw, throwThe, MonadExceptOf.throw,
+    Bind.bind, Except.bind, pure, Except.pure] at checked
+  repeat first | contradiction | split at checked
+#print axioms checkCallReference_scope
 
 /-- Resolve the token through the selected import, or through the ordinary metadata environment. -/
 def resolveCallMember (env : MetadataEnv) (frame : Frame) (token : Nat) (call : CallSite)

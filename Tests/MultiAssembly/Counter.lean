@@ -19,8 +19,8 @@ theorem counter_callee {pin : AssemblyPin} {token : Nat} {arguments : List TypeE
       Extracted.environment 1 pin token arguments) :
     pin.identity = Extracted.assembly0.identity ∧ token = Extracted.method1Original.token ∧
       arguments = [] :=
-  bound.direct_site Extracted.attribution_validated Extracted.method0_calls_validated
-    (pc := 1) rfl rfl rfl rfl rfl rfl rfl (by decide +kernel)
+  bound.direct_site Extracted.method0_calls_validated
+    (pc := 1) rfl rfl rfl rfl rfl rfl rfl
 
 #print axioms counter_callee
 

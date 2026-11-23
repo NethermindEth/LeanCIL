@@ -239,4 +239,17 @@ theorem sameRuntimeType_aggregate_self (identity : String) (layout : Nat) :
 
 #print axioms sameRuntimeType_aggregate_self
 
+/-- The separate assembly name on a metadata type head. Flat owners carry it inside the name. -/
+def TypeExpr.explicitHeadScope : TypeExpr → Option String
+  | .atom scope _ | .object scope _ | .constructor scope _ | .objectConstructor scope _ =>
+    some scope
+  | .apply head _ => head.explicitHeadScope
+  | _ => none
+
+/-- The assembly of the declaring type, including a scope embedded in an aggregate or enum name. -/
+def TypeExpr.headScope : TypeExpr → Option String
+  | .aggregate identity _ | .enum identity _ => flatOwnerScope? identity
+  | .apply head _ => head.headScope
+  | type => type.explicitHeadScope
+
 end CIL.Extraction

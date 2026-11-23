@@ -36,17 +36,19 @@ partial class Program
         var source = example is null ? "import Extracted" : File.ReadAllText(example);
         if (source.StartsWith("import Extracted.", StringComparison.Ordinal))
             source = $"import Extracted{source[source.IndexOf('\n')..]}";
-        Verify(assembly, identity, selector, Proof(positiveOutput, positive, source), positiveOutput, profile,
-            theorem: theorem);
+        var original = Verify(assembly, identity, selector, Proof(positiveOutput, positive, source), positiveOutput,
+            profile, theorem: theorem, statement: new(Term: true));
+        var expected = original.statementIdentity!.term!.Value.GetRawText();
         var wrongProof = Proof(wrongOutput, counterexample, "import Extracted");
-        VerifyRefutation(wrongAssembly, identity, wrongSelector, wrongProof, wrongOutput, profile, theorem);
+        VerifyRefutation(wrongAssembly, identity, wrongSelector, wrongProof, wrongOutput, profile, theorem, expected);
     }
 
-    /// <summary>The checked counterexample must name the entry in this extraction.</summary>
+    /// <summary>The counterexample refutes the verified contract and names the entry in this extraction.</summary>
     void VerifyRefutation(string assembly, string identity, string selector, string proof, string output,
-        string profile, string theorem)
+        string profile, string theorem, string expected)
     {
-        var result = Verify(assembly, identity, selector, proof, output, profile, theorem: theorem);
+        var result = Verify(assembly, identity, selector, proof, output, profile, theorem: theorem,
+            statement: new(Term: false, Expected: expected, Refuted: true));
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "identity.json")));
         var entry = manifest.RootElement.GetProperty("entry").GetString()
             ?? throw new InvalidDataException("The extraction has no entry signature.");

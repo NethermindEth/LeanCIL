@@ -370,7 +370,10 @@ internal static class LeanEmitter
         // The platform definitions sit after the shape facts' position, so they go in first.
         genericEvidence.InsertPlatformDefinitions(lean);
         lean.Insert(shapeFactsAt, operandShapes.Lean());
-        lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
+        var specialized = Enumerable.Range(0, methods.Length).Select(n =>
+            $"⟨method{n}TypeArgumentsRaw, method{n}Closed, assembly{pinned.Index(methods[n].Module)}⟩");
+        lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" +
+            string.Join(", ", specialized) + "]");
         // Whole-program data, so it stays after the `specializedMethods` boundary of per-method components;
         // feature obligations read callee certificates through it.
         var records = Enumerable.Range(0, methods.Length).Select(n =>

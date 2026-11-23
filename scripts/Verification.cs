@@ -4726,7 +4726,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     Report Verify(string assembly, string identity, string entry, string proof, string output,
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
         string? settings = null, Action<string>? stage = null, DeepCheckInputs? deepChecks = null,
-        DeepCheckRun? deepRun = null, Func<Sha256Digest, Sha256Digest>? receiveDigest = null)
+        DeepCheckRun? deepRun = null, Func<Sha256Digest, Sha256Digest>? receiveDigest = null,
+        StatementRequest? statement = null)
     {
         Sha256Digest RunCheck(string[] command) => CheckManifest(command, receiveDigest);
         deepRun = DeepCheckRun.Claim(deepChecks, deepRun);
@@ -4741,7 +4742,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
         var reportPath = Path.Combine(output, "verified.json");
 
-        if (check && deepChecks is null)
+        if (check && deepChecks is null && statement is null)
         {
             var old = ReadCertificate(File.ReadAllText(reportPath), BindingMode.Default, out var problem) ??
                 throw new InvalidOperationException("Stale verification report: " + problem);
@@ -5107,8 +5108,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     "Proof"];
             string[] auditModules = ["Proof", "Extracted",
                 .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
+            var proofAudit = ProofTheorem(theorem, extraction);
             AuditRequest[] proofAudits =
-                [ProofTheorem(theorem, extraction), ExtractionCertificate("Extracted.translation_valid")];
+                [statement?.Apply(proofAudit) ?? proofAudit, ExtractionCertificate("Extracted.translation_valid")];
             if (deep is not null)
             {
                 if (deep.Requests.Any(request => request.Audit.name == theorem))
@@ -5236,7 +5238,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             stage?.Invoke("theorem audit");
             axioms = AuditedAxioms(auditedTheorems[theorem]);
             audit = AuditText(auditedTheorems[theorem]);
-            refutation = ExtractedRefutation(auditedTheorems[theorem], extraction.Root);
+            var proved = auditedTheorems[theorem];
+            refutation = ExtractedRefutation(proved, extraction.Root);
+            if (statement?.Expected is not null && proved.matches != true)
+                throw new InvalidOperationException(
+                    $"Verified statement does not match the requested contract: {proved.mismatch}");
+            if (statement?.Term == true && proved.term is null)
+                throw new InvalidOperationException($"Cannot compare the verified statement: {proved.termError}");
             RequireOriginalProofSources();
             RequireStagedProofSources();
             RequireOriginalProofSources();
@@ -5286,7 +5294,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 contractDependencies: fullResult?.Dependencies ?? DeploymentDependencies(extraction.Root),
                 compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit,
                 initializationAssumptions: InitializationAssumptions(extraction.Root), libraryModules: libraryModules,
-                refutation: refutation);
+                statementIdentity: statement is null ? null : Identity(proved), refutation: refutation);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireDeepStable();
             var deepPublication = deep is null ? null : StageDeepResult(deep, fresh);

@@ -1146,4 +1146,27 @@ theorem BodyDecodes.callManagedTarget {pins platform pin body method arguments s
 
 #print axioms BodyDecodes.callManagedTarget
 
+/-- A managed operand identifies a MethodDef row in the assembly of its scoped declaring type.
+The operand token belongs to the caller and may differ from the MethodDef token in that slice. -/
+theorem BodyDecodes.callManagedDefinition
+    {pins platform pin body method arguments signature imports}
+    (decodes : BodyDecodes pins platform pin body method arguments signature imports)
+    {pc target : Nat} {instruction : RawInstruction} {call : CallSite}
+    (fetched : method.code[pc]? = some instruction) (called : instruction.operand = .call call)
+    (managed : call.target = .managed target) :
+    ∃ operand env site position index row,
+      (operand, RawOperand.call call) ∈ body.tokens.operands ∧ body.environment = .ok env ∧
+      env.methodSite operand = .ok site ∧ site.definition = some (position, target) ∧
+      env.slices.find? position = some index ∧ index.methodDef target = .ok row ∧
+      ∀ scope, call.declaringType.headScope = some scope → index.identity = bytesOf scope := by
+  obtain ⟨operand, env, frame, site, position, listed, built, _, resolved, reference, defined⟩ :=
+    decodes.callManagedTarget fetched called managed
+  obtain ⟨head, index, row, declared, lookup, scopeEq, methodRow⟩ :=
+    env.methodSite_definition resolved defined
+  exact ⟨operand, env, site, position, index, row, listed, built, resolved, defined, lookup,
+    methodRow, fun _ scope =>
+      scopeEq.trans (checkCallReference_scope reference declared scope).symm⟩
+
+#print axioms BodyDecodes.callManagedDefinition
+
 end CIL.Extraction

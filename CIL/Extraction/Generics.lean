@@ -4,7 +4,7 @@ import CIL.Extraction.TypeStorage
 import CIL.Extraction.FlowIndex
 import CIL.Extraction.LinkIndex
 import CIL.Imports
-import CIL.Extraction.MetadataNames
+import CIL.Extraction.Assemblies
 
 /-!
 # Raw methods, generic instantiation and call binding
@@ -464,11 +464,12 @@ theorem validated_closed_arguments {layouts : List RawLayout} {original closed :
     closedArguments layouts closed = some parameterInput := valid.2
 
 
-/-- One entry of the program's method table: the type arguments and closed body of the
+/-- One entry of the program's method table: type arguments, closed body and assembly pin of the
     extracted method at that index. -/
 structure SpecializedMethod where
   arguments : List TypeExpr
   closed : RawMethod
+  assembly : AssemblyPin
   deriving DecidableEq, Repr
 
 /-- The callee index and argument count of an emitted call, if its kind matches the raw
@@ -518,7 +519,8 @@ def calleeMatchesSite (site : CallSite) (token : Nat) (callee : SpecializedMetho
   callee.closed.hasThis == site.hasThis &&
   (callee.closed.returnType != .void) == site.returnsValue &&
   callee.closed.returnType == site.returnType &&
-  callee.closed.parameters == site.parameterTypes
+  callee.closed.parameters == site.parameterTypes &&
+  site.declaringType.headScope == some callee.assembly.identity
 
 /-- What a live `newobj` of `constructor` may be linked to. Its raw instruction is `newobj` (115)
     of a managed site naming `constructor`, and the linked method is the one the site names. A
@@ -608,7 +610,8 @@ def managedAddressMatches (methods : Nat → Option SpecializedMethod)
   match raw.operand with
   | .call site => site.target == .managed target.identity.token &&
     (match methods target.method with
-      | some callee => managedOwnerMatches site target.identity.owner callee.closed.ownerArgumentCount &&
+      | some callee => site.declaringType.headScope == some callee.assembly.identity &&
+        managedOwnerMatches site target.identity.owner callee.closed.ownerArgumentCount &&
         site.typeArguments == callee.arguments &&
         site.returnType == callee.closed.returnType && site.parameterTypes == callee.closed.parameters
       | none => false) &&

@@ -1235,23 +1235,7 @@ if (equalWords.Invoke(null, firstWordSet) is not true || swappedEqualWords.Invok
 verification.VerifyContractVariant(assembly, "Examples", selectors["EqualWords128"],
     Path.Combine(root, "EqualWords128Contract"), equalityArguments.Assembly, selectors["EqualWords128"],
     equalityArguments.Output, """
-    /-- Four 32-bit words and the vector to compare against. -/
-    structure Comparison where
-      a : W32
-      b : W32
-      c : W32
-      d : W32
-      expected : BitVec 128
-
-    /-- The comparison packs the four words in lane order and preserves caller memory. -/
-    def equalWords : MethodContract Comparison Bool where
-      args w := [.scalar (.i32 w.a), .scalar (.i32 w.b), .scalar (.i32 w.c), .scalar (.i32 w.d),
-        .scalar (.v128 w.expected)]
-      results equal := [.scalar (.i32 (if equal then 1 else 0))]
-      pre _ _ := True
-      footprint _ := []
-      post w before after equal := after = before ∧
-        equal = (((w.d ++ w.c) ++ (w.b ++ w.a)) == w.expected)
+    open Tests.ExactIntrinsics.WordContracts
     """, """
     set_option maxRecDepth 8192 in
     /-- The compiled comparison checks every bit of all four words. -/
@@ -1273,35 +1257,13 @@ verification.VerifyContractVariant(assembly, "Examples", selectors["EqualWords12
       rintro ⟨_, value, encoded, _, rfl⟩
       revert encoded
       decide
-    """);
+    """, imports: "import Tests.ExactIntrinsics.WordContracts");
 Console.WriteLine("PASS four-word vector equality preserves memory and refutes swapped low words");
 
 var wordArguments = SwapFirstArguments("CreateWords");
 verification.VerifyContractVariant(assembly, "Examples", selectors["CreateWords"], Path.Combine(root, "WordsContract"),
     wordArguments.Assembly, selectors["CreateWords"], wordArguments.Output, """
-    /-- The eight input words in argument order. -/
-    structure Words where
-      a : W32
-      b : W32
-      c : W32
-      d : W32
-      e : W32
-      f : W32
-      g : W32
-      h : W32
-
-    /-- Lane zero contains the first word, and lane seven contains the last. -/
-    def lanes (w : Words) : BitVec 256 :=
-      ((w.h ++ w.g) ++ (w.f ++ w.e)) ++ ((w.d ++ w.c) ++ (w.b ++ w.a))
-
-    /-- Creating the vector packs all eight words and preserves caller memory. -/
-    def createWords : MethodContract Words (BitVec 256) where
-      args w := [.scalar (.i32 w.a), .scalar (.i32 w.b), .scalar (.i32 w.c), .scalar (.i32 w.d),
-        .scalar (.i32 w.e), .scalar (.i32 w.f), .scalar (.i32 w.g), .scalar (.i32 w.h)]
-      results v := [.scalar (.v256 v)]
-      pre _ _ := True
-      footprint _ := []
-      post w before after v := after = before ∧ v = lanes w
+    open Tests.ExactIntrinsics.WordContracts
     """, """
     set_option maxRecDepth 8192 in
     /-- The compiled method puts every word in its declared lane. -/
@@ -1321,7 +1283,7 @@ verification.VerifyContractVariant(assembly, "Examples", selectors["CreateWords"
       rintro ⟨_, v, encoded, _, rfl⟩
       exact (by decide : ¬ ([CIL.Safety.Value.scalar (.v256 4294967296)] =
         [.scalar (.v256 (lanes input))])) encoded
-    """);
+    """, imports: "import Tests.ExactIntrinsics.WordContracts");
 Console.WriteLine("PASS vector creation packs every input lane and refutes swapped low words");
 
 var (swappedAssembly, swapped) = SwapFirstArguments("ReverseLimbs");

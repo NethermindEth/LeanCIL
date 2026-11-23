@@ -84,7 +84,8 @@ def linkedProgram : Option Program := do
   let code ← decoded
   let raw := { Extracted.method0Original with code := code.code }
   let table : List SpecializedMethod :=
-    (raw :: coreBytes.map Prod.snd ++ [Core.RangeResource.raw]).map (⟨[], ·⟩)
+    ⟨[], raw, Extracted.assembly0⟩ ::
+      (coreBytes.map Prod.snd ++ [Core.RangeResource.raw]).map (⟨[], ·, ⟨coreLibraryScope⟩⟩)
   let entry ← Method.ofBody? .scalar {} (links table raw)
     (List.replicate raw.code.length true) body raw []
   let constructors ← coreBytes.mapM fun (evidence, method) => Method.ofBody? .scalar {}

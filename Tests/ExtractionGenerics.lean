@@ -71,27 +71,27 @@ def callCode : Method := {
 
 /-- A generic call site whose operand, link and closed signature agree passes the check. -/
 theorem structural_call :
-    ManagedCallsValid [⟨[word], closed⟩] [] (fun _ => false) (caller word) [true] callCode := by
+    ManagedCallsValid [⟨[word], closed, ⟨"Test"⟩⟩] [] (fun _ => false) (caller word) [true] callCode := by
   decide +kernel
 #print axioms structural_call
 
 /-- Equal storage width does not permit substituting a signed parameter. -/
 theorem signed_parameter_rejected :
-    ¬ ManagedCallsValid [⟨[word], closed⟩] [] (fun _ => false)
+    ¬ ManagedCallsValid [⟨[word], closed, ⟨"Test"⟩⟩] [] (fun _ => false)
       (caller (.atom runtimeScope "System.Int64")) [true] callCode := by
   decide +kernel
 #print axioms signed_parameter_rejected
 
 /-- A matching type name from another assembly remains a different parameter type. -/
 theorem parameter_scope_rejected :
-    ¬ ManagedCallsValid [⟨[word], closed⟩] [] (fun _ => false)
+    ¬ ManagedCallsValid [⟨[word], closed, ⟨"Test"⟩⟩] [] (fun _ => false)
       (caller (.atom "attacker" "System.UInt64")) [true] callCode := by
   decide +kernel
 #print axioms parameter_scope_rejected
 
 /-- A closed signature cannot stand in for different method type arguments. -/
 theorem generic_argument_rejected :
-    ¬ ManagedCallsValid [⟨[.atom runtimeScope "System.Int64"], closed⟩] [] (fun _ => false)
+    ¬ ManagedCallsValid [⟨[.atom runtimeScope "System.Int64"], closed, ⟨"Test"⟩⟩] [] (fun _ => false)
       (caller word) [true] callCode := by
   decide +kernel
 #print axioms generic_argument_rejected
@@ -103,7 +103,7 @@ def twoArguments : Method :=
 
 /-- A call operand with an altered argument count fails the check. -/
 theorem argument_count_rejected :
-    ¬ ManagedCallsValid [⟨[word], closed⟩] [] (fun _ => false) (caller word) [true]
+    ¬ ManagedCallsValid [⟨[word], closed, ⟨"Test"⟩⟩] [] (fun _ => false) (caller word) [true]
       twoArguments := by
   decide +kernel
 #print axioms argument_count_rejected
@@ -122,7 +122,7 @@ def pairConstructor : RawMethod := { tallyConstructor with
   objectBases := [] }
 /-- The program's methods: the class constructor at index 0, the struct constructor at 1. -/
 def constructors (index : Nat) : Option SpecializedMethod :=
-  [(⟨[], tallyConstructor⟩ : SpecializedMethod), ⟨[], pairConstructor⟩][index]?
+  [(⟨[], tallyConstructor, ⟨"Test"⟩⟩ : SpecializedMethod), ⟨[], pairConstructor, ⟨"Test"⟩⟩][index]?
 /-- The managed site of each constructor. -/
 def construction : CallSite := {
   declared := { convention := 0x20, parameters := [word] },
@@ -190,15 +190,15 @@ def linkedZero : Option Link := some (.direct 0)
 -- Only `callvirt` emits a receiver-checked call, counting the receiver, and only into a method
 -- whose receiver is an object; a `callvirt` that skips the null check as a plain call is rejected.
 theorem receiver_checked_calls :
-    validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
+    validateManagedCall [⟨[], deposit, ⟨"Test"⟩⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
       (.callvirt depositSite.method) ∧
-    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
+    ¬ validateManagedCall [⟨[], deposit, ⟨"Test"⟩⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
       (.call depositSite.method) ∧
-    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 40, .call depositSite⟩ true linkedZero
+    ¬ validateManagedCall [⟨[], deposit, ⟨"Test"⟩⟩] [] ⟨0, 40, .call depositSite⟩ true linkedZero
       (.callvirt depositSite.method) ∧
-    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
+    ¬ validateManagedCall [⟨[], deposit, ⟨"Test"⟩⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
       (.callvirt { depositSite.method with parameters := [] }) ∧
-    ¬ validateManagedCall [⟨[], { deposit with objectReceiver := false }⟩] []
+    ¬ validateManagedCall [⟨[], { deposit with objectReceiver := false }, ⟨"Test"⟩⟩] []
       ⟨0, 111, .call depositSite⟩ true linkedZero (.callvirt depositSite.method) := by
   decide +kernel
 #print axioms receiver_checked_calls
@@ -209,9 +209,9 @@ def virtualDeposit : RawMethod := { deposit with attributes := virtualMethodAttr
 -- A virtual body is admitted as the target of a plain `call`, which runs exactly that body, but a
 -- `callvirt` of it can never become a fixed-target receiver-checked call.
 theorem virtual_bodies_called_directly :
-    validateManagedCall [⟨[], virtualDeposit⟩] [] ⟨0, 40, .call depositSite⟩ true
+    validateManagedCall [⟨[], virtualDeposit, ⟨"Test"⟩⟩] [] ⟨0, 40, .call depositSite⟩ true
       linkedZero (.call depositSite.method) ∧
-    ¬ validateManagedCall [⟨[], virtualDeposit⟩] [] ⟨0, 111, .call depositSite⟩ true
+    ¬ validateManagedCall [⟨[], virtualDeposit, ⟨"Test"⟩⟩] [] ⟨0, 111, .call depositSite⟩ true
       linkedZero (.callvirt depositSite.method) := by decide +kernel
 #print axioms virtual_bodies_called_directly
 
@@ -220,17 +220,17 @@ theorem receiver_links_bind_slot :
     let site : RawInstruction := ⟨0, 111, .call depositSite⟩
     let other := Instruction.callvirt { depositSite.method with name := name!"Withdraw" }
     let table := some (Link.virtual [(tally, 0)])
-    validateManagedCall [⟨[], virtualDeposit⟩] [] site true table (.callvirt depositSite.method) ∧
-    ¬ validateManagedCall [⟨[], deposit⟩] [] site true table (.callvirt depositSite.method) ∧
-    ¬ validateManagedCall [⟨[], deposit⟩] [] site true linkedZero other ∧
-    ¬ validateManagedCall [⟨[], virtualDeposit⟩] [] site true table other := by decide +kernel
+    validateManagedCall [⟨[], virtualDeposit, ⟨"Test"⟩⟩] [] site true table (.callvirt depositSite.method) ∧
+    ¬ validateManagedCall [⟨[], deposit, ⟨"Test"⟩⟩] [] site true table (.callvirt depositSite.method) ∧
+    ¬ validateManagedCall [⟨[], deposit, ⟨"Test"⟩⟩] [] site true linkedZero other ∧
+    ¬ validateManagedCall [⟨[], virtualDeposit, ⟨"Test"⟩⟩] [] site true table other := by decide +kernel
 #print axioms receiver_links_bind_slot
 
 /-- Managed addresses and catalog entries authenticate the token of the indexed body. -/
 theorem managed_pointer_bindings :
     let first := { closed with parameters := [], returnType := .void }
     let second := { first with token := 2 }
-    let methods : List SpecializedMethod := [⟨[], first⟩, ⟨[], second⟩]
+    let methods : List SpecializedMethod := [⟨[], first, ⟨"Test"⟩⟩, ⟨[], second, ⟨"Test"⟩⟩]
     let signature : ManagedSignature := ⟨.void, []⟩
     let identity : ManagedIdentity := ⟨first.owner, first.token, []⟩
     let site := { callSite word with

@@ -29,7 +29,7 @@ def call : RawInstruction := ⟨0, 40, .call site⟩
 /-- Each instruction calls a distinct table position. -/
 def calls (count : Nat) := raw (List.replicate count call)
 /-- Equal signatures at distinct positions isolate positional lookup costs. -/
-def methods (count : Nat) : List SpecializedMethod := List.replicate count ⟨[], raw []⟩
+def methods (count : Nat) : List SpecializedMethod := List.replicate count ⟨[], raw [], ⟨"Tests"⟩⟩
 /-- Every table position is exercised once, through the link at the pc of the same index. -/
 def callCode (count : Nat) : Method :=
   { emitted (List.replicate count (.call site.method)) with

@@ -15,6 +15,12 @@ Sentences about what a suite checks describe the repository's own tests
 (`dotnet run --file scripts/Test.cs -- --suite <name>`, see [validation](VALIDATION.md)). Those
 sentences name the wrong implementations that each unchanged proof rejects.
 
+When a suite pairs a proved contract with a counterexample, Lean checks the exact statement
+of the positive proof against the refutation in the changed assembly. For example,
+the reference-array length contract requires a live array to return its length with memory
+unchanged and a null array to raise `NullReferenceException`. A compiled variant returns zero
+on null. Weakening the live-array clause also changes the statement and invalidates that pairing.
+
 ## Independent examples
 
 - `Add`: universal modular arithmetic correctness in the specified empty initial memory.

@@ -73,7 +73,7 @@ def bodyOwners (evidence : List MethodEvidence) : List (AssemblyPin × String) :
 
 /-- The program's method table, as the call check sees it. -/
 def specializationTable (evidence : List MethodEvidence) : List SpecializedMethod :=
-  evidence.map fun item => ⟨item.arguments, item.closed⟩
+  evidence.map fun item => ⟨item.arguments, item.closed, item.assembly⟩
 
 /-- The word each program method returns, by emitted index, as its own feature certificate
     shows. An index past the program, such as a contract import, has none. -/
@@ -203,6 +203,58 @@ private theorem getElem?_of_mapM {α β : Type} {make : α → Option β} :
     cases index with
     | zero => simp [first]
     | succ index => simp [getElem?_of_mapM remaining index]
+
+/-- Substitution changes type arguments while preserving a scoped declaring type's assembly. -/
+private theorem substituteType_headScope {arguments : List TypeExpr} {owner closed : TypeExpr}
+    {scope : String} (substituted : substituteType arguments owner = some closed)
+    (named : owner.headScope = some scope) : closed.headScope = some scope := by
+  induction owner generalizing closed with
+  | apply head arg ih _ =>
+    simp only [substituteType, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      Option.some.injEq] at substituted
+    obtain ⟨newHead, ready, _, _, rfl⟩ := substituted
+    exact ih (closed := newHead) ready named
+  | enum name base _ =>
+    simp [substituteType, Option.map_eq_some_iff] at substituted
+    obtain ⟨_, _, rfl⟩ := substituted
+    exact named
+  | _ =>
+    first
+    | solve | cases named
+    | simp [substituteType] at substituted
+      subst closed
+      exact named
+
+#print axioms substituteType_headScope
+
+/-- A direct managed call retains its definition token and declaring assembly when instantiated. -/
+theorem instantiateMethod_managedSite {layouts : List RawLayout} {original closed : RawMethod}
+    {arguments : List TypeExpr} {pc token : Nat} {scope : String}
+    {before after : RawInstruction} {source : CallSite}
+    (instantiated : instantiateMethod layouts original arguments = some closed)
+    (fetched : original.code[pc]? = some before) (called : before.operand = .call source)
+    (managed : source.target = .managed token) (named : source.declaringType.headScope = some scope)
+    (present : closed.code[pc]? = some after) :
+    ∃ site, after.operand = .call site ∧ site.target = .managed token ∧
+      site.declaringType.headScope = some scope := by
+  unfold instantiateMethod at instantiated
+  split at instantiated
+  · cases instantiated
+  · simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      Option.some.injEq] at instantiated
+    obtain ⟨_, _, _, _, _, _, code, mapped, rfl⟩ := instantiated
+    change code[pc]? = some after at present
+    rw [getElem?_of_mapM mapped pc, fetched] at present
+    simp only [Option.bind_some, Option.bind_eq_some_iff, Option.some.injEq, called,
+      substituteOperand, Option.bind_eq_bind, Option.pure_def] at present
+    obtain ⟨operand, made, rfl⟩ := present
+    obtain ⟨owner, replaced, _, _, _, _, _, _, rest⟩ := made
+    split at rest <;> simp [managed, substituteTarget, Option.bind_eq_some_iff] at rest
+    all_goals
+      obtain ⟨_, _, rfl⟩ := rest
+      exact ⟨_, rfl, rfl, substituteType_headScope replaced named⟩
+
+#print axioms instantiateMethod_managedSite
 
 /-- Substituting type arguments into an operand keeps every branch destination. -/
 theorem substituteOperand_branchesTo {arguments : List TypeExpr} {layouts : List RawLayout}

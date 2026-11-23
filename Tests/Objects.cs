@@ -53,7 +53,6 @@ foreach (var (proof, entry) in new[]
     ("DogCast", "ClassTests::AsDog(Examples.Animal)"),
     ("NodePair", "NodeArrays::Pair(Examples.Node,Examples.Node)"),
     ("ArrayElement", "NodeArrays::At(Examples.Node[],System.Int32)"),
-    ("ArrayLength", "NodeArrays::Count(Examples.Node[])"),
     ("ArrayCovariance", "NodeArrays::Put(Examples.Shape[],System.Int32,Examples.Shape)"),
     ("BucketItems", "NodeArrays::First(Examples.Bucket)"),
     ("BucketRefill", "NodeArrays::Refill(Examples.Bucket,Examples.Node[])"),
@@ -123,6 +122,81 @@ verification.VerifyContractVariant(assembly, "Examples", legsSelector, Path.Comb
         (by rintro ⟨-, value, encoded, -, rfl⟩; revert encoded; decide)
     """, example: At("Examples/Proofs/AnimalLegs.lean"));
 Console.WriteLine("PASS virtual caller contract and certified two-legged Dog override");
+
+const string lengthSelector = "NodeArrays::Count(Examples.Node[])";
+var nullLength = Path.Combine(root, "NullArrayLength");
+Directory.CreateDirectory(nullLength);
+var nullLengthAssembly = Path.Combine(nullLength, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var count = variant.GetType("Examples.NodeArrays").Methods.Single(method => method.Name == "Count");
+    var length = count.Body.Instructions.Single(site => site.OpCode == OpCodes.Ldlen);
+    var il = count.Body.GetILProcessor();
+    il.InsertBefore(length, il.Create(OpCodes.Dup));
+    il.InsertBefore(length, il.Create(OpCodes.Brtrue_S, length));
+    il.InsertBefore(length, il.Create(OpCodes.Pop));
+    il.InsertBefore(length, il.Create(OpCodes.Ldc_I4_0));
+    il.InsertBefore(length, il.Create(OpCodes.Ret));
+    variant.Write(nullLengthAssembly);
+}
+verification.VerifyContractVariant(assembly, "Examples", lengthSelector, Path.Combine(root, "ArrayLength"),
+    nullLengthAssembly, lengthSelector, nullLength, """
+    /-- Every live Node array returns its length in unchanged memory. Null raises NullReferenceException. -/
+    def arrayLength : OutcomeContract (Option (Reference × Nat)) W32 where
+      args input := [.object (match input with | none => .null | some (nodes, _) => .address nodes)]
+      results value := [.scalar (.i32 value)]
+      pre input memory := match input with
+        | none => True
+        | some (nodes, size) => ReferenceArray.Live memory nodes
+            (.object "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Examples.Node") size
+      footprint _ := []
+      post input before after value :=
+        before = after ∧ ∃ nodes size, input = some (nodes, size) ∧ value = BitVec.ofNat 32 size
+      raises input _ := if input.isNone then some .nullReference else none
+    """, """
+    theorem correctness : arrayLength.HoldsCLR Extracted.program 0 := by
+      intro input memory live
+      cases input with
+      | none =>
+        obtain ⟨fuel, ran⟩ := ExampleProof.null_array memory
+        exact ⟨fuel, _, ran, rfl⟩
+      | some pair =>
+        obtain ⟨nodes, size⟩ := pair
+        obtain ⟨fuel, ran⟩ := ExampleProof.correctness memory nodes size live
+        exact ⟨fuel, memory, _, ran, Confined.refl _ _, _, rfl, rfl, nodes, size, rfl, by simp⟩
+    """, """
+    /-- The modified body returns zero on null before it reaches ldlen. -/
+    theorem correctness : arrayLength.RefutedCLR Extracted.program 0 :=
+      .of_return (input := none) (initial := Memory.empty) trivial
+        (rfl : invoke Extracted.program 16 0 [.object .null] Memory.empty =
+          .ok (Memory.empty, [.scalar (.i32 0)])) trivial
+    """, example: At("Examples/Proofs/ArrayLength.lean"),
+    imports: "import CIL.Safety.ReferenceArrayElements\nimport CIL.Safety.RuntimeExceptions");
+Console.WriteLine("PASS array length contract and certified zero return for a null array");
+
+
+// The same null return also violates a contract that drops the live-array length guarantee.
+// Changing the proved contract must invalidate its pairing with the original counterexample.
+var lengthControl = Path.Combine(root, "ChangedArrayLengthContract");
+Directory.CreateDirectory(lengthControl);
+var originalLengthProof = File.ReadAllText(Path.Combine(root, "ArrayLength", "ContractVariant.lean"));
+var changedLengthProof = Path.Combine(lengthControl, "ChangedLength.lean");
+File.WriteAllText(changedLengthProof, originalLengthProof.Replace("value = BitVec.ofNat 32 size",
+    "value = value", StringComparison.Ordinal));
+var weaker = verification.Verify(assembly, "Examples", lengthSelector, changedLengthProof, lengthControl,
+    theorem: "VariantProof.correctness", statement: new(Term: true));
+try
+{
+    verification.VerifyRefutation(nullLengthAssembly, "Examples", lengthSelector,
+        Path.Combine(nullLength, "ContractVariant.lean"), Path.Combine(root, "MismatchedLength"), "scalar",
+        "VariantProof.correctness", weaker.statementIdentity!.term!.Value.GetRawText());
+    throw new InvalidOperationException("A changed array contract accepted the original counterexample predicate.");
+}
+catch (InvalidOperationException mismatch) when (mismatch.Message.Contains(
+    "Verified statement does not match the requested contract", StringComparison.Ordinal))
+{
+    Console.WriteLine("PASS changing the proved array contract rejects its previous refutation");
+}
 
 // Each named field is checked against the operation it names, so a view with another offset, width or
 // element fails its own theorem instead of naming storage the code never touches.
