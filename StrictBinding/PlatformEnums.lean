@@ -27,7 +27,7 @@ def physicalEnumStorage (image : PreparedImage) (row : Nat) : Except AuditError 
   return code
 
 /-- The enclosing TypeDef row, or zero for a top-level declaration. -/
-private def enumParent (image : PreparedImage) (row flags : Nat) : Except AuditError Nat := do
+def enclosingTypeRow (image : PreparedImage) (row flags : Nat) : Except AuditError Nat := do
   let mut parent := 0
   for i in [:nestedCount image] do
     if (← nestedTypeOf image (i + 1)) == row then
@@ -49,7 +49,7 @@ private def enumChild? (image : PreparedImage) (parent : Nat) (space name : List
     let row := i + 1
     unless ← stringFound image (← cell row typeNameColumn) (name ++ [0]) do continue
     unless ← stringFound image (← cell row typeNamespaceColumn) (space ++ [0]) do continue
-    unless (← enumParent image row (← cell row typeDefFlagsColumn)) == parent do continue
+    unless (← enclosingTypeRow image row (← cell row typeDefFlagsColumn)) == parent do continue
     if found.isSome then throw (.typeDefMismatch row .typeName)
     found := some row
   return found
@@ -77,7 +77,7 @@ def physicalEnumCode (image : PreparedImage) (row : Nat) : Except AuditError Nat
   baseBound image row baseValue claim
   if table == Table.typeDef then
     let baseFlags ← image.layout.cell image.view base typeDefFlagsColumn
-    unless (← enumParent image (baseValue / 4) baseFlags) == 0 do throw (.typeDefMismatch row .base)
+    unless (← enclosingTypeRow image (baseValue / 4) baseFlags) == 0 do throw (.typeDefMismatch row .base)
   unless (← kindOf image flags [] [] claim) == .enum do throw (.typeDefMismatch row .kind)
   physicalEnumStorage image row
 

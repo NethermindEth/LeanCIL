@@ -11,20 +11,43 @@ namespace Nethermind.LeanCIL;
 // the extraction's keyed module, which resolves both in the editor workspace and under verify.
 internal static partial class ProofOutline
 {
-    /// <summary>The frame and instruction descriptors used to outline a proof of this method.</summary>
-    internal sealed class Method(FrameMetadata frame, Operation[] operations, MethodDefinition source,
+    /// <summary>The source instructions, bound operands and frame used to outline a proof of this method.</summary>
+    internal sealed class Method(FrameMetadata frame, MethodDefinition source,
         IReadOnlySet<Instruction> reachable, IReadOnlyDictionary<int, int> parameterHomes,
         FeatureProfile profile, MetadataValidation.LayoutContext layouts, InstructionIndex instructions,
-        ResolvedCallSites calls, IReadOnlyDictionary<MethodDefinition, int> methodIndices, ImportResolution? imports)
+        ResolvedCallSites calls, IReadOnlyDictionary<MethodDefinition, int> methodIndices, ImportResolution? imports,
+        NativeOperands.Certificate? nativeOperands = null)
     {
         internal FrameMetadata Frame { get; } = frame;
-        internal Operation[] Operations { get; } = operations;
+        internal int InstructionCount => source.Body.Instructions.Count;
+
+        /// <summary>The word-stack operation at a reachable source instruction, including admitted call and prefix patterns.</summary>
+        internal Code? StackCodeAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            if (!reachable.Contains(site)) return null;
+            var code = site.OpCode.Code;
+            if (code is Code.Ldelem_Any or Code.Stelem_Any)
+                return code == Code.Ldelem_Any && nativeOperands is not null &&
+                    InstructionOperands.MethodTableLoad(site, nativeOperands) ? null : code;
+            if (code is Code.Ldlen or Code.Ldelem_Ref or Code.Stelem_Ref || Arrays.NumericElement(code).HasValue)
+                return code;
+            if (TypeTests.Analyze(source).Operands.Contains(site)) return null;
+            if (code is Code.Tail or Code.Constrained or Code.Readonly or Code.Unaligned) return Code.Nop;
+            var throws = Throws.Analyze(source);
+            if (throws.Raises.ContainsKey(site)) return code;
+            if (code != Code.Ldnull && throws.Operands.Contains(site)) return Code.Nop;
+            if (code == Code.Call && calls.IsModel(site) && site.Operand is MethodReference reference)
+                return RuntimeModels.ObjectConstructor(reference) ? Code.Pop :
+                    UnsafeModels.StackCode(reference, profile.Architecture);
+            return OutlineInstructions.IsStackCode(code) || code == Code.Nop ? code : null;
+        }
 
         /// <summary>The argument read directly at a reachable site. Addressed and assigned arguments use a frame slot.</summary>
         internal int? ArgumentAt(int pc)
         {
             var site = source.Body.Instructions[pc];
-            return Operations[pc] is Unoutlined && reachable.Contains(site) &&
+            return StackCodeAt(pc) is null && reachable.Contains(site) &&
                 MethodArguments.LoadIndex(source, site) is int index && !parameterHomes.ContainsKey(index)
                 ? index : null;
         }
@@ -33,7 +56,7 @@ internal static partial class ProofOutline
         internal (CallKind Kind, int Method, int Arguments)? CallAt(int pc)
         {
             var site = source.Body.Instructions[pc];
-            return Operations[pc] is Unoutlined && reachable.Contains(site)
+            return StackCodeAt(pc) is null && reachable.Contains(site)
                 ? calls.OutlineTarget(site, methodIndices, imports) : null;
         }
 
@@ -41,7 +64,7 @@ internal static partial class ProofOutline
         internal (ILOpCode Kind, int Target)? BranchAt(int pc)
         {
             var site = source.Body.Instructions[pc];
-            if (Operations[pc] is not Unoutlined || site.Operand is not Instruction target ||
+            if (StackCodeAt(pc) is not null || site.Operand is not Instruction target ||
                 site.OpCode.OperandType is not (OperandType.InlineBrTarget or OperandType.ShortInlineBrTarget) ||
                 site.OpCode.Code is Code.Leave or Code.Leave_S || !reachable.Contains(site)) return null;
             int opcode = site.OpCode.Value;
@@ -55,7 +78,7 @@ internal static partial class ProofOutline
         internal (int? Bytes, int? ScalarWidth, bool Signed)? ObjectAt(int pc, Code opcode)
         {
             var site = source.Body.Instructions[pc];
-            if (site.OpCode.Code != opcode || Operations[pc] is not Unoutlined ||
+            if (site.OpCode.Code != opcode || StackCodeAt(pc) is not null ||
                 !reachable.Contains(site) || site.Operand is not TypeReference operand) return null;
             return InstructionOperands.ObjectStorage(source, site, operand, instructions, layouts, profile);
         }
@@ -64,7 +87,7 @@ internal static partial class ProofOutline
         internal (int Width, long Value, bool Numeral)? ConstantAt(int pc)
         {
             var site = source.Body.Instructions[pc];
-            if (Operations[pc] is not Unoutlined || !reachable.Contains(site)) return null;
+            if (StackCodeAt(pc) is not null || !reachable.Contains(site)) return null;
             var code = site.OpCode.Code;
             return code switch
             {
@@ -87,20 +110,19 @@ internal static partial class ProofOutline
         internal int? BitCountWidthAt(int pc)
         {
             var site = source.Body.Instructions[pc];
-            return Operations[pc] is Unoutlined && site.OpCode.Code == Code.Call &&
+            return StackCodeAt(pc) is null && site.OpCode.Code == Code.Call &&
                 site.Operand is MethodReference member && reachable.Contains(site) && calls.IsModel(site)
                 ? BitModels.CountWidth(member, profile) : null;
         }
 
         /// <summary>Whether one checked, straight-line word step suffices for this site.</summary>
-        internal bool PureAt(int pc, bool plainReturn) => Operations[pc] switch
+        internal bool PureAt(int pc, bool plainReturn) => StackCodeAt(pc) switch
         {
-            StackOperation { Kind: Code.Ret } => plainReturn,
-            Unoutlined when ArgumentAt(pc) is int argument => MethodArguments.Plain(source, argument),
+            Code.Ret => plainReturn,
+            null when ArgumentAt(pc) is int argument => MethodArguments.Plain(source, argument),
             var operation => ConstantAt(pc) is { Width: 32 or 64 } ||
-                BitCountWidthAt(pc) is not null || operation is StackOperation { Kind:
-                    Code.Add or Code.Sub or Code.Mul or Code.And or Code.Or or Code.Xor or Code.Nop or
-                    Code.Conv_I8 or Code.Conv_I or Code.Conv_U8 or Code.Conv_U4 or Code.Conv_I4 }
+                BitCountWidthAt(pc) is not null || operation is Code.Add or Code.Sub or Code.Mul or Code.And or Code.Or or Code.Xor or Code.Nop or
+                    Code.Conv_I8 or Code.Conv_I or Code.Conv_U8 or Code.Conv_U4 or Code.Conv_I4
         };
 
         /// <summary>The admitted struct field at this instruction, using the extraction's layout context.</summary>
@@ -115,7 +137,7 @@ internal static partial class ProofOutline
         }
     }
 
-    /// <summary>A checked extraction: its methods while still loaded, their emitted operations and
+    /// <summary>The loaded methods and their outline inputs, with
     /// its computed layouts in emission order, each with its identity, its named class fields, and
     /// the architecture that sizes its struct array elements.</summary>
     internal sealed record Extraction(MethodDefinition[] Methods, Method[] Emitted,
@@ -134,6 +156,12 @@ internal static partial class ProofOutline
             for (var index = 0; index < layouts.Length; index++) indices.TryAdd(layouts[index].Identity, index);
             return indices;
         }).GetValueOrDefault(identity, -1);
+
+    static string? ArithmeticSymbol(Code? code) => code switch
+    {
+        Code.Add => "+", Code.Sub => "-", Code.Mul => "*", Code.And => "&&&",
+        Code.Or => "|||", Code.Xor => "^^^", _ => null
+    };
 
     const string Usage = "Usage: leancil new-proof extraction-directory proof.lean";
 

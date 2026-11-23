@@ -8,6 +8,7 @@
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
+#:include ContractVariants.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -105,21 +106,39 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     });
 }
 
-// The same universally quantified contract rejects an incorrect implementation.
-var contract = At("Examples/Proofs/EnumFlags.lean");
-verification.Verify(assembly, "Examples", "Enums::SetFlag(Examples.Unsigned64)", contract, Path.Combine(root, "UniversalFlags"));
-var wrongOutput = Path.Combine(root, "WrongFlags");
-var failed = false;
-try
-{
-    verification.Verify(assembly, "Examples", "Enums::WrongSetFlag(Examples.Unsigned64)", contract, wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    failed = true;
-}
-if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect enum flag implementation accepted");
+// An unnamed high bit distinguishes preserving the flags from masking them all away.
+var setFlag = runtime.GetMethod("SetFlag")!;
+const ulong high = 1UL << 63;
+var witness = Enum.ToObject(setFlag.GetParameters()[0].ParameterType, high);
+if (Convert.ToUInt64(setFlag.Invoke(null, [witness])) != (high | 1) ||
+    Convert.ToUInt64(runtime.GetMethod("WrongSetFlag")!.Invoke(null, [witness])) != 0)
+    throw new InvalidOperationException("The compiled flag methods disagree with the high-bit witness.");
+
+verification.VerifyContractVariant(assembly, "Examples", "Enums::SetFlag(Examples.Unsigned64)",
+    Path.Combine(root, "UniversalFlags"), assembly, "Enums::WrongSetFlag(Examples.Unsigned64)",
+    Path.Combine(root, "WrongFlags"), """
+    /-- Setting the low flag preserves every other enum bit and the caller's memory. -/
+    def flags : MethodContract W64 W64 where
+      args value := [.scalar (.i64 value)]
+      results value := [.scalar (.i64 value)]
+      pre _ _ := True
+      footprint _ := []
+      post input before after value := after = before ∧ value = input ||| 1
+    """, """
+    theorem correctness : flags.Holds Extracted.program 0 := by
+      intro input memory _
+      apply MethodContract.Holds.intro (c := flags) (input := input) memory
+        (input ||| 1) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      exact ⟨8, rfl⟩
+    """, """
+    /-- Masking the high bit returns zero on a successful invocation. -/
+    theorem correctness : flags.Refuted Extracted.program 0 := by
+      apply MethodContract.Refuted.of_return (c := flags) (input := 1 <<< 63)
+        (initial := Memory.empty) (fuel := 8) (values := [.scalar (.i64 0)]) trivial rfl
+      rintro ⟨_, value, encoded, _, rfl⟩
+      exact (by decide : [Value.scalar (.i64 0)] ≠ [.scalar (.i64 ((1 <<< 63) ||| 1))]) encoded
+    """, example: At("Examples/Proofs/EnumFlags.lean"));
+Console.WriteLine("PASS setting the low flag preserves all other bits and refutes the masking variant");
 
 // Bad metadata must fail before it can produce a proof artifact.
 var mutations = new[] { "base", "underlying", "scope", "extra-field", "field-name", "special-name", "generic", "constant", "sealed", "layout", "boolean" };

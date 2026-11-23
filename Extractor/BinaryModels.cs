@@ -7,16 +7,16 @@ internal static class BinaryModels
 {
     private static readonly HashSet<string> Signatures = BuildSignatures();
 
-    internal static Operation? CallModel(MethodReference reference, string architecture)
+    internal static bool CallModel(MethodReference reference, string architecture)
     {
         if (reference.DeclaringType.FullName != "System.Buffers.Binary.BinaryPrimitives" ||
             !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemMemory) ||
             reference.HasThis || reference.ExplicitThis || reference.HasGenericParameters ||
             reference is GenericInstanceMethod || reference.CallingConvention != MethodCallingConvention.Default)
-            return null;
-        if (!Signatures.Contains(reference.FullName)) return null;
+            return false;
+        if (!Signatures.Contains(reference.FullName)) return false;
         RuntimeModels.ValidateSignature(reference, architecture);
-        return Unoutlined.Site;
+        return true;
     }
 
     private static HashSet<string> BuildSignatures()

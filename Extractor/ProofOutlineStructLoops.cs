@@ -60,7 +60,7 @@ internal static partial class ProofOutline
                 throw Unsupported("A struct receiver loop needs one conditional back edge, no local homes, " +
                     "and word arguments with a void or 64-bit result");
             header = body.BlockStart(loops[0].Latch);
-            for (var pc = 0; pc < body.Operations.Length; pc++)
+            for (var pc = 0; pc < body.Method.InstructionCount; pc++)
             {
                 if (body.Method.StructFieldAt(pc) is not { Opcode: Code.Stfld or Code.Ldfld, IsAggregate: false,
                     Width: 8, Signed: false } access) continue;
@@ -204,7 +204,7 @@ internal static partial class ProofOutline
         void Walk(ReceiverPath path, int pc, string indent, string hypothesis, bool iteration)
         {
             var visited = new HashSet<int>();
-            while (pc < body.Operations.Length)
+            while (pc < body.Method.InstructionCount)
             {
                 if (pc == header && (path.Stepped || !iteration))
                 {
@@ -219,7 +219,7 @@ internal static partial class ProofOutline
                 }
                 if (!visited.Add(pc)) throw Unsupported("A receiver loop path cycles outside its cutpoint");
                 path.Stepped = true;
-                var op = body.Operations[pc];
+                var op = body.Method.StackCodeAt(pc);
                 string Pop()
                 {
                     if (path.Stack.Count == 0) throw Unsupported("A receiver loop has a short symbolic stack");
@@ -232,23 +232,20 @@ internal static partial class ProofOutline
                 else if (StructLiteral(body.Method.ConstantAt(pc)) is { } literal)
                 {
                     if (literal.Width == 8) path.Stack.Add(literal.Term);
-                    else if (pc + 1 < body.Operations.Length &&
-                        body.Operations[pc + 1] is StackOperation
-                            { Kind: Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I })
+                    else if (pc + 1 < body.Method.InstructionCount &&
+                        body.Method.StackCodeAt(pc + 1) is Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I)
                         path.Stack.Add($"({literal.Term})." +
-                            (body.Operations[++pc] is StackOperation { Kind: Code.Conv_I8 or Code.Conv_I }
+                            (body.Method.StackCodeAt(++pc) is Code.Conv_I8 or Code.Conv_I
                                 ? "signExtend" : "setWidth") +
                             " 64");
                     else throw Unsupported("A receiver loop needs 64-bit arithmetic and comparisons");
                 }
-                else if (op is StackOperation
-                    { Kind: Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I or Code.Nop }) { }
-                else if (op is StackOperation { Kind: Code.Dup }) path.Stack.Add(path.Stack[^1]);
-                else if (op is StackOperation { IsArithmetic: true } arithmetic)
+                else if (op is Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I or Code.Nop) { }
+                else if (op is Code.Dup) path.Stack.Add(path.Stack[^1]);
+                else if (ArithmeticSymbol(op) is { } symbol)
                 {
                     var right = Pop();
                     var left = Pop();
-                    var symbol = arithmetic.Symbol;
                     path.Stack.Add($"({left} {symbol} {right})");
                 }
                 else if (body.Method.StructFieldAt(pc) is { Opcode: Code.Stfld or Code.Ldfld, IsAggregate: false,
@@ -283,7 +280,7 @@ internal static partial class ProofOutline
                     Walk(no, taken ? pc + 1 : target, indent + "  ", hypothesis, iteration);
                     return;
                 }
-                else if (op is StackOperation { Kind: Code.Ret } && plainReturn)
+                else if (op is Code.Ret && plainReturn)
                 {
                     lean.Wrapped(indent + "cil_loop_finish", ("[" + string.Join(", ", path.Facts
                         .Concat([path.Confined])) + "]").Terms(), "");

@@ -20,14 +20,13 @@ internal static class ReferenceArrays
     internal static bool Element(TypeReference element) => ObjectTypes.Is(element) || ObjectTypes.IsString(element);
 
     /// <summary>
-    /// The checked operation for an array instruction over an array of class references, or null when the
-    /// instruction is not one; <c>ldlen</c> is the same instruction for every array.
+    /// Whether this is an admitted array instruction over class references; <c>ldlen</c> is the same instruction for every array.
     /// </summary>
-    internal static Operation? Translate(Instruction instruction) => instruction.OpCode.Code switch
+    internal static bool SupportsInstruction(Instruction instruction) => instruction.OpCode.Code switch
     {
         Code.Newarr when instruction.Operand is TypeReference element && Element(element) =>
-            Unoutlined.Site,
-        Code.Ldelem_Ref or Code.Stelem_Ref => new StackOperation(instruction.OpCode.Code),
-        _ => null
+            true,
+        Code.Ldelem_Ref or Code.Stelem_Ref => true,
+        _ => false
     };
 }

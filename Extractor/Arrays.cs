@@ -61,13 +61,13 @@ internal static class Arrays
     }
 
     /// <summary>Array.Fill accepts primitive and enum storage with an optional int32 range.</summary>
-    internal static Operation? Fill(MethodReference method, string architecture)
+    internal static bool Fill(MethodReference method, string architecture)
     {
         if (method.Name != "Fill" || method.DeclaringType.FullName != "System.Array" || method.HasThis ||
             method.ExplicitThis || method.CallingConvention != MethodCallingConvention.Generic ||
             method is not GenericInstanceMethod { GenericArguments.Count: 1 } generic ||
             generic.ElementMethod.GenericParameters.Count != 1 || method.ReturnType.MetadataType != MetadataType.Void ||
-            !RuntimeModels.ExactScope(method.DeclaringType, PlatformAssemblies.SystemRuntime)) return null;
+            !RuntimeModels.ExactScope(method.DeclaringType, PlatformAssemblies.SystemRuntime)) return false;
 
         var parameters = method.Parameters;
         var counted = parameters.Count == 4;
@@ -75,12 +75,12 @@ internal static class Arrays
             parameters[0].ParameterType is not ArrayType { IsVector: true } array ||
             !MethodElement(array.ElementType) || !MethodElement(parameters[1].ParameterType) ||
             counted && (parameters[2].ParameterType.MetadataType != MetadataType.Int32 ||
-                parameters[3].ParameterType.MetadataType != MetadataType.Int32)) return null;
+                parameters[3].ParameterType.MetadataType != MetadataType.Int32)) return false;
 
         var element = generic.GenericArguments[0];
-        if (Primitive(element) is null && !EnumTypes.IsEnum(element)) return null;
+        if (Primitive(element) is null && !EnumTypes.IsEnum(element)) return false;
         RuntimeModels.ValidateSignature(method, architecture);
-        return Storage(element, architecture) is null ? null : Unoutlined.Site;
+        return Storage(element, architecture) is not null;
 
         static bool MethodElement(TypeReference type) =>
             type is GenericParameter { Type: GenericParameterType.Method, Position: 0 };
@@ -93,21 +93,20 @@ internal static class Arrays
         elements.Values.FirstOrDefault(element => element.Kind == kind) is { } element
             ? new LocalKind.Array(element) : null;
 
-    internal static Operation? Translate(Instruction instruction, string architecture)
+    internal static bool SupportsInstruction(Instruction instruction, string architecture)
     {
         if (instruction.OpCode.Code is Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any)
         {
             ElementStorage(instruction, architecture);
-            return instruction.OpCode.Code == Code.Ldelema
-                ? Unoutlined.Site : new StackOperation(instruction.OpCode.Code);
+            return true;
         }
         return instruction.OpCode.Code switch
         {
             Code.Newarr when Storage((TypeReference)instruction.Operand, architecture) is
-                { Width: > 0 and <= ushort.MaxValue } => Unoutlined.Site,
-            Code.Ldlen => new StackOperation(instruction.OpCode.Code),
-            _ when NumericElement(instruction.OpCode.Code).HasValue => new StackOperation(instruction.OpCode.Code),
-            _ => null
+                { Width: > 0 and <= ushort.MaxValue } => true,
+            Code.Ldlen => true,
+            _ when NumericElement(instruction.OpCode.Code).HasValue => true,
+            _ => false
         };
     }
 
@@ -135,7 +134,7 @@ internal static class Arrays
     }
 
     /// <summary>The integer kind and access direction encoded by a numeric array opcode.</summary>
-    static (NumericKind Kind, bool Store)? NumericElement(Code code) => code switch
+    internal static (NumericKind Kind, bool Store)? NumericElement(Code code) => code switch
     {
         Code.Ldelem_I1 => (NumericKind.I1, false),
         Code.Ldelem_U1 => (NumericKind.U1, false),
@@ -154,12 +153,12 @@ internal static class Arrays
     };
 
     /// <summary>A numeric access uses the method's checked shape for its closed element type.</summary>
-    internal static NumericAccess? Numeric(Operation op, MethodDefinition method, int pc, int methodIndex = 0) =>
+    internal static NumericAccess? Numeric(Code? op, MethodDefinition method, int pc, int methodIndex = 0) =>
         op switch
         {
-            StackOperation raw when NumericElement(raw.Kind) is { } access =>
+            Code raw when NumericElement(raw) is { } access =>
                 new(access.Kind.Width(), access.Kind.Signed(), access.Store, access.Kind),
-            StackOperation { Kind: Code.Ldelem_Any or Code.Stelem_Any } when
+            Code.Ldelem_Any or Code.Stelem_Any when
                 method.Body.Instructions[pc] is { Operand: TypeReference element } site &&
                 Storage(element) is { Kind: not NativeOperands.Kind.ArrayComposite } storage =>
                 new(storage.Width, storage.Signed, site.OpCode.Code == Code.Stelem_Any, null,

@@ -44,20 +44,19 @@ internal static partial class ProofOutline
 
     /// <summary>The result width in bytes and signedness of a `conv.i1` to `conv.u8` or of `conv.i`, which
     /// sign-extends like `conv.i8`; null for another operation, including the native-width `conv.u`.</summary>
-    static (int Bytes, bool Signed)? SizedConversion(Operation op) => op is StackOperation { Kind: var kind }
-        ? kind switch
+    static (int Bytes, bool Signed)? SizedConversion(Code? op) => op switch
     {
         Code.Conv_I1 => (1, true), Code.Conv_I2 => (2, true), Code.Conv_I4 => (4, true),
             Code.Conv_I8 or Code.Conv_I => (8, true),
         Code.Conv_U1 => (1, false), Code.Conv_U2 => (2, false), Code.Conv_U4 => (4, false),
         Code.Conv_U8 => (8, false),
         _ => null
-    } : null;
+    };
 
     /// <summary>Walks a branch-free body over the receiver's disjoint scalar fields and integer arguments.</summary>
     static StructWalk WalkStruct(Specification spec, Body body, Names names)
     {
-        var ops = body.Operations;
+        var outline = body.Method;
         var walk = new StructWalk();
         var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
         var receiver = spec.Parameters[0];
@@ -79,9 +78,9 @@ internal static partial class ProofOutline
             walk.Fields.Add(field);
             return field;
         }
-        for (var pc = 0; pc < ops.Length; pc++)
+        for (var pc = 0; pc < outline.InstructionCount; pc++)
         {
-            var op = ops[pc];
+            var op = outline.StackCodeAt(pc);
             if (body.Method.ArgumentAt(pc) is int argument)
             {
                 var parameter = spec.Parameters[argument];
@@ -100,13 +99,12 @@ internal static partial class ProofOutline
                 stack.Push(bits < 32 ? $"(({value}).setWidth {bits}).{extension} 32"
                     : $"({value}).{extension} {bits}");
             }
-            else if (op is StackOperation { IsArithmetic: true } arithmetic)
+            else if (ArithmeticSymbol(op) is { } symbol)
             {
                 if (stack.Count < 2) return Stop(" on a short stack", pc, showInstruction: true);
                 var (right, left) = (stack.Pop(), stack.Pop());
                 if (left is null or Receiver || right is null or Receiver)
                     return Stop(" on a value the outline does not name", pc, showInstruction: true);
-                var symbol = arithmetic.Symbol;
                 stack.Push($"{Operand(left)} {symbol} {Operand(right)}");
             }
             else if (body.Method.StructFieldAt(pc) is { Opcode: Code.Ldfld, IsAggregate: false, Width: 1 or 2 or 4 or 8 } load)
@@ -138,13 +136,13 @@ internal static partial class ProofOutline
                 field.Stored = true;
                 walk.Stores.Add((field, field.Width < 4 ? $"({value}).setWidth {field.Width * 8}" : value, value));
             }
-            else if (op is StackOperation { Kind: Code.Dup })
+            else if (op is Code.Dup)
             {
                 if (stack.Count == 0) return Stop("a duplicate of an empty stack", pc);
                 stack.Push(stack.Peek());
             }
-            else if (op.IsNop) { }
-            else if (op is StackOperation { Kind: Code.Ret } && plainReturn && pc == ops.Length - 1)
+            else if (op == Code.Nop) { }
+            else if (op is Code.Ret && plainReturn && pc == outline.InstructionCount - 1)
             {
                 if (spec.Result is not null)
                 {
@@ -157,7 +155,7 @@ internal static partial class ProofOutline
             }
             else return Stop(", which the outline does not step through a struct", pc, showInstruction: true);
         }
-        return Stop("the end of the body without a return", ops.Length - 1);
+        return Stop("the end of the body without a return", outline.InstructionCount - 1);
     }
 
     /// <summary>The binders the specification names: the receiver, the integer arguments, and the value each field

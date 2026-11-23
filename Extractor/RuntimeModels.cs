@@ -1,5 +1,4 @@
 using Mono.Cecil;
-using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -138,37 +137,36 @@ internal static class RuntimeModels
         ExactScope(owner, PlatformAssemblies.SystemRuntime);
 
     /// <summary>
-    /// A modelled call keeps its method operand. Analyses use the returned operation, including
-    /// the checked write for an integer helper with an out parameter.
+    /// A modelled call keeps its method operand. The model checks the bound signature and the selected profile.
     /// </summary>
-    internal static Operation? CallModel(MethodReference reference, FeatureProfile profile)
+    internal static bool CallModel(MethodReference reference, FeatureProfile profile)
     {
-        if (FeatureProfile.PlatformConstant(reference) is not null) return Unoutlined.Site;
-        if (FeatureProfile.Getter(reference) is not null) return Unoutlined.Site;
-        if (ReferenceQueries.Constant(reference, profile.Architecture) is not null) return Unoutlined.Site;
-        if (ArgumentGuards.CallModel(reference, profile.Architecture) is { } guard) return guard;
-        if (Spans.ArrayExtension(reference, profile.Architecture) is { } arrayView) return arrayView;
-        if (Spans.Member(reference, profile.Architecture) is { } span) return span;
-        if (Spans.ConstructorOperation(reference, profile.Architecture) is not null)
-            return Unoutlined.Site;
-        if (Arrays.Fill(reference, profile.Architecture) is { } fill) return fill;
-        if (StaticSpanModel(reference, profile.Architecture) is { } staticSpan) return staticSpan;
-        if (MarshalModels.CallModel(reference, profile.Architecture) is { } marshal) return marshal;
-        if (BinaryModels.CallModel(reference, profile.Architecture) is { } binary) return binary;
-        if (ObjectConstructor(reference)) return new StackOperation(Code.Pop);
-        if (VectorModel(reference, profile) is { } vector)
+        if (FeatureProfile.PlatformConstant(reference) is not null) return true;
+        if (FeatureProfile.Getter(reference) is not null) return true;
+        if (ReferenceQueries.Constant(reference, profile.Architecture) is not null) return true;
+        if (ArgumentGuards.CallModel(reference, profile.Architecture)) return true;
+        if (Spans.ArrayExtension(reference, profile.Architecture)) return true;
+        if (Spans.Member(reference, profile.Architecture)) return true;
+        if (Spans.ConstructorOperation(reference, profile.Architecture))
+            return true;
+        if (Arrays.Fill(reference, profile.Architecture)) return true;
+        if (StaticSpanModel(reference, profile.Architecture)) return true;
+        if (MarshalModels.CallModel(reference, profile.Architecture)) return true;
+        if (BinaryModels.CallModel(reference, profile.Architecture)) return true;
+        if (ObjectConstructor(reference)) return true;
+        if (VectorModel(reference, profile))
         {
             ValidateSignature(reference, profile.Architecture);
             if (ValueTuples.Is(reference.ReturnType))
                 ValueTuples.RequirePair(reference.ReturnType, reference.Module, profile.Architecture);
-            return vector;
+            return true;
         }
-        if (BitModels.Admits(reference, profile)) return Unoutlined.Site;
-        if (UnsafeModels.CallModel(reference, profile.Architecture) is { } helper) return helper;
+        if (BitModels.Admits(reference, profile)) return true;
+        if (UnsafeModels.CallModel(reference, profile.Architecture)) return true;
         if (reference.HasThis || reference.ExplicitThis || reference.HasGenericParameters ||
             reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default ||
-            !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime)) return null;
+            !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime)) return false;
         var model = reference.FullName switch
         {
             $"System.Void {Unsafe}::CopyBlock(System.Byte&,System.Byte&,System.UInt32)" or
@@ -179,10 +177,10 @@ internal static class RuntimeModels
             $"System.Void {Unsafe}::InitBlock(System.Void*,System.Byte,System.UInt32)" or
             $"System.Void {Unsafe}::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" or
             $"System.Void {Unsafe}::InitBlockUnaligned(System.Void*,System.Byte,System.UInt32)" =>
-                Unoutlined.Site,
-            _ => IntegerMathCalls.Contains(reference.FullName) ? Unoutlined.Site : null
+                true,
+            _ => IntegerMathCalls.Contains(reference.FullName)
         };
-        if (model is null) return null;
+        if (!model) return false;
         ValidateSignature(reference, profile.Architecture);
         if (ValueTuples.Is(reference.ReturnType))
             ValueTuples.RequirePair(reference.ReturnType, reference.Module, profile.Architecture);
@@ -197,23 +195,23 @@ internal static class RuntimeModels
         new(MetadataName.OfText("System"), MetadataName.OfText("RuntimeFieldHandle"));
 
     /// <summary>The runtime field handle supplies a readonly span over primitive or enum storage.</summary>
-    internal static Operation? StaticSpanModel(MethodReference reference, string architecture)
+    internal static bool StaticSpanModel(MethodReference reference, string architecture)
     {
         if (reference is not GenericInstanceMethod { Name: "CreateSpan", GenericArguments.Count: 1 } method ||
             method.HasThis || method.ExplicitThis || method.ElementMethod.GenericParameters.Count != 1 ||
             method.ElementMethod.CallingConvention != MethodCallingConvention.Generic ||
             method.DeclaringType is TypeSpecification || method.Parameters.Count != 1 ||
             method.ReturnType is not GenericInstanceType { GenericArguments.Count: 1 } result ||
-            result.GenericArguments[0] != method.ElementMethod.GenericParameters[0]) return null;
+            result.GenericArguments[0] != method.ElementMethod.GenericParameters[0]) return false;
         var runtime = PlatformAssemblies.SystemRuntime;
         var handle = method.Parameters[0].ParameterType;
         if (handle is TypeSpecification || !IdentityRows.TopLevelMatches(handle, FieldHandle, runtime) ||
             !IdentityRows.TopLevelMatches(method.DeclaringType, RuntimeHelpers, runtime) ||
-            !IdentityRows.TopLevelMatches(result.ElementType, ReadOnlySpan, runtime)) return null;
+            !IdentityRows.TopLevelMatches(result.ElementType, ReadOnlySpan, runtime)) return false;
         var element = method.GenericArguments[0];
-        if (Arrays.Primitive(element) is null && !EnumTypes.IsEnum(element)) return null;
+        if (Arrays.Primitive(element) is null && !EnumTypes.IsEnum(element)) return false;
         ValidateSignature(reference, architecture);
-        return Spans.ElementWidth(element, architecture) is not null ? Unoutlined.Site : null;
+        return Spans.ElementWidth(element, architecture) is not null;
     }
 
     internal static void ValidateCallScope(MethodReference reference)
@@ -239,24 +237,24 @@ internal static class RuntimeModels
         [("Min", 2), ("Max", 2), ("Clamp", 3), ("Abs", 1), ("Sign", 1)];
 
     // Vector helpers must bind a static declaration in the exact intrinsics assembly.
-    static Operation? VectorModel(MethodReference reference, FeatureProfile profile)
+    static bool VectorModel(MethodReference reference, FeatureProfile profile)
     {
         var convention = reference is GenericInstanceMethod
             ? MethodCallingConvention.Generic : MethodCallingConvention.Default;
         if (reference.HasThis || reference.ExplicitThis || reference.CallingConvention != convention ||
-            !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntimeIntrinsics)) return null;
+            !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntimeIntrinsics)) return false;
         if (reference is GenericInstanceMethod generic &&
-            generic.GenericArguments.Count != generic.ElementMethod.GenericParameters.Count) return null;
-        if (reference is not GenericInstanceMethod && reference.HasGenericParameters) return null;
+            generic.GenericArguments.Count != generic.ElementMethod.GenericParameters.Count) return false;
+        if (reference is not GenericInstanceMethod && reference.HasGenericParameters) return false;
         string signature = reference.FullName;
-        if (VectorHelperSignatures.Contains(signature)) return Unoutlined.Site;
+        if (VectorHelperSignatures.Contains(signature)) return true;
         if (signature == $"{V128UInt64} {Intrinsics}.Vector128::CreateScalarUnsafe(System.UInt64)")
-            return Unoutlined.Site;
+            return true;
         foreach (int width in new[] { 128, 256 })
         {
             string element = $"!!0 {Intrinsics}.Vector{width}::GetElement<System.UInt64>";
             if (signature == $"{element}({Vector(width, "!!0")},System.Int32)")
-                return Unoutlined.Site;
+                return true;
         }
         return HardwareModel(signature, profile);
     }
@@ -361,14 +359,14 @@ internal static class RuntimeModels
         return signatures;
     }
 
-    private static Operation? HardwareModel(string signature, FeatureProfile profile)
+    private static bool HardwareModel(string signature, FeatureProfile profile)
     {
-        if (PortableVectorSignatures.Contains(signature)) return Unoutlined.Site;
-        Operation Require(Feature feature)
+        if (PortableVectorSignatures.Contains(signature)) return true;
+        bool Require(Feature feature)
         {
             if (!profile.Get(feature))
                 throw new InvalidDataException($"Reachable intrinsic lacks {feature}: {signature}");
-            return Unoutlined.Site;
+            return true;
         }
         if (signature == $"{V256UInt64} {Avx2}::And({V256UInt64},{V256UInt64})")
             return Require(Feature.Avx2);
@@ -397,12 +395,12 @@ internal static class RuntimeModels
             string genericOwner = Vector(width, "System.UInt64");
             foreach (var name in new[] { "op_Addition", "op_Subtraction" })
                 if (signature == $"{memberVector} {genericOwner}::{name}({memberVector},{memberVector})")
-                    return Unoutlined.Site;
+                    return true;
             foreach (var name in new[] { "LessThan", "Equals" })
                 if (signature == $"{genericVector} {owner}::{name}<System.UInt64>({genericVector},{genericVector})")
-                    return Unoutlined.Site;
+                    return true;
             if (signature == $"{genericVector} {owner}::LessThan<System.Int64>({genericVector},{genericVector})")
-                return Unoutlined.Site;
+                return true;
             foreach ((string method, string target) in new[] { ("AsByte", "System.Byte"), ("AsUInt32", "System.UInt32"),
                 ("AsInt64", "System.Int64"), ("AsDouble", "System.Double"), ("AsUInt64", "System.UInt64"),
                 ("AsInt32", "System.Int32"), ("AsSingle", "System.Single") })
@@ -411,18 +409,18 @@ internal static class RuntimeModels
                     "System.UInt64", "System.Byte", "System.UInt32", "System.Int64", "System.Int32", "System.Single"
                 })
                     if (signature == $"{Vector(width, target)} {owner}::{method}<{source}>({genericVector})")
-                        return Unoutlined.Site;
+                        return true;
             string longVector = Vector(width, "System.Int64");
             if (signature == $"{longVector} {owner}::ShiftRightArithmetic({longVector},System.Int32)")
-                return Unoutlined.Site;
+                return true;
             if (signature == $"{ulongVector} {owner}::CreateScalar(System.UInt64)")
-                return Unoutlined.Site;
+                return true;
             if (signature == $"{Vector(width, "System.UInt32")} {owner}::CreateScalar(System.UInt32)")
-                return Unoutlined.Site;
+                return true;
             if (signature == $"System.UInt32 {owner}::ExtractMostSignificantBits<System.UInt64>({genericVector})")
-                return Unoutlined.Site;
+                return true;
             if (signature == $"!!0 {owner}::Sum<System.UInt64>({genericVector})")
-                return Unoutlined.Site;
+                return true;
         }
         return signature switch
         {
@@ -491,7 +489,7 @@ internal static class RuntimeModels
             $"System.UInt64 {Intrinsics}.Arm.ArmBase/Arm64::MultiplyHigh(System.UInt64,System.UInt64)" =>
                 Require(Feature.ArmBase64),
             X86DivRemSignature => Require(Feature.X86Base64),
-            _ => null
+            _ => false
         };
     }
 }

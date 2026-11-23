@@ -110,7 +110,7 @@ internal static partial class ProofOutline
         var receiver = method.HasThis ? new[] { Receiver(method, names, views) } : [];
         var body = new Body(emitted);
         var parameters = WrittenArrays(method, receiver.Concat(method.Parameters.Select(parameter =>
-            Describe(method, parameter, names, views, extraction.Architecture))).ToArray(), body.Operations,
+            Describe(method, parameter, names, views, extraction.Architecture))).ToArray(), body.Method,
             body.Loops().Count, extraction.Architecture);
         var result = DescribeResult(method, extraction.Architecture);
         bool symbolic = parameters.Any(parameter => parameter.Shape is ParameterShape.Reference or
@@ -148,7 +148,7 @@ internal static partial class ProofOutline
             source = new ReceiverLoop(spec, body, lean).Generate();
         else if (structReceiver)
             source = StructStraightLine(spec, body, names, lean);
-        else if (loops.Count == 0 && !spec.Framed && ArrayRead(extraction, spec, body.Operations) is { } read)
+        else if (loops.Count == 0 && !spec.Framed && ArrayRead(extraction, spec, body.Method) is { } read)
             source = ArrayReadLine(spec, read, lean);
         else if (loops.Count == 0)
             source = StraightLine(extraction, spec, body, lean);
@@ -171,13 +171,13 @@ internal static partial class ProofOutline
     /// <summary>`parameters` with the array a loop stores into, by index or through a writable span over it,
     /// marked written; a loop's store is followed only into a method's one array argument. A straight-line store
     /// stays a hole over the array's contents.</summary>
-    static Parameter[] WrittenArrays(MethodDefinition method, Parameter[] parameters, Operation[] ops, int loops,
+    static Parameter[] WrittenArrays(MethodDefinition method, Parameter[] parameters, Method outline, int loops,
         string architecture)
     {
         var arrays = parameters.Where(parameter => parameter.Shape == ParameterShape.WordArray).ToArray();
-        if (loops == 0 || arrays.Length == 0 || !Enumerable.Range(0, ops.Length).Any(pc =>
-            Arrays.Numeric(ops[pc], method, pc) is { Store: true } ||
-            ops[pc] is Unoutlined &&
+        if (loops == 0 || arrays.Length == 0 || !Enumerable.Range(0, outline.InstructionCount).Any(pc =>
+            Arrays.Numeric(outline.StackCodeAt(pc), method, pc) is { Store: true } ||
+            outline.StackCodeAt(pc) is null &&
             Spans.ArrayView(method.Body.Instructions[pc], architecture) is { Element.Compound: false, Writable: true })) return parameters;
         if (arrays.Length > 1)
             throw Unsupported($"{method.FullName} stores into one of {arrays.Length} array arguments in a loop; " +
@@ -524,14 +524,14 @@ internal static partial class ProofOutline
         var homes = extraction.Emitted[0].Frame.IndexParameterHomes();
         var steppable = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.StructValue) &&
-            body.Operations.Index().All(entry => body.Method.PureAt(entry.Index, plainReturn) ||
-                Steps(body.Method, spec.Method, entry.Index, homes));
+            Enumerable.Range(0, body.Method.InstructionCount).All(pc => body.Method.PureAt(pc, plainReturn) ||
+                Steps(body.Method, spec.Method, pc, homes));
         var split = !steppable && SplitsOnBooleans(body.Method, spec.Parameters, plainReturn);
         var paths = steppable || split ? null : ScalarPaths(spec, body.Method);
         // A body over words that calls helpers composes them through stub contracts, as a body over objects does.
         if (!steppable && !split && paths is null &&
             spec.Parameters.All(parameter => parameter.Shape == ParameterShape.Scalar) &&
-            Enumerable.Range(0, body.Operations.Length)
+            Enumerable.Range(0, body.Method.InstructionCount)
                 .Any(pc => body.Method.CallAt(pc) is { Kind: CallKind.Static }) &&
             ObjectStraightLine(extraction, spec, body, lean, stubsOnly: true) is { } composed)
             return composed;
@@ -573,15 +573,15 @@ internal static partial class ProofOutline
     static bool Steps(Method emitted, MethodDefinition method, int pc, IReadOnlyDictionary<int, int> homes)
     {
         var site = method.Body.Instructions[pc];
-        return emitted.Operations[pc] switch
+        return emitted.StackCodeAt(pc) switch
         {
-            Unoutlined when InstructionOperands.LoadSlot(method, site, homes) is int loaded =>
+            null when InstructionOperands.LoadSlot(method, site, homes) is int loaded =>
                 !NarrowLocal(method, loaded),
-            Unoutlined when InstructionOperands.StoreSlot(method, site, homes) is int stored =>
+            null when InstructionOperands.StoreSlot(method, site, homes) is int stored =>
                 !NarrowLocal(method, stored),
-            Unoutlined => site.OpCode.Code is Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S ||
+            null => site.OpCode.Code is Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S ||
                 emitted.StructFieldAt(pc) is { Signed: false } || emitted.ObjectAt(pc, Code.Initobj) is not null,
-            StackOperation { Kind: Code.Dup } => true,
+            Code.Dup => true,
             _ => false
         };
     }
@@ -614,7 +614,7 @@ internal static partial class ProofOutline
             parameters.Any(parameter => parameter.Shape is not (ParameterShape.Scalar or ParameterShape.Boolean)))
             return false;
         var previousBoolean = false;
-        for (var pc = 0; pc < emitted.Operations.Length; pc++)
+        for (var pc = 0; pc < emitted.InstructionCount; pc++)
         {
             var loadsBoolean = emitted.ArgumentAt(pc) is int index && parameters[index].Shape == ParameterShape.Boolean;
             var jump = emitted.BranchAt(pc);
@@ -654,7 +654,7 @@ internal static partial class ProofOutline
         // keeps locals, whose homes change the memory a stub's `post` keeps.
         Func<int, Callee?> summarized = !stubsOnly ? Summary
             : index => Stubbed(index) is null && Summary(index) is { Walk.NumericHomes: true } read ? read : null;
-        var numericHomes = HasNumericObjectHomes(spec.Method) || Enumerable.Range(0, body.Operations.Length)
+        var numericHomes = HasNumericObjectHomes(spec.Method) || Enumerable.Range(0, body.Method.InstructionCount)
             .Any(pc => body.Method.CallAt(pc) is { Kind: not CallKind.Tail } call &&
                 summarized(call.Method)?.Walk.NumericHomes == true);
         // Local homes belong to the entry memory, so the statement accepts any well-formed entry memory.
@@ -840,8 +840,7 @@ internal static partial class ProofOutline
                 _ => "a span of caller memory"
             };
         var plainReturn = LeanEmitter.Narrow(method.ReturnType) is null;
-        var ops = emitted.Operations;
-        var pc = Enumerable.Range(0, ops.Length).FirstOrDefault(i => !emitted.PureAt(i, plainReturn), -1);
+        var pc = Enumerable.Range(0, emitted.InstructionCount).FirstOrDefault(i => !emitted.PureAt(i, plainReturn), -1);
         if (pc < 0) return "the body has locals";
         // A call the outline cannot compose names the contract the author must write and prove.
         var instruction = InstructionAt(method, pc);

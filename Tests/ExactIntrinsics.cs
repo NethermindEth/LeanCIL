@@ -288,13 +288,27 @@ foreach (var (name, width, zero, highBit) in new (string, int, object, object)[]
           pre _ _ := True
           footprint _ := []
           post pair before after equal := after = before ∧ equal = (pair.1 == pair.2)
-        """, """
+        """, $$"""
         set_option maxRecDepth 8192 in
         theorem correctness : equalVectors.Holds Extracted.program 0 := by
           rintro ⟨left, right⟩ memory -
           apply MethodContract.Holds.intro (c := equalVectors) (input := (left, right)) memory
             (left == right) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
-          refine ⟨16, ?_⟩
+          refine ⟨4, ?_⟩
+          let args := equalVectors.args (left, right)
+          let frame : Frame := ⟨memory.nextIdentity, [], [], 0⟩
+          let leftValue := Value.scalar (.v{{width}} left)
+          let rightValue := Value.scalar (.v{{width}} right)
+          let result := Value.scalar (.i32 (if left == right then 1 else 0))
+          apply invoke_of_run (frame := frame) (entered := memory) Extracted.program_method0 rfl rfl
+          rw [run_next (fuel := 3) (op := .ldarg 0) (target := 1) (values := [leftValue])
+            (nextFrame := frame) (updated := memory) Extracted.program_method0 rfl rfl]
+          rw [run_next (fuel := 2) (op := .ldarg 1) (target := 2) (values := [rightValue, leftValue])
+            (nextFrame := frame) (updated := memory) Extracted.program_method0 rfl rfl]
+          have call := step_call_intrinsic Extracted.method0 2 args frame memory (stack := [rightValue, leftValue])
+            (prefixes := {}) rfl Extracted.method0_model2 rfl
+          rw [run_next (fuel := 1) (target := 3) (values := [result]) (nextFrame := frame)
+            (updated := memory) Extracted.program_method0 rfl (call.trans (by rfl))]
           change Except.ok (memory, [Value.scalar (.i32
             (CIL.NarrowKind.unsigned8.extend (if left == right then 1 else 0)))]) =
             Except.ok (memory, [Value.scalar (.i32 (if left == right then 1 else 0))])

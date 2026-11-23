@@ -772,8 +772,8 @@ The implementation this inventory describes is:
 - The extractor checks each reachable CIL instruction against its operands and rejects unsupported
   opcodes before emission. [Instruction admission](../Extractor/InstructionAdmission.cs) and
   [operand checks](../Extractor/InstructionOperands.cs).
-- The literal emitter and proof outlines use the C# representation of each instruction.
-  [Instruction translation](../Extractor/InstructionTranslation.cs).
+- Proof outlines read original CIL instructions, branch targets and bound call operands.
+  [Outline instruction checks](../Extractor/OutlineInstructions.cs).
 - [MetadataValidation.cs](../Extractor/MetadataValidation.cs),
   [Reachability.cs](../Extractor/Reachability.cs) and [StaticData.cs](../Extractor/StaticData.cs):
   type, call, control-flow and static-data restrictions.

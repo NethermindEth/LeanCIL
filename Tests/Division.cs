@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:package Mono.Cecil
+#:include ContractVariants.cs
 #:include ../scripts/Verification.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
@@ -21,10 +22,8 @@ Directory.CreateDirectory(root);
 var cases = 0;
 var queue = new GeneratedQueue(verification, assembly);
 
-// The universal contracts use nonzero divisors, with no restriction on dividends.
-foreach (var width in new[] { 32, 64 })
-    verification.Verify(assembly, "Examples", width == 32 ? "Division::Quotient(uint,uint)" : "Division::Quotient64(ulong,ulong)",
-        At($"Examples/Proofs/Quotient{width}.lean"), Path.Combine(root, $"Quotient{width}"));
+verification.Verify(assembly, "Examples", "Division::Quotient64(ulong,ulong)",
+    At("Examples/Proofs/Quotient64.lean"), Path.Combine(root, "Quotient64"));
 
 // Execute the exact same emitted CIL in .NET and in the checked Lean semantics.
 foreach (var width in new[] { 32, 64 })
@@ -103,17 +102,34 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     method.Body.Instructions.Single(i => i.OpCode == OpCodes.Div_Un).OpCode = OpCodes.Mul;
     module.Write(wrongDll);
 }
-var rejected = false;
-try
-{
-    verification.Verify(wrongDll, "Examples", "Division::Quotient(uint,uint)",
-        At("Examples/Proofs/Quotient32.lean"), wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    rejected = true;
-}
-if (!rejected || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect quotient accepted");
+uint Evaluate(string dll) => (uint)Assembly.Load(File.ReadAllBytes(dll)).GetType("Examples.Division")!
+    .GetMethod("Quotient")!.Invoke(null, [6u, 2u])!;
+if (Evaluate(assembly) != 3 || Evaluate(wrongDll) != 12)
+    throw new InvalidOperationException("The compiled quotient and product disagree with the counterexample.");
 
-Console.WriteLine($"Division passed: {cases} cases; universal contracts passed and incorrect quotient rejected.");
+const string contractSelector = "Division::Quotient(uint,uint)";
+verification.VerifyContractVariant(assembly, "Examples", contractSelector, Path.Combine(root, "Quotient32"),
+    wrongDll, contractSelector, wrongOutput,
+    """
+    /-- Unsigned division by a nonzero divisor preserves caller memory. -/
+    def quotient : MethodContract (W32 × W32) where
+      args pair := [.scalar (.i32 pair.1), .scalar (.i32 pair.2)]
+      pre pair _ := pair.2 ≠ 0
+      footprint _ := []
+      post pair before after values := after = before ∧
+        values = [.scalar (.i32 (BitVec.ofNat 32 (pair.1.toNat / pair.2.toNat)))]
+    """, """
+    theorem correctness : quotient.Holds Extracted.program 0 := by
+      rintro ⟨left, right⟩ memory nonzero
+      apply MethodContract.Holds.intro (c := quotient) (input := (left, right)) memory
+        [.scalar (.i32 (BitVec.ofNat 32 (left.toNat / right.toNat)))] ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      exact ⟨4, ExampleProof.correctness_framed memory left right nonzero⟩
+    """, """
+    /-- The changed multiplication returns 12 for 6 divided by 2. -/
+    theorem correctness : quotient.Refuted Extracted.program 0 :=
+      .of_return (input := (6, 2)) (initial := Memory.empty) (by dsimp [quotient]; decide)
+        (rfl : invoke Extracted.program 4 0 (quotient.args (6, 2)) Memory.empty = .ok _)
+        (by rintro ⟨-, _, rfl, -, wrong⟩; revert wrong; decide)
+    """, example: At("Examples/Proofs/Quotient32.lean"));
+
+Console.WriteLine($"PASS {cases} division comparisons, both universal quotients and the product refutation");

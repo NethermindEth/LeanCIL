@@ -18,16 +18,18 @@ internal static partial class ProofOutline
 
     /// <summary>The access of a body that loads an array argument and an `int` argument, reads that element and
     /// returns it, or null for any other body.</summary>
-    static ArrayAccess? ArrayRead(Extraction extraction, Specification spec, Operation[] all)
+    static ArrayAccess? ArrayRead(Extraction extraction, Specification spec, Method outline)
     {
         // Instructions after the return cannot affect a straight-line read.
-        var end = Array.FindIndex(all, op => op is StackOperation { Kind: Code.Ret });
-        var ops = all.Take(end + 1).Index().Where(site => !site.Item.IsNop).ToArray();
+        var end = Enumerable.Range(0, outline.InstructionCount)
+            .FirstOrDefault(pc => outline.StackCodeAt(pc) == Code.Ret, -1);
+        var ops = Enumerable.Range(0, end + 1).Select(pc => (Index: pc, Item: outline.StackCodeAt(pc)))
+            .Where(site => site.Item != Code.Nop).ToArray();
         if (LeanEmitter.Narrow(spec.Method.ReturnType) is not null || spec.Method.HasThis ||
             spec.Result is not { Boolean: false, Object: false } || ops.Length < 4 ||
             Argument(ops[0].Index) is not { Shape: ParameterShape.WordArray } array ||
             Argument(ops[1].Index) is not { Shape: ParameterShape.Scalar, Width: 4 } index ||
-            spec.Result.Lean != WordType(array.Width) || ops[^1].Item is not StackOperation { Kind: Code.Ret })
+            spec.Result.Lean != WordType(array.Width) || ops[^1].Item is not Code.Ret)
             return null;
         if (ops.Length == 4 &&
             Arrays.Numeric(ops[2].Item, spec.Method, ops[2].Index) is { Store: false, Signed: false } load &&
@@ -35,7 +37,7 @@ internal static partial class ProofOutline
             return new(array, index, null, load);
         // A helper's address is loaded with `ldind.i4`, the only indirect load whose step the outline gives.
         if (ops.Length != 5 || array.Width != 4 ||
-            ops[3].Item is not StackOperation { Kind: Code.Ldind_I4 } ||
+            ops[3].Item is not Code.Ldind_I4 ||
             extraction.Emitted[0].CallAt(ops[2].Index) is not { Kind: CallKind.Static, Arguments: 2 } call)
             return null;
         return ElementAddress(extraction, call.Method, array.Element!) is { } method
@@ -50,17 +52,14 @@ internal static partial class ProofOutline
     static MethodDefinition? ElementAddress(Extraction extraction, int index, Arrays.Element element)
     {
         var method = extraction.Methods[index];
-        var slots = extraction.Emitted[index].Operations;
-        var instructions = method.Body.Instructions;
-        if (slots.Length != instructions.Count) return null;
         var sites = StoreBodySites(extraction, index);
         return !method.HasThis && method.Parameters.Count == 2 && method.ReturnType is ByReferenceType &&
             method.Parameters[0].ParameterType is ArrayType { Rank: 1 } array &&
             WordArrayElement(array.ElementType) == element &&
             method.Parameters[1].ParameterType.FullName is "System.Int32" &&
             extraction.Emitted[index].Frame.HasNoLocals && sites is
-                [var arraySite, var indexSite, (Unoutlined, { OpCode.Code: Code.Ldelema } address, _),
-                    (StackOperation { Kind: Code.Ret }, _, _)] &&
+                [var arraySite, var indexSite, (null, { OpCode.Code: Code.Ldelema } address, _),
+                    (Code.Ret, _, _)] &&
             extraction.Emitted[index].ArgumentAt(arraySite.Pc) == 0 && extraction.Emitted[index].ArgumentAt(indexSite.Pc) == 1 &&
             address.Previous?.OpCode.Code != Code.Readonly && Arrays.ElementStorage(address, extraction.Architecture) == element
             ? method : null;

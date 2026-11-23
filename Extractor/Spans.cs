@@ -37,7 +37,7 @@ internal static class Spans
         type is GenericInstanceType { ElementType.FullName: "System.Span`1" };
 
     /// <summary>The array overloads of AsSpan preserve the identity and checked layout of the element.</summary>
-    internal static Operation? ArrayExtension(MethodReference reference, string architecture)
+    internal static bool ArrayExtension(MethodReference reference, string architecture)
     {
         if (reference.Name != "AsSpan" || reference.DeclaringType is TypeSpecification ||
             reference.DeclaringType.FullName != "System.MemoryExtensions" ||
@@ -46,7 +46,7 @@ internal static class Spans
             reference is not GenericInstanceMethod { GenericArguments.Count: 1 } method ||
             method.ElementMethod.CallingConvention != MethodCallingConvention.Generic ||
             method.ElementMethod.GenericParameters.Count != 1 || method.Parameters.Count is < 1 or > 3)
-            return null;
+            return false;
 
         var variable = method.ElementMethod.GenericParameters[0];
         if (method.Parameters[0].ParameterType is not ArrayType { IsVector: true } array ||
@@ -56,43 +56,43 @@ internal static class Spans
             !RuntimeModels.ExactScope(result.ElementType, PlatformAssemblies.SystemRuntime) ||
             method.Parameters.Skip(1).Any(parameter => parameter.ParameterType.MetadataType != MetadataType.Int32 ||
                 !RuntimeModels.ExactScope(parameter.ParameterType, PlatformAssemblies.SystemRuntime)))
-            return null;
+            return false;
 
-        if (Arrays.Storage(method.GenericArguments[0], architecture) is null) return null;
+        if (Arrays.Storage(method.GenericArguments[0], architecture) is null) return false;
         RuntimeModels.ValidateSignature(reference, architecture);
-        return Unoutlined.Site;
+        return true;
     }
 
     static bool OwnerElement(TypeReference type) =>
         type is GenericParameter { Type: GenericParameterType.Type, Position: 0 };
 
     /// <summary>A supported span constructor at its original call site.</summary>
-    internal static Operation? ConstructorOperation(MethodReference method, string architecture)
+    internal static bool ConstructorOperation(MethodReference method, string architecture)
     {
         if (method.Name != ".ctor" || !method.HasThis || method.ExplicitThis || method.HasGenericParameters ||
             method is GenericInstanceMethod || method.CallingConvention != MethodCallingConvention.Default ||
             method.ReturnType.MetadataType != MetadataType.Void ||
             method.DeclaringType is not GenericInstanceType { GenericArguments.Count: 1 } owner ||
             owner.ElementType.FullName is not ("System.Span`1" or "System.ReadOnlySpan`1") ||
-            !RuntimeModels.ExactScope(owner.ElementType, PlatformAssemblies.SystemRuntime)) return null;
+            !RuntimeModels.ExactScope(owner.ElementType, PlatformAssemblies.SystemRuntime)) return false;
         var element = owner.GenericArguments[0];
-        if (ElementWidth(element, architecture) is null) return null;
+        if (ElementWidth(element, architecture) is null) return false;
         var parameters = method.Parameters;
-        Operation? operation = parameters switch
+        var supported = parameters switch
         {
             [{ ParameterType: ByReferenceType byref }] when OwnerElement(byref.ElementType) =>
-                Unoutlined.Site,
+                true,
             [{ ParameterType: PointerType { ElementType.MetadataType: MetadataType.Void } },
                 { ParameterType.MetadataType: MetadataType.Int32 }] =>
-                Unoutlined.Site,
+                true,
             _ when parameters.Count is 1 or 3 && parameters[0].ParameterType is ArrayType { IsVector: true } array &&
                 OwnerElement(array.ElementType) &&
                 parameters.Skip(1).All(parameter => parameter.ParameterType.MetadataType == MetadataType.Int32) &&
-                Arrays.Storage(element, architecture) is not null => Unoutlined.Site,
-            _ => null
+                Arrays.Storage(element, architecture) is not null => true,
+            _ => false
         };
-        if (operation is not null) RuntimeModels.ValidateSignature(method, architecture);
-        return operation;
+        if (supported) RuntimeModels.ValidateSignature(method, architecture);
+        return supported;
     }
 
     static bool DeclaredSpan(TypeReference type, string owner) =>
@@ -117,11 +117,11 @@ internal static class Spans
             method.Parameters.Count == 0 || wholeOnly && method.Parameters.Count != 1 ||
             method.Parameters[0].ParameterType is not ArrayType { IsVector: true }) return null;
         if (site.OpCode.Code == Code.Call && method is GenericInstanceMethod extension &&
-            ArrayExtension(extension, architecture) is not null)
+            ArrayExtension(extension, architecture))
             return (Arrays.Storage(extension.GenericArguments[0], architecture)!, true);
         if (method.DeclaringType is not GenericInstanceType owner) return null;
-        if (site.OpCode.Code == Code.Newobj && ConstructorOperation(method, architecture) is not null ||
-            site.OpCode.Code == Code.Call && method.Name == "op_Implicit" && Member(method, architecture) is not null)
+        if (site.OpCode.Code == Code.Newobj && ConstructorOperation(method, architecture) ||
+            site.OpCode.Code == Code.Call && method.Name == "op_Implicit" && Member(method, architecture))
             return (Arrays.Storage(owner.GenericArguments[0], architecture)!, Writable(owner));
         return null;
     }
@@ -131,19 +131,19 @@ internal static class Spans
     {
         if (site.OpCode.Code != Code.Call || site.Operand is not MethodReference { DeclaringType: GenericInstanceType owner } method ||
             method.Name != name || method.Parameters.Count != parameterCount ||
-            Member(method, architecture) is null) return null;
+            !Member(method, architecture)) return null;
         return ElementWidth(owner.GenericArguments[0], architecture);
     }
 
     /// <summary>A retained span member uses the element of its closed receiver.</summary>
-    internal static Operation? Member(MethodReference method, string architecture)
+    internal static bool Member(MethodReference method, string architecture)
     {
         if (method.DeclaringType is not GenericInstanceType { GenericArguments.Count: 1 } owner ||
             owner.ElementType.FullName is not ("System.Span`1" or "System.ReadOnlySpan`1") ||
             method.HasGenericParameters || method is GenericInstanceMethod || method.ExplicitThis ||
             method.CallingConvention != MethodCallingConvention.Default ||
             method.HasThis == (method.Name is "get_Empty" or "op_Implicit") ||
-            !RuntimeModels.ExactScope(owner.ElementType, PlatformAssemblies.SystemRuntime)) return null;
+            !RuntimeModels.ExactScope(owner.ElementType, PlatformAssemblies.SystemRuntime)) return false;
 
         var name = owner.ElementType.FullName;
         var writable = Writable(owner);
@@ -152,39 +152,39 @@ internal static class Spans
         var element = owner.GenericArguments[0];
         if (method.Name is not ("get_Item" or "get_Length" or "Slice" or "get_IsEmpty" or
             "GetPinnableReference" or "op_Implicit" or "get_Empty" or "Clear" or "Fill" or "CopyTo" or "TryCopyTo"))
-            return null;
-        if (ElementWidth(element, architecture) is null) return null;
-        Operation? operation = method.Name switch
+            return false;
+        if (ElementWidth(element, architecture) is null) return false;
+        var supported = method.Name switch
         {
             "Clear" when writable && parameters.Count == 0 && result.MetadataType == MetadataType.Void =>
-                Unoutlined.Site,
+                true,
             "Fill" when writable && parameters.Count == 1 && OwnerElement(parameters[0].ParameterType) &&
-                result.MetadataType == MetadataType.Void => Unoutlined.Site,
+                result.MetadataType == MetadataType.Void => true,
             "CopyTo" or "TryCopyTo" when parameters.Count == 1 &&
                 DeclaredSpan(parameters[0].ParameterType, "System.Span`1") &&
                 result.MetadataType == (method.Name == "CopyTo" ? MetadataType.Void : MetadataType.Boolean) =>
-                Unoutlined.Site,
+                true,
             "get_Item" when parameters is [{ ParameterType.MetadataType: MetadataType.Int32 }] &&
-                ElementReference(result, writable) => Unoutlined.Site,
-            "get_Length" when parameters.Count == 0 && result.MetadataType == MetadataType.Int32 => Unoutlined.Site,
+                ElementReference(result, writable) => true,
+            "get_Length" when parameters.Count == 0 && result.MetadataType == MetadataType.Int32 => true,
             "Slice" when parameters.Count is 1 or 2 && DeclaredSpan(result, name) &&
                 parameters.All(parameter => parameter.ParameterType.MetadataType == MetadataType.Int32) =>
-                Unoutlined.Site,
+                true,
             "get_IsEmpty" when parameters.Count == 0 && result.MetadataType == MetadataType.Boolean =>
-                Unoutlined.Site,
+                true,
             "GetPinnableReference" when parameters.Count == 0 && ElementReference(result, writable) =>
-                Unoutlined.Site,
-            "get_Empty" when parameters.Count == 0 && DeclaredSpan(result, name) => Unoutlined.Site,
+                true,
+            "get_Empty" when parameters.Count == 0 && DeclaredSpan(result, name) => true,
             "op_Implicit" when parameters is [{ ParameterType: ArrayType { IsVector: true } array }] &&
                 OwnerElement(array.ElementType) && DeclaredSpan(result, name) &&
-                Arrays.Storage(element, architecture) is not null => Unoutlined.Site,
-            _ => null
+                Arrays.Storage(element, architecture) is not null => true,
+            _ => false
         };
-        if (operation is null && !(method.Name == "op_Implicit" && writable && parameters.Count == 1 &&
+        if (!supported && !(method.Name == "op_Implicit" && writable && parameters.Count == 1 &&
             DeclaredSpan(parameters[0].ParameterType, name) && DeclaredSpan(result, "System.ReadOnlySpan`1")))
-            return null;
+            return false;
         RuntimeModels.ValidateSignature(method, architecture);
-        return operation ?? Unoutlined.Site;
+        return true;
     }
 
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, HashSet<Instruction>>

@@ -340,19 +340,12 @@ internal static class LeanEmitter
             {
                 var instructions = new InstructionIndex(m);
                 var parameterHomes = ParameterStorage.IndexHomes(parameterIndices, frame.Locals.Count);
-                var outlineOperations = new List<Operation>(m.Body.Instructions.Count);
                 foreach (var site in m.Body.Instructions)
-                {
-                    if (!reachable.Contains(site))
-                    {
-                        outlineOperations.Add(Unoutlined.Site);
-                        continue;
-                    }
-                    outlineOperations.Add(InstructionTranslation.Translate(site, m, methodIndices, instructions,
-                        callSites, profile, scalarCertificate, parameterHomes, importResolution, layoutContext));
-                }
-                outlines.Add(new(frame, [.. outlineOperations], m, reachable, parameterHomes, profile,
-                    layoutContext, instructions, callSites, methodIndices, importResolution));
+                    if (reachable.Contains(site))
+                        OutlineInstructions.Validate(site, m, methodIndices, instructions, callSites,
+                            profile, scalarCertificate, parameterHomes, importResolution, layoutContext);
+                outlines.Add(new(frame, m, reachable, parameterHomes, profile, layoutContext,
+                    instructions, callSites, methodIndices, importResolution, scalarCertificate));
             }
             // The decoder's raw definition is the method's only source; the command states its field facts and
             // writes each field operand as the definition the operand shapes name.

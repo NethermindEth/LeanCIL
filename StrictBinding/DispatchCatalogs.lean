@@ -1,6 +1,6 @@
 import StrictBinding.GenericConstraints
 
-/-! Check the complete method catalogs of local, nongeneric virtual class calls in one image. -/
+/-! Check the physical catalogs of local virtual class calls and rule out foreign descendants. -/
 
 namespace StrictBinding.ClassDispatch
 open CIL CIL.Extraction
@@ -11,17 +11,28 @@ private abbrev Reading := OptionT (Except AuditError)
 /-- Structural PE errors retain the token, heap offset or column that failed. -/
 private def physical (action : Except AuditError α) : Reading α := liftM action
 
-/-- The name of a unique, top-level nongeneric declaration of the required CLI kind. -/
+/-- The unambiguous Cecil spelling of a physical TypeDef and its enclosing declarations. -/
+private def declarationName (image : PreparedImage) : Nat → Nat → Reading String
+  | 0, row => throwThe AuditError (.typeDefMismatch row .nesting)
+  | fuel + 1, row => do
+    let cell := image.layout.cellOfRow image.view Table.typeDef row
+    let name ← physical (image.layout.stringAt image.view (← physical (cell typeNameColumn)))
+    let space ← physical (image.layout.stringAt image.view (← physical (cell typeNamespaceColumn)))
+    let flags ← physical (cell typeDefFlagsColumn)
+    let parent ← if visibilityOf flags < nestedVisibility then pure 0
+      else physical (enclosingTypeRow image row flags)
+    unless (← physical (enumDefinition? image parent [space, name])) == some row do failure
+    let some simple := spelled? name | failure
+    let some scope := spelled? space | failure
+    guard (ordinaryTypeName scope simple)
+    if parent == 0 then return if scope.isEmpty then simple else scope ++ "." ++ simple
+    guard (scope.isEmpty && (← physical (physicalTypeShape image parent)).2 == 0)
+    return (← declarationName image fuel parent) ++ "/" ++ simple
+
+/-- A uniquely named nongeneric class or interface from the selected image. -/
 private def localName (image : PreparedImage) (row : Nat) (kind : TypeKind) : Reading String := do
-  let cell := image.layout.cellOfRow image.view Table.typeDef row
-  let name ← physical (image.layout.stringAt image.view (← physical (cell 1)))
-  let space ← physical (image.layout.stringAt image.view (← physical (cell 2)))
-  unless (← physical (enumDefinition? image 0 [space, name])) == some row do failure
   unless (← physical (physicalTypeShape image row)) == (kind, 0) do failure
-  let some simple := spelled? name | failure
-  let some scope := spelled? space | failure
-  guard (ordinaryTypeName scope simple)
-  return if scope.isEmpty then simple else scope ++ "." ++ simple
+  declarationName image row row
 
 /-- A physical class identity used by the slot or its signatures. -/
 private def className (image : PreparedImage) (row : Nat) : Reading TypeExpr := do
@@ -60,7 +71,7 @@ private def descends (parents : Array Nat) (root : Nat) : Nat → Nat → Bool �
     descends parents root fuel parent (found || row == root)
 
 /-- Primitive signatures and references to other supported local classes. -/
-private def formalType (image : PreparedImage) : SigType → Reading TypeExpr
+private def formalElement (image : PreparedImage) : SigType → Reading TypeExpr
   | .primitive 1 => return .void
   | .primitive code => do
     let some name := (primitiveName code).bind spelled? | failure
@@ -69,6 +80,14 @@ private def formalType (image : PreparedImage) : SigType → Reading TypeExpr
     guard (tableOf token == Table.typeDef)
     className image (token % 2^24)
   | _ => failure
+
+/-- A managed reference in a slot signature preserves its physical element type. -/
+private def formalType (image : PreparedImage) : SigType → Reading TypeExpr
+  | .byref element => do
+    let value ← formalElement image element
+    guard (value != .void)
+    return .byref value
+  | element => formalElement image element
 
 /-- A nongeneric managed MethodDef, with its physical flags, signature, and body presence. -/
 private def classMethod (image : PreparedImage) (row : Nat) : Reading DispatchMethod := do
@@ -153,18 +172,25 @@ private def localOverrides (image : PreparedImage) (interfaces : Array (Array Na
     bindings := bindings.modify (body / 2) (binding :: ·)
   return bindings.map List.reverse
 
+/-- Local parent edges in a single metadata module. The only external roots admitted here
+    are the core Object, ValueType and Enum declarations. -/
+private def localParents (image : PreparedImage) : Reading (Array Nat) := do
+  -- A File row with metadata introduces another module whose classes this image cannot enumerate.
+  for i in [:image.layout.rowCount 0x26] do
+    guard ((← physical (image.layout.cellOfRow image.view 0x26 (i+1) 0)) == 1)
+  let count := image.layout.rowCount Table.typeDef
+  let mut parents := #[0]
+  for i in [:count] do parents := parents.push (← parentRow image (i+1))
+  return parents
+
 /-- Enumerate every physical descendant, including abstract intermediates, and every MethodDef
     each one owns, including explicit implementations of direct local interface slots. -/
 def physicalHierarchy (image : PreparedImage) (owner : Nat) :
     OptionT (Except AuditError) (List DispatchType) := do
   guard (image.layout.rowCount 5 == 0)
-  -- A File row with metadata introduces another module whose classes this image cannot enumerate.
-  for i in [:image.layout.rowCount 0x26] do
-    guard ((← physical (image.layout.cellOfRow image.view 0x26 (i+1) 0)) == 1)
   let count := image.layout.rowCount Table.typeDef
   let interfaces ← interfacesByOwner image count
-  let mut parents := #[0]
-  for i in [:count] do parents := parents.push (← parentRow image (i+1))
+  let parents ← localParents image
   let overrides ← localOverrides image interfaces parents owner
   let mut types := #[]
   for i in [:count] do
@@ -265,27 +291,70 @@ theorem bound_of_checkMethods {image items imports}
   exact bound_of_checkItem result
 #print axioms bound_of_checkMethods
 
-/-- The physical catalog of each supported method agrees in both directions with its evidence.
-    Empty selections and incomplete reference, import, cast or constrained coverage stay partial. -/
+/-- An additional image has no class deriving from a non-core class of another assembly.
+    Every declared parent chain reaches a recognized root, and no File row adds metadata. -/
+private def closedParents (image : PreparedImage) : Reading Unit := do
+  let parents ← localParents image
+  let count := image.layout.rowCount Table.typeDef
+  for i in [:count] do
+    let _ ← descends parents 0 count (i+1) false
+
+/-- Physical inheritance in a neighbour of the selected class hierarchy is closed locally. -/
+def ParentsBound (image : PreparedImage) : Prop := (closedParents image).run = .ok (some ())
+
+/-- The image of the selected slot is checked by checkMethods. Each other image must have
+    a closed parent graph, and the selected slot cannot belong to a core assembly in that case. -/
+private def checkNeighbour (home image : PreparedImage) : Except AuditError Bool := do
+  if image.identity == home.identity then return true
+  if ← platformAssembly home then return false
+  let covered ← (closedParents image).run
+  return covered.isSome
+
+/-- Every supplied pin participates in the audit. The selected class calls are local to one
+    image. Other images must have no descendants that could contribute a dispatch target. -/
 def check (images : List PinnedImage) (pins : List AssemblyPin) (items : List MethodEvidence)
     (imports : List ImportSlot) : Except AuditError Bool := do
-  let [pin] := pins | return false
-  let [supplied] := images | return false
-  unless supplied.identity == pin.identity do return false
-  let image ← prepareOne supplied
-  checkMethods image items imports
+  unless (images.map (·.identity)).Perm (pins.map (·.identity)) do return false
+  let first :: _ := items | return false
+  let prepared ← prepare images
+  let some home := prepared.find? (·.identity == first.assembly.identity) | return false
+  unless ← checkMethods home items imports do return false
+  let covered ← prepared.mapM (checkNeighbour home)
+  return covered.all id
 
-/-- Complete image coverage entails a physical catalog for every method of the extraction. -/
+/-- The selected pin is the physical source of every catalog. Each other supplied image has
+    only local class parent chains ending at core roots. -/
 theorem bound_of_check {images pins items imports}
     (checked : check images pins items imports = .ok true) :
-    ∃ supplied image, images = [supplied] ∧ prepareOne supplied = .ok image ∧
-      ∀ item ∈ items, CatalogBound image item (specializationTable items) := by
+    ∃ prepared home, prepare images = .ok prepared ∧ home ∈ prepared ∧
+      (images.map (·.identity)).Perm (pins.map (·.identity)) ∧
+      (∀ other ∈ prepared, other.identity ≠ home.identity →
+        platformAssembly home = .ok false ∧ ParentsBound other) ∧
+      ∀ item ∈ items, CatalogBound home item (specializationTable items) := by
   unfold check at checked
   split at checked <;> try cases checked
   split at checked <;> try cases checked
-  split at checked <;> try cases checked
-  obtain ⟨image, prepared, complete⟩ := CIL.Safety.except_bind_ok checked
-  exact ⟨_, image, rfl, prepared, bound_of_checkMethods complete⟩
+  obtain ⟨prepared, preparedEq, rest⟩ := CIL.Safety.except_bind_ok checked
+  split at rest <;> try cases rest
+  rename_i home found
+  obtain ⟨localCheck, methodsEq, rest⟩ := CIL.Safety.except_bind_ok rest
+  cases localCheck <;> simp only [Bool.false_eq_true, ↓reduceIte] at rest
+  · cases rest
+  obtain ⟨bits, scanned, all⟩ := CIL.Safety.except_bind_ok rest
+  have allBits : bits.all id = true := Except.ok.inj all
+  refine ⟨prepared, home, preparedEq, List.mem_of_find?_eq_some found, by assumption, ?_,
+    bound_of_checkMethods methodsEq⟩
+  intro other mem different
+  obtain ⟨bit, member, probe⟩ := read_member mem scanned
+  have full : bit = true := List.all_eq_true.mp allBits bit member
+  subst bit
+  unfold checkNeighbour at probe
+  simp [different] at probe
+  obtain ⟨core, coreEq, continued⟩ := CIL.Safety.except_bind_ok probe
+  cases core <;> simp [pure, Except.pure] at continued
+  obtain ⟨value, valueEq, yes⟩ := CIL.Safety.except_bind_ok continued
+  cases value <;> simp at yes
+  exact ⟨coreEq, valueEq⟩
 #print axioms bound_of_check
 
 end StrictBinding.ClassDispatch
@@ -307,8 +376,11 @@ instance (images : List PinnedImage) (pins : List AssemblyPin) (items : List Met
 /-- Each claimed method catalog is a permutation of its reconstructed physical declarations. -/
 theorem DispatchCatalogsChecked.physical {images pins items imports}
     (checked : DispatchCatalogsChecked images pins items imports true) :
-    ∃ supplied image, images = [supplied] ∧ prepareOne supplied = .ok image ∧
-      ∀ item ∈ items, ClassDispatch.CatalogBound image item (specializationTable items) := by
+    ∃ prepared home, prepare images = .ok prepared ∧ home ∈ prepared ∧
+      (images.map (·.identity)).Perm (pins.map (·.identity)) ∧
+      (∀ other ∈ prepared, other.identity ≠ home.identity →
+        platformAssembly home = .ok false ∧ ClassDispatch.ParentsBound other) ∧
+      ∀ item ∈ items, ClassDispatch.CatalogBound home item (specializationTable items) := by
   apply ClassDispatch.bound_of_check (pins := pins) (imports := imports)
   cases result : ClassDispatch.check images pins items imports with
   | error err => simp [DispatchCatalogsChecked, result, Except.toOption] at checked

@@ -379,8 +379,8 @@ For a generic contract import, Lean reconstructs the open definition key from th
 metadata, encodes its bytes in uppercase hexadecimal and checks the closed arguments and
 signature. The implementation and interface digests belong to the deployment record.
 The import slot carries the contract closure digest separately. The verifier hashes the audited
-canonical closure and compares it with that digest. The deep audit does not yet bind the selected
-generic MethodDef in the imported implementation and its published contract to the import slot.
+canonical closure and compares it with that digest. For supported static generic calls, the
+deep audit also checks the producer's MethodDef and the selected export against the slot.
 [Deep verification](CLI.md#deep-verification) reconfirms each body at its RVA and each carried
 row and heap entry, under one numbering of the `#Strings` and `#Blob` offsets per heap and with
 MethodDef RVAs zeroed; the assembly identity, key token, core library, links, `#GUID` heap,
@@ -408,14 +408,22 @@ For enums, Lean checks the physical TypeDef and its instance field `value__` aga
 storage code from the certified method environment. A nested enum is identified by its
 enclosing TypeDefs. An external enum may reach its definition through several forwarding
 assemblies. Each must be supplied for complete coverage.
-For local virtual class slots in a single image, Lean follows each physical TypeDef parent,
+For local virtual class slots, Lean follows each physical TypeDef parent,
 including abstract intermediates, and checks the MethodDefs and signatures of every descendant.
+For a nested declaration it checks each enclosing type and the name at every level.
+A managed-reference signature must match the physical element type and its byref marker.
 It compares the complete declarations of each method's catalog and validates each reachable
 target table against the physical hierarchy. For an explicit implementation of a direct local
 interface slot, the MethodImpl row must name the implementing class and two local MethodDefs
 with matching nongeneric instance signatures. The catalog records the interface and the exact
 declaration token. A class outside the selected hierarchy may implement an external interface
-when its body MethodDef belongs to that class. Casts, constrained calls, interface dispatch,
+when its body MethodDef belongs to that class.
+If extra assemblies are pinned, each must have a distinct identity. Every class parent in
+each additional image must resolve locally or name the core Object, ValueType or Enum.
+The audit checks each chain for cycles and each file table for additional metadata modules.
+The selected hierarchy must then belong to a non-core image. The physical-catalog theorem
+identifies that image and establishes the closed parent chains of the others.
+Casts, constrained calls, interface dispatch,
 cross-image dispatch, other override forms on selected classes, additional metadata modules
 and unsupported signatures leave this fact uncovered.
 With all direct reference images supplied, the audit checks each AssemblyRef against its target's

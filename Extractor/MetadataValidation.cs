@@ -832,9 +832,9 @@ internal static class MetadataValidation
                                   followed by at most three simple argument pushes and no branch target.
                                 """);
                         if (instruction.OpCode.Code == Code.Call &&
-                            RuntimeModels.CallModel(reference, profile) is not null ||
+                            RuntimeModels.CallModel(reference, profile) ||
                             instruction.OpCode.Code == Code.Newobj &&
-                            Spans.ConstructorOperation(reference, profile.Architecture) is not null)
+                            Spans.ConstructorOperation(reference, profile.Architecture))
                         {
                             callSites?.AddModel(instruction);
                             return;

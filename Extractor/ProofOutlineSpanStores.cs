@@ -8,10 +8,10 @@ namespace Nethermind.LeanCIL;
 internal static partial class ProofOutline
 {
     /// <summary>Non-nop outline operations paired with their original CIL instructions.</summary>
-    static (Operation Op, Instruction Site, int Pc)[] StoreBodySites(Extraction extraction, int index) =>
-        extraction.Emitted[index].Operations
-            .Select((op, pc) => (Op: op, Site: extraction.Methods[index].Body.Instructions[pc], Pc: pc))
-            .Where(pair => !pair.Op.IsNop).ToArray();
+    static (Code? Op, Instruction Site, int Pc)[] StoreBodySites(Extraction extraction, int index) =>
+        extraction.Methods[index].Body.Instructions
+            .Select((site, pc) => (Op: extraction.Emitted[index].StackCodeAt(pc), Site: site, Pc: pc))
+            .Where(pair => pair.Op != Code.Nop).ToArray();
 
     /// <summary>The element width and store of a static method `(Span&lt;T&gt; target, T value)` whose body only
     /// stores `value` into `target[0]`.</summary>
@@ -23,8 +23,8 @@ internal static partial class ProofOutline
             WrittenSpanWidth(method.Parameters[0].ParameterType) is not { } width ||
             ElementWidth(method.Parameters[1].ParameterType) != width ||
             !extraction.Emitted[index].Frame.HasNoLocals) return null;
-        if (ops is not [(Unoutlined, var address, _), var head,
-                (Unoutlined, var item, _), var value, var store, (_, { OpCode.Code: Code.Ret }, _)] ||
+        if (ops is not [(null, var address, _), var head,
+                (null, var item, _), var value, var store, (_, { OpCode.Code: Code.Ret }, _)] ||
             extraction.Emitted[index].ConstantAt(head.Pc) != (32, 0L, true) ||
             extraction.Emitted[index].ArgumentAt(value.Pc) != 1 ||
             address.OpCode.Code is not (Code.Ldarga or Code.Ldarga_S) ||
@@ -40,15 +40,15 @@ internal static partial class ProofOutline
     {
         static (int, string) Transfer(int width) =>
             (width, width == 8 ? "transfer_i64_of_write" : "transfer_i32_of_write");
-        return emitted.Operations[pc] switch
+        return emitted.StackCodeAt(pc) switch
         {
-            StackOperation { Kind: Code.Stind_I1 } => (1, "step_stind_narrow_of_write .i1"),
-            StackOperation { Kind: Code.Stind_I2 } => (2, "step_stind_narrow_of_write .i2"),
-            StackOperation { Kind: Code.Stind_I4 } => (4, "step_stind_narrow_of_write .i4"),
-            StackOperation { Kind: Code.Stind_I8 } => (8, "step_stind_i8_of_write"),
-            StackOperation { Kind: Code.Stind_I } => (8, "step_stind_i_of_write"),
-            Unoutlined when emitted.ObjectAt(pc, Code.Stobj)?.ScalarWidth is int width => Transfer(width),
-            Unoutlined when UnsafeModels.UnalignedStorage(site, "WriteUnaligned", architecture) is { } storage =>
+            Code.Stind_I1 => (1, "step_stind_narrow_of_write .i1"),
+            Code.Stind_I2 => (2, "step_stind_narrow_of_write .i2"),
+            Code.Stind_I4 => (4, "step_stind_narrow_of_write .i4"),
+            Code.Stind_I8 => (8, "step_stind_i8_of_write"),
+            Code.Stind_I => (8, "step_stind_i_of_write"),
+            null when emitted.ObjectAt(pc, Code.Stobj)?.ScalarWidth is int width => Transfer(width),
+            null when UnsafeModels.UnalignedStorage(site, "WriteUnaligned", architecture) is { } storage =>
                 Transfer(MetadataValidation.PrimitiveWidth(storage)),
             _ => null
         };

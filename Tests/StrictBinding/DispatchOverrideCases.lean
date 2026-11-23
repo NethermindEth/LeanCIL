@@ -1,5 +1,7 @@
 import Extracted
 import DispatchImage
+import NeighbourImage
+import DerivedImage
 import StrictBinding.DispatchCatalogs
 import Tests.StrictBinding.Mutation
 
@@ -8,7 +10,10 @@ import Tests.StrictBinding.Mutation
 namespace DispatchOverrideCases
 open StrictBinding CIL.Extraction
 
-private def images (image : ImageBytes) : List PinnedImage := [⟨Extracted.assembly0.identity, image⟩]
+private def neighbour (bytes : ImageBytes) : PinnedImage := ⟨Extracted.assembly1.identity, bytes⟩
+
+private def images (image : ImageBytes) : List PinnedImage :=
+  [⟨Extracted.assembly0.identity, image⟩, neighbour NeighbourImage.image]
 
 private def audit (image : ImageBytes) (items := Extracted.methodEvidence) :=
   ClassDispatch.check (images image) Extracted.assemblies items Extracted.imports
@@ -41,6 +46,20 @@ theorem missingOverrides :
       Extracted.method0Original.token = true := by decide +kernel
 #print axioms missingOverrides
 
+/-- Erasing the managed reference from a carried parameter contradicts its physical signature. -/
+private def eraseByref (item : MethodEvidence) : MethodEvidence := { item with
+  dispatchTypes := item.dispatchTypes.map fun type => { type with
+    methods := type.methods.map fun method => { method with
+      parameters := method.parameters.map fun
+        | .byref element => element
+        | other => other } } }
+
+/-- The same Int32 parameter passed by value does not match the byref declaration. -/
+theorem byrefMismatch :
+    mismatch (audit DispatchImage.image (Extracted.methodEvidence.map eraseByref))
+      Extracted.method0Original.token = true := by decide +kernel
+#print axioms byrefMismatch
+
 private def crossed (owner : Bool) : Option Bool := do
   let image := DispatchImage.image
   let prepared ← (prepareOne ⟨Extracted.assembly0.identity, image⟩).toOption
@@ -63,5 +82,39 @@ theorem crossedOwner : crossed true = some true := by decide +kernel
 /-- Selecting the other declaration changes the catalog even though its signature agrees. -/
 theorem crossedDeclaration : crossed false = some true := by decide +kernel
 #print axioms crossedDeclaration
+
+/-- Reparenting the descendant changes its complete name while preserving its base and methods. -/
+private def movedDescendant : Option Bool := do
+  let bytes := DispatchImage.image
+  let image ← (prepareOne ⟨Extracted.assembly0.identity, bytes⟩).toOption
+  guard (nestedCount image == 1)
+  let parent ← (enclosingOf image 1).toOption
+  let some other ← (enumDefinition? image 0 [bytesOf "Geometry", bytesOf "Triangle"]).toOption
+    | none
+  guard (parent != other && parent < 256 && other < 256)
+  let (offset, _) ← (image.layout.cellAt 0x29000001 enclosingTypeColumn).toOption
+  let changed := Tests.StrictBinding.flipByte bytes offset (parent ^^^ other)
+  let some call := Extracted.method0Original.code[1]? | none
+  let .call site := call.operand | none
+  let .managed slot := site.target | none
+  return mismatch (audit changed) slot
+
+/-- The dispatch certificate rejects a NestedClass row naming the wrong enclosing type. -/
+theorem nestedOwnerMismatch : movedDescendant = some true := by decide +kernel
+#print axioms nestedOwnerMismatch
+
+/-- The physical pins may be supplied in either order. -/
+theorem reversedPins : DispatchCatalogsChecked (images DispatchImage.image).reverse
+    Extracted.assemblies Extracted.methodEvidence Extracted.imports true := by decide +kernel
+#print axioms reversedPins
+
+/-- An actual descendant in a second assembly or a missing pin leaves the catalog uncovered. -/
+theorem incompleteHierarchy :
+    let home : PinnedImage := ⟨Extracted.assembly0.identity, DispatchImage.image⟩
+    DispatchCatalogsChecked [home, neighbour DerivedImage.image] Extracted.assemblies
+        Extracted.methodEvidence Extracted.imports false ∧
+      DispatchCatalogsChecked [home] Extracted.assemblies
+        Extracted.methodEvidence Extracted.imports false := by decide +kernel
+#print axioms incompleteHierarchy
 
 end DispatchOverrideCases

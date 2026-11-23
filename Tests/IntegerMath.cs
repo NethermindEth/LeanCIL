@@ -9,6 +9,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include PinnedMetadata.cs
+#:include ContractVariants.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -112,7 +113,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     }
     var originalModel = callModel.Invoke(null, [math, profile]);
     var aliasModel = callModel.Invoke(null, [alias, profile]);
-    if (originalModel is null || !originalModel.Equals(aliasModel))
+    if (originalModel is not true || aliasModel is not true)
         throw new InvalidOperationException("Primitive helper must share its Math model: " + alias.FullName);
     var values = new ulong[] { 0, 1, 2, 127, 128, 255, 32767, 32768, 65535, int.MaxValue, 1UL << 31, uint.MaxValue, long.MaxValue, 1UL << 63, ulong.MaxValue }
         .Select(x => Value(type, x)).Distinct().ToArray();
@@ -266,21 +267,36 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
         throw new InvalidOperationException("Incorrect runtime rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
-// The same universal specification must reject a maximum implementation.
-var contract = At("Examples/Proofs/IntegerMinimum.lean");
-verification.Verify(assembly, "Examples", "IntegerMath::MinInt64(long,long)", contract, Path.Combine(root, "UniversalMin"));
-var wrongOutput = Path.Combine(root, "WrongMin");
-var rejected = false;
-try
-{
-    verification.Verify(assembly, "Examples", "IntegerMath::WrongMin(long,long)", contract, wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    rejected = true;
-}
-if (!rejected || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Maximum implementation accepted as minimum");
+// Both compiled entries return normally at the signed witness.
+long MinimumResult(string method) => (long)runtime.GetMethod(method)!.Invoke(null, [-1L, 1L])!;
+if (MinimumResult("MinInt64") != -1 || MinimumResult("WrongMin") != 1)
+    throw new InvalidOperationException("The compiled entries disagree with the signed minimum witness.");
 
-Console.WriteLine($"PASS {cases} Math/primitive comparisons, universal minimum and incorrect implementation rejection");
+verification.VerifyContractVariant(assembly, "Examples", "IntegerMath::MinInt64(long,long)",
+    Path.Combine(root, "UniversalMin"), assembly, "IntegerMath::WrongMin(long,long)", Path.Combine(root, "WrongMin"),
+    """
+    /-- The minimum of two signed Int64 values preserves the caller's memory. -/
+    def signedMinimum : MethodContract (W64 × W64) W64 where
+      args pair := [.scalar (.i64 pair.1), .scalar (.i64 pair.2)]
+      results value := [.scalar (.i64 value)]
+      pre _ _ := True
+      footprint _ := []
+      post pair before after value :=
+        after = before ∧ value = BitVec.ofInt 64 (min pair.1.toInt pair.2.toInt)
+    """, """
+    theorem correctness : signedMinimum.Holds Extracted.program 0 := by
+      rintro ⟨left, right⟩ memory -
+      apply MethodContract.Holds.intro (c := signedMinimum) (input := (left, right)) memory
+        (BitVec.ofInt 64 (min left.toInt right.toInt)) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      exact ⟨8, rfl⟩
+    """, """
+    /-- WrongMin returns 1 when the signed minimum is -1. -/
+    theorem correctness : signedMinimum.Refuted Extracted.program 0 := by
+      apply MethodContract.Refuted.of_return (c := signedMinimum) (input := (-1, 1))
+        (initial := Memory.empty) (fuel := 8) (values := [.scalar (.i64 1)]) trivial rfl
+      rintro ⟨_, value, encoded, _, rfl⟩
+      exact (by decide : [Value.scalar (.i64 1)] ≠ [.scalar (.i64 (-1))]) encoded
+    """, example: At("Examples/Proofs/IntegerMinimum.lean"));
+
+Console.WriteLine($"PASS {cases} Math/primitive comparisons, universal signed minimum and verified maximum counterexample");
 Run(["dotnet", "run", "--file", "Tests/WideProduct.cs"], streamOutput: true, progress: "BigMul checked output tests");

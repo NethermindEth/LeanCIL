@@ -103,7 +103,7 @@ internal static class NativeOperands
         if (result is RequiredModifierType { ModifierType.FullName:
             "System.Runtime.InteropServices.InAttribute", ElementType: ByReferenceType })
         {
-            if (RuntimeModels.CallModel(method, profile) is not null &&
+            if (RuntimeModels.CallModel(method, profile) &&
                 method.Name is "get_Item" or "GetPinnableReference" &&
                 method.DeclaringType is GenericInstanceType
                     { ElementType.FullName: "System.Span`1" or "System.ReadOnlySpan`1" })

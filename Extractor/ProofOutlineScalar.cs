@@ -44,16 +44,16 @@ internal static partial class ProofOutline
     /// backward jump; null when it does neither, has another operation or splits into too many paths.</summary>
     static ScalarStep? ScalarPaths(Specification spec, Method emitted)
     {
-        var ops = emitted.Operations;
+        var outline = emitted;
         var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
         if (spec.Parameters.Any(parameter => parameter.Shape != ParameterShape.Scalar)) return null;
         var paths = 0;
         var decided = false;
         ScalarStep? Walk(int pc, ImmutableStack stack)
         {
-            for (; pc < ops.Length; pc++)
+            for (; pc < outline.InstructionCount; pc++)
             {
-                var op = ops[pc];
+                var op = outline.StackCodeAt(pc);
                 if (emitted.ArgumentAt(pc) is int argument && MethodArguments.Plain(spec.Method, argument))
                 {
                     var parameter = spec.Parameters[argument];
@@ -62,15 +62,14 @@ internal static partial class ProofOutline
                 else if (emitted.ConstantAt(pc) is { } constant)
                     stack = stack.Push(new(constant.Numeral ? $"{constant.Value}" : $"({constant.Value})",
                         constant.Width == 32 ? 32 : 64, constant.Numeral ? constant.Value : null));
-                else if (op is StackOperation { IsArithmetic: true } arithmetic)
+                else if (ArithmeticSymbol(op) is { } arithmeticSymbol)
                 {
                     if (stack.Count < 2) return null;
                     stack = stack.Pop(out var right).Pop(out var left);
-                    var symbol = arithmetic.Symbol;
                     stack = stack.Push(new(left.Term is null || right.Term is null ? null
-                        : $"{Operand(left.Term)} {symbol} {Operand(right.Term)}", right.Bits));
+                        : $"{Operand(left.Term)} {arithmeticSymbol} {Operand(right.Term)}", right.Bits));
                 }
-                else if (op is StackOperation stackOp && CheckedWord(stackOp.Kind) is { } checkedWord)
+                else if (op is Code stackOp && CheckedWord(stackOp) is { } checkedWord)
                 {
                     if (stack.Count < 2) return null;
                     stack = stack.Pop(out var right).Pop(out var left);
@@ -111,17 +110,17 @@ internal static partial class ProofOutline
                         return null;
                     return new ScalarSplit(condition, pc, holds, holdsStep, fails, failsStep);
                 }
-                else if (op is StackOperation { Kind: Code.Ret } && plainReturn)
+                else if (op is Code.Ret && plainReturn)
                     return ++paths > MaxScalarPaths ? null : new ScalarReturn();
-                else if (op.IsNop) { }
+                else if (op == Code.Nop) { }
                 else if (emitted.PureAt(pc, plainReturn))
                 {
                     // Conversions and bit counts compute a word the outline does not name; it may be returned.
                     if (stack.Count == 0) return null;
                     stack = stack.Pop(out var word).Push(new(null,
-                        op is StackOperation { Kind: Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I }
+                        op is Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I
                             ? 64
-                        : op is StackOperation { Kind: Code.Conv_U4 or Code.Conv_I4 } ||
+                        : op is Code.Conv_U4 or Code.Conv_I4 ||
                             emitted.BitCountWidthAt(pc) == 32 ? 32
                         : word.Bits));
                 }

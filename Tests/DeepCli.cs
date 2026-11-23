@@ -327,10 +327,11 @@ void CheckDispatchCatalogs()
             public abstract class Shape { public abstract int Sides(); }
             public class Triangle : Shape, IShapeTag, IColour {
                 public override int Sides() => 3;
+                public int ReadScale(ref int scale) => scale;
                 int IShapeTag.Tag() => 1;
                 int IShapeTag.OtherTag() => 2;
             }
-            public sealed class Equilateral : Triangle { }
+            public static class Polygons { public sealed class Equilateral : Triangle { } }
             public abstract class Solid { public abstract int Faces(); }
             public sealed class Cube : Solid, IColour { public override int Faces() => {{(changed ? 5 : 6)}}; }
             public sealed class TagOnly : IShapeTag { public int Tag() => 1; public int OtherTag() => 2; }
@@ -340,10 +341,17 @@ void CheckDispatchCatalogs()
             }
             """);
         var pins = Path.Combine(fixture.Root, build + ".sha256");
-        File.WriteAllText(pins, Sha(assembly) + "  " + assembly + Environment.NewLine);
         var output = fixture.Artifact(build + "Total");
         const string selector = "Geometry.Reader::Total(Geometry.Shape,Geometry.Solid)";
-        Run([.. cli, "extract", assembly, selector, output]);
+        var neighbour = changed ? null : fixture.Build("LocalParent", "DeepCli.Neighbour", """
+            namespace Neighbours;
+            public class LocalBase { }
+            public sealed class LocalChild : LocalBase { }
+            """);
+        string[] images = neighbour is null ? [assembly] : [assembly, neighbour];
+        File.WriteAllLines(pins, images.Select(path => Sha(path) + "  " + path));
+        string[] references = neighbour is null ? [] : MultiAssemblyFixture.Reference(neighbour);
+        Run([.. cli, "extract", assembly, selector, output, .. references]);
         var proof = Path.Combine(output, "Proof.lean");
         var template = File.ReadAllText(At("Tests/StrictBinding/DispatchTotal.lean.in"));
         var claim = changed ? "Refuted" : "Holds";
@@ -367,9 +375,16 @@ void CheckDispatchCatalogs()
         if (fact.GetProperty("status").GetString() != "reconfirmed" ||
             fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
             throw new InvalidOperationException("Incorrect dispatch binding report: " + fact);
+        var derived = fixture.Build("ExternalParent", "DeepCli.Neighbour", """
+            namespace Neighbours;
+            public sealed class NewShape : Geometry.Shape { public override int Sides() => 7; }
+            """, references: """<ProjectReference Include="../SixFaces/SixFaces.csproj" />""");
+        fixture.RejectedExtract("foreign descendant", "Neighbours.NewShape overrides from another assembly",
+            assembly, selector, MultiAssemblyFixture.Reference(derived));
         ReplayImageCases(output, assembly, "DispatchImage", At("Tests/StrictBinding/DispatchOverrideCases.lean"),
-            ["StrictBinding.DispatchCatalogs", "Tests.StrictBinding.Mutation"]);
-        Console.WriteLine("PASS physical MethodImpl rows reject missing slots, crossed owners and crossed declarations");
+            ["StrictBinding.DispatchCatalogs", "Tests.StrictBinding.Mutation"],
+            ("NeighbourImage", neighbour!), ("DerivedImage", derived));
+        Console.WriteLine("PASS physical dispatch binds nested owners, byrefs and other pinned images");
     }
 }
 
@@ -684,16 +699,19 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
     Console.WriteLine("PASS the pinned FieldRVA rejects a matching prefix, changed bytes and a missing RVA marker");
 }
 
-void ReplayImageCases(string directory, string assembly, string imageModule, string casesFile, string[] dependencies)
+void ReplayImageCases(string directory, string assembly, string imageModule, string casesFile, string[] dependencies,
+    params (string Module, string Assembly)[] otherImages)
 {
     Run(["lake", "build", .. dependencies], preparation.CheckoutPackage());
     var leanPath = directory + Path.PathSeparator + preparation.CheckoutLeanPath();
-    File.WriteAllText(Path.Combine(directory, imageModule + ".lean"),
-        $"import StrictBinding.Image\nimport CIL.Extraction.FixedDigits\nnamespace {imageModule}\n" +
-        BindingImage.Definitions(File.ReadAllBytes(assembly)) + $"\nend {imageModule}\n");
+    (string Module, string Assembly)[] images = [(imageModule, assembly), .. otherImages];
+    foreach (var (module, path) in images)
+        File.WriteAllText(Path.Combine(directory, module + ".lean"),
+            $"import StrictBinding.Image\nimport CIL.Extraction.FixedDigits\nnamespace {module}\n" +
+            BindingImage.Definitions(File.ReadAllBytes(path)) + $"\nend {module}\n");
     var cases = Path.GetFileNameWithoutExtension(casesFile);
     File.Copy(casesFile, Path.Combine(directory, cases + ".lean"), true);
-    string[] modules = ["Extracted", imageModule, cases];
+    string[] modules = ["Extracted", .. images.Select(image => image.Module), cases];
     foreach (var module in modules)
     {
         var log = Run([preparation.LeanExecutable, "--root=" + directory, "-o",

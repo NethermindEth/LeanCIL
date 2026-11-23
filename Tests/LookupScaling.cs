@@ -2020,9 +2020,7 @@ void ImportLinkCosts()
               { method, declared := method.signature 0, target := .external (toString i),
                 typeArguments := [], parameterCount := 0, returnsValue := false }
             ({ offset := i, opcode := 0x28, operand := .call site } : RawInstruction)
-          let names := bound.calls.foldl (fun acc (_, entry) => acc.insert entry.identity entry)
-            ({} : Std.TreeMap String ImportSlot)
-          bound.calls.length == count && bound.checkUses names sites
+          bound.calls.length == count && bound.checkUses bound.byIdentity sites
         {{string.Join("\n", samples)}}
         """);
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());

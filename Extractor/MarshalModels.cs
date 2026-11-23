@@ -5,16 +5,16 @@ namespace Nethermind.LeanCIL;
 // The open signature fixes each overload. Closed element types supply its storage widths.
 internal static class MarshalModels
 {
-    internal static Operation? CallModel(MethodReference reference, string architecture)
+    internal static bool CallModel(MethodReference reference, string architecture)
     {
         if (reference is not GenericInstanceMethod method || reference.HasThis || reference.ExplicitThis ||
             reference.DeclaringType is TypeSpecification ||
             reference.DeclaringType.FullName != "System.Runtime.InteropServices.MemoryMarshal" ||
             !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
-            method.ElementMethod.CallingConvention != MethodCallingConvention.Generic) return null;
+            method.ElementMethod.CallingConvention != MethodCallingConvention.Generic) return false;
         var arity = reference.Name == "Cast" ? 2 : 1;
         if (method.GenericArguments.Count != arity || method.ElementMethod.GenericParameters.Count != arity ||
-            method.Parameters.Count is < 1 or > 2) return null;
+            method.Parameters.Count is < 1 or > 2) return false;
 
         var source = method.ElementMethod.GenericParameters[0];
         var input = method.Parameters[0].ParameterType;
@@ -41,24 +41,24 @@ internal static class MarshalModels
                 output.MetadataType == MetadataType.Boolean,
             _ => false
         };
-        if (!matches) return null;
+        if (!matches) return false;
         RuntimeModels.ValidateSignature(reference, architecture);
         var element = method.GenericArguments[0];
-        if (Spans.ElementWidth(element, architecture) is null) return null;
+        if (Spans.ElementWidth(element, architecture) is null) return false;
         switch (method.Name)
         {
             case "GetReference":
             case "GetArrayDataReference":
             case "CreateSpan":
             case "CreateReadOnlySpan":
-                return Unoutlined.Site;
+                return true;
             case "AsBytes":
             case "Cast":
                 var target = arity == 1 ? 1 : Spans.ElementWidth(method.GenericArguments[1], architecture);
-                return target is null ? null : Unoutlined.Site;
+                return target is not null;
             default:
                 MemoryTransfers.ValidateElement(element, method.Module, architecture);
-                return Unoutlined.Site;
+                return true;
         }
     }
 

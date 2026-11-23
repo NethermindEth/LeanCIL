@@ -1,40 +1,4 @@
-using Mono.Cecil.Cil;
-
 namespace Nethermind.LeanCIL;
-
-/// <summary>
-/// Instruction information used by extraction and proof outlines.
-/// The compiled method's instructions come from Lean's decoder.
-/// </summary>
-internal abstract record Operation
-{
-    /// <summary>The operation does nothing: a prefix or an operand the translator folded away.</summary>
-    internal bool IsNop => this is StackOperation { Kind: Code.Nop };
-}
-
-/// <summary>A site without a separate outline descriptor. Outlines and diagnostics can inspect its CIL instruction.</summary>
-internal sealed record Unoutlined : Operation
-{
-    internal static readonly Unoutlined Site = new();
-}
-
-/// <summary>The CIL stack opcode used by the proof outline for this site.</summary>
-internal sealed record StackOperation(Code Kind) : Operation
-{
-    /// <summary>The operation is word addition, subtraction, multiplication or a bitwise combination.</summary>
-    internal bool IsArithmetic => Kind is Code.Add or Code.Sub or Code.Mul or
-        Code.And or Code.Or or Code.Xor;
-
-    /// <summary>The infix operator that Lean's bit-vector arithmetic writes for an arithmetic operation.</summary>
-    internal string Symbol => Kind switch
-    {
-        Code.Add => "+", Code.Sub => "-", Code.Mul => "*", Code.And => "&&&",
-        Code.Or => "|||", Code.Xor => "^^^",
-        _ => throw new InvalidOperationException("Not an arithmetic operation: " + Kind)
-    };
-
-    internal static readonly StackOperation Nop = new(Code.Nop);
-}
 
 /// <summary>The width and signedness a narrow integer is truncated to when it is read.</summary>
 internal enum Narrowing { Signed8, Unsigned8, Signed16, Unsigned16 }

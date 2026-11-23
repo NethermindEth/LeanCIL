@@ -87,6 +87,27 @@ checking it once and using it twice costs fewer kernel heartbeats than reducing 
 invocations. The proof that uses the contract has more proof objects. The command-level
 measurements use the proof-cost frontend described below. Elapsed times are from one run.
 
+For a matched comparison, .NET 10 and .NET 11 compiled the two equality methods alone in
+a Release assembly. Each method has the same nine bytes in both builds, including its tiny
+header, call token and return. Neither method has locals. The baseline uses the CIL.Op
+interpreter at `27953edb`. Both models check identical contract and high-bit consumer sources
+at each width. The resolved-call proof uses the canonical extraction's `method0_model2`
+theorem at the call between the two argument loads and the Boolean return.
+
+| Width | Proof | Baseline kernel heartbeats | Canonical kernel heartbeats |
+| ---: | --- | ---: | ---: |
+| 256 | Universal contract by reduction | 69,974 | 768,551 |
+| 512 | Universal contract by reduction | 70,058 | 978,335 |
+| 256 | Direct high-bit consumer | 68,879 | 767,246 |
+| 512 | Direct high-bit consumer | 68,963 | 977,030 |
+| 256 and 512 | Consumer using the contract | 6,013 | 6,013 |
+
+Using the checked call resolution costs 186,226 kernel heartbeats for the 256-bit universal
+proof and 186,310 for the 512-bit proof. Both proof terms have 773 objects, compared with
+312 for direct reduction. The canonical elaboration times in this run were 118 and 129 ms
+with the call theorem, compared with 350 and 414 ms by reduction. The production equality
+fixtures use the call theorem and check a compiled second-load substitution at each width.
+
 ## Reusing an in-place vector swap contract
 
 On Lean 4.35.0, the `arm64-advsimd` extraction of `DivisionIntrinsics.SwapHalves` exchanges

@@ -161,7 +161,7 @@ bool HasPinnedModel(MethodReference method, object? profile)
     identityImage.Invoke(null, [method.DeclaringType]);
     try
     {
-        if (callModel.Invoke(null, [method, profile]) is not null) return true;
+        if (callModel.Invoke(null, [method, profile]) is true) return true;
     }
     catch (TargetInvocationException exception) when (exception.InnerException is
         InvalidDataException or NotSupportedException or AssemblyResolutionException)
@@ -186,7 +186,7 @@ void CheckConventions(MethodReference method, object? profile)
         member.ExplicitThis = (header & 0x40) != 0;
         member.HasThis = (header & 0x20) != 0;
         member.CallingConvention = (MethodCallingConvention)(header & 0x1f);
-        if (callModel.Invoke(null, [method, profile]) is not null)
+        if (callModel.Invoke(null, [method, profile]) is true)
             acceptedConventions.Add($"{method.Name} 0x{header:X2}");
     }
     // Keep the generic flag while checking EXPLICITTHIS on a genuine generic MethodSpec.
@@ -195,7 +195,7 @@ void CheckConventions(MethodReference method, object? profile)
     if (method is GenericInstanceMethod)
     {
         member.ExplicitThis = true;
-        if (callModel.Invoke(null, [method, profile]) is not null)
+        if (callModel.Invoke(null, [method, profile]) is true)
             acceptedConventions.Add($"{method.Name} ExplicitThis");
     }
     member.ExplicitThis = false;

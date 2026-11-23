@@ -305,9 +305,9 @@ internal static partial class ProofOutline
         bool Walk(int start, List<Item> stack, Dictionary<int, Item> locals, HashSet<int> visited,
             Func<int, string> location)
         {
-            for (var pc = start; pc < emitted.Operations.Length; pc++)
+            for (var pc = start; pc < emitted.InstructionCount; pc++)
             {
-                var op = emitted.Operations[pc];
+                var op = emitted.StackCodeAt(pc);
                 var classField = views.FieldAt(methodIndex, pc);
                 Item? Pop()
                 {
@@ -360,7 +360,7 @@ internal static partial class ProofOutline
                     if (item is Values loaded) Steps.Add(new ArrayUse(loaded.Array, stores));
                     stack.Add(item);
                 }
-                else if (op is Unoutlined && InstructionOperands.StoreSlot(spec.Method,
+                else if (op is null && InstructionOperands.StoreSlot(spec.Method,
                     spec.Method.Body.Instructions[pc], homes) is int storedSlot)
                 {
                     if (Pop() is not { } item) return Stop("a local store of an empty stack");
@@ -374,7 +374,7 @@ internal static partial class ProofOutline
                     }
                     locals[storedSlot] = item;
                 }
-                else if (op is Unoutlined && InstructionOperands.LoadSlot(spec.Method,
+                else if (op is null && InstructionOperands.LoadSlot(spec.Method,
                     spec.Method.Body.Instructions[pc], homes) is int loadedSlot)
                 {
                     if (!locals.TryGetValue(loadedSlot, out var item))
@@ -384,13 +384,13 @@ internal static partial class ProofOutline
                         Steps.Add(new LocalAccess(loadedSlot, value, word.Width, stores, false));
                     stack.Add(item);
                 }
-                else if (op is StackOperation { Kind: Code.Ldnull }) stack.Add(new Null());
-                else if (op is StackOperation { Kind: Code.Dup })
+                else if (op is Code.Ldnull) stack.Add(new Null());
+                else if (op is Code.Dup)
                 {
                     if (stack.Count == 0) return Stop("a duplicate of an empty stack");
                     stack.Add(stack[^1]);
                 }
-                else if (op is StackOperation { Kind: Code.Pop })
+                else if (op is Code.Pop)
                 {
                     if (Pop() is null) return Stop("a pop of an empty stack");
                 }
@@ -415,14 +415,14 @@ internal static partial class ProofOutline
                     if (Compared(left, right) is not { } condition) return Stop(Uncompared, showInstruction: true);
                     return Branch(condition, equalityTest.Kind == ILOpCode.Beq, equalityTest.Target);
                 }
-                else if (op is StackOperation { Kind: Code.Ceq or Code.Cgt_Un } comparison
+                else if (op is Code.Ceq or Code.Cgt_Un
                     && stack.Count > 1 &&
                     (stack[^1] is Opaque || stack[^2] is Opaque))
                 {
                     var right = Pop();
                     var left = Pop();
                     // `cgt.un` on references is defined only against null.
-                    if (Compared(left, right) is null || comparison.Kind == Code.Cgt_Un && right is not Null)
+                    if (Compared(left, right) is null || op == Code.Cgt_Un && right is not Null)
                         return Stop(Uncompared, showInstruction: true);
                     stack.Add(new Word(null, 4));
                 }
@@ -450,39 +450,37 @@ internal static partial class ProofOutline
                 else if (emitted.ConstantAt(pc) is { Width: 32 or 64 } constant)
                     stack.Add(new Word(constant.Numeral ? $"{constant.Value}" : $"({constant.Value})",
                         constant.Width == 64 ? 8 : 4, constant.Value, constant.Numeral));
-                else if (op is StackOperation { IsArithmetic: true } arithmetic)
+                else if (ArithmeticSymbol(op) is { } symbol)
                 {
                     if (Pop() is not Word right || Pop() is not Word left || left.Width != right.Width)
                         return Stop("arithmetic on a value the outline cannot name");
-                    var symbol = arithmetic.Symbol;
                     stack.Add(new Word(left.Term is null || right.Term is null ? null
                         : $"({left.Term} {symbol} {right.Term})", left.Width));
                 }
-                else if (op is StackOperation { Kind: Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I }
-                    widening)
+                else if (op is Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I)
                 {
                     if (Pop() is not Word { Width: 4 } word)
                         return Stop("a widening of a value the outline cannot name");
-                    var widen = widening.Kind == Code.Conv_U8 ? "setWidth" : "signExtend";
+                    var widen = op == Code.Conv_U8 ? "setWidth" : "signExtend";
                     stack.Add(new Word(word.Term is null ? null : $"({word.Term}.{widen} 64)", 8));
                 }
                 // Values the steps compute but the outline does not name: they may be returned, not stored.
-                else if (op is StackOperation { Kind: Code.Shl or Code.Shr or Code.Shr_Un
+                else if (op is Code.Shl or Code.Shr or Code.Shr_Un
                     or Code.Ceq or Code.Cgt or
-                    Code.Cgt_Un or Code.Clt or Code.Clt_Un } unnamed)
+                    Code.Cgt_Un or Code.Clt or Code.Clt_Un)
                 {
                     if (Pop() is not Word || Pop() is not Word left)
                         return Stop(" on a value that is not a word", showInstruction: true);
-                    stack.Add(new Word(null, unnamed.Kind is Code.Ceq or Code.Cgt or Code.Cgt_Un
+                    stack.Add(new Word(null, op is Code.Ceq or Code.Cgt or Code.Cgt_Un
                         or Code.Clt or Code.Clt_Un
                         ? 4 : left.Width));
                 }
-                else if (op is StackOperation { Kind: Code.Neg or Code.Conv_I1 or Code.Conv_I2
+                else if (op is Code.Neg or Code.Conv_I1 or Code.Conv_I2
                     or Code.Conv_I4 or
-                    Code.Conv_U1 or Code.Conv_U2 or Code.Conv_U4 } unary)
+                    Code.Conv_U1 or Code.Conv_U2 or Code.Conv_U4)
                 {
                     if (Pop() is not Word word) return Stop(" on a value that is not a word", showInstruction: true);
-                    stack.Add(new Word(null, unary.Kind == Code.Neg ? word.Width : 4));
+                    stack.Add(new Word(null, op == Code.Neg ? word.Width : 4));
                 }
                 else if (classField is { Store: false, Kind: ClassViews.FieldKind.Word } load)
                 {
@@ -629,7 +627,7 @@ internal static partial class ProofOutline
                         elementLoad));
                     stack.Add(new Word($"{array.ElementsName}[({term} : W32).toNat]", array.Width));
                 }
-                else if (op is StackOperation { Kind: Code.Ldlen })
+                else if (op is Code.Ldlen)
                 {
                     switch (Pop())
                     {
@@ -707,7 +705,7 @@ internal static partial class ProofOutline
                         stack.Add(new Word(null, callee.Spec.Result is { Width: 8 } ? 8 : 4));
                 }
                 // An array of a runtime class, such as `string[]`, is not stepped.
-                else if (op is Unoutlined && spec.Method.Body.Instructions[pc] is
+                else if (op is null && spec.Method.Body.Instructions[pc] is
                     { OpCode.Code: Code.Newarr, Operand: TypeReference element } && ReferenceArrays.Element(element) &&
                     LayoutEvidence.Scope(element) is var elementScope && elementScope != TypeTests.RuntimeScope)
                 {
@@ -722,7 +720,7 @@ internal static partial class ProofOutline
                     stores++;
                     stack.Add(new ArrayArgument(Fresh.Array));
                 }
-                else if (op is StackOperation { Kind: Code.Ldelem_Ref })
+                else if (op is Code.Ldelem_Ref)
                 {
                     if (Pop() is not Word index || Pop() is not ArrayArgument array || Index(index) is not { } at)
                         return Stop("`ldelem.ref` of an array or index the outline cannot name");
@@ -758,7 +756,7 @@ internal static partial class ProofOutline
                         Formed: held.Formed, Slot: slot, LiteralIndex: at.Literal is not null));
                     stack.Add(held);
                 }
-                else if (op is StackOperation { Kind: Code.Stelem_Ref })
+                else if (op is Code.Stelem_Ref)
                 {
                     var value = Pop();
                     if (Pop() is not Word index || Pop() is not ArrayArgument array || Index(index) is not { } at)
@@ -785,13 +783,13 @@ internal static partial class ProofOutline
                     Steps.Add(stored);
                     stores++;
                 }
-                else if (op.IsNop) { }
-                else if (throws && !linear && op is StackOperation { Kind: Code.Throw })
+                else if (op == Code.Nop) { }
+                else if (throws && !linear && op is Code.Throw)
                 {
                     Steps.Add(new Thrown(location(pc)));
                     return true;
                 }
-                else if (op is StackOperation { Kind: Code.Ret })
+                else if (op is Code.Ret)
                 {
                     if (spec.Result is not null)
                     {

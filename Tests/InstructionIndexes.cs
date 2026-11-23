@@ -67,14 +67,14 @@ callee.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
 var call = Instruction.Create(OpCodes.Call, callee);
 caller.Body.Instructions.Add(call);
 caller.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
-var translate = extractor.GetType("Nethermind.LeanCIL.InstructionTranslation", true)!
-    .GetMethod("Translate", BindingFlags.Static | BindingFlags.NonPublic)!;
+var validate = extractor.GetType("Nethermind.LeanCIL.OutlineInstructions", true)!
+    .GetMethod("Validate", BindingFlags.Static | BindingFlags.NonPublic)!;
 var methods = new Dictionary<MethodDefinition, int> { [caller] = 0, [callee] = 1 };
 var sitesType = extractor.GetType("Nethermind.LeanCIL.ResolvedCallSites", true)!;
 var sites = Activator.CreateInstance(sitesType)!;
 sitesType.GetMethod("Add", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(sites, [call, callee]);
-object Operation(Instruction instruction) => translate.Invoke(null,
-    [instruction, caller, methods, Index(caller), sites, null, null, null, null, null])!;
+void Validate(Instruction instruction) => validate.Invoke(null,
+    [instruction, caller, methods, Index(caller), sites, null, null, null, null, null]);
 List<(int Pc, string Link)> Links(SortedSet<int> targets) =>
     (List<(int, string)>)sitesType.GetMethod("Links", BindingFlags.Instance | BindingFlags.NonPublic)!
         .Invoke(sites, [caller, caller.Body.Instructions.ToHashSet(), methods, null, null, targets])!;
@@ -82,8 +82,8 @@ List<(int Pc, string Link)> Links(SortedSet<int> targets) =>
 // The proof outline and the template link use the same bound target at the call site.
 object? BoundCall(Instruction site) => sitesType.GetMethod("OutlineTarget", BindingFlags.Instance |
     BindingFlags.NonPublic)!.Invoke(sites, [site, methods, null]);
-if (Operation(call).GetType() != Model("Unoutlined") ||
-    BoundCall(call) is not System.Runtime.CompilerServices.ITuple direct ||
+Validate(call);
+if (BoundCall(call) is not System.Runtime.CompilerServices.ITuple direct ||
     !Equals(direct[0], Named("CallKind", "Static")) || !Equals(direct[1], 1) || !Equals(direct[2], 0))
     throw new Exception("Incorrect direct call binding");
 var linked = new SortedSet<int>();
@@ -91,15 +91,15 @@ if (!Links(linked).SequenceEqual([(0, ".direct 1")]) || !linked.SetEquals([1]))
     throw new Exception("Incorrect call link or target");
 caller.Body.GetILProcessor().InsertBefore(call, Instruction.Create(OpCodes.Tail));
 linked.Clear();
-if (Operation(call).GetType() != Model("Unoutlined") ||
-    BoundCall(call) is not System.Runtime.CompilerServices.ITuple tail ||
+Validate(call);
+if (BoundCall(call) is not System.Runtime.CompilerServices.ITuple tail ||
     !Equals(tail[0], Named("CallKind", "Tail")) || !Equals(tail[1], 1) ||
     !Links(linked).SequenceEqual([(1, ".direct 1")]) || !linked.SetEquals([1]))
     throw new Exception("The prefixed call lost its target or its link at the call instruction");
 methods.Remove(callee);
 try
 {
-    Operation(call);
+    Validate(call);
     throw new Exception("Unresolved method was assigned a call index");
 }
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
@@ -111,8 +111,7 @@ var choose = Instruction.Create(OpCodes.Switch, [destination, destination]);
 caller.Body.Instructions.Add(Instruction.Create(OpCodes.Ldc_I4_0));
 caller.Body.Instructions.Add(choose);
 caller.Body.Instructions.Add(destination);
-if (Operation(choose).GetType() != Model("Unoutlined"))
-    throw new Exception("The switch has a redundant outline descriptor");
+Validate(choose);
 linked.Clear();
 if (Links(linked).Count != 0 || linked.Count != 0) throw new Exception("A branch carries a call link");
 Console.WriteLine("PASS call indexes reject missing callees and a switch requires no outline descriptor or call link");
@@ -259,14 +258,14 @@ var addressArgument = Instruction.Create(OpCodes.Ldarga, argumentMethod.Paramete
 foreach (var instruction in new[] { Instruction.Create(OpCodes.Ldc_I4_0), storeArgument, loadArgument,
     Instruction.Create(OpCodes.Pop), addressArgument, Instruction.Create(OpCodes.Pop), Instruction.Create(OpCodes.Ret) })
     argumentMethod.Body.Instructions.Add(instruction);
-object TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => translate.Invoke(null,
+void ValidateArgument(Instruction instruction, Dictionary<int, int> positions) => validate.Invoke(null,
     [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
-        Index(argumentMethod), sites, null, null, positions, null, null])!;
-if (TranslateArgument(storeArgument, homePositions).GetType() != Model("Unoutlined") ||
-    storeSlot(argumentMethod, storeArgument, homePositions) != 3 ||
-    TranslateArgument(loadArgument, homePositions).GetType() != Model("Unoutlined") ||
+        Index(argumentMethod), sites, null, null, positions, null, null]);
+ValidateArgument(storeArgument, homePositions);
+ValidateArgument(loadArgument, homePositions);
+ValidateArgument(addressArgument, homePositions);
+if (storeSlot(argumentMethod, storeArgument, homePositions) != 3 ||
     loadSlot(argumentMethod, loadArgument, homePositions) != 3 ||
-    TranslateArgument(addressArgument, homePositions).GetType() != Model("Unoutlined") ||
     addressSlot(argumentMethod, addressArgument, homePositions) != 3)
     throw new Exception("A homed argument's store, load or address used the wrong frame slot");
 var shortStore = Instruction.Create(OpCodes.Starg_S, argumentMethod.Parameters[1]);
@@ -299,18 +298,19 @@ if (addressSlot(argumentMethod, Instruction.Create(OpCodes.Ldarga_S, argumentMet
     throw new Exception("An argument load and a short address did not retain their distinct opcodes");
 var argumentIndex = Model("MethodArguments").GetMethod("LoadIndex", BindingFlags.Static | BindingFlags.NonPublic)!
     .CreateDelegate<Func<MethodDefinition, Instruction, int?>>();
-if (TranslateArgument(loadArgument, []).GetType() != Model("Unoutlined") || argumentIndex(argumentMethod, loadArgument) != 1)
+ValidateArgument(loadArgument, []);
+if (argumentIndex(argumentMethod, loadArgument) != 1)
     throw new Exception("Unhomed loads no longer use the original argument");
 try
 {
-    TranslateArgument(storeArgument, []);
+    ValidateArgument(storeArgument, []);
     throw new Exception("A store without a home was admitted");
 }
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
     rejected.Message == "Missing parameter storage") { }
 try
 {
-    TranslateArgument(addressArgument, []);
+    ValidateArgument(addressArgument, []);
     throw new Exception("An address without a home was admitted");
 }
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
@@ -325,17 +325,10 @@ object Make(string name, params object?[] arguments) => Activator.CreateInstance
 object Named(string type, string value) => Enum.Parse(Model(type), value);
 var bodyType = extractor.GetType("Nethermind.LeanCIL.ProofOutline", true)!.GetNestedType("Body",
     BindingFlags.NonPublic)!;
-Array Operations(params object[] operations)
-{
-    var array = Array.CreateInstance(Model("Operation"), operations.Length);
-    for (var at = 0; at < operations.Length; at++) array.SetValue(operations[at], at);
-    return array;
-}
 var scalarProfile = Model("FeatureProfile").GetMethod("Select", Declared)!.Invoke(null, ["scalar"]);
-object OutlineMethod(MethodDefinition source, HashSet<Instruction> reachable, Dictionary<int, int> homes,
-    params object[] operations) =>
-    Make("ProofOutline+Method", null, Operations(operations), source, reachable, homes, scalarProfile, context,
-        Index(source), sites, methods, null);
+object OutlineMethod(MethodDefinition source, HashSet<Instruction> reachable, Dictionary<int, int> homes) =>
+    Make("ProofOutline+Method", null, source, reachable, homes, scalarProfile, context,
+        Index(source), sites, methods, null, null);
 int Loops(object body) => ((System.Collections.IList)bodyType.GetMethod("Loops", Declared)!.Invoke(body, null)!).Count;
 // An argument read is pure only when its declared type is no narrow integer: (int, byte) below.
 var mixedArguments = new MethodDefinition("Mixed", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
@@ -351,8 +344,7 @@ mixedCode.Add(Instruction.Create(OpCodes.Ret));
 mixedCode.Add(Instruction.Create(OpCodes.Call, mixedArguments));
 var mixedLive = mixedCode.ToHashSet();
 var mixedHomes = new Dictionary<int, int>();
-var mixed = OutlineMethod(mixedArguments, mixedLive, mixedHomes, Make("Unoutlined"), Make("Unoutlined"),
-    Make("StackOperation", Code.Ret), Make("Unoutlined"));
+var mixed = OutlineMethod(mixedArguments, mixedLive, mixedHomes);
 bool Pure(int pc, bool plainReturn = true) =>
     (bool)mixed.GetType().GetMethod("PureAt", Declared)!.Invoke(mixed, [pc, plainReturn])!;
 foreach (var encoding in new[] { OpCodes.Blt_S, OpCodes.Blt })
@@ -364,7 +356,7 @@ foreach (var encoding in new[] { OpCodes.Blt_S, OpCodes.Blt })
         caller.Body.Instructions.Add(site);
     var code = caller.Body.Instructions;
     var liveBranches = code.ToHashSet();
-    var loopMethod = OutlineMethod(caller, liveBranches, [], code.Select(Operation).ToArray());
+    var loopMethod = OutlineMethod(caller, liveBranches, []);
     var body = Activator.CreateInstance(bodyType, Declared, null, [loopMethod], null)!;
     if (Loops(body) != 1)
         throw new Exception("A conditional back edge is not found as a loop: " + encoding.Name);
@@ -374,7 +366,7 @@ foreach (var encoding in new[] { OpCodes.Blt_S, OpCodes.Blt })
     if (Branch(2) != (System.Reflection.Metadata.ILOpCode.Blt, 0) || Branch(0) is not null)
         throw new Exception("A short or long branch lost its original target");
     code[2].Operand = code[3];
-    loopMethod = OutlineMethod(caller, liveBranches, [], code.Select(Operation).ToArray());
+    loopMethod = OutlineMethod(caller, liveBranches, []);
     if (Branch(2)?.Target != 3) throw new Exception("The new body index lost the changed CIL target");
     liveBranches.Remove(code[2]);
     if (Branch(2) is not null) throw new Exception("An unreachable branch contributed an outline edge");
@@ -389,7 +381,7 @@ foreach (var (methodName, width) in new (string, int?)[]
     var pc = instructions.IndexOf(site);
     sitesType.GetMethod("AddModel", Declared)!.Invoke(sites, [site]);
     var liveCalls = instructions.ToHashSet();
-    var outline = OutlineMethod(bitMethod, liveCalls, [], instructions.Select(_ => Make("Unoutlined")).ToArray());
+    var outline = OutlineMethod(bitMethod, liveCalls, []);
     int? CountWidth() => (int?)outline.GetType().GetMethod("BitCountWidthAt", Declared)!.Invoke(outline, [pc]);
     if (CountWidth() != width) throw new Exception("Wrong bit-count result width for " + methodName);
     liveCalls.Remove(site);
@@ -404,8 +396,7 @@ var fieldReader = module.GetType("Examples.Counter").Methods.Single(member => me
 var fieldCode = fieldReader.Body.Instructions;
 var fieldSite = fieldCode.Single(site => site.OpCode.Code == Code.Ldfld);
 var live = fieldCode.ToHashSet();
-var extractedReader = OutlineMethod(fieldReader, live, [],
-    fieldCode.Select(_ => Make("Unoutlined")).ToArray());
+var extractedReader = OutlineMethod(fieldReader, live, []);
 var fieldAt = extractedReader.GetType().GetMethod("StructFieldAt", Declared)!;
 object? Shape(Instruction site) => fieldAt.Invoke(extractedReader, [fieldCode.IndexOf(site)]);
 if (!Equals(Shape(fieldSite), (Code.Ldfld, 0, 8, false, false)) || Shape(fieldCode[0]) is not null)
@@ -436,7 +427,6 @@ if (Storage(writeSite, "WriteUnaligned")?.MetadataType != MetadataType.UInt64 ||
     Storage(TransferSite("ReadPointerAggregate"), "ReadUnaligned") is not null)
     throw new Exception("A transfer outline lost its opcode, direction, alignment or scalar type");
 var outlineType = Model("ProofOutline");
-var unoutlined = Model("Unoutlined").GetField("Site", Declared)!.GetValue(null)!;
 var objectSites = new MethodDefinition("ObjectOperands", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
 owner.Methods.Add(objectSites);
 var objectCode = objectSites.Body.Instructions;
@@ -444,7 +434,7 @@ objectCode.Add(Instruction.Create(OpCodes.Sizeof, module.TypeSystem.UInt32));
 objectCode.Add(Instruction.Create(OpCodes.Ldobj, module.TypeSystem.Int16));
 objectCode.Add(Instruction.Create(OpCodes.Stobj, module.TypeSystem.UInt64));
 var objectLive = objectCode.ToHashSet();
-var objectMethod = OutlineMethod(objectSites, objectLive, [], objectCode.Select(_ => unoutlined).ToArray());
+var objectMethod = OutlineMethod(objectSites, objectLive, []);
 (int? Bytes, int? ScalarWidth, bool Signed)? ObjectShape(int pc, Code op) =>
     ((int?, int?, bool)?)objectMethod.GetType().GetMethod("ObjectAt", Declared)!.Invoke(objectMethod, [pc, op]);
 if (ObjectShape(0, Code.Sizeof) != (4, null, false) || ObjectShape(1, Code.Ldobj) != (null, 2, true) ||
@@ -460,7 +450,7 @@ var readsWidth = outlineType.GetNestedType("LoopOutline", BindingFlags.NonPublic
     var method = module.GetType("Examples.UnalignedMemory").Methods.Single(candidate => candidate.Name == name);
     var code = method.Body.Instructions;
     var site = TransferSite(name);
-    return (OutlineMethod(method, code.ToHashSet(), [], code.Select(_ => unoutlined).ToArray()),
+    return (OutlineMethod(method, code.ToHashSet(), []),
         code.IndexOf(site), site);
 }
 bool Reads(string name, int width)
@@ -497,7 +487,7 @@ foreach (var literal in new[] { Instruction.Create(OpCodes.Ldc_I4_M1), Instructi
     Instruction.Create(OpCodes.Ldc_I4, 5), Instruction.Create(OpCodes.Ldc_I8, long.MinValue) })
     literals.Add(literal);
 var liveLiterals = literals.ToHashSet();
-var literalMethod = OutlineMethod(constants, liveLiterals, [], literals.Select(_ => unoutlined).ToArray());
+var literalMethod = OutlineMethod(constants, liveLiterals, []);
 (int Width, long Value, bool Numeral)? Literal(int pc) =>
     ((int, long, bool)?)literalMethod.GetType().GetMethod("ConstantAt", Declared)!.Invoke(literalMethod, [pc]);
 (int, long, bool)[] expectedLiterals = [(32, -1, false), (32, 0, true), (32, 8, true), (32, -3, false),
@@ -536,14 +526,13 @@ foreach (var enumeration in enums)
 Console.WriteLine(
     $"PASS argument narrowing agrees with declaredNarrow on 14 primitive heads and {enums.Length} enums");
 
-// A stage learns an instruction's category, callee and target from the typed Operation, never from the Lean text
-// that renders it. Each place that reads generated Lean text is listed here with what it reads.
+// Outline categories, calls and targets come from source CIL and its bindings.
 var sourceFiles = Directory.GetFiles(At("Extractor"), "*.cs").Concat(Directory.GetFiles(At("scripts"), "*.cs")
     .Where(path => !Path.GetFileName(path).StartsWith("Test", StringComparison.Ordinal)))
     .ToDictionary(path => Path.GetRelativePath(Root, path).Replace('\\', '/'), File.ReadAllText);
-foreach (var type in extractor.GetTypes().Where(Model("Operation").IsAssignableFrom))
-    if (type.GetMethods(Declared | BindingFlags.DeclaredOnly).Any(method => method.Name is "Render" or "ToLean"))
-        throw new Exception("Extractor operation defines an instruction renderer: " + type);
+foreach (var obsolete in new[] { "Operation", "Unoutlined", "StackOperation" })
+    if (extractor.GetType("Nethermind.LeanCIL." + obsolete) is not null)
+        throw new Exception("Obsolete outline representation: " + obsolete);
 var constructors = RenderedLeanReaders.Constructors(File.ReadLines(At("CIL/Instructions.lean")));
 foreach (var rendered in new[] { "ret", "ldloc", "switch", "br", "brtrue", "call", "callvirt" })
     if (!constructors.Contains(rendered)) throw new Exception("Missing CIL instruction ." + rendered);

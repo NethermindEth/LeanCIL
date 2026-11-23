@@ -11,18 +11,18 @@ internal static class ArgumentGuards
     private static readonly HashSet<string> Signatures = BuildSignatures();
 
     // Exact generic instances only: another type argument or overload is not a modeled guard.
-    internal static Operation? CallModel(MethodReference reference, string architecture)
+    internal static bool CallModel(MethodReference reference, string architecture)
     {
-        if (!Signatures.Contains(reference.FullName)) return null;
+        if (!Signatures.Contains(reference.FullName)) return false;
         if (!RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
-            reference.HasThis || reference.ExplicitThis) return null;
+            reference.HasThis || reference.ExplicitThis) return false;
         var generic = reference is GenericInstanceMethod { GenericArguments.Count: 1 } instance &&
             instance.ElementMethod.GenericParameters.Count == 1;
         var numeric = reference.DeclaringType.FullName == OutOfRange;
         var convention = numeric ? MethodCallingConvention.Generic : MethodCallingConvention.Default;
-        if (generic != numeric || reference.CallingConvention != convention) return null;
+        if (generic != numeric || reference.CallingConvention != convention) return false;
         RuntimeModels.ValidateSignature(reference, architecture);
-        return Unoutlined.Site;
+        return true;
     }
 
     // The modeled ThrowIfNull, whose object argument must be a class instance or null on the stack.

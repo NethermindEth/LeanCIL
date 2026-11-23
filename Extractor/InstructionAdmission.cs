@@ -168,8 +168,8 @@ internal sealed class InstructionAdmission(MethodDefinition method, FeatureProfi
                 InstructionOperands.ValidateVirtualTarget(entry, methods, methods[method]);
             return;
         }
-        if (code == Code.Call && RuntimeModels.CallModel(reference, profile) is not null ||
-            code == Code.Newobj && Spans.ConstructorOperation(reference, profile.Architecture) is not null) return;
+        if (code == Code.Call && RuntimeModels.CallModel(reference, profile) ||
+            code == Code.Newobj && Spans.ConstructorOperation(reference, profile.Architecture)) return;
         RuntimeModels.ValidateCallScope(reference);
         var (target, _) = InstructionOperands.DirectTarget(reference, TailCalls.IsCall(site),
             methods[method], methods);

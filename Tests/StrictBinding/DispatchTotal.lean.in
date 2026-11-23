@@ -14,7 +14,7 @@ private def named (name : String) :=
 private def caller (equilateral : Bool) : Safety.Memory := { Safety.Memory.empty with
   allocations := fun id =>
     if id == 0 then
-      let shape := if equilateral then named "Equilateral" else named "Triangle"
+      let shape := if equilateral then named "Polygons/Equilateral" else named "Triangle"
       let bases := if equilateral then [named "Triangle", named "Shape"] else [named "Shape"]
       some ⟨.object ⟨shape, bases⟩, ⟨8,8,[]⟩, true, []⟩
     else if id == 1 then some ⟨.object ⟨named "Cube", [named "Solid"]⟩, ⟨8,8,[]⟩, true, []⟩
