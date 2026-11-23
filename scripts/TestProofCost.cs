@@ -332,6 +332,7 @@ Require(VerificationSuites.ProofOutputs.Keys.Order().SequenceEqual(VerificationS
     "every proof suite declares its output directories");
 Require(Owner("ProofOutlines/control/Outlines/Choose") == "outlines-control" &&
     Owner("ConsumerSupportUnion-7c43a93156a9/Extraction0") == "core" && Owner("AddModel") == "core" &&
+    Owner("ConsumerBatchContract-7c43a93156a9") == "core" &&
     Owner("StructOutlines/Narrow") == "structoutlines" && Owner("CheckedConversions/conv_ovf_i1-32") is null &&
     Owner("Additional") is null, "an output belongs to the one suite that declares its directory");
 var noon = new DateTime(2026, 11, 10, 12, 0, 0, DateTimeKind.Utc);

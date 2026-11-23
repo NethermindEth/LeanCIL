@@ -79,7 +79,7 @@ partial class Program
                 CopyTree(batchB, output);
             // Expected rejections: a refutation of the contract the Add copy verifies, and one control per way a
             // rejection can fail; the tampered copy fails its extraction check.
-            var (contractOutput, absentOutput) = (Copy(batchB, "Contract"), Copy(batchB, "Absent"));
+            var (contractOutput, absentOutput) = (Copy(batchB, "ConsumerBatchContract"), Copy(batchB, "Absent"));
             var (refutedOutput, tamperedOutput) = (Copy(batchC, "Refuted"), Copy(batchC, "Tampered"));
             File.AppendAllText(Path.Combine(tamperedOutput, "Extracted.lean"), "\n-- changed after extraction\n");
             File.WriteAllText(contract, ContractSource);

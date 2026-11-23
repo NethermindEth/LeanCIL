@@ -574,7 +574,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Ldloc_S, Code.Ldloc, Code.Stloc_S, Code.Stloc, Code.Ldloca_S, Code.Ldloca,
         Code.Ldc_I4_S, Code.Ldc_I4, Code.Ldc_I8, Code.Ldstr, Code.Newarr, Code.Ldelem_Any,
         Code.Stelem_Any, Code.Ldelema, Code.Ldobj, Code.Stobj, Code.Initobj, Code.Cpobj, Code.Sizeof,
-        Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld, Code.Call, Code.Constrained,
+        Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld, Code.Ldsfld, Code.Ldsflda, Code.Stsfld,
+        Code.Call, Code.Constrained,
         Code.Callvirt, Code.Newobj, Code.Ldftn, Code.Calli, Code.Switch,
         Code.Cpblk, Code.Initblk, Code.Unaligned, Code.Ldtoken
     }).ToFrozenSet();
