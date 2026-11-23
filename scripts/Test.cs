@@ -296,8 +296,12 @@ verification.Verify(At("Examples/Hardware/bin/Examples.Hardware.dll"),
 Passed("independent hardware assembly");
 
 // The addition contract is refuted for the subtraction implementation by a kernel-checked counterexample.
+var add = verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/AddModel.lean"),
+    At("artifacts/AddContract"), theorem: "ExampleProof.holds", statement: new(Term: true));
+var expectedAddition = add.statementIdentity!.term!.Value.GetRawText();
 var wrongAdd = verification.Verify(assembly, identity, signatures["WrongAdd"], At("Examples/Proofs/WrongAdd.lean"),
-    At("artifacts/WrongAdd"), theorem: CoreExampleTheorems["WrongAdd"], check: true);
+    At("artifacts/WrongAdd"), theorem: CoreExampleTheorems["WrongAdd"], existingArtifacts: true,
+    statement: new(Term: false, Expected: expectedAddition, Refuted: true));
 if (wrongAdd.refutation?.method.signature != signatures["WrongAdd"])
     throw new InvalidOperationException("Subtraction has no verified refutation of the addition contract");
 

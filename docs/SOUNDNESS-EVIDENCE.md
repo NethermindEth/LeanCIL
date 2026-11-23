@@ -371,6 +371,11 @@ What `MetadataResolution` and `MetadataBinding` check:
   names a type alone, a class's base, and the declaring type of a `Field` or `MethodDef` token
   used as an operand have no generic parameters, and the head of a generic instance has one per
   argument. A type outside the carried slices has no rows to count.
+- A local signature containing a custom modifier fails at the local's index. An external generic
+  aggregate with a named argument must include that argument's assembly in the claimed type.
+  A remaining limitation affects type names with punctuation. The default local check can accept
+  the same atom for a type named `Value` in namespace `N` and a type whose simple name is
+  `N.Value` in the empty namespace (#610).
 - A table or signature form the checker does not read is an explicit error: tables other than
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a

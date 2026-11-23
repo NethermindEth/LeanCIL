@@ -990,7 +990,8 @@ def checkLocals (env : MetadataEnv) (arity signature : Nat) (locals : List TypeE
   let rec compare : Nat → List ResolvedType → List TypeExpr → Except MetadataError Unit
     | _, [], _ | _, _, [] => .ok ()
     | position, type :: types, claimed :: locals =>
-      if frame.admits type claimed then compare (position + 1) types locals
+      if !hasModifier resolveFuel type && frame.admits type claimed then
+        compare (position + 1) types locals
       else .error (.localMismatch position)
   compare 0 types locals
 

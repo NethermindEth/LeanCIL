@@ -1359,7 +1359,8 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
     | .genericInst head arguments, .aggregate identity _ =>
       valueLike head.kind && aggregateValueArgs fuel arguments &&
         (if head.pinned || (head.parts == [systemNamespace, valueTuplePairName] &&
-            head.scope == bytesOf runtimeScope) then
+            head.scope == bytesOf runtimeScope) ||
+            arguments.toList.any (fun | .primitive _ => false | _ => true) then
           match frame.corlib with
           | some corlib => aggregateSpelling (some corlib) fuel (.genericInst head arguments)
           | none => none

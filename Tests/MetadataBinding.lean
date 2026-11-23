@@ -356,6 +356,64 @@ theorem rejects_a_pinned_local :
 /-- The coded `TypeDefOrRef` index of a type reference, as a signature writes it. -/
 private def typeRefCoded (token : Nat) : Nat := (token - 0x01000000) * 4 + 1
 
+/-- The modifier's TypeRef names System.Console in a versioned external assembly. -/
+private def modifiedLocal (version marker : Nat) : MetadataSlice :=
+  let target := mutateRow own.1 0x23000002 fun row => row.set 0 version
+  let changed := borrow target tokens.consoleRef tokens.boxRef 0
+  mutateBlob changed (blobOffset own.1 [0x07, 0x01, 0x0B]) fun _ =>
+    [5, 0x07, 0x01, marker, typeRefCoded tokens.consoleRef, 0x0B]
+
+/-- A flat local name cannot bind the assembly of either kind of custom modifier. -/
+theorem rejects_local_modifiers_from_either_assembly :
+    [7, 8].all (fun version =>
+      localsFail (modifiedLocal version 0x1F) [.atom runtimeScope "System.UInt64 modreq(System.Console)"]
+        (.localMismatch 0) &&
+      localsFail (modifiedLocal version 0x20) [.atom runtimeScope "System.UInt64 modopt(System.Console)"]
+        (.localMismatch 0)) = true := by decide +kernel
+#print axioms rejects_local_modifiers_from_either_assembly
+
+private def externalScope (name : String) : String :=
+  name ++ ", Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+
+private def externalValues : PlatformTable := platform_table%
+  [⟨bytesOf (externalScope "Outer"), [bytesOf "N", bytesOf "Wrap`1"], .genericValue 1⟩,
+   ⟨bytesOf (externalScope "A"), [bytesOf "N", bytesOf "Value"], .valueType⟩,
+   ⟨bytesOf (externalScope "B"), [bytesOf "N", bytesOf "Value"], .valueType⟩]
+
+private def externalAggregateRows (reference : String) : Step Nat := do
+  let outer ← string "Outer"
+  let arg ← string reference
+  let ns ← string "N"
+  let wrapper ← string "Wrap`1"
+  let value ← string "Value"
+  let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, outer, 0, 0]
+  let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, arg, 0, 0]
+  let runtime ← string "System.Runtime"
+  let publisher ← blob runtimePublisher
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publisher, runtime, 0, 0]
+  modify fun builder => { builder with corlib := 3 }
+  let _ ← row Table.typeRef [6, wrapper, ns]
+  let _ ← row Table.typeRef [10, value, ns]
+  let sig ← blob [7, 1, 0x15, 0x11, 5, 1, 0x11, 9]
+  row Table.standAloneSig [sig]
+
+private def externalAggregateLocal (reference argument : String) : Except MetadataError Unit := do
+  let (slice, sig) := build (externalAggregateRows reference) (bytesOf "Caller") (externalScope "Caller")
+  let env := MetadataEnv.ofSlices [← slice.index] (platform := externalValues)
+  checkLocals env 0 sig [.aggregate (externalScope "Outer" ++ "::N.Wrap`1<" ++ argument ++ ">") 0]
+
+/-- The IL signatures differ only in the assembly of N.Value inside the external generic. -/
+theorem external_aggregate_local_binds_argument_scope :
+    let mismatches := fun source name =>
+      match externalAggregateLocal source name with
+      | .error (.localMismatch 0) => true
+      | _ => false
+    let a := externalScope "A" ++ "::N.Value"
+    let b := externalScope "B" ++ "::N.Value"
+    (externalAggregateLocal "A" a).isOk && (externalAggregateLocal "B" b).isOk &&
+      mismatches "A" b && mismatches "B" a && mismatches "A" "N.Value" && mismatches "B" "N.Value" := by decide +kernel
+#print axioms external_aggregate_local_binds_argument_scope
+
 /-- The own slice with its one local retyped to an array of the signature type `element`. -/
 private def arrayLocal (element : List Nat) : MetadataSlice :=
   mutateBlob own.1 (blobOffset own.1 [0x07, 0x01, 0x0B]) fun _ =>
