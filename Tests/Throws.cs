@@ -153,6 +153,12 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         translated.Write(image);
         queue.Add(new(selector, proof, Path.Combine(root, "Percent-Translated"), Assembly: image), () =>
             Console.WriteLine("PASS Percent: the same boundary proof checks with translated exception literals"));
+
+        var contract = At("Examples/Proofs/Percent.lean");
+        queue.Add(new(selector, contract, Path.Combine(root, "Percent-Contract")), () =>
+            Console.WriteLine("PASS Percent: the CLR contract holds for every uint and caller memory"));
+        queue.Add(new(selector, contract, Path.Combine(root, "Percent-Contract-Translated"), Assembly: image), () =>
+            Console.WriteLine("PASS Percent: the same CLR contract holds with translated exception literals"));
     }
 
     if (name is "Null" or "Inner" or "ArgumentInner" or "ActualValue")

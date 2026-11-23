@@ -696,11 +696,12 @@ expectation.
   workspace cleanup. Requests that share work can finish together, so do not sum these times as
   independent costs. Normal verification and compile checks report the same measure.
 
-A request with `"expect": "rejected"` passes only when its theorem is a verified refutation of the
-contract that the request it `refutes` proves: the counterexample predicate
-(`MethodContract.Refuted`) of that request's `Holds` statement, accepted by the kernel and bound
-to a method of the rejected request's own extraction. Requests it refutes run first, in the same
-session. Its line reads `PASS rejected` with the refuted contract and method signature. A failed
+A request with `"expect": "rejected"` must prove a counterexample to the contract of the
+positive request identified by `refutes`. The kernel checks the refutation theorem for the
+rejected request's extracted method. The verifier matches `MethodContract.Refuted`,
+`OutcomeContract.Refuted` or `OutcomeContract.RefutedCLR` to the corresponding positive
+contract. An unsupported operation leaves a CLR contract inconclusive. The positive request
+runs first in the same session. The rejected request prints `PASS rejected` with the refuted contract and method signature. A failed
 extraction, a proof that does not build, a refutation of another contract, a theorem that states
 no counterexample predicate or a target that did not verify fails it, and the `FAIL` line ends
 with `no verified refutation of request N`. A failed refutation removes its `verified.json` and

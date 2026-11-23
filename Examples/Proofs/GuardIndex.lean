@@ -14,9 +14,12 @@ when its bit pattern is negative as a signed integer.
 open CIL.Safety
 namespace ExampleProof
 
+/-- The parameter-name operand at the compiled guard's `ldstr` instruction. -/
+abbrev parameterName : String := ldstrOperand Extracted.method0_instruction2
+
 /-- `Index` returns an index below `length` and raises `ArgumentOutOfRangeException` otherwise. -/
 theorem correctness (memory : Memory) (literal : Reference) (index length : CIL.W32)
-    (bound : memory.literals.lookup "index" = some literal)
+    (bound : memory.literals.lookup parameterName = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i32 index), .scalar (.i32 length)]
         memory =
@@ -38,7 +41,7 @@ theorem correctness (memory : Memory) (literal : Reference) (index length : CIL.
 
 /-- An index with its top bit set is still below a larger unsigned length, so it is returned. -/
 theorem high_index_returned (memory : Memory) (literal : Reference)
-    (bound : memory.literals.lookup "index" = some literal)
+    (bound : memory.literals.lookup parameterName = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0
         [.scalar (.i32 0x80000000#32), .scalar (.i32 0xFFFFFFFF#32)] memory =
@@ -49,7 +52,7 @@ theorem high_index_returned (memory : Memory) (literal : Reference)
 
 /-- An index equal to the length raises. -/
 theorem equal_raises (memory : Memory) (literal : Reference) (index : CIL.W32)
-    (bound : memory.literals.lookup "index" = some literal)
+    (bound : memory.literals.lookup parameterName = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i32 index), .scalar (.i32 index)] memory =
       .error ⟨0, 3, .thrown .argumentOutOfRange⟩ := by

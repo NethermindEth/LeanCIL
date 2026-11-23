@@ -840,8 +840,9 @@ fact crosses the call like any other object's
 A framework argument guard steps to its named exception or past itself. `ThrowIfNull` steps on
 the argument's null test directly. An integer guard reduces through `zeroGuardOutcome` or
 `comparisonGuardOutcome`; pass those with `CIL.guardOperand`, `CIL.ZeroGuard.throws` or
-`CIL.ComparisonGuard.throws` and the case hypothesis that decides the test, and bind the
-parameter-name literal as for `ldstr`
+`CIL.ComparisonGuard.throws` and the case hypothesis that decides the test. Bind the parameter
+name to a live string object using `CIL.Safety.ldstrOperand` with the extracted instruction
+equation for its `ldstr` site. The same proof then applies when the assembly changes the name
 ([GuardCount](../Examples/Proofs/GuardCount.lean),
 [GuardIndex](../Examples/Proofs/GuardIndex.lean)).
 
@@ -1049,6 +1050,10 @@ overflow for signed minimum divided by negative one, including its remainder ins
 arithmetic operands, invalid bounds, memory faults, unsupported instructions, invalid state and fuel
 exhaustion have no name in this mode. The mode does not change `Raises` or `.thrown`.
 `OutcomeContract.Holds.clr` lifts a thrown-outcome proof (`Holds`) to `HoldsCLR`.
+The compiled `Throws.Percent(uint)` returns its input through 100 inclusive and raises
+`ArgumentOutOfRangeException` above 100, from any caller memory. The same proof applies
+when the constructor's message and parameter name are translated.
+[Percent](../Examples/Proofs/Percent.lean)
 
 For a wide-integer `Divide` or `Mod` contract, select `some .divideByZero` in
 `raises` when its divisor is zero and prove `HoldsCLR`. Both an explicit throw and the mapped

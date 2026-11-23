@@ -31,6 +31,10 @@ namespace CIL.Safety
 
 #print axioms formObject_null
 
+/-- The string operand witnessed by a checked instruction equation at an `ldstr` site. -/
+abbrev ldstrOperand {site : Option CIL.Instruction} {text : String}
+    (_ : site = some (.ldstr text)) : String := text
+
 /-- A literal bound to `reference` loads what forming that reference gives. -/
 theorem literalObject_of_lookup {memory : Memory} {text : String} {reference : Reference}
     (bound : memory.literals.lookup text = some reference) :

@@ -19,26 +19,45 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Guards");
 Directory.CreateDirectory(root);
 
+const string countSelector = "Guards::Count(System.Int32)";
+var translated = Path.Combine(root, "Localized.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var guards = module.GetType("Examples.Guards");
+    foreach (var (method, text) in new[] { ("Count", "nombre"), ("Index", "indice"), ("Required", "étiquette") })
+    {
+        var body = guards.Methods.Single(candidate => candidate.Name == method).Body;
+        body.Instructions.Single(site => site.OpCode == OpCodes.Ldstr).Operand = text;
+    }
+    module.Write(translated);
+}
+
 foreach (var (source, entry) in new[]
 {
+    ("Examples/Proofs/GuardCount.lean", countSelector),
     ("Examples/Proofs/GuardIndex.lean", "Guards::Index(System.UInt32,System.UInt32)"),
     ("Examples/Proofs/GuardRequired.lean", "Guards::Required(System.String)")
 })
 {
     var proof = Path.GetFileNameWithoutExtension(source);
-    verification.Verify(assembly, "Examples", entry, At(source), Path.Combine(root, proof));
-    Console.WriteLine($"PASS {proof}: {entry}");
+    // Count's original proof runs with the counterexample below.
+    if (entry != countSelector)
+        verification.Verify(assembly, "Examples", entry, At(source), Path.Combine(root, proof));
+    verification.Verify(translated, "Examples", entry, At(source), Path.Combine(root, proof + "-Localized"));
+    Console.WriteLine($"PASS {proof} with the localized parameter name: {entry}");
 }
 
 // Zero returns under ThrowIfNegative and raises ArgumentOutOfRangeException under ThrowIfNegativeOrZero.
 var swapped = Mutate("swapped", "Count",
     (module, call) => Guard(module, call, "ThrowIfNegativeOrZero", module.TypeSystem.Int32));
-const string countSelector = "Guards::Count(System.Int32)";
 const string countContract = """
+    /-- The checked literal passed to the guard as its parameter name. -/
+    abbrev parameterName : String := ldstrOperand Extracted.method0_instruction1
+
     /-- Negative counts raise, and a nonnegative count returns unchanged in the caller's memory. -/
     def contract : OutcomeContract W32 where
       args count := [.scalar (.i32 count)]
-      pre _ memory := ∃ literal, memory.literals.lookup "count" = some literal ∧
+      pre _ memory := ∃ literal, memory.literals.lookup parameterName = some literal ∧
         formObject memory (.address literal) = .ok (.object (.address literal))
       footprint _ := []
       post count before after values := after = before ∧ values = [.scalar (.i32 count)]
@@ -64,7 +83,7 @@ const string counterexample = """
         ⟨.object ⟨.object CIL.Extraction.runtimeScope "System.String", []⟩, ⟨1, 1, []⟩, true, []⟩
         else none
       nextIdentity := 1
-      literals := [("count", ⟨0, 0⟩)] }
+      literals := [(parameterName, ⟨0, 0⟩)] }
 
     /-- The substituted guard throws at pc 2 on zero, which the contract requires to return. -/
     theorem correctness : contract.RefutedCLR Extracted.program 0 :=

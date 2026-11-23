@@ -12,9 +12,12 @@ returned unchanged with memory unchanged.
 open CIL.Safety
 namespace ExampleProof
 
+/-- The parameter-name operand at the compiled guard's `ldstr` instruction. -/
+abbrev parameterName : String := ldstrOperand Extracted.method0_instruction1
+
 /-- A null label raises `ArgumentNullException`. -/
 theorem null_raises (memory : Memory) (literal : Reference)
-    (bound : memory.literals.lookup "label" = some literal)
+    (bound : memory.literals.lookup parameterName = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object .null] memory =
       .error ⟨0, 2, .thrown .argumentNull⟩ := by
@@ -25,7 +28,7 @@ theorem null_raises (memory : Memory) (literal : Reference)
 /-- A label that forms is returned as it is. -/
 theorem keeps_label (memory : Memory) (label literal : Reference)
     (labelFormed : formObject memory (.address label) = .ok (.object (.address label)))
-    (bound : memory.literals.lookup "label" = some literal)
+    (bound : memory.literals.lookup parameterName = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object (.address label)] memory =
       .ok (memory, [.object (.address label)]) := by
@@ -37,7 +40,7 @@ theorem keeps_label (memory : Memory) (label literal : Reference)
 theorem correctness (memory : Memory) (label : ManagedReference) (literal : Reference)
     (labelFormed : ∀ reference, label = .address reference →
       formObject memory label = .ok (.object label))
-    (bound : memory.literals.lookup "label" = some literal)
+    (bound : memory.literals.lookup parameterName = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object label] memory =
       if label = .null then .error ⟨0, 2, .thrown .argumentNull⟩
