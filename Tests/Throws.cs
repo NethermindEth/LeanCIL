@@ -160,11 +160,15 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
             Console.WriteLine("PASS Percent: the CLR contract holds for every uint and caller memory"));
         queue.Add(new(selector, contract, Path.Combine(root, "Percent-Contract-Translated"), Assembly: image), () =>
             Console.WriteLine("PASS Percent: the same CLR contract holds with translated exception literals"));
+        var rawProof = CompiledPercentProof(folder);
         foreach (var (suffix, assemblyPath) in new[] { ("", assembly), ("-Translated", image) })
         {
             queue.Add(new(selector, contract, Path.Combine(root, "Percent-Image" + suffix),
                 Theorem: "ExampleProof.loadedException", Assembly: assemblyPath), () =>
                 Console.WriteLine("PASS Percent: original string operands load from the certified image" + suffix));
+            verification.Verify(assemblyPath, "Examples", selector, rawProof, Path.Combine(root, "Percent-Raw" + suffix),
+                theorem: "CompiledPercent.verified");
+            Console.WriteLine("PASS Percent: decoded caller and CoreLib exception path at every heap quota" + suffix);
         }
         CheckPercentExceptionType(translated, percent, selector, contract);
     }
@@ -352,6 +356,30 @@ foreach (var (mutation, marker) in new[]
 }
 queue.Flush();
 Console.WriteLine("PASS folded throws, located faults, runtime comparisons, forged types and exact-pattern rejection");
+
+static string CompiledPercentProof(string folder)
+{
+    // Single-file consumer proofs carry their fixture declarations alongside the generated Extracted module.
+    string[] modules = ["Tests.CoreLibImage", "Tests.PercentRuntime.Core", "Tests.PercentRuntime.Source",
+        "Tests.PercentRuntime.Program", "Tests.PercentRuntime.Startup", "Tests.PercentRuntime", "Tests.CompiledPercent.Proof"];
+    var imports = new SortedSet<string>(StringComparer.Ordinal);
+    var declarations = new List<string>();
+    foreach (var module in modules)
+    {
+        foreach (var line in File.ReadLines(At(module.Replace('.', '/') + ".lean")))
+        {
+            if (line.StartsWith("import ", StringComparison.Ordinal))
+            {
+                if (!modules.Contains(line[7..])) imports.Add(line);
+            }
+            else declarations.Add(line);
+        }
+        declarations.Add("");
+    }
+    var path = Path.Combine(folder, "CompiledPercent.lean");
+    File.WriteAllLines(path, imports.Concat(declarations));
+    return path;
+}
 
 void CheckPercentExceptionType(ModuleDefinition image, MethodDefinition method, string selector, string example)
 {
