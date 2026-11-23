@@ -399,7 +399,8 @@ void CheckTwoAssemblyCatalogs()
     var library = fixture.Build("LocalClassLibrary", "Classes.Library", """
         namespace Far;
         public class Shape { }
-        public sealed class Second : Shape { }
+        public class Second : Shape { }
+        public static class Family { public sealed class Child : Second { } }
         public static class Reader { public static int Test(Shape value) => value is Second ? 2 : 0; }
         """);
     var app = fixture.Build("LocalClassApp", "Classes.App", """
@@ -407,7 +408,8 @@ void CheckTwoAssemblyCatalogs()
         public class Shape { }
         public sealed class First : Shape { }
         public static class Reader {
-            public static int Both(Shape local, Far.Shape other) => Far.Reader.Test(other) + (local is First ? 4 : 0);
+            public static int Both(Shape local, Far.Shape other) => Far.Reader.Test(other) +
+                (local is First ? 4 : 0) + (other is Far.Second ? 8 : 0) + (other is Far.Family.Child ? 16 : 0);
         }
         """, references: $"<Reference Include=\"Classes.Library\"><HintPath>{library}</HintPath></Reference>");
     const string selector = "Near.Reader::Both(Near.Shape,Far.Shape)";
@@ -424,8 +426,7 @@ void CheckTwoAssemblyCatalogs()
         var proof = Path.Combine(output, "Proof.lean");
         var claim = original ? "Holds" : "Refuted";
         var evidence = original
-            ? "holds (by rintro ⟨localMatch, other⟩; cases localMatch <;> cases other with " +
-              "| none => rfl | some subclass => cases subclass <;> rfl)"
+            ? "holds (by rintro ⟨localMatch, other⟩; cases localMatch <;> cases other <;> rfl)"
             : "refuted rfl";
         File.WriteAllText(proof, template +
             $"\ntheorem correctness : contract.{claim} Extracted.program 0 := {evidence}\n" +
@@ -449,7 +450,7 @@ void CheckTwoAssemblyCatalogs()
             fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
             throw new InvalidOperationException("Expected both methods' physical class catalogs: " + fact);
         ReplayImageCases(output, app, "AppImage", At("Tests/StrictBinding/TwoCatalogCases.lean"),
-            ["StrictBinding.DispatchCatalogs"], ("LibImage", library));
+            ["StrictBinding.DispatchCatalogs", "Tests.StrictBinding.Mutation"], ("LibImage", library));
     }
     Console.WriteLine("PASS changing the foreign class token refutes the unchanged caller's return contract");
 }

@@ -247,8 +247,10 @@ verification.VerifyContractVariant(assembly, "Examples", selectors["And"], Path.
       rintro ⟨left, right⟩ memory -
       apply MethodContract.Holds.intro (c := intersection) (input := (left, right))
         memory (left &&& right) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      have widths := CIL.DeclaredSignature.binaryPrimitiveStorage Extracted.environment.rawLayouts
+        Extracted.method0.declared .uint64 rfl
       exact ⟨256, invoke_broadcastBinary_word Extracted.profile .band 0 left right _ memory
-        rfl rfl rfl Extracted.method0_model4 rfl (by decide) (checked_broadcast_and left right)⟩
+        widths.1 widths.2.1 widths.2.2 Extracted.method0_model4 rfl (by decide) (checked_broadcast_and left right)⟩
     """, """
     /-- On disjoint words one and two the replacement returns three. The intersection is zero. -/
     theorem correctness : intersection.Refuted Extracted.program 0 :=
@@ -1207,8 +1209,10 @@ verification.VerifyContractVariant(assembly, "Examples", selectors["AndNot"], Pa
       rintro ⟨left, right⟩ memory -
       apply MethodContract.Holds.intro (c := andNot) (input := (left, right)) memory
         ((~~~left) &&& right) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      have widths := CIL.DeclaredSignature.binaryPrimitiveStorage Extracted.environment.rawLayouts
+        Extracted.method0.declared .uint64 rfl
       exact ⟨256, invoke_broadcastBinary_word Extracted.profile .andNot 3 left right _ memory
-        rfl rfl rfl Extracted.method0_model4 rfl (by decide) (checked_broadcast_andNot left right)⟩
+        widths.1 widths.2.1 widths.2.2 Extracted.method0_model4 rfl (by decide) (checked_broadcast_andNot left right)⟩
     """, """
     /-- The reversed operands return one where the contract requires two. -/
     theorem correctness : andNot.Refuted Extracted.program 0 := by

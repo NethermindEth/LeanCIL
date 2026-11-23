@@ -419,6 +419,22 @@ theorem Method.argumentAccess_congr {expected actual : Method}
 
 #print axioms Method.argumentAccess_congr
 
+/-- In a static binary method whose arguments and result have the same primitive type, all
+    three use that primitive's narrowing for any extraction layout table. -/
+theorem DeclaredSignature.binaryPrimitiveStorage (layouts : List Extraction.RawLayout)
+    (signature : DeclaredSignature) (type : PrimitiveType) {initLocals : Bool}
+    (declared : signature = {
+      parameters := [type.typeExpr, type.typeExpr],
+      returnType := type.typeExpr, initLocals := initLocals }) :
+    Extraction.declaredNarrow layouts signature.returnType = type.narrow ∧
+    (signature.argumentType 0).bind (Extraction.declaredNarrow layouts) = type.narrow ∧
+    (signature.argumentType 1).bind (Extraction.declaredNarrow layouts) = type.narrow := by
+  subst signature
+  have width := Extraction.declaredNarrow_primitive layouts type
+  exact ⟨width, width, width⟩
+
+#print axioms DeclaredSignature.binaryPrimitiveStorage
+
 /-- Parameter `index` of a static method is argument `index`. -/
 theorem DeclaredSignature.argumentType_static {signature : DeclaredSignature} {index : Nat}
     {type : Extraction.TypeExpr} (static : signature.receiver = none)

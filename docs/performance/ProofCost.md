@@ -121,6 +121,7 @@ empty local signature. Lean 4.35.0 checked both extractions.
 | Base | Universal contract | 67,714 | 4,355 | 273 | 7 |
 | Canonical at 97b318f7 | Universal contract | 1,674,992 | 477,046 | 361 | 145 |
 | Canonical with literal broadcast signature | Universal contract | 494,340 | 130,729 | 361 | 42 |
+| Canonical with checked primitive signature | Universal contract | 101,316 | 6,280 | 401 | 8 |
 | Base | Direct witness | 719,384 | 141,620 | 97 | 62 |
 | Canonical | Direct witness | 4,727,138 | 1,216,915 | 97 | 437 |
 | Base | Consumer using contract | 59,649 | 6,157 | 511 | 6 |
@@ -135,6 +136,15 @@ cost 363,912 kernel heartbeats. Using its literal metadata name took 2,119. The 
 contract uses the same 361 proof objects and retains the 6,157-heartbeat consumer. Stepping
 the four resolved call sites separately took 194,168 kernel heartbeats, 9,079 proof objects
 and 648 ms of elaboration.
+
+Reducing the return-width premise for the extracted UInt64 costs 122,105 kernel heartbeats.
+The two argument-width premises cost 123,348 and 123,713 when checked separately. These
+counts overlap in the full proof. Both AVX2 AND and AND-NOT use one checked fact about the
+static method signature. The result and both arguments have the same primitive narrowing for
+any layout table. With the original AND-NOT instructions, the full proof takes 6,280 kernel
+heartbeats, and its consumer still takes 6,157. Lean replayed the measured module against the
+395-module certified library. The independent AVX2 AND contract drops from 130,609 to 6,074
+kernel heartbeats with the same signature fact. Its proof grows from 352 to 391 proof objects.
 
 
 ## Reusing an in-place vector swap contract

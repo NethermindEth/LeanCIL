@@ -282,6 +282,11 @@ What `MetadataResolution` and `MetadataBinding` check:
   `System.Private.CoreLib`. It checks the defining assembly's name, version, culture and key
   token. The operand retains that assembly identity. Within that image, the root
   `System.Object` definition has no base type and occupies an object reference on the stack.
+  Inside that CoreLib, a top-level integer primitive defined directly over the local
+  `System.ValueType` has scalar storage. On the .NET 11.0.0 Windows x64 NativeAOT pack's
+  IL-only CoreLib, the signed 32-bit `System.Math.Min` body returns the lesser argument
+  and preserves caller memory. [The proof](../Examples/Proofs/CoreLibMin.lean) uses the scalar profile.
+  The x64 ReadyToRun CoreLib is outside normal extraction.
   The two-argument `Monitor.Enter` wrapper reads the flag byte before calling either helper.
   When the object overload returns successfully and the byref remains writable, the wrapper
   sets that byte to one. Monitor ownership, the pinned object header and atomic updates are
@@ -436,12 +441,14 @@ with matching nongeneric instance signatures. The catalog records the interface 
 declaration token. A class outside the selected hierarchy may implement an external interface
 when its body MethodDef belongs to that class.
 Each selected method uses the physical image matching its own assembly identity. A single
-extraction can use local class tests and virtual slots in several assemblies. When more than one
+extraction can use class tests and local virtual slots in several assemblies. At a foreign class test,
+Lean reads the TypeRef and its enclosing TypeRefs from the caller, checks the full AssemblyRef
+identity, and locates the top-level or nested TypeDef in the pinned destination. When more than one
 image is pinned, each selected hierarchy must belong to a non-core image. Class parents in the
 other images must resolve locally or name the core Object, ValueType or Enum. The audit checks
 parent chains for cycles and file tables for additional metadata modules. The physical-catalog
 theorem identifies the image and the reconstructed catalog for every selected method.
-Nonlocal class tests, constrained calls, interface dispatch,
+Forwarded class tests, constrained calls, interface dispatch,
 cross-image dispatch, other override forms on selected classes, additional metadata modules
 and unsupported signatures leave this fact uncovered.
 With all direct reference images supplied, the audit checks each AssemblyRef against its target's

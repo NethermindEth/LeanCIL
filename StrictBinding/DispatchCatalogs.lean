@@ -1,6 +1,6 @@
 import StrictBinding.GenericConstraints
 
-/-! Check the physical catalogs of local virtual calls and class tests against pinned metadata. -/
+/-! Check physical class tests and local virtual slot catalogs against the pinned images. -/
 
 namespace StrictBinding.ClassDispatch
 open CIL CIL.Extraction
@@ -172,12 +172,15 @@ private def localOverrides (image : PreparedImage) (interfaces : Array (Array Na
     bindings := bindings.modify (body / 2) (binding :: ·)
   return bindings.map List.reverse
 
+/-- File rows with metadata introduce classes in other modules of the same assembly. -/
+private def singleModule (image : PreparedImage) : Reading Unit := do
+  for i in [:image.layout.rowCount 0x26] do
+    guard ((← physical (image.layout.cellOfRow image.view 0x26 (i+1) 0)) == 1)
+
 /-- Local parent edges in a single metadata module. The only external roots admitted here
     are the core Object, ValueType and Enum declarations. -/
 private def localParents (image : PreparedImage) : Reading (Array Nat) := do
-  -- A File row with metadata introduces another module whose classes this image cannot enumerate.
-  for i in [:image.layout.rowCount 0x26] do
-    guard ((← physical (image.layout.cellOfRow image.view 0x26 (i+1) 0)) == 1)
+  singleModule image
   let count := image.layout.rowCount Table.typeDef
   let mut parents := #[0]
   for i in [:count] do parents := parents.push (← parentRow image (i+1))
@@ -215,23 +218,55 @@ def physicalHierarchy (image : PreparedImage) (owner : Nat) (includeDerived := t
       interfaces := owned, methods := methods.toList }
   return types.toList
 
-/-- Read the token at a class-test instruction boundary in the physically bound method body. -/
-private def testedClass (image : PreparedImage) (instruction : RawInstruction) (code : Array Nat) :
-    Reading DispatchType := do
+/-- Read the namespace, outer name and nested names from the TypeRef chain, ending at
+    the physical AssemblyRef. A cyclic or module-scoped reference is uncovered. -/
+private def referencedClass (image : PreparedImage) : Nat → Nat → List (List Nat) →
+    Reading (String × List (List Nat))
+  | 0, _, _ => failure
+  | fuel + 1, token, nested => do
+    let cell := image.layout.cell image.view token
+    let scope ← physical (cell 0)
+    let name ← physical (image.layout.stringAt image.view (← physical (cell typeNameColumn)))
+    let space ← physical (image.layout.stringAt image.view (← physical (cell typeNamespaceColumn)))
+    match scope % 4 with
+    | 2 =>
+      let assembly ← physical (checkedTokenOf Table.assemblyRef (scope / 4) .rowOverflow)
+      return (← physical (referenceIdentity image assembly), space :: name :: nested)
+    | 3 =>
+      guard space.isEmpty
+      let enclosing ← physical (checkedTokenOf Table.typeRef (scope / 4) .rowOverflow)
+      referencedClass image fuel enclosing (space :: name :: nested)
+    | _ => failure
+
+/-- Locate a class at its TypeDef or through an AssemblyRef in the body that tests it.
+    Forwarded or unpinned declarations remain uncovered. -/
+private def testDefinition (prepared : List PreparedImage) (home : PreparedImage) (token : Nat) :
+    Reading (PreparedImage × Nat) := do
+  let _ ← physical (home.layout.rowAt token)
+  if tableOf token == Table.typeDef then return (home, token % 2^24)
+  guard (tableOf token == Table.typeRef)
+  let (identity, parts) ← referencedClass home (home.layout.rowCount Table.typeRef) token []
+  let some target := prepared.find? (·.identity == identity) | failure
+  singleModule target
+  let .defined row ← physical (definitionRoute target parts) | failure
+  return (target, row)
+
+/-- Read a class-test token at its original instruction boundary and check the class in
+    its defining module. -/
+private def testedClass (prepared : List PreparedImage) (home : PreparedImage)
+    (instruction : RawInstruction) (code : Array Nat) : Reading DispatchType := do
   let .type target := instruction.operand | failure
   let #[op, a, b, c, d] := code.extract instruction.offset (instruction.offset + 5) | failure
   guard (op == instruction.opcode)
   let token := a + 256 * (b + 256 * (c + 256 * d))
-  guard (tableOf token == Table.typeDef)
-  let row := token % 2^24
-  let _ ← physical (image.layout.rowAt token)
+  let (image, row) ← testDefinition prepared home token
   unless target == (← className image row) do throwThe AuditError (.dispatchMismatch token)
   let [entry] ← physicalHierarchy image row false | failure
   return entry
 
 /-- The union of all physical class hierarchies and tested classes selected by the original body.
     Live sites must dispatch through the exact target table validated against that hierarchy. -/
-private def selected (image : PreparedImage) (item : MethodEvidence)
+private def selected (prepared : List PreparedImage) (image : PreparedImage) (item : MethodEvidence)
     (methods : List SpecializedMethod) : Reading (List DispatchType) := do
   guard (item.assembly.identity == image.identity)
   let mut code := #[]
@@ -249,7 +284,7 @@ private def selected (image : PreparedImage) (item : MethodEvidence)
   for (instruction, pc) in item.original.code.zipIdx do
     if instruction.opcode == 0xfe16 then failure
     if instruction.opcode == 0x74 || instruction.opcode == 0x75 then
-      let entry ← testedClass image instruction code
+      let entry ← testedClass prepared image instruction code
       unless types.contains entry do types := entry :: types
       continue
     unless instruction.opcode == 0x6f do continue
@@ -275,21 +310,23 @@ private def selected (image : PreparedImage) (item : MethodEvidence)
 
 /-- A physical catalog contains all claimed declarations with the same multiplicities.
     The order of declarations in the metadata can differ from the extractor's name order. -/
-def CatalogBound (image : PreparedImage) (item : MethodEvidence)
+def CatalogBound (prepared : List PreparedImage) (image : PreparedImage) (item : MethodEvidence)
     (methods : List SpecializedMethod) : Prop :=
-  ∃ actual, (selected image item methods).run = .ok (some actual) ∧ actual.Perm item.dispatchTypes
+  ∃ actual, (selected prepared image item methods).run = .ok (some actual) ∧
+    actual.Perm item.dispatchTypes
 
 /-- Whether the claimed catalog equals the physically reconstructed declarations. -/
-private def checkItem (image : PreparedImage) (methods : List SpecializedMethod)
+private def checkItem (prepared : List PreparedImage) (image : PreparedImage)
+    (methods : List SpecializedMethod)
     (item : MethodEvidence) : Except AuditError Bool := do
-  let some actual ← (selected image item methods).run | return false
+  let some actual ← (selected prepared image item methods).run | return false
   if actual.Perm item.dispatchTypes then return true
   throw (.dispatchMismatch item.original.token)
 
 /-- Every covered method has exactly the physically reconstructed declarations. -/
-private theorem bound_of_checkItem {image methods item}
-    (checked : checkItem image methods item = .ok true) :
-    CatalogBound image item methods := by
+private theorem bound_of_checkItem {prepared image methods item}
+    (checked : checkItem prepared image methods item = .ok true) :
+    CatalogBound prepared image item methods := by
   unfold checkItem at checked
   obtain ⟨value, physical, rest⟩ := CIL.Safety.except_bind_ok checked
   cases value with
@@ -325,7 +362,7 @@ private def checkHome (prepared : List PreparedImage) (methods : List Specialize
     (items : List MethodEvidence) (home : PreparedImage) : Except AuditError Bool := do
   let localItems := items.filter (fun item => item.assembly.identity == home.identity)
   if localItems.isEmpty then return true
-  let coverage ← localItems.mapM (checkItem home methods)
+  let coverage ← localItems.mapM (checkItem prepared home methods)
   unless coverage.all id do return false
   let neighbours ← prepared.mapM (checkNeighbour home)
   return neighbours.all id
@@ -335,7 +372,7 @@ private def checkHome (prepared : List PreparedImage) (methods : List Specialize
 private theorem bound_of_checkHome {prepared methods items home item}
     (mem : item ∈ items) (same : item.assembly.identity == home.identity)
     (checked : checkHome prepared methods items home = .ok true) :
-    CatalogBound home item methods ∧
+    CatalogBound prepared home item methods ∧
       ∀ other ∈ prepared, other.identity ≠ home.identity →
         platformAssembly home = .ok false ∧ ParentsBound other := by
   have localMem : item ∈ items.filter (fun i => i.assembly.identity == home.identity) :=
@@ -385,7 +422,7 @@ theorem bound_of_check {images pins items imports}
     ∃ prepared, prepare images = .ok prepared ∧
       (images.map (·.identity)).Perm (pins.map (·.identity)) ∧
       ∀ item ∈ items, ∃ home ∈ prepared, item.assembly.identity = home.identity ∧
-        CatalogBound home item (specializationTable items) ∧
+        CatalogBound prepared home item (specializationTable items) ∧
         ∀ other ∈ prepared, other.identity ≠ home.identity →
           platformAssembly home = .ok false ∧ ParentsBound other := by
   unfold check at checked
@@ -428,7 +465,7 @@ theorem DispatchCatalogsChecked.physical {images pins items imports}
     ∃ prepared, prepare images = .ok prepared ∧
       (images.map (·.identity)).Perm (pins.map (·.identity)) ∧
       ∀ item ∈ items, ∃ home ∈ prepared, item.assembly.identity = home.identity ∧
-        ClassDispatch.CatalogBound home item (specializationTable items) ∧
+        ClassDispatch.CatalogBound prepared home item (specializationTable items) ∧
         ∀ other ∈ prepared, other.identity ≠ home.identity →
           platformAssembly home = .ok false ∧ ClassDispatch.ParentsBound other := by
   apply ClassDispatch.bound_of_check (pins := pins) (imports := imports)

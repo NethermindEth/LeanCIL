@@ -42,8 +42,8 @@
     <Content Include="../CIL/**/*.lean;../CIL.lean;../StrictBinding/**/*.lean;../StrictBinding.lean;../lakefile.toml;../lake-manifest.json;../lean-toolchain">
       <Link>verification/%(Identity)</Link>
       <TargetPath>verification/$([MSBuild]::MakeRelative('$(MSBuildProjectDirectory)/..', '%(FullPath)'))</TargetPath>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <Pack>false</Pack>
     </Content>
   </ItemGroup>
@@ -81,12 +81,19 @@
     <Content Include="$(CertifiedLibraryReleaseDirectory)/certified-library-release.*.json">
       <Link>verification/%(Filename)%(Extension)</Link>
       <TargetPath>verification/%(Filename)%(Extension)</TargetPath>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <Pack>false</Pack>
     </Content>
   </ItemGroup>
 
+  <!-- A published verifier must contain the selected proof sources even if a previous output
+       has the same length and modification time. The SDK normally skips copies in that case. -->
+  <Target Name="CopyPublishedVerifierInputsExactly" BeforeTargets="PrepareForPublish">
+    <PropertyGroup>
+      <SkipCopyUnchangedFiles>false</SkipCopyUnchangedFiles>
+    </PropertyGroup>
+  </Target>
   <!-- Keep the managed assembly identity while giving the CLI a short executable name. -->
   <Target Name="NameCliExecutable" AfterTargets="_ComputeNETCoreBuildOutputFiles">
     <ItemGroup>

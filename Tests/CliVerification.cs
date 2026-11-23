@@ -721,16 +721,40 @@ if (args.Length == 0)
     foreach (var directory in new[] { packages, packBuild })
         if (Directory.Exists(directory)) Directory.Delete(directory, true);
     // Later suites of the same job run the extractor this one found, so the pack builds into its own directories.
+    var bin = Path.Combine(packBuild, "bin");
+    var publish = Path.Combine(packBuild, "publish");
+    var relative = Path.Combine("StrictBinding", "PlatformEnums.lean");
+    var source = At(relative);
+    var expected = Sha(source);
+
+    // Build and publish must refresh changed proof sources even when file sizes and timestamps match.
+    string SeedStaleSource(string directory)
+    {
+        var path = Path.Combine(directory, "verification", relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var bytes = File.ReadAllBytes(source);
+        bytes[0] ^= 1;
+        File.WriteAllBytes(path, bytes);
+        File.SetLastWriteTimeUtc(path, File.GetLastWriteTimeUtc(source));
+        return path;
+    }
+
+    var builtSource = SeedStaleSource(bin);
+    var publishedSource = SeedStaleSource(publish);
     var sharedExtractor = Sha(ExtractorPath);
     Run(["dotnet", "pack", At("Extractor"), "-c", "Release", "-o", packages,
-        $"-p:OutputPath={Path.Combine(packBuild, "bin")}/",
+        $"-p:OutputPath={bin}/", $"-p:PublishDir={publish}/",
         $"-p:IntermediateOutputPath={Path.Combine(packBuild, "obj")}/"], progress: "CLI development pack");
+    if (Sha(builtSource) != expected || Sha(publishedSource) != expected)
+        throw new InvalidOperationException("The built or published CLI retained the previous strict binding source.");
     if (Sha(ExtractorPath) != sharedExtractor)
         throw new InvalidOperationException("The development pack rebuilt the shared extractor at " + ExtractorPath);
     var package = Directory.GetFiles(packages, "Nethermind.LeanCIL.*.nupkg").Single();
     var packageVersion = Path.GetFileNameWithoutExtension(package)["Nethermind.LeanCIL.".Length..];
     var unpacked = Path.Combine(packages, "unpacked");
     System.IO.Compression.ZipFile.ExtractToDirectory(package, unpacked);
+    if (Sha(Path.Combine(unpacked, "tools/net11.0/any/verification", relative)) != expected)
+        throw new InvalidOperationException("The packed CLI contains a different strict binding source.");
     var packedVersion = Execute(["dotnet", Path.Combine(unpacked, "tools/net11.0/any/Nethermind.LeanCIL.dll"),
         "--version"]);
     var reported = packedVersion.Stdout.ReplaceLineEndings("\n").Split('\n')[0];

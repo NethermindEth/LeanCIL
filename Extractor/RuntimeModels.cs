@@ -38,6 +38,15 @@ internal static class RuntimeModels
     internal static bool ExactScope(TypeReference type, AssemblyName platform) =>
         type.Scope is AssemblyNameReference && AssemblyName.OfScope(type, IdentityImage(type)) == platform;
 
+    // A primitive's own TypeDef occurs as the signature element inside CoreLib itself.
+    internal static bool CoreIntegerDefinition(TypeReference type) =>
+        type is TypeDefinition { IsValueType: true, DeclaringType: null, Namespace: "System",
+            BaseType: TypeDefinition { Namespace: "System", Name: "ValueType", DeclaringType: null } parent } &&
+        parent.Module == type.Module && type.MetadataType is not (MetadataType.Single or MetadataType.Double) &&
+        PrimitiveType.OfElementType(type.MetadataType) is { } primitive && primitive.Name == type.Name &&
+        PinnedAssemblies.Active is { } pins &&
+        AssemblyName.OfScope(type, pins.IdentityMetadata(type.Module)) == PlatformAssemblies.CoreLibrary;
+
     static MetadataImage IdentityImage(TypeReference type) =>
         (PinnedAssemblies.Active ?? throw new InvalidDataException("Type identity without a pinned module image"))
         .IdentityMetadata(type.Module);
@@ -61,6 +70,7 @@ internal static class RuntimeModels
     internal static void ValidateTypeIdentity(TypeReference type, ModuleDefinition module,
         string architecture = "scalar")
     {
+        if (CoreIntegerDefinition(type)) return;
         if (PinnedAssemblies.Declares(type, module) && type.IsValueType && type is not TypeSpecification)
         {
             if (EnumTypes.IsEnum(type)) EnumTypes.Storage(type);

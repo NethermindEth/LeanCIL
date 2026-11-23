@@ -379,15 +379,18 @@ to compute sizes, alignments and offsets for its architecture. An empty selectio
 missing images, or structs with unhandled fields, generics, custom attributes or interfaces
 leave the fact `not covered`. A conflicting supported layout fails the audit.
 
-For `dispatch-catalogs`, Lean checks ordinary virtual slots of nongeneric classes in a single
-pinned assembly. It reads the physical parent of every TypeDef, enumerates all descendants of
-each slot owner, and checks their class flags, declared methods and direct local nongeneric
-interfaces against the catalog. Each interface must resolve to its unique physical TypeDef.
-Every reachable virtual site must dispatch to the implementations selected by these declarations.
-Empty selections, multiple audited images, imports, constrained calls, casts, interface dispatch,
-explicit method overrides, additional metadata modules and unsupported interface types, ancestry
-or signatures leave the fact `not covered`. A different catalog or target table for a supported
-slot fails verification.
+For `dispatch-catalogs`, supply the method images and the images defining the classes they
+test. For `isinst` and `castclass`, Lean reads the token at the original instruction offset.
+A TypeDef names a class in the method's image. For a TypeRef, Lean follows enclosing TypeRefs
+to the AssemblyRef, then locates each named TypeDef in the pinned defining image.
+For a virtual class slot, Lean checks the owner's descendants, methods, local interfaces and
+supported explicit interface implementations in the slot's own image. It checks every reachable
+virtual site's selected targets. Multiple selected methods can have catalogs in different images.
+Each other pinned image must have locally closed parent chains ending at recognized core roots.
+
+Missing pins, forwarded class tests, constrained calls, interface dispatch, cross-image overrides,
+additional metadata modules and unsupported signatures leave the fact `not covered`. Conflicting
+class identities, supported catalogs or target tables fail verification.
 
 For `generic-constraints`, Lean locates each selected method and its declaring type in the
 pinned image. It compares each parameter's ordinal, flags and complete constraint list,

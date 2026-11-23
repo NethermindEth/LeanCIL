@@ -22,6 +22,29 @@ var validateEntry = extractor.GetType("Nethermind.LeanCIL.InstructionPrefixes", 
     .GetMethod("Validate", BindingFlags.Static | BindingFlags.NonPublic)!;
 object Index(MethodDefinition method) => Activator.CreateInstance(indexType,
     BindingFlags.Instance | BindingFlags.NonPublic, null, [method], null)!;
+var metadata = extractor.GetType("Nethermind.LeanCIL.MetadataValidation", true)!;
+var models = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!;
+const BindingFlags internalStatic = BindingFlags.Static | BindingFlags.NonPublic;
+var isAggregate = metadata.GetMethod("IsAggregate", internalStatic)!;
+var coreInteger = models.GetMethod("CoreIntegerDefinition", internalStatic)!;
+var validateIdentity = models.GetMethod("ValidateTypeIdentity", internalStatic)!;
+using (var core = new PinnedMetadata(extractor, typeof(int).Assembly.Location))
+{
+    Type[] integers = [typeof(bool), typeof(char), typeof(sbyte), typeof(byte), typeof(short), typeof(ushort),
+        typeof(int), typeof(uint), typeof(long), typeof(ulong), typeof(nint), typeof(nuint)];
+    foreach (var integer in integers)
+    {
+        var definition = core.Module.GetType(integer.FullName!);
+        if (!(bool)coreInteger.Invoke(null, [definition])! || (bool)isAggregate.Invoke(null, [definition, core.Module])!)
+            throw new InvalidOperationException("CoreLib integer classified as an aggregate: " + integer);
+        validateIdentity.Invoke(null, [definition, core.Module, "scalar"]);
+    }
+    foreach (var other in new[] { typeof(float), typeof(double), typeof(decimal), typeof(DateTime), typeof(string) })
+        if ((bool)coreInteger.Invoke(null, [core.Module.GetType(other.FullName!)])!)
+            throw new InvalidOperationException("Unexpected CoreLib integer definition: " + other);
+}
+Console.WriteLine("PASS pinned CoreLib integer definitions retain their scalar storage");
+
 using var pinned = new PinnedMetadata(extractor, At("Examples/Assembly/bin/Examples.dll"));
 var module = pinned.Module;
 var method = new MethodDefinition("Body", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);

@@ -1,5 +1,6 @@
 import CIL.Extraction.DecodedMethod
 import CIL.Extraction.Features
+import CIL.Safety.Execution
 
 set_option maxRecDepth 4096
 
@@ -53,12 +54,27 @@ theorem message_operands :
     throwFold [i 20 (.text "forged"), i 115 argument, i 122] = none := by decide
 #print axioms message_operands
 
-/-- An ordinary string load retains its text, while a throw consumes its own message. -/
-theorem string_and_throw :
-    let closed := raw [i 114 (.text "keep"), i 38, i 114 (.text "message"), i 115 argument, i 122]
+/-- An ordinary string load retains its text, while the thrown type is independent of the message. -/
+theorem string_and_throw (message : String) :
+    let closed := raw [i 114 (.text "keep"), i 38, i 114 (.text message), i 115 argument, i 122]
     methodCode .scalar {} [] (List.replicate 5 true) closed =
       [.ldstr "keep", .pop, .nop, .nop, .throw .argument] := rfl
 #print axioms string_and_throw
+
+/-- The two string loads and constructor preceding the range exception's throw. -/
+private def rangeCode (parameterName message : String) : List Instruction :=
+  let constructor := ctor runtime "System.ArgumentOutOfRangeException" 2
+  let closed := raw [i 114 (.text parameterName), i 114 (.text message), i 115 constructor, i 122]
+  methodCode .scalar {} [] (List.replicate 4 true) closed
+
+/-- Every parameter name and message yield the same range exception at the original throw. -/
+theorem range_throw (parameterName message : String) (memory : Safety.Memory) :
+    let method : Method := {
+      code := rangeCode parameterName message
+      locals := []
+      returnsValue := false }
+    Safety.invoke [method] 5 0 [] memory = .error ⟨0, 3, .thrown .argumentOutOfRange⟩ := rfl
+#print axioms range_throw
 
 /-- Rejecting an oversized message prefix still discovers an admitted fold in its suffix. -/
 theorem long_prefix_suffix :

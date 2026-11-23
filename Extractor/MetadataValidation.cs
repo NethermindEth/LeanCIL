@@ -53,7 +53,7 @@ internal static class MetadataValidation
 
     internal static bool IsAggregate(TypeReference type, ModuleDefinition module) =>
         (type is not TypeSpecification && PinnedAssemblies.Declares(type, module) && type.IsValueType &&
-            !EnumTypes.IsEnum(type)) ||
+            !EnumTypes.IsEnum(type) && !RuntimeModels.CoreIntegerDefinition(type)) ||
         ValueTuples.Is(type) || GenericStructs.Is(type);
 
     internal static int PrimitiveWidth(TypeReference type) => EnumTypes.Storage(type).FullName switch

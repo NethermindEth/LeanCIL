@@ -21,7 +21,7 @@ private def constraintTarget (image : PreparedImage) (coded : Nat) : Except Audi
   return token
 
 /-- Full assembly identity recorded in the physical AssemblyRef. -/
-private def referenceIdentity (image : PreparedImage) (token : Nat) :
+def referenceIdentity (image : PreparedImage) (token : Nat) :
     Except AuditError String := do
   let text ← assemblyIdentityAt image.view image.layout token 0
   return String.ofList (text.map Char.ofNat)

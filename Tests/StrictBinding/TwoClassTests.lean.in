@@ -1,7 +1,7 @@
 import Extracted
 import CIL.Safety.MethodContract
 
-/-! The two local class tests distinguish a foreign subclass from its base and null. -/
+/-! The caller and its dependency test classes declared in both images. -/
 
 namespace BothCatalogs
 open CIL CIL.Extraction CIL.Safety
@@ -10,7 +10,7 @@ open CIL CIL.Extraction CIL.Safety
 private def objectAt (scope name : String) (bases : List TypeExpr) : Allocation :=
   ⟨.object ⟨.object scope name, bases⟩, ⟨8, 8, []⟩, true, []⟩
 
-/-- The caller owns one local subclass, one foreign subclass, and one plain foreign base. -/
+/-- The caller owns one local subclass and three objects in the foreign hierarchy. -/
 private def caller : Safety.Memory := { Safety.Memory.empty with
   allocations := fun id => match id with
     | 0 => some (objectAt Extracted.assembly0.identity "Near.First"
@@ -18,21 +18,32 @@ private def caller : Safety.Memory := { Safety.Memory.empty with
     | 1 => some (objectAt Extracted.assembly1.identity "Far.Second"
         [.object Extracted.assembly1.identity "Far.Shape"])
     | 2 => some (objectAt Extracted.assembly1.identity "Far.Shape" [])
+    | 3 => some (objectAt Extracted.assembly1.identity "Far.Family/Child"
+        [.object Extracted.assembly1.identity "Far.Second",
+         .object Extracted.assembly1.identity "Far.Shape"])
     | _ => none
-  nextIdentity := 3 }
+  nextIdentity := 4 }
 
-/-- The second argument ranges over null, the subclass and its base. -/
-private def foreignReference : Option Bool → ManagedReference
-  | none => .null
-  | some true => .address ⟨1, 0⟩
-  | some false => .address ⟨2, 0⟩
+/-- The four reference cases in the foreign class hierarchy. -/
+inductive ForeignInput where
+  | null | base | second | child
 
-/-- Each exact subclass contributes its own weight. -/
-private def total (input : Bool × Option Bool) : W32 :=
-  (if input.1 then 4 else 0) + (if input.2 == some true then 2 else 0)
+/-- Each non-null case points into the original caller memory. -/
+private def foreignReference : ForeignInput → ManagedReference
+  | .null => .null
+  | .second => .address ⟨1, 0⟩
+  | .base => .address ⟨2, 0⟩
+  | .child => .address ⟨3, 0⟩
 
-/-- The independent class tests preserve all three caller allocations. -/
-def contract : MethodContract (Bool × Option Bool) W32 where
+/-- Both tests of Second accept Child, which also passes the caller's nested class test. -/
+private def total (input : Bool × ForeignInput) : W32 :=
+  (if input.1 then 4 else 0) + match input.2 with
+    | .null | .base => 0
+    | .second => 10
+    | .child => 26
+
+/-- The independent class tests preserve all four caller allocations. -/
+def contract : MethodContract (Bool × ForeignInput) W32 where
   args input := [.object (if input.1 then .address ⟨0, 0⟩ else .null),
     .object (foreignReference input.2)]
   results value := [.scalar (.i32 value)]
@@ -40,18 +51,18 @@ def contract : MethodContract (Bool × Option Bool) W32 where
   footprint _ := []
   post input before after value := after = before ∧ value = total input
 
-/-- The six combinations of local and foreign reference establish the full contract. -/
-theorem holds (ran : ∀ input, invoke Extracted.program 32 0 (contract.args input) caller =
+/-- The eight combinations of local and foreign reference establish the full contract. -/
+theorem holds (ran : ∀ input, invoke Extracted.program 64 0 (contract.args input) caller =
     .ok (caller, contract.results (total input))) : contract.Holds Extracted.program 0 := by
   rintro input _ rfl
-  exact MethodContract.Holds.intro (c := contract) _ _ ⟨32, ran input⟩
+  exact MethodContract.Holds.intro (c := contract) _ _ ⟨64, ran input⟩
     (Confined.refl [] _) ⟨rfl, rfl⟩
 #print axioms holds
 
 /-- A plain foreign base returning two contradicts the required zero at the original entry. -/
-theorem refuted (ran : invoke Extracted.program 32 0 (contract.args (false, some false)) caller =
+theorem refuted (ran : invoke Extracted.program 64 0 (contract.args (false, .base)) caller =
     .ok (caller, [.scalar (.i32 2)])) : contract.Refuted Extracted.program 0 := by
-  apply MethodContract.Refuted.of_return (c := contract) (input := (false, some false)) rfl ran
+  apply MethodContract.Refuted.of_return (c := contract) (input := (false, .base)) rfl ran
   rintro ⟨_, value, encoded, _, rfl⟩
   revert encoded
   decide +kernel
