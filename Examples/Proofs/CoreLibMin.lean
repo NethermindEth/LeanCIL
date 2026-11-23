@@ -29,6 +29,8 @@ private theorem invokeMin (left right : W32) (memory : Safety.Memory) :
   · rw [ite_eq_right ordered, minimum, ite_eq_right ordered]
     rfl
 
+#print axioms invokeMin
+
 /-- The extracted two-argument Math.Min satisfies the signed minimum contract. -/
 theorem correctness : contract.Holds Extracted.program 0 := by
   rintro ⟨left, right⟩ memory _
