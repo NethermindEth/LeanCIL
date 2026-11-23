@@ -8,7 +8,7 @@ shuffling, return, constants, `ldnull`, arguments, locals, branches, integer ari
 conversions, comparisons, integer indirect loads and stores, block copies and fills, array
 allocations, lengths and element loads and stores, dynamic frame storage, the `readonly.` and
 `unaligned.` prefixes, the class type tests `castclass` and `isinst`, the
-instance field accesses `ldfld`, `ldflda` and `stfld` of a class or a struct, direct and
+instance and static field loads, addresses and stores, direct and
 constrained calls, and construction by `newobj`, with every short and macro form folded into its
 constructor. `valueEncodingMatches` accepts an emitted instruction exactly when it is that decoded
 instruction, and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some
@@ -121,7 +121,7 @@ def Instruction.valueOpcode (opcode : Nat) : Bool :=
     (40 <= opcode && opcode <= 41) ||
     (42 <= opcode && opcode <= 77) || (82 <= opcode && opcode <= 85) ||
     (88 <= opcode && opcode <= 106) || (109 <= opcode && opcode <= 117) ||
-    (123 <= opcode && opcode <= 125) || (129 <= opcode && opcode <= 139) ||
+    (123 <= opcode && opcode <= 139) ||
     opcode == 141 || (142 <= opcode && opcode <= 151) ||
     (154 <= opcode && opcode <= 159) || (162 <= opcode && opcode <= 164) ||
     (179 <= opcode && opcode <= 186) || (208 <= opcode && opcode <= 219) || opcode == 223 ||
@@ -230,6 +230,21 @@ theorem Instruction.instanceField?_opcode {opcode : Nat} {field : FieldRef}
       · cases accessed
 
 #print axioms Instruction.instanceField?_opcode
+
+/-- Decode the access named by a static field opcode. The method separately binds storage. -/
+def Instruction.staticField? (opcode : Nat) (field : FieldRef) : Option Instruction :=
+  if opcode == 126 then some (.ldsfld field) else if opcode == 127 then some (.ldsflda field)
+  else if opcode == 128 then some (.stsfld field) else none
+
+/-- A static field operand can name a load, an address or a store. -/
+theorem Instruction.staticField?_opcode {opcode : Nat} {field : FieldRef} {instruction : Instruction}
+    (accessed : Instruction.staticField? opcode field = some instruction) :
+    opcode = 126 ∨ opcode = 127 ∨ opcode = 128 := by
+  unfold Instruction.staticField? at accessed
+  repeat' split at accessed
+  all_goals simp_all
+
+#print axioms Instruction.staticField?_opcode
 
 /-- Whether `emitted` is the instruction `decoded`, operands included. Defined only for the
     value constructors `ofRaw?` produces; every other `decoded` gives `false`. -/
@@ -347,10 +362,13 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ldelema expected readOnly => match emitted with
     | .ldelema actual actualReadOnly => expected == actual && readOnly == actualReadOnly
     | _ => false
-  -- Instance field instructions compare the field they name.
+  -- Field instructions compare the field they name.
   | .ldfld expected => match emitted with | .ldfld actual => expected == actual | _ => false
   | .ldflda expected => match emitted with | .ldflda actual => expected == actual | _ => false
   | .stfld expected => match emitted with | .stfld actual => expected == actual | _ => false
+  | .ldsfld expected => match emitted with | .ldsfld actual => expected == actual | _ => false
+  | .ldsflda expected => match emitted with | .ldsflda actual => expected == actual | _ => false
+  | .stsfld expected => match emitted with | .stsfld actual => expected == actual | _ => false
   -- A call compares the method it names and its prefixes, a construction its constructor.
   | .callvirt expected => match emitted with
     | .callvirt actual => expected == actual
@@ -502,8 +520,8 @@ private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction
 
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
     with short and macro forms folded into it. A type operand gives the type test or typed array
-    instruction its opcode names, a struct or nongeneric class field the instruction its opcode
-    names and a call site the `call` of the method it names, whose target the method's link table
+    instruction its opcode names. A field operand retains its identity and access kind. A call
+    site gives the `call` of the method it names, whose target the method's link table
     gives, at `call` or constrained `callvirt`, and its construction at `newobj`. Any other
     opcode, another operand kind that instantiation rewrites, or a malformed or out-of-range
     operand gives `none`. A hole is never a decoding, so `Instruction.ofRaw` can write one where
@@ -527,6 +545,8 @@ def Instruction.ofRaw? (previous : Option RawInstruction) (raw : RawInstruction)
   | .field owner _ _ _ false =>
     if owner.objectApplication then none else
       (FieldRef.ofOperand? raw.operand).bind (Instruction.instanceField? raw.opcode)
+  | .field _ _ _ _ true =>
+    (FieldRef.ofOperand? raw.operand).bind (Instruction.staticField? raw.opcode)
   | .call site => Instruction.ofCallSite? previous raw.opcode site
   | .indirectCall result parameters hasThis explicitThis convention =>
     if raw.opcode == 41 && !hasThis && !explicitThis && convention == 0 then
@@ -554,6 +574,9 @@ theorem Instruction.valueOpcode_of_ofRaw? {previous : Option RawInstruction} {ra
         · cases found
         obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
         rcases Instruction.instanceField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
+          rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
+      · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
+        rcases Instruction.staticField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
           rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
       · rcases Instruction.ofCallSite?_opcode found with
           opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
@@ -596,6 +619,9 @@ theorem Instruction.ofRaw?_readOnly {previous : Option RawInstruction} {raw : Ra
       · cases found
       obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
       rcases Instruction.instanceField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
+        cases opcodeIs
+    · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
+      rcases Instruction.staticField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
     · rcases Instruction.ofCallSite?_opcode found with
         opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
@@ -644,6 +670,9 @@ theorem Instruction.ofRaw?_ldelema {previous : Option RawInstruction} {raw : Raw
       obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
       rcases Instruction.instanceField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
+    · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
+      rcases Instruction.staticField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
+        cases opcodeIs
     · rcases Instruction.ofCallSite?_opcode found with
         opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
@@ -657,12 +686,13 @@ theorem Instruction.ofRaw?_ldelema {previous : Option RawInstruction} {raw : Raw
 def Instruction.ofRaw (previous : Option RawInstruction) (raw : RawInstruction) : Instruction :=
   (Instruction.ofRaw? previous raw).getD (.unadmitted raw.opcode)
 
-/-- Decode an ordinary closed site. Type handles require a recognized comparison, and object
-    transfers and sizes require an admitted closed operand. -/
+/-- Decode an ordinary closed site. Static fields require method-level storage evidence, type
+    handles require a recognized comparison, and object transfers and sizes need a closed type. -/
 def Instruction.ofClosedValue (previous : Option RawInstruction) (raw : RawInstruction) :
     Instruction :=
   if (match raw.operand with
     | .type type => raw.opcode == 208 || objectOpcode raw.opcode && !objectApplicationAdmitted type
+    | .field _ _ _ _ true => true
     | _ => false) then .unadmitted raw.opcode
   else Instruction.ofRaw previous raw
 
@@ -778,6 +808,10 @@ theorem Instruction.sameValue_self_of_ofRaw? {previous : Option RawInstruction}
       · cases found
       obtain ⟨_, _, found⟩ := Option.bind_eq_some_iff.mp found
       unfold Instruction.instanceField? at found
+      repeat' split at found
+      all_goals cases found <;> simp [Instruction.sameValue]
+    · obtain ⟨_, _, found⟩ := Option.bind_eq_some_iff.mp found
+      unfold Instruction.staticField? at found
       repeat' split at found
       all_goals cases found <;> simp [Instruction.sameValue]
     · unfold Instruction.ofCallSite? at found

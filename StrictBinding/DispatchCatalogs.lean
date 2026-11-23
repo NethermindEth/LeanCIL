@@ -70,8 +70,8 @@ private def descends (parents : Array Nat) (root : Nat) : Nat → Nat → Bool �
     let some parent := parents[row]? | throwThe AuditError (.typeDefMismatch row .base)
     descends parents root fuel parent (found || row == root)
 
-/-- Primitive signatures and references to other supported local classes. -/
-private def formalElement (image : PreparedImage) : SigType → Reading TypeExpr
+/-- A primitive, local class or in-range method type parameter in a catalog signature. -/
+private def formalElement (image : PreparedImage) (arity : Nat) : SigType → Reading TypeExpr
   | .primitive 1 => return .void
   | .primitive code => do
     let some name := (primitiveName code).bind spelled? | failure
@@ -79,17 +79,43 @@ private def formalElement (image : PreparedImage) : SigType → Reading TypeExpr
   | .named false token => do
     guard (tableOf token == Table.typeDef)
     className image (token % 2^24)
+  | .mvar index => do
+    guard (index < arity)
+    return .parameter index
   | _ => failure
 
 /-- A managed reference in a slot signature preserves its physical element type. -/
-private def formalType (image : PreparedImage) : SigType → Reading TypeExpr
+private def formalType (image : PreparedImage) (arity : Nat) : SigType → Reading TypeExpr
   | .byref element => do
-    let value ← formalElement image element
+    let value ← formalElement image arity element
     guard (value != .void)
     return .byref value
-  | element => formalElement image element
+  | element => formalElement image arity element
 
-/-- A nongeneric managed MethodDef, with its physical flags, signature, and body presence. -/
+/-- Check GenericParam ordinals and arity against the signature. A constraint on a catalog
+    method leaves its declaration uncovered until the catalog can describe that constraint. -/
+private def methodParameters (image : PreparedImage) (row arity : Nat) : Reading Unit := do
+  let token := StrictBinding.tokenOf Table.methodDef row
+  if arity == 0 then return ← physical (parameterDeclarations image token [])
+  let cell := image.layout.cellOfRow image.view Table.genericParam
+  let ownerKey := 2 * row + 1
+  let mut ordinal := 0
+  let mut unrestricted := true
+  for i in [:image.layout.rowCount Table.genericParam] do
+    let parameter := i + 1
+    if (← physical (cell parameter 2)) != ownerKey then continue
+    unless (← physical (cell parameter 0)) == ordinal do
+      throwThe AuditError (.constraintMismatch token)
+    ordinal := ordinal + 1
+    if (← physical (cell parameter 1)) != 0 then unrestricted := false
+  unless ordinal == arity do throwThe AuditError (.constraintMismatch token)
+  guard unrestricted
+  let constraintTable := 0x2c
+  for i in [:image.layout.rowCount constraintTable] do
+    let parameter ← physical (image.layout.cellOfRow image.view constraintTable (i+1) 0)
+    guard ((← physical (cell parameter 2)) != ownerKey)
+
+/-- A managed MethodDef with its physical flags, signature and unconstrained type parameters. -/
 private def classMethod (image : PreparedImage) (row : Nat) : Reading DispatchMethod := do
   let cell := image.layout.cellOfRow image.view Table.methodDef row
   let implementation ← physical (cell 1)
@@ -98,20 +124,21 @@ private def classMethod (image : PreparedImage) (row : Nat) : Reading DispatchMe
     | failure
   let blob ← physical (image.layout.blobAt image.view (← physical (cell 4)))
   let .ok sig := decodeMethodSig blob | failure
-  guard (sig.genericArity == 0 && (sig.convention == 0 || sig.convention == 32))
+  let convention := if sig.genericArity == 0 then 0 else genericFlag
+  guard (sig.convention == convention || sig.convention == convention + hasThisFlag)
   guard (implementation == 0)
   let token := StrictBinding.tokenOf Table.methodDef row
-  let _ ← physical (parameterDeclarations image token [])
+  methodParameters image row sig.genericArity
   let isAbstract := attributes &&& 0x400 != 0
   let hasBody := (← physical (cell 0)) != 0
-  let hasThis := sig.convention == 32
+  let hasThis := sig.convention == convention + hasThisFlag
   guard (hasBody == !isAbstract && hasThis == (attributes &&& 0x10 == 0))
   return {
     token, name, hasThis, isPublic := attributes % 8 == 6,
-    isAbstract, isVirtual := attributes &&& virtualMethodAttribute != 0, hasBody, genericArity := 0,
-    explicitThis := false, callingConvention := 0, attributes, implementation,
-    returnType := ← formalType image sig.result,
-    parameters := ← sig.parameters.mapM (formalType image),
+    isAbstract, isVirtual := attributes &&& virtualMethodAttribute != 0, hasBody,
+    genericArity := sig.genericArity, explicitThis := false, callingConvention := convention,
+    attributes, implementation, returnType := ← formalType image sig.genericArity sig.result,
+    parameters := ← sig.parameters.mapM (formalType image sig.genericArity),
     overrides := [] }
 
 /-- InterfaceImpl targets grouped by their physical TypeDef owner, in declaration order. -/
@@ -163,6 +190,7 @@ private def localOverrides (image : PreparedImage) (interfaces : Array (Array Na
     let slotOwner := TypeExpr.atom image.identity name
     let implementation ← classMethod image (body / 2)
     let declaration ← classMethod image (slot / 2)
+    guard (implementation.genericArity == 0 && declaration.genericArity == 0)
     guard (implementation.hasThis && implementation.hasBody && implementation.isVirtual &&
       declaration.hasThis && declaration.isVirtual && declaration.isAbstract &&
       implementation.returnType == declaration.returnType &&

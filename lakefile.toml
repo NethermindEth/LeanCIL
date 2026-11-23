@@ -46,6 +46,9 @@ name = "Tests.CoreStringLength"
 name = "Tests.CoreLibImage"
 
 [[lean_lib]]
+name = "Tests.CoreExceptionHResult"
+
+[[lean_lib]]
 name = "Tests.CoreMonitor"
 
 [[lean_lib]]

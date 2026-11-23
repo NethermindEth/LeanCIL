@@ -27,6 +27,22 @@ theorem missingCatalog : rejected (Extracted.methodEvidence.map fun item =>
     {item with dispatchTypes := []}) = true := by decide +kernel
 #print axioms missingCatalog
 
+/-- Change the method type parameter named by the physical return signature of Pick. -/
+theorem wrongGenericReturn : rejected (Extracted.methodEvidence.map fun item =>
+    { item with dispatchTypes := item.dispatchTypes.map fun type =>
+      { type with methods := type.methods.map fun method =>
+        if method.name == "Pick" then { method with returnType := .parameter 0 }
+        else method } }) = true := by decide +kernel
+#print axioms wrongGenericReturn
+
+/-- Removing the managed reference from Load's parameter contradicts the signature blob. -/
+theorem wrongGenericByref : rejected (Extracted.methodEvidence.map fun item =>
+    { item with dispatchTypes := item.dispatchTypes.map fun type =>
+      { type with methods := type.methods.map fun method =>
+        if method.name == "Load" then { method with parameters := [.parameter 0] }
+        else method } }) = true := by decide +kernel
+#print axioms wrongGenericByref
+
 /-- Changing either operand while retaining its original body contradicts the physical token. -/
 private def crossed (opcode : Nat) (item : MethodEvidence) : MethodEvidence :=
   {item with original := {item.original with code := item.original.code.map fun instruction =>

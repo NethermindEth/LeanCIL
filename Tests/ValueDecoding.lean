@@ -30,6 +30,9 @@ def structOperand : RawOperand :=
 /-- The field `structOperand` names. -/
 def structField : FieldRef := { classField with owner := .aggregate "T::Pair" 0 }
 
+private def staticOperand : RawOperand :=
+  .field classField.owner classField.index classField.type classField.name true
+
 /-- The class the type test rows name. -/
 private def dog : TypeExpr := .object "Fixture" "Fixture.Dog"
 
@@ -188,6 +191,8 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 125, classOperand⟩, .stfld classField),
   (⟨0, 123, structOperand⟩, .ldfld structField), (⟨0, 124, structOperand⟩, .ldflda structField),
   (⟨0, 125, structOperand⟩, .stfld structField),
+  (⟨0, 126, staticOperand⟩, .ldsfld classField), (⟨0, 127, staticOperand⟩, .ldsflda classField),
+  (⟨0, 128, staticOperand⟩, .stsfld classField),
   -- Typed object operations.
   (⟨0, 0x70, .type int32⟩, .cpobj int32), (⟨0, 0x71, .type int32⟩, .ldobj int32),
   (⟨0, 0x81, .type int32⟩, .stobj int32), (⟨0, 0xfe15, .type int32⟩, .initobj int32),
@@ -219,8 +224,7 @@ def named : List (RawInstruction × Instruction) := [
 
 /-- Constructors no opcode decodes to: the families outside the value opcodes. -/
 def undecoded : List Name := [
-  ``Instruction.throw,
-  ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld]
+  ``Instruction.throw, ``Instruction.unadmitted]
 
 /-- What each named opcode decodes to after its predecessor. -/
 def decodedNamed : List (Option Instruction) :=
@@ -239,6 +243,21 @@ theorem literal_operands :
     valueEncodingMatches none ⟨0, 208, .type dog⟩ (.ldtoken (.type int32)) = false ∧
     Instruction.ofRaw? none ⟨0, 208, classOperand⟩ = none := by decide +kernel
 #print axioms literal_operands
+
+/-- Each static access needs a static operand and a matching field. A method needs a site
+    binding to admit any of the three instructions. -/
+theorem static_field_operands :
+    [126, 127, 128].all (fun opcode =>
+      (Instruction.ofRaw? none ⟨0, opcode, classOperand⟩).isNone &&
+      (Instruction.ofRaw? none ⟨0, opcode, .none⟩).isNone &&
+      Instruction.ofClosedValue none ⟨0, opcode, staticOperand⟩ == .unadmitted opcode) = true ∧
+    [123, 124, 125].all (fun opcode =>
+      (Instruction.ofRaw? none ⟨0, opcode, staticOperand⟩).isNone) = true ∧
+    valueEncodingMatches none ⟨0, 126, staticOperand⟩
+      (.ldsfld { classField with index := 2 }) = false ∧
+    valueEncodingMatches none ⟨0, 127, staticOperand⟩ (.ldsfld classField) = false := by
+  decide +kernel
+#print axioms static_field_operands
 
 /-- A bare string load retains every Unicode scalar of the decoded user-string entry. -/
 theorem literal_characters (text : String) :
@@ -752,7 +771,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 96, undecoded 5 of 101 constructors -/
+/-- info: decoded 99, undecoded 2 of 101 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

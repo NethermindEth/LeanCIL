@@ -329,6 +329,8 @@ void CheckDispatchCatalogs()
             public class Triangle : Shape, IShapeTag, IColour {
                 public override int Sides() => 3;
                 public int ReadScale(ref int scale) => scale;
+                public T Load<T>(ref T value) => value;
+                public static U Pick<T, U>(T first, U second) => second;
                 int IShapeTag.Tag() => 1;
                 int IShapeTag.OtherTag() => 2;
             }

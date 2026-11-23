@@ -212,10 +212,8 @@ private def ordinaryStaticInstruction (environment : CallLayouts) (methodOwner :
   else
     let init ← descriptor.initializer
     guard (init.literal.isNone || initializerYields [] descriptor)
-  match opcode with
-  | 126 => return .ldsfld field
-  | 127 => return .ldsflda field
-  | _ => none
+  guard (opcode == 126 || opcode == 127)
+  Instruction.staticField? opcode field
 
 /-- The raw operand names the descriptor's field. An RVA site also requires its full blob. -/
 private def staticInstruction (profile : FeatureProfile) (environment : CallLayouts)
@@ -334,7 +332,8 @@ private theorem malformedCall (previous : Option RawInstruction) (raw : RawInstr
     split <;> try rfl
   all_goals
     rename_i isStatic _
-    cases isStatic <;> simp [Instruction.instanceField?, FieldRef.ofOperand?, Option.bind]
+    cases isStatic <;>
+      simp [Instruction.instanceField?, Instruction.staticField?, FieldRef.ofOperand?, Option.bind]
     all_goals repeat' split <;> rfl
 
 #print axioms malformedCall

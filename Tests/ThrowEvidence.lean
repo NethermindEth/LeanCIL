@@ -1,6 +1,6 @@
 import CIL.Extraction.DecodedMethod
 import CIL.Extraction.Features
-import CIL.Safety.Execution
+import CIL.Safety.ObjectSteps
 
 set_option maxRecDepth 4096
 
@@ -276,5 +276,52 @@ theorem rejects_unadmitted_owners :
     foldRoles [i 115 (ctor runtime "System.InvalidCastException" 0), i 122] = [none, none] ∧
     exceptionOwner? (.atom runtimeScope "System.Object") = none := by decide +kernel
 #print axioms rejects_unadmitted_owners
+
+section
+open CIL.Safety
+
+/-- A live object pushed by a string load is a valid constructor argument. -/
+private theorem argument_of_literal {text : String} {memory : Safety.Memory}
+    {reference : Reference} (frame : Safety.Frame)
+    (loaded : stringLiteralInstruction text [] memory =
+      .ok (memory, [.object (.address reference)])) :
+    callArgument frame memory (.object (.address reference)) =
+      .ok (.object (.address reference)) := by
+  cases bound : memory.literals.lookup text with
+  | none => simp [stringLiteralInstruction, literalObject, bound, bind, Except.bind] at loaded
+  | some actual =>
+    cases formed : formObject memory (.address actual) with
+    | error fault =>
+      simp [stringLiteralInstruction, literalObject, bound, formed, bind, Except.bind] at loaded
+    | ok value =>
+      have same := formObject_returns_input formed
+      subst value
+      have equal : actual = reference := by
+        simpa [stringLiteralInstruction, literalObject, bound, formed, bind, Except.bind,
+          pure, Except.pure] using loaded
+      subst actual
+      exact callArgument_of_checked (checkedValue_object memory _ formed)
+#print axioms argument_of_literal
+
+/-- Once both literal arguments load, a linked class constructor still needs space for its
+    instance. With zero modeled heap budget the original newobj fails before the constructor. -/
+theorem literal_constructor_allocation (name message : String) (nameRef messageRef : Reference)
+    (memory : Safety.Memory) (budget : memory.heapBudget = 0) (method : MethodRef)
+    (arguments : method.parameters.length = 2) (constructor : Nat) (bases : List TypeExpr)
+    (size : Nat) (positive : 0 < size) (body : Method) (pc : Nat) (frame : Safety.Frame)
+    (nameLoaded : stringLiteralInstruction name [] memory =
+      .ok (memory, [.object (.address nameRef)]))
+    (messageLoaded : stringLiteralInstruction message [] memory =
+      .ok (memory, [.object (.address messageRef)])) :
+    newobjStep (some (.object constructor bases size)) method body pc frame
+      [.object (.address messageRef), .object (.address nameRef)] memory =
+      .error (.allocationFailure size 0) := by
+  have firstArg := argument_of_literal frame nameLoaded
+  have secondArg := argument_of_literal frame messageLoaded
+  simp [newobjStep, arguments, constructObject, firstArg, secondArg, allocateObject, budget,
+    positive, List.mapM_cons, List.mapM_nil, bind, Except.bind, pure, Except.pure]
+#print axioms literal_constructor_allocation
+
+end
 
 end Tests.ThrowEvidence

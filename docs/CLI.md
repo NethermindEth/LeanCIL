@@ -387,8 +387,10 @@ For a virtual class slot, Lean checks the owner's descendants, methods, local in
 supported explicit interface implementations in the slot's own image. It checks every reachable
 virtual site's selected targets. Multiple selected methods can have catalogs in different images.
 Each other pinned image must have locally closed parent chains ending at recognized core roots.
+The catalog checks unconstrained method type parameters, including byref parameters, against the
+physical signature and the owning GenericParam rows.
 
-Missing pins, forwarded class tests, constrained calls, interface dispatch, cross-image overrides,
+Missing pins, constrained calls, constrained generic methods, interface dispatch, cross-image overrides,
 additional metadata modules and unsupported signatures leave the fact `not covered`. Conflicting
 class identities, supported catalogs or target tables fail verification.
 

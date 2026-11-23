@@ -441,6 +441,10 @@ interface slot, the MethodImpl row must name the implementing class and two loca
 with matching nongeneric instance signatures. The catalog records the interface and the exact
 declaration token. A class outside the selected hierarchy may implement an external interface
 when its body MethodDef belongs to that class.
+For an unconstrained generic method, Lean checks the signature's generic flag, the number and
+order of its GenericParam rows, and the ordinal of every method parameter in the supported
+signature types. It retains byrefs in both the return and parameter types. A declaration with
+generic parameter flags or constraint rows leaves this catalog uncovered.
 Each selected method uses the physical image matching its own assembly identity. A single
 extraction can use class tests and local virtual slots in several assemblies. At a foreign class test,
 Lean reads the TypeRef and its enclosing TypeRefs from the caller, checks the full AssemblyRef
@@ -473,6 +477,14 @@ output can lose admission without invalidating a theorem over an already admitte
 | Closed `typeof` equality/inequality calls, reference `ceq` and comparison branches | Exact type handles, runtime helper identities, substituted types, result and selected target; all encoded targets validated and no branch into the interior | Forwarding/scoped identity ambiguities, decorated names and arbitrary runtime `System.Type` use remain unsupported. Reference comparison relies on [CoreCLR runtime type equality](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Type.cs) and [GetTypeFromHandle](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/System.Private.CoreLib/src/System/Type.CoreCLR.cs). |
 | `throw new E(...)` | Allowlisted type/constructor, permitted literal/null arguments and final throw; no branch into the interior | No exception-object identity, observable constructor effects, handlers or resource-exhaustion model. |
 | `ldnull; throw` | Adjacent operand-free null load and throw, bound to `System.NullReferenceException`; no branch into the throw | No general exception-object evaluation or handlers. |
+
+For a recognized exception constructor, the contract identifies the exception type on the throwing
+path. A proof can use the same contract in every locale. The kernel theorem
+`CIL.Extraction.throwFold_map_literals` allows an arbitrary replacement at each string load and
+preserves both the recognized type and the number of argument instructions consumed. Each
+translated assembly still binds its own literal operands and requires verification against its
+own image digest. If the modeled heap budget is zero, loading both strings leaves a linked
+constructor unable to allocate a positive-sized exception object.
 
 An in-place span constructor runs as a runtime-model call on a span home.
 `ObjectOperandsValid` requires its receiver to be the address of a local or parameter of the
