@@ -37,19 +37,35 @@ private def missingInterface : Except AuditError Bool := do
 theorem missingConstraintImage : missingInterface.toOption = some true := by decide +kernel
 #print axioms missingConstraintImage
 
-/-- Changing only the interface scope in the proposed constraint contradicts Pick's TypeRef. -/
-private def wrongScope : List MethodEvidence := Extracted.methodEvidence.map fun item =>
-  { item with dispatchTypes := item.dispatchTypes.map fun entry =>
-    { entry with methods := entry.methods.map fun method =>
-      if method.name == "Pick" then
-        { method with genericParameters := method.genericParameters.modify 0 fun constraint =>
-          let head := TypeExpr.objectConstructor app.identity "Far.IScale`2"
-          { constraint with interfaces := [.apply (.apply head (.parameter 1)) (.parameter 0)] } }
-      else method } }
+/-- Change one open constraint on Pick while retaining every other catalog entry. -/
+private def changePick (change : TypeExpr → TypeExpr) : List MethodEvidence :=
+  Extracted.methodEvidence.map fun item =>
+    { item with dispatchTypes := item.dispatchTypes.map fun entry =>
+      { entry with methods := entry.methods.map fun method =>
+        if method.name == "Pick" then
+          { method with genericParameters := method.genericParameters.modify 0 fun constraint =>
+            { constraint with interfaces := constraint.interfaces.map change } }
+        else method } }
+
+/-- Moving only the outer interface to the caller contradicts Pick's TypeRef. -/
+private def wrongScope := changePick fun
+  | .apply (.apply (.objectConstructor _ name) left) right =>
+    .apply (.apply (.objectConstructor app.identity name) left) right
+  | type => type
 
 theorem wrongConstraintScope : checked [app, library] wrongScope =
     .error (.dispatchMismatch Extracted.method0Original.token) := by cil_kernel_rfl
 #print axioms wrongConstraintScope
+
+/-- Swapping the arguments of the interface inside Box preserves both outer applications. -/
+private def crossedArguments := changePick fun
+  | .apply (.apply outer (.apply box (.apply (.apply inner first) second))) right =>
+    .apply (.apply outer (.apply box (.apply (.apply inner second) first))) right
+  | type => type
+
+theorem wrongNestedArguments : checked [app, library] crossedArguments =
+    .error (.dispatchMismatch Extracted.method0Original.token) := by cil_kernel_rfl
+#print axioms wrongNestedArguments
 
 /-- Both pin orders locate the same declaring images. -/
 theorem reversed : (checked [library, app] Extracted.methodEvidence).toOption = some true :=
@@ -106,13 +122,32 @@ private def testedReference (name : String) : Option Nat := do
   return token
 
 /-- Change a physical metadata cell while preserving the caller's exact method-body bytes. -/
-private def replaceCell (image : PreparedImage) (token column value : Nat) :
+private def replaceCell (pin : PinnedImage) (image : PreparedImage) (token column value : Nat) :
     Option PinnedImage := do
   let old ← (image.layout.cell image.view token column).toOption
   let (offset, width) ← (image.layout.cellAt token column).toOption
   guard (value < 256 ^ width)
   let changes := (List.range width).map fun i => (offset + i, ((old ^^^ value) / 256 ^ i) % 256)
-  return {app with image := Tests.StrictBinding.flipBytes app.image changes}
+  return {pin with image := Tests.StrictBinding.flipBytes pin.image changes}
+
+/-- Change only the ordinal of Box's parameter in the library. The caller's nested constraint
+    must read that TypeDef even though its own outer interface and IL are unchanged. -/
+private def alteredNestedParameter : Option Bool := do
+  let source ← (prepareOne library).toOption
+  let some box ← (enumDefinition? source 0 [bytesOf "Far", bytesOf "Box`1"]).toOption | none
+  let index ← (List.range (source.layout.rowCount Table.genericParam)).find? fun index =>
+    (source.layout.cellOfRow source.view Table.genericParam (index + 1) 2).toOption ==
+      some (2 * box)
+  let parameter := StrictBinding.tokenOf Table.genericParam (index + 1)
+  let altered ← replaceCell library source parameter 0 1
+  let changed ← (prepareOne altered).toOption
+  let _ ← (bodyBound changed Extracted.method1Original.token Extracted.method1Body.bytes).toOption
+  match checked [app, altered] Extracted.methodEvidence with
+  | .error (.typeDefMismatch row .kind) => return row == box
+  | _ => return false
+
+theorem nestedParameterOrdinal : alteredNestedParameter = some true := by decide +kernel
+#print axioms nestedParameterOrdinal
 
 /-- Changing the caller's TypeRef to the physically present outer class contradicts the
     bound operand at its own TypeRef token. Cycling a nested scope leaves coverage partial. -/
@@ -124,8 +159,8 @@ private def changedReference (cycle : Bool) : Option Bool := do
   let second ← testedReference "Far.Second"
   let outer := StrictBinding.tokenOf Table.typeRef (outerScope / 4)
   let outerName ← (original.layout.cell original.view outer typeNameColumn).toOption
-  let altered ← if cycle then replaceCell original nested 0 ((nested % 2^24) * 4 + 3)
-    else replaceCell original second typeNameColumn outerName
+  let altered ← if cycle then replaceCell app original nested 0 ((nested % 2^24) * 4 + 3)
+    else replaceCell app original second typeNameColumn outerName
   let prepared ← (prepareOne altered).toOption
   let _ ← (bodyBound prepared Extracted.method0Original.token Extracted.method0Body.bytes).toOption
   match checked [altered, library] Extracted.methodEvidence with
@@ -146,7 +181,7 @@ private def missingChild : Option Bool := do
   let nested ← testedReference "Far.Family/Child"
   let second ← testedReference "Far.Second"
   let name ← (caller.layout.cell caller.view second typeNameColumn).toOption
-  let altered ← replaceCell caller nested typeNameColumn name
+  let altered ← replaceCell app caller nested typeNameColumn name
   let some family ← (enumDefinition? target 0 [CIL.Extraction.bytesOf "Far",
     CIL.Extraction.bytesOf "Family"]).toOption | none
   match checked [altered, library] Extracted.methodEvidence with

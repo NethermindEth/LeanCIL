@@ -388,9 +388,10 @@ supported explicit interface implementations in the slot's own image. It checks 
 virtual site's selected targets. Multiple selected methods can have catalogs in different images.
 Each other pinned image must have locally closed parent chains ending at recognized core roots.
 For generic methods, the catalog checks the signature, including byrefs, and the ordinal, flags
-and constraints of each type parameter. A generic interface constraint may use method type
-parameters and primitive arguments in the order specified by its TypeSpec. Supply the defining
-image and each forwarding image when the interface belongs to another assembly.
+and constraints of each type parameter. A method parameter or primitive can appear inside
+nested generic classes and interfaces. For example, in `IScale<Box<ICode<U>>, T>` the audit
+checks all three definitions, their arities and the order of their arguments. Supply the
+defining and forwarding images for every referenced head.
 
 Missing pins, constrained calls, unsupported constraint types, interface dispatch, cross-image overrides,
 additional metadata modules and unsupported signatures leave the fact `not covered`. Conflicting
@@ -398,8 +399,9 @@ class identities, supported catalogs or target tables fail verification.
 
 For `generic-constraints`, Lean locates each selected method and its declaring type in the
 pinned image. It compares each parameter's ordinal, flags and complete constraint list,
-including pinned generic interfaces applied to method type parameters or primitive types.
-For value-type layouts it compares the direct interface implementations. When a struct
+including nested reference types in pinned generic interface constraints. For value-type layouts
+it compares the direct interface implementations. A local interface such as `IClosed<Box<int>>`
+can witness a selected instantiation of `where T : IClosed<Box<U>>`. When a struct
 has primitive type arguments, Lean reads its own parameter declarations and substitutes those
 arguments at the positions specified by the interface signature. A conflicting declaration fails
 the check. An extraction with no generic selection, an import, an unsupported layout argument

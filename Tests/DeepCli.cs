@@ -275,7 +275,8 @@ void CheckGenericConstraints()
     var assembly = fixture.Build("Constraints", "DeepCli.Constraints", """
         namespace Gates;
         public interface IClosed<T> { }
-        public struct Both : IClosed<int>, IClosed<long> { public int Value; }
+        public class Box<T> { }
+        public struct Both : IClosed<int>, IClosed<long>, IClosed<Box<int>> { public int Value; }
         public struct Pair<S, T> : IClosed<T> where S : unmanaged where T : unmanaged
         {
             public S First;
@@ -286,7 +287,9 @@ void CheckGenericConstraints()
             public static int Read<T>(int n) where T : struct, IClosed<int> => n + 1;
             public static int ReadWide<T>(int n) where T : struct, IClosed<long> => n + 1;
             public static int Identity<T, U>(int n) where T : struct, IClosed<U> where U : unmanaged => n;
-            public static int Entry(int n) => ReadWide<Pair<int, long>>(Read<Both>(Identity<Both, int>(n)));
+            public static int Nested<T, U>(int n) where T : struct, IClosed<Box<U>> where U : unmanaged => n;
+            public static int Entry(int n) =>
+                ReadWide<Pair<int, long>>(Read<Both>(Identity<Both, int>(Nested<Both, int>(n))));
         }
         """);
     var extracted = fixture.Artifact("GenericExtraction");
@@ -410,12 +413,14 @@ void CheckTwoAssemblyCatalogs()
         public static class Family { public sealed class Child : Second { } }
         public static class Reader { public static int Test(Shape value) => value is Second ? 2 : 0; }
         public interface IScale<T, U> { }
+        public class Box<T> { }
         """);
     var app = fixture.Build("LocalClassApp", "Classes.App", """
         namespace Near;
         public class Shape { }
         public sealed class First : Shape {
-            public static U Pick<T, U>(T first, U second) where T : class, Far.IScale<U, T>, new() => second;
+            public static U Pick<T, U>(T first, U second)
+                where T : class, Far.IScale<Far.Box<Far.IScale<U, int>>, Far.IScale<T, string>>, new() => second;
         }
         public static class Reader {
             public static int Both(Shape local, Far.Shape other) => Far.Reader.Test(other) +

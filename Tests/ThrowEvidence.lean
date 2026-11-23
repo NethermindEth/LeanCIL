@@ -1,5 +1,7 @@
 import CIL.Extraction.DecodedMethod
 import CIL.Extraction.Features
+import CIL.Safety.CallComposition
+import CIL.Safety.ExecutionLifetime
 import CIL.Safety.ObjectSteps
 
 set_option maxRecDepth 4096
@@ -320,6 +322,67 @@ theorem literal_constructor_allocation (name message : String) (nameRef messageR
   simp [newobjStep, arguments, constructObject, firstArg, secondArg, allocateObject, budget,
     positive, List.mapM_cons, List.mapM_nil, bind, Except.bind, pure, Except.pure]
 #print axioms literal_constructor_allocation
+
+/-- The two literal loads, linked constructor call and raw throw raise the owner's exception
+    if both literals load, the instance fits and the constructor returns normally. -/
+theorem literal_constructor_throw (program : CIL.Program) (entry pc callee fuel : Nat)
+    (body : Method) (method : MethodRef) (bases : List TypeExpr) (size : Nat)
+    (frame : Safety.Frame) (args : List Safety.Value) (memory final : Safety.Memory)
+    (name message : String) (nameRef messageRef : Reference) (raised : ExceptionType)
+    (found : program[entry]? = some body) (first : body.code[pc]? = some (.ldstr name))
+    (second : body.code[pc + 1]? = some (.ldstr message))
+    (construct : body.code[pc + 2]? = some (.newobj method))
+    (linked : body.linkAt (pc + 2) = some (.object callee bases size))
+    (throws : body.code[pc + 3]? = some .throw) (arity : method.parameters.length = 2)
+    (owner : runtimeException? method.owner = some raised)
+    (formed : memory.WellFormed) (affordable : size ≤ memory.heapBudget)
+    (bounded : size < nativeLimit)
+    (nameLoaded : literalObject memory name = .ok (.object (.address nameRef)))
+    (messageLoaded : literalObject memory message = .ok (.object (.address messageRef)))
+    (returned : invoke program (fuel + 1) callee
+      [.object (.address ⟨memory.nextIdentity, 0⟩), .object (.address nameRef),
+       .object (.address messageRef)] (objectMemory memory ⟨method.owner, bases⟩ size) =
+        .ok (final, [])) :
+    run program (fuel + 4) entry pc args frame [] memory =
+      .error ⟨entry, pc + 3, .thrown raised⟩ := by
+  let receiver : Reference := ⟨memory.nextIdentity, 0⟩
+  let created : Safety.Value := .object (.address receiver)
+  let allocated := objectMemory memory ⟨method.owner, bases⟩ size
+  have load (site : Nat) (stack : List Safety.Value) (text : String) (reference : Reference)
+      (bound : literalObject memory text = .ok (.object (.address reference))) :
+      step body (.ldstr text) site args frame stack memory =
+        .ok (.next (site + 1) (.object (.address reference) :: stack) frame memory) := by
+    rw [step_ldstr_eq, bound]
+    rfl
+  have argument (text : String) (reference : Reference)
+      (bound : literalObject memory text = .ok (.object (.address reference))) :=
+    argument_of_literal frame (text := text) (memory := memory) (reference := reference)
+      (by rw [stringLiteralInstruction, bound]; rfl)
+  rw [run_next found first (load pc [] name nameRef nameLoaded)]
+  rw [run_next found second (load (pc + 1) _ message messageRef messageLoaded)]
+  have make : step body (.newobj method) (pc + 2) args frame
+      [.object (.address messageRef), .object (.address nameRef)] memory =
+        .ok (.call callee [created, .object (.address nameRef), .object (.address messageRef)]
+          [created] allocated) := by
+    simp [step_newobj_eq, linked, arity, unspecifiedOperands, Safety.Value.hasUnspecified,
+      argument _ _ nameLoaded, argument _ _ messageLoaded,
+      allocateObject_ok formed _ affordable bounded, created, receiver,
+      allocated, List.mapM_cons, List.mapM_nil, bind, Except.bind, pure, Except.pure]
+  apply run_call_of_invoke found construct make returned
+  have kept := (invoke_preserves_caller_allocations _ _ _ _ _ _ _ returned).lookup
+    memory.nextIdentity (by simp [objectMemory])
+  have object : ExceptionObject final receiver raised := by
+    refine ⟨rfl, ⟨⟨method.owner, bases⟩, ?_, owner⟩⟩
+    simp [runtimeTypeOf, receiver, liveAllocation, kept, objectMemory, checkedAt,
+      bind, Except.bind, pure, Except.pure, Except.mapError]
+  have fault := object.thrown []
+  change run program (fuel + 1) entry (pc + 3) args frame [created] final = _
+  simp only [run_succ, found, throws]
+  change Except.error (α := Safety.Memory × List Safety.Value)
+    (LocatedFault.mk entry (pc + 3) (throwFault final [created])) = _
+  rw [fault]
+
+#print axioms literal_constructor_throw
 
 /-- A method body with the given evaluation-stack instructions. -/
 private def throwBody (ops : List Instruction) : Method :=

@@ -443,10 +443,12 @@ declaration token. A class outside the selected hierarchy may implement an exter
 when its body MethodDef belongs to that class.
 For a generic method, Lean checks the signature's generic flag and arity, its byrefs and the
 position of each method type parameter. It reconstructs the owning GenericParam rows in
-ordinal order, with their flags and GenericParamConstraint rows. For an open interface such
-as `IScale<U, T>`, Lean checks the interface TypeDef, arity and each TypeSpec argument.
-For an external interface it follows the TypeRef's AssemblyRef and any ExportedType forwarders
-to the defining image. A missing image leaves the catalog uncovered.
+ordinal order, with their flags and GenericParamConstraint rows. For a constraint such as
+`IScale<Box<IScale<U, int>>, T>`, Lean checks the outer interface and the physical definition
+and arity of each inner class or interface. Each TypeRef follows its AssemblyRef and any
+ExportedType forwarders to the defining image. Method parameter indices and primitive element
+types come from the TypeSpec in argument order. A missing image or a nested constructed value
+type leaves the catalog uncovered.
 Each selected method uses the physical image matching its own assembly identity. A single
 extraction can use class tests and local virtual slots in several assemblies. At a foreign class test,
 Lean reads the TypeRef and its enclosing TypeRefs from the caller, checks the full AssemblyRef
@@ -485,8 +487,11 @@ path. A proof can use the same contract in every locale. The kernel theorem
 `CIL.Extraction.throwFold_map_literals` allows an arbitrary replacement at each string load and
 preserves both the recognized type and the number of argument instructions consumed. Each
 translated assembly still binds its own literal operands and requires verification against its
-own image digest. If the modeled heap budget is zero, loading both strings leaves a linked
-constructor unable to allocate a positive-sized exception object.
+own image digest. For two raw `ldstr` instructions followed by a linked `newobj` and `throw`,
+Lean proves the same type outcome when both literals load in well-formed memory, the instance
+size is representable and fits the heap budget, and the constructor returns normally. The fresh
+object retains its runtime type across the call. With a zero budget, a positive-sized allocation
+fails even when both literals load.
 
 An in-place span constructor runs as a runtime-model call on a span home.
 `ObjectOperandsValid` requires its receiver to be the address of a local or parameter of the

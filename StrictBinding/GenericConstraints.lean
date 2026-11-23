@@ -82,41 +82,10 @@ private def constraintTypeName (image : PreparedImage) (token : Nat) :
   let (scope, name) ← constraintTypeParts image token
   return scope ++ "::" ++ name
 
-/-- Physical constraint identity. A VAR in an implemented interface refers to the corresponding
-    closed argument of its declaring type. -/
-private def constraintIdentity (image : PreparedImage) (token : Nat)
-    (arguments : Option (List String) := none) :
-    Except AuditError String := do
-  if tableOf token != Table.typeSpec then return ← constraintTypeName image token
-  let blob ← image.layout.blobAt image.view (← image.layout.cell image.view token 0)
-  let .ok spec := decodeTypeSpec blob | throw .uncoveredConstraint
-  match spec with
-  | .genericInst false head args =>
-    unless tableOf head == Table.typeDef do throw .uncoveredConstraint
-    let (kind, arity) ← physicalTypeShape image (head % 2^24)
-    unless kind == .interface && arity == args.toList.length do throw .uncoveredConstraint
-    let core ← primitiveScope image
-    let names ← args.toList.mapM fun argument => do
-      match argument with
-      | .primitive code =>
-        let some name := (primitiveName code).bind spelled? | throw .uncoveredConstraint
-        return core ++ "::" ++ name
-      | .var index =>
-        let some closed := arguments | throw .uncoveredConstraint
-        let some name := closed[index]? | throw (.constraintMismatch token)
-        return name
-      | _ => throw .uncoveredConstraint
-    return (← constraintTypeName image head) ++ "<" ++ String.intercalate "," names ++ ">"
-  | .modified true modifier (.named false base) =>
-    let name := (← constraintTypeName image modifier) ++ "!" ++ (← constraintTypeName image base)
-    unless name == unmanagedTypeConstraint do throw .uncoveredConstraint
-    return name
-  | _ => throw .uncoveredConstraint
-
-/-- The definition of the signature's interface head. A TypeRef follows its AssemblyRef
-    and any supplied forwarders before the defining TypeDef fixes kind and arity. -/
-private def interfaceHead (images : List PreparedImage) (image : PreparedImage)
-    (head arity : Nat) : Except AuditError TypeExpr := do
+/-- A reference-type constructor in a constraint. The outer application requires an interface.
+    Each nested application checks its own defining TypeDef, including any forwarders. -/
+private def constraintHead (images : List PreparedImage) (image : PreparedImage)
+    (head arity : Nat) (requireInterface : Bool) : Except AuditError (String × String) := do
   unless tableOf head == Table.typeDef || tableOf head == Table.typeRef do throw .uncoveredConstraint
   let (scope, name) ← constraintTypeParts image head
   let (defining, row) ← if tableOf head == Table.typeDef then pure (image, head % 2^24)
@@ -128,31 +97,85 @@ private def interfaceHead (images : List PreparedImage) (image : PreparedImage)
         (images.length + 1) | throw .uncoveredConstraint
       pure found
   let (kind, count) ← physicalTypeShape defining row
-  unless kind == .interface && count == arity do throw .uncoveredConstraint
-  return .objectConstructor defining.identity name
+  unless arity > 0 && count == arity &&
+      (kind == .interface || (!requireInterface && kind == .classType)) do
+    throw .uncoveredConstraint
+  return (defining.identity, name)
 
-/-- An open generic interface constraint with direct method parameters and primitive arguments. -/
+/-- Method parameters anywhere in a reference-type application make the constraint open.
+    Its blob length bounds the depth of the decoded signature. -/
+private def hasMethodParameter : Nat → SigType → Bool
+  | _, .mvar _ => true
+  | fuel + 1, .genericInst _ _ args => args.toList.any (hasMethodParameter fuel)
+  | _, _ => false
+
+/-- Read applications from the physical signature, using the same scope, kind, arity and argument
+    order checks for open declarations and for the closed identities of concrete witnesses. -/
+private def readApplication (images : List PreparedImage) (image : PreparedImage)
+    (leaf : SigType → Except AuditError α) (apply : String → String → List α → α) :
+    Nat → SigType → Bool → Except AuditError α
+  | fuel + 1, .genericInst false head args, outer => do
+    let arguments := args.toList
+    let (scope, name) ← constraintHead images image head arguments.length outer
+    let values ← arguments.mapM fun arg => readApplication images image leaf apply fuel arg false
+    return apply scope name values
+  | _, type, false => leaf type
+  | _, _, true => throw .uncoveredConstraint
+
+/-- Physical constraint identity. A VAR in an implemented interface refers to the corresponding
+    closed argument of its declaring type. The outer local interface uses scoped argument names. -/
+private def constraintIdentity (images : List PreparedImage) (image : PreparedImage) (token : Nat)
+    (arguments : Option (List String) := none) : Except AuditError String := do
+  if tableOf token != Table.typeSpec then return ← constraintTypeName image token
+  let blob ← image.layout.blobAt image.view (← image.layout.cell image.view token 0)
+  let .ok spec := decodeTypeSpec blob | throw .uncoveredConstraint
+  match spec with
+  | .genericInst false head _ =>
+    unless tableOf head == Table.typeDef do throw .uncoveredConstraint
+    let leaf : SigType → Except AuditError String := fun
+      | .primitive code => do
+        let some name := (primitiveName code).bind spelled? | throw .uncoveredConstraint
+        if code == 1 then throw .uncoveredConstraint
+        return (← primitiveScope image) ++ "::" ++ name
+      | .var index => do
+        let some closed := arguments | throw .uncoveredConstraint
+        let some name := closed[index]? | throw (.constraintMismatch token)
+        return name
+      | _ => throw .uncoveredConstraint
+    readApplication images image leaf
+      (fun scope name args => scope ++ "::" ++ name ++ "<" ++ String.intercalate "," args ++ ">")
+      blob.length spec true
+  | .modified true modifier (.named false base) =>
+    let name := (← constraintTypeName image modifier) ++ "!" ++ (← constraintTypeName image base)
+    unless name == unmanagedTypeConstraint do throw .uncoveredConstraint
+    return name
+  | _ => throw .uncoveredConstraint
+
+/-- An open method constraint binds every nested reference application to its own declaration. -/
 private def openMethodConstraint? (images : List PreparedImage) (image : PreparedImage)
     (owner arity token : Nat) : Except AuditError (Option TypeExpr) := do
   if tableOf token != Table.typeSpec then return none
   let blob ← image.layout.blobAt image.view (← image.layout.cell image.view token 0)
-  let .ok (.genericInst false head arguments) := decodeTypeSpec blob | return none
-  let args := arguments.toList
-  unless args.any (fun arg => arg matches .mvar _) do return none
+  let .ok spec := decodeTypeSpec blob | return none
+  unless spec matches .genericInst false .. do return none
+  unless hasMethodParameter blob.length spec do return none
   unless tableOf owner == Table.methodDef do throw (.constraintMismatch owner)
-  let mut applied ← interfaceHead images image head args.length
-  for arg in args do
-    let element ← match arg with
-      | .mvar index => do
-        unless index < arity do throw (.constraintMismatch owner)
-        pure (.parameter index)
-      | .primitive code => do
-        let some name := (primitiveName code).bind spelled? | throw .uncoveredConstraint
-        if code == 1 then throw .uncoveredConstraint
-        pure (.atom (← primitiveScope image) name)
-      | _ => throw .uncoveredConstraint
-    applied := .apply applied element
-  return some applied
+  let leaf : SigType → Except AuditError TypeExpr := fun
+    | .mvar index => do
+      unless index < arity do throw (.constraintMismatch owner)
+      return .parameter index
+    | .primitive code => do
+      let some name := (primitiveName code).bind spelled? | throw .uncoveredConstraint
+      if code == 1 then throw .uncoveredConstraint
+      let scope ← primitiveScope image
+      if code == 0x0E then
+        unless scope == runtimeScope do throw .uncoveredConstraint
+        return .object scope name
+      return .atom scope name
+    | _ => throw .uncoveredConstraint
+  return some (← readApplication images image leaf
+    (fun scope name args => args.foldl TypeExpr.apply (.objectConstructor scope name))
+    blob.length spec true)
 
 /-- Flags and every constraint of one physical GenericParam, in metadata order within each
     of the closed and open lists carried by the extraction. -/
@@ -171,7 +194,7 @@ private def parameterConstraint (image : PreparedImage) (owner arity row : Nat)
     if let some applied ← openMethodConstraint? images image owner arity target then
       interfaces := interfaces.push applied
     else
-      types := types.push (← constraintIdentity image target)
+      types := types.push (← constraintIdentity images image target)
   return { flags, types := types.toList, interfaces := interfaces.toList }
 
 /-- Physical GenericParam rows of one owner, in ordinal order and at its declared arity. -/
@@ -272,7 +295,7 @@ def layoutInterfaces (images : List PreparedImage) (layout : RawLayout) :
     let row := index + 1
     if (← cell row 0) == owner then
       let target ← constraintTarget image (← cell row 1)
-      let identity ← constraintIdentity image target arguments
+      let identity ← constraintIdentity images image target arguments
       if interfaces.contains identity then
         throw (.constraintMismatch (StrictBinding.tokenOf Table.typeDef owner))
       interfaces := interfaces.push identity
