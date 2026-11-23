@@ -12,6 +12,7 @@
 #:include GeneratedEvidence.cs
 #:include ../scripts/BatchVerification.cs
 #:include ExceptionMembers.cs
+#:include ContractVariants.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -159,6 +160,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
             Console.WriteLine("PASS Percent: the CLR contract holds for every uint and caller memory"));
         queue.Add(new(selector, contract, Path.Combine(root, "Percent-Contract-Translated"), Assembly: image), () =>
             Console.WriteLine("PASS Percent: the same CLR contract holds with translated exception literals"));
+        CheckPercentExceptionType(translated, percent, selector, contract);
     }
 
     if (name is "Null" or "Inner" or "ArgumentInner" or "ActualValue")
@@ -344,3 +346,38 @@ foreach (var (mutation, marker) in new[]
 }
 queue.Flush();
 Console.WriteLine("PASS folded throws, located faults, runtime comparisons, forged types and exact-pattern rejection");
+
+void CheckPercentExceptionType(ModuleDefinition image, MethodDefinition method, string selector, string example)
+{
+    // Preserve both translated ldstr operands and the constructor signature. Change only the exception class.
+    var site = method.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Newobj);
+    var original = (MethodReference)site.Operand;
+    var owner = new TypeReference("System", "ArgumentException", image, original.DeclaringType.Scope);
+    var replacement = new MethodReference(original.Name, original.ReturnType, owner) { HasThis = original.HasThis };
+    foreach (var parameter in original.Parameters)
+        replacement.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
+    site.Operand = replacement;
+    var changed = Path.Combine(root, "Percent-WrongType.dll");
+    image.Write(changed);
+
+    verification.VerifyContractVariant(assembly, "Examples", selector, Path.Combine(root, "Percent-Type-Original"),
+        changed, selector, Path.Combine(root, "Percent-Type-Changed"), """
+        def bounded : OutcomeContract W32 W32 where
+          args value := [.scalar (.i32 value)]
+          results result := [.scalar (.i32 result)]
+          pre _ _ := True
+          footprint _ := []
+          post value _ _ result := result = value
+          raises value _ := if value ≤ 100 then none else some .argumentOutOfRange
+        """, """
+        theorem correctness : bounded.HoldsCLR Extracted.program 0 := ExampleProof.correctness
+        """, """
+        theorem correctness : bounded.RefutedCLR Extracted.program 0 := by
+          have ran : invoke Extracted.program 64 0 [.scalar (.i32 101)] Memory.empty =
+              .error ⟨0, 6, .thrown .argument⟩ := by cil_kernel_rfl
+          apply OutcomeContract.RefutedCLR.of_fault (input := (101 : W32)) trivial (by decide) ran
+          change (ExecutionFault.thrown .argument).clrException ≠ some .argumentOutOfRange
+          decide
+        """, example: example, imports: "import CIL.Safety.RuntimeExceptions");
+    Console.WriteLine("PASS Percent(101) with ArgumentException refutes the public CLR contract from empty memory");
+}

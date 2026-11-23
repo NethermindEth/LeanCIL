@@ -404,14 +404,19 @@ void CheckTwoAssemblyCatalogs()
     var library = fixture.Build("LocalClassLibrary", "Classes.Library", """
         namespace Far;
         public class Shape { }
-        public class Second : Shape { }
+        public class Second : Shape {
+            public static T Keep<T, U>(T value) where T : IScale<T, U> => value;
+        }
         public static class Family { public sealed class Child : Second { } }
         public static class Reader { public static int Test(Shape value) => value is Second ? 2 : 0; }
+        public interface IScale<T, U> { }
         """);
     var app = fixture.Build("LocalClassApp", "Classes.App", """
         namespace Near;
         public class Shape { }
-        public sealed class First : Shape { }
+        public sealed class First : Shape {
+            public static U Pick<T, U>(T first, U second) where T : class, Far.IScale<U, T>, new() => second;
+        }
         public static class Reader {
             public static int Both(Shape local, Far.Shape other) => Far.Reader.Test(other) +
                 (local is First ? 4 : 0) + (other is Far.Second ? 8 : 0) + (other is Far.Family.Child ? 16 : 0);

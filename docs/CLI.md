@@ -388,8 +388,9 @@ supported explicit interface implementations in the slot's own image. It checks 
 virtual site's selected targets. Multiple selected methods can have catalogs in different images.
 Each other pinned image must have locally closed parent chains ending at recognized core roots.
 For generic methods, the catalog checks the signature, including byrefs, and the ordinal, flags
-and constraints of each type parameter. A locally declared generic interface constraint may use
-method type parameters and primitive arguments in the order specified by its TypeSpec.
+and constraints of each type parameter. A generic interface constraint may use method type
+parameters and primitive arguments in the order specified by its TypeSpec. Supply the defining
+image and each forwarding image when the interface belongs to another assembly.
 
 Missing pins, constrained calls, unsupported constraint types, interface dispatch, cross-image overrides,
 additional metadata modules and unsupported signatures leave the fact `not covered`. Conflicting
@@ -397,7 +398,8 @@ class identities, supported catalogs or target tables fail verification.
 
 For `generic-constraints`, Lean locates each selected method and its declaring type in the
 pinned image. It compares each parameter's ordinal, flags and complete constraint list,
-including local generic interfaces applied to method type parameters or primitive types. For value-type layouts it compares the direct interface implementations. When a struct
+including pinned generic interfaces applied to method type parameters or primitive types.
+For value-type layouts it compares the direct interface implementations. When a struct
 has primitive type arguments, Lean reads its own parameter declarations and substitutes those
 arguments at the positions specified by the interface signature. A conflicting declaration fails
 the check. An extraction with no generic selection, an import, an unsupported layout argument

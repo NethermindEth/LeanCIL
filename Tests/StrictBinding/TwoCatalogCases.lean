@@ -27,6 +27,30 @@ theorem covered : (checked [app, library] Extracted.methodEvidence).toOption = s
   by decide +kernel
 #print axioms covered
 
+/-- The reference to Far.IScale on Near.First.Pick needs its defining image. -/
+private def missingInterface : Except AuditError Bool := do
+  let home ← prepareOne app
+  let some owner ← enumDefinition? home 0 [bytesOf "Near", bytesOf "First"]
+    | throw .uncoveredConstraint
+  return (← (ClassDispatch.physicalHierarchy home owner false [home]).run).isNone
+
+theorem missingConstraintImage : missingInterface.toOption = some true := by decide +kernel
+#print axioms missingConstraintImage
+
+/-- Changing only the interface scope in the proposed constraint contradicts Pick's TypeRef. -/
+private def wrongScope : List MethodEvidence := Extracted.methodEvidence.map fun item =>
+  { item with dispatchTypes := item.dispatchTypes.map fun entry =>
+    { entry with methods := entry.methods.map fun method =>
+      if method.name == "Pick" then
+        { method with genericParameters := method.genericParameters.modify 0 fun constraint =>
+          let head := TypeExpr.objectConstructor app.identity "Far.IScale`2"
+          { constraint with interfaces := [.apply (.apply head (.parameter 1)) (.parameter 0)] } }
+      else method } }
+
+theorem wrongConstraintScope : checked [app, library] wrongScope =
+    .error (.dispatchMismatch Extracted.method0Original.token) := by cil_kernel_rfl
+#print axioms wrongConstraintScope
+
 /-- Both pin orders locate the same declaring images. -/
 theorem reversed : (checked [library, app] Extracted.methodEvidence).toOption = some true :=
   by decide +kernel

@@ -443,9 +443,10 @@ declaration token. A class outside the selected hierarchy may implement an exter
 when its body MethodDef belongs to that class.
 For a generic method, Lean checks the signature's generic flag and arity, its byrefs and the
 position of each method type parameter. It reconstructs the owning GenericParam rows in
-ordinal order, with their flags and GenericParamConstraint rows. For an open local interface
-such as `IScale<U, T>`, Lean checks the interface TypeDef, arity and each TypeSpec argument.
-An open generic constraint from another assembly leaves the catalog uncovered.
+ordinal order, with their flags and GenericParamConstraint rows. For an open interface such
+as `IScale<U, T>`, Lean checks the interface TypeDef, arity and each TypeSpec argument.
+For an external interface it follows the TypeRef's AssemblyRef and any ExportedType forwarders
+to the defining image. A missing image leaves the catalog uncovered.
 Each selected method uses the physical image matching its own assembly identity. A single
 extraction can use class tests and local virtual slots in several assemblies. At a foreign class test,
 Lean reads the TypeRef and its enclosing TypeRefs from the caller, checks the full AssemblyRef

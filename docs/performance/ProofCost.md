@@ -275,6 +275,43 @@ profile in each checkout, use its loop proof as `Proof.lean` and the consumer ab
 `Consumer.lean`. Use the frontend below to measure `Proof` and `Consumer` with that checkout's
 compiled library and extraction on the Lean search path.
 
+## Reusing the Percent exception contract
+
+`Examples.Throws.Percent(uint)` returns its input through 100 inclusive and raises
+`System.ArgumentOutOfRangeException` above 100. The public contract holds for any caller
+memory. At 101, both consumers prove the exception type from `Memory.empty`. One steps the
+compiled instructions and the other applies the public theorem.
+[Public contract](../../Examples/Proofs/Percent.lean) ·
+[Boundary consumers](../../Tests/ThrowVariants/PercentReuse.lean.in)
+
+The base interpreter at `27953edb` represents the exception type with its full CLR name.
+The canonical interpreter uses `.argumentOutOfRange`. This spelling is the only proof
+source difference. The .NET 10 and .NET 11 scalar builds have 23 instruction bytes and no
+locals. Their method bodies differ only in the four-byte `newobj` operand. Both MemberRefs
+resolve to `System.ArgumentOutOfRangeException::.ctor(string,string)` in the respective
+`System.Runtime` assembly, and both user-string operands have the same values.
+
+| Proof | Base kernel heartbeats | Canonical kernel heartbeats | Base proof objects | Canonical proof objects | Base ms | Canonical ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| All unsigned inputs, any caller memory | 94,299 | 74,876 | 3,514 | 3,808 | 385 | 611 |
+| Step the instructions at 101 | 64,442 | 46,667 | 1,428 | 1,407 | 288 | 324 |
+| Apply the contract at 101 | 1,275 | 1,278 | 50 | 50 | 3 | 4 |
+
+Lean 4.35.0 measured each proof on one thread. Times in the table are single elaborations.
+The public proof module occupies 192,856 bytes on the base and 204,056 bytes on canonical.
+The consumer module occupies 89,440 and 88,712 bytes respectively. Median standalone kernel
+replay of the extraction, public proof and consumers together took 22.9 and 22.8 seconds
+over three runs each while other verification jobs were active.
+
+Replacing both exception literals in the .NET 11 DLL and verifying against its own image
+digest required no proof edits. All three kernel heartbeat counts, proof-object counts and
+both compiled proof module sizes matched the original. Median joint replay took 23.8 seconds.
+
+To reproduce, extract `Examples.Throws::Percent(uint)` under the scalar profile. Measure
+the public proof as `Percent` and the boundary consumers as `PercentReuse` with the
+single-module frontend below. On the base, use `"System.ArgumentOutOfRangeException"`
+as the exception type in both modules.
+
 ## Decoding an ordinary string load
 
 Both certified libraries checked the same reflexivity proof that opcode 114 decodes to

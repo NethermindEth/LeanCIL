@@ -93,7 +93,7 @@ private def formalType (image : PreparedImage) (arity : Nat) : SigType → Readi
   | element => formalElement image arity element
 
 /-- A managed MethodDef with its physical flags, signature and type parameter declarations. -/
-private def classMethod (image : PreparedImage) (row : Nat) : Reading DispatchMethod := do
+private def classMethod (prepared : List PreparedImage) (image : PreparedImage) (row : Nat) : Reading DispatchMethod := do
   let cell := image.layout.cellOfRow image.view Table.methodDef row
   let implementation ← physical (cell 1)
   let attributes ← physical (cell 2)
@@ -105,7 +105,7 @@ private def classMethod (image : PreparedImage) (row : Nat) : Reading DispatchMe
   guard (sig.convention == convention || sig.convention == convention + hasThisFlag)
   guard (implementation == 0)
   let token := StrictBinding.tokenOf Table.methodDef row
-  let genericParameters ← match readParameterDeclarations image token sig.genericArity with
+  let genericParameters ← match readParameterDeclarations image token sig.genericArity prepared with
     | .ok declarations => pure declarations
     | .error .uncoveredConstraint => failure
     | .error error => throwThe AuditError error
@@ -147,7 +147,7 @@ private def interfaceName (image : PreparedImage) (coded : Nat) : Reading TypeEx
 
 /-- Local MethodImpl rows bind the implementing MethodDef to its class and the overridden
     MethodDef to its interface. Both signatures describe the same nongeneric instance slot. -/
-private def localOverrides (image : PreparedImage) (interfaces : Array (Array Nat))
+private def localOverrides (prepared : List PreparedImage) (image : PreparedImage) (interfaces : Array (Array Nat))
     (parents : Array Nat) (root : Nat) :
     Reading (Array (List (Nat × TypeExpr))) := do
   let rowCount := image.layout.rowCount 0x19
@@ -173,8 +173,8 @@ private def localOverrides (image : PreparedImage) (interfaces : Array (Array Na
     guard (direct.contains ((interfaceToken % 2^24) * 4))
     let name ← localName image (interfaceToken % 2^24) .interface
     let slotOwner := TypeExpr.atom image.identity name
-    let implementation ← classMethod image (body / 2)
-    let declaration ← classMethod image (slot / 2)
+    let implementation ← classMethod prepared image (body / 2)
+    let declaration ← classMethod prepared image (slot / 2)
     guard (implementation.genericArity == 0 && declaration.genericArity == 0)
     guard (implementation.hasThis && implementation.hasBody && implementation.isVirtual &&
       declaration.hasThis && declaration.isVirtual && declaration.isAbstract &&
@@ -201,13 +201,14 @@ private def localParents (image : PreparedImage) : Reading (Array Nat) := do
 
 /-- The owner's physical declaration, with its MethodDefs and direct interface implementations.
     Virtual calls also require every descendant, including abstract intermediates. -/
-def physicalHierarchy (image : PreparedImage) (owner : Nat) (includeDerived := true) :
+def physicalHierarchy (image : PreparedImage) (owner : Nat) (includeDerived := true)
+    (prepared : List PreparedImage := []) :
     OptionT (Except AuditError) (List DispatchType) := do
   guard (image.layout.rowCount 5 == 0)
   let count := image.layout.rowCount Table.typeDef
   let interfaces ← interfacesByOwner image count
   let parents ← localParents image
-  let overrides ← localOverrides image interfaces parents owner
+  let overrides ← localOverrides prepared image interfaces parents owner
   let mut types := #[]
   for i in [:count] do
     let row := i+1
@@ -220,7 +221,7 @@ def physicalHierarchy (image : PreparedImage) (owner : Nat) (includeDerived := t
       else physical (image.layout.cellOfRow image.view Table.typeDef (row+1) 5)
     let mut methods := #[]
     for index in [first:finish] do
-      let method ← classMethod image index
+      let method ← classMethod prepared image index
       methods := methods.push { method with overrides := overrides[index]?.getD [] }
     let base ← if parents[row]! == 0 then pure TypeExpr.void else className image parents[row]!
     let owned ← interfaces[row]!.toList.mapM (interfaceName image)
@@ -278,7 +279,7 @@ private def testedClass (prepared : List PreparedImage) (home : PreparedImage)
   let token := a + 256 * (b + 256 * (c + 256 * d))
   let (image, row) ← testDefinition prepared home token
   unless target == (← className image row) do throwThe AuditError (.dispatchMismatch token)
-  let [entry] ← physicalHierarchy image row false | failure
+  let [entry] ← physicalHierarchy image row false prepared | failure
   return entry
 
 /-- The union of all physical class hierarchies and tested classes selected by the original body.
@@ -312,11 +313,11 @@ private def selected (prepared : List PreparedImage) (image : PreparedImage) (it
     let attr ← physical (image.layout.cell image.view token 2)
     unless attr &&& virtualMethodAttribute != 0 do continue
     let owner := (← physical (methodDeclaringType image token)) % 2^24
-    let slot ← classMethod image (token % 2^24)
+    let slot ← classMethod prepared image (token % 2^24)
     unless site.declaringType == (← className image owner) && slot.name == site.name &&
         slot.hasThis && slot.returnType == site.returnType && slot.parameters == site.parameterTypes
       do throwThe AuditError (.dispatchMismatch token)
-    let entries ← physicalHierarchy image owner
+    let entries ← physicalHierarchy image owner (prepared := prepared)
     if item.reachable[pc]? == some true then
       let some (_, .virtual targets) := item.links.find? (·.1 == pc)
         | throwThe AuditError (.dispatchMismatch token)

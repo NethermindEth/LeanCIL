@@ -1,0 +1,22 @@
+import Percent
+
+/-! Compare a direct execution proof with the public exception contract at its first throwing input. -/
+
+namespace PercentReuse
+open CIL CIL.Safety ExampleProof
+
+/-- The checked instruction sequence throws at the first unsigned value above 100. -/
+theorem direct : RaisesCLR Extracted.program 0 [.scalar (.i32 101)] Memory.empty
+    .argumentOutOfRange := by
+  apply RaisesCLR.of_raises
+  cil_raise_steps []
+
+#print axioms direct
+
+/-- The same exception follows by applying the all-input contract to empty caller memory. -/
+theorem reused : RaisesCLR Extracted.program 0 [.scalar (.i32 101)] Memory.empty
+    .argumentOutOfRange :=
+  ExampleProof.correctness.raising (input := 101) (initial := Memory.empty) trivial rfl
+
+#print axioms reused
+end PercentReuse

@@ -113,21 +113,34 @@ private def constraintIdentity (image : PreparedImage) (token : Nat)
     return name
   | _ => throw .uncoveredConstraint
 
-/-- An open generic interface constraint with direct method parameters and primitive arguments.
-    The local TypeDef fixes its scope, interface kind and number of type arguments. -/
-private def openMethodConstraint? (image : PreparedImage) (owner arity token : Nat) :
-    Except AuditError (Option TypeExpr) := do
+/-- The definition of the signature's interface head. A TypeRef follows its AssemblyRef
+    and any supplied forwarders before the defining TypeDef fixes kind and arity. -/
+private def interfaceHead (images : List PreparedImage) (image : PreparedImage)
+    (head arity : Nat) : Except AuditError TypeExpr := do
+  unless tableOf head == Table.typeDef || tableOf head == Table.typeRef do throw .uncoveredConstraint
+  let (scope, name) ← constraintTypeParts image head
+  let (defining, row) ← if tableOf head == Table.typeDef then pure (image, head % 2^24)
+    else do
+      let cell := image.layout.cell image.view head
+      let space ← image.layout.stringAt image.view (← cell typeNamespaceColumn)
+      let simple ← image.layout.stringAt image.view (← cell typeNameColumn)
+      let some found ← findPinnedDefinition images [space, simple] (bytesOf scope)
+        (images.length + 1) | throw .uncoveredConstraint
+      pure found
+  let (kind, count) ← physicalTypeShape defining row
+  unless kind == .interface && count == arity do throw .uncoveredConstraint
+  return .objectConstructor defining.identity name
+
+/-- An open generic interface constraint with direct method parameters and primitive arguments. -/
+private def openMethodConstraint? (images : List PreparedImage) (image : PreparedImage)
+    (owner arity token : Nat) : Except AuditError (Option TypeExpr) := do
   if tableOf token != Table.typeSpec then return none
   let blob ← image.layout.blobAt image.view (← image.layout.cell image.view token 0)
   let .ok (.genericInst false head arguments) := decodeTypeSpec blob | return none
   let args := arguments.toList
   unless args.any (fun arg => arg matches .mvar _) do return none
   unless tableOf owner == Table.methodDef do throw (.constraintMismatch owner)
-  unless tableOf head == Table.typeDef do throw .uncoveredConstraint
-  let (kind, count) ← physicalTypeShape image (head % 2^24)
-  unless kind == .interface && count == args.length do throw .uncoveredConstraint
-  let (_, name) ← constraintTypeParts image head
-  let mut applied := TypeExpr.objectConstructor image.identity name
+  let mut applied ← interfaceHead images image head args.length
   for arg in args do
     let element ← match arg with
       | .mvar index => do
@@ -144,7 +157,7 @@ private def openMethodConstraint? (image : PreparedImage) (owner arity token : N
 /-- Flags and every constraint of one physical GenericParam, in metadata order within each
     of the closed and open lists carried by the extraction. -/
 private def parameterConstraint (image : PreparedImage) (owner arity row : Nat)
-    (expectedFlags : Option Nat := none) :
+    (expectedFlags : Option Nat := none) (images : List PreparedImage := []) :
     Except AuditError GenericConstraint := do
   let flags ← image.layout.cellOfRow image.view Table.genericParam row 1
   if expectedFlags.any (· != flags) then throw (.constraintMismatch owner)
@@ -155,7 +168,7 @@ private def parameterConstraint (image : PreparedImage) (owner arity row : Nat)
     let constraint := index + 1
     if (← cell constraint 0) != row then continue
     let target ← constraintTarget image (← cell constraint 1)
-    if let some applied ← openMethodConstraint? image owner arity target then
+    if let some applied ← openMethodConstraint? images image owner arity target then
       interfaces := interfaces.push applied
     else
       types := types.push (← constraintIdentity image target)
@@ -177,17 +190,17 @@ private def parameterRows (image : PreparedImage) (owner arity : Nat) :
   return rows.toList
 
 /-- All flags and constraints declared on the type or method, in parameter order. -/
-def readParameterDeclarations (image : PreparedImage) (owner arity : Nat) :
-    Except AuditError (List GenericConstraint) := do
+def readParameterDeclarations (image : PreparedImage) (owner arity : Nat)
+    (images : List PreparedImage := []) : Except AuditError (List GenericConstraint) := do
   let rows ← parameterRows image owner arity
-  rows.mapM fun row => parameterConstraint image owner arity row
+  rows.mapM fun row => parameterConstraint image owner arity row (images := images)
 
 /-- Compare the complete parameter list for a physical TypeOrMethodDef owner. -/
 def parameterDeclarations (image : PreparedImage) (owner : Nat)
-    (expected : List GenericConstraint) : Except AuditError Unit := do
+    (expected : List GenericConstraint) (images : List PreparedImage := []) : Except AuditError Unit := do
   let rows ← parameterRows image owner expected.length
   for (row, claim) in rows.zip expected do
-    let actual ← parameterConstraint image owner expected.length row (some claim.flags)
+    let actual ← parameterConstraint image owner expected.length row (some claim.flags) images
     unless actual == claim do throw (.constraintMismatch owner)
 
 /-- Locate the physical TypeDef whose MethodList range contains this MethodDef. -/
@@ -278,10 +291,10 @@ private def checkMethodConstraints (images : List PreparedImage) (item : MethodE
     Except AuditError Bool := do
   let image ← located images item.assembly.identity
   let token := item.original.token
-  let method ← constraintCovered (parameterDeclarations image token item.original.genericParameters)
+  let method ← constraintCovered (parameterDeclarations image token item.original.genericParameters images)
   let owner ← constraintCovered (do
     let declaring ← methodDeclaringType image token
-    parameterDeclarations image declaring item.original.ownerParameters)
+    parameterDeclarations image declaring item.original.ownerParameters images)
   return method && owner
 
 /-- Check every method, its owner and the interfaces of concrete arguments in the extraction.
@@ -323,8 +336,8 @@ theorem GenericConstraintsChecked.physical {images : List PinnedImage}
       (∀ item ∈ methods, ∃ image declaring,
         located prepared item.assembly.identity = .ok image ∧
         methodDeclaringType image item.original.token = .ok declaring ∧
-        parameterDeclarations image item.original.token item.original.genericParameters = .ok () ∧
-        parameterDeclarations image declaring item.original.ownerParameters = .ok ()) ∧
+        parameterDeclarations image item.original.token item.original.genericParameters prepared = .ok () ∧
+        parameterDeclarations image declaring item.original.ownerParameters prepared = .ok ()) ∧
       (∀ layout ∈ layouts, layoutInterfaces prepared layout = .ok ()) := by
   have done : checkGenericConstraints images methods layouts imports = .ok true := by
     cases result : checkGenericConstraints images methods layouts imports with
