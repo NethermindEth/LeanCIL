@@ -160,6 +160,12 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
             Console.WriteLine("PASS Percent: the CLR contract holds for every uint and caller memory"));
         queue.Add(new(selector, contract, Path.Combine(root, "Percent-Contract-Translated"), Assembly: image), () =>
             Console.WriteLine("PASS Percent: the same CLR contract holds with translated exception literals"));
+        foreach (var (suffix, assemblyPath) in new[] { ("", assembly), ("-Translated", image) })
+        {
+            queue.Add(new(selector, contract, Path.Combine(root, "Percent-Image" + suffix),
+                Theorem: "ExampleProof.loadedException", Assembly: assemblyPath), () =>
+                Console.WriteLine("PASS Percent: original string operands load from the certified image" + suffix));
+        }
         CheckPercentExceptionType(translated, percent, selector, contract);
     }
 

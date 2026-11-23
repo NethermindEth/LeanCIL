@@ -100,6 +100,7 @@ import CIL.Safety.HomeProgress
 import CIL.Safety.ImmutableMemory
 import CIL.Safety.InstructionMemory
 import CIL.Safety.HeapObjects
+import CIL.Safety.LiteralImage
 import CIL.Safety.HeapObjectFacts
 import CIL.Safety.ClassCatalog
 import CIL.Safety.ObjectFraming

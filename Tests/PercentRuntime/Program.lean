@@ -18,9 +18,13 @@ def coreBytes : List (BodyEvidence × RawMethod) := [
     ({ ObjectCtor.body with names := ObjectCtor.names }, ObjectCtor.definition),
     ({ SetHResult.body with names := SetHResult.names }, SetHResult.definition)]
 
+
+/-- Original method definitions whose byte and metadata witnesses are checked above. -/
+def imageMethods : List RawMethod := Source.raw :: coreBytes.map Prod.snd
+
 /-- All physical call targets, including the resource getter on the null-message path. -/
 def table : List SpecializedMethod :=
-  (Source.raw :: coreBytes.map Prod.snd ++ [RangeResource.raw]).map (⟨[], ·⟩)
+  (imageMethods ++ [RangeResource.raw]).map (⟨[], ·⟩)
 
 /-- Admit a managed call or allocation only if the raw site selects its unique physical target. -/
 def linked (table : List SpecializedMethod) (raw : RawInstruction) : Option Link := do

@@ -500,11 +500,19 @@ size is representable and fits the heap budget, and the constructor returns norm
 object retains its runtime type across the call. With a zero budget, a positive-sized allocation
 fails even when both literals load.
 
+A proof can construct entry memory with `CIL.Safety.LiteralImage.initialMemory`, passing the
+original methods in its extraction evidence and an explicit heap quota. The loader reads the
+original `ldstr` operands, interns repeated text once and grants read-only access to each string.
+The supplied quota remains available for allocations during execution. For both compiled locales
+of `Throws.Percent`, the verifier checks that both original operands load even with zero heap quota.
+The ordinary packaged exception proof uses the recognized constructor fold.
+
 For the pinned .NET 11 Windows x64 body of `Throws.Percent(uint)`, Lean checks the original
 caller and the CoreLib constructor methods reached on the throwing path. Starting from empty
-memory, the loader interns both strings and the runtime supplies 128 bytes for the exception
-object. Under those conditions the decoded method returns the input through 100 and raises
-`ArgumentOutOfRangeException` at its original throw for every larger unsigned input. The proof
+memory, the loader interns both strings. Inputs through 100 return with the initial memory for
+every heap quota. For each larger input, a quota below 128 bytes reports the modeled allocation
+failure at `newobj`. A quota of 128 bytes or more reaches the original `throw` and raises
+`ArgumentOutOfRangeException`. The proof
 works for arbitrary representable literal texts, including equal texts. Inputs through 100 also
 return with every caller memory untouched, before any runtime preparation. The ordinary entry from
 unprepared empty memory still relies on the recognized constructor fold for its exception guarantee.
