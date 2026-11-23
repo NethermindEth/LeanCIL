@@ -72,6 +72,7 @@ internal static class ObjectTypes
     /// <summary>The admitted base classes of an admitted class, nearest first, excluding System.Object.</summary>
     internal static TypeReference[] Bases(TypeReference type)
     {
+        if (IsStringDefinition(type)) return [];
         var bases = new List<TypeReference>();
         for (var parent = Validate(type).BaseType; parent is not null && parent.FullName != "System.Object";
             parent = Validate(parent).BaseType)
@@ -99,18 +100,28 @@ internal static class ObjectTypes
     }
 
     /// <summary>
-    /// The exact <c>System.String</c> of <c>System.Runtime</c>: a value of it is an object reference the model can
-    /// pass, store, compare and test for null, never read through, since no admitted operation reads characters.
+    /// The string class referenced through System.Runtime or defined in its pinned CoreLib image.
     /// </summary>
     internal static bool IsString(TypeReference type) =>
         type is not TypeSpecification && type.FullName == "System.String" &&
-        RuntimeModels.ExactScope(type, PlatformAssemblies.SystemRuntime);
+        (RuntimeModels.ExactScope(type, PlatformAssemblies.SystemRuntime) || IsStringDefinition(type));
+
+    // The metadata receiver for CoreLib string methods has no base slots before its own fields.
+    internal static bool IsStringDefinition(TypeReference type) =>
+        type is TypeDefinition { FullName: "System.String", BaseType: TypeDefinition parent } &&
+        parent.Module == type.Module && IsObjectDefinition(parent);
+
+    // The ECMA object element type resolves to this root TypeDef inside CoreLib itself.
+    static bool IsObjectDefinition(TypeReference type) =>
+        type is TypeDefinition { FullName: "System.Object", BaseType: null } &&
+        PinnedAssemblies.Active is { } pins &&
+        AssemblyName.OfScope(type, pins.IdentityMetadata(type.Module)) == PlatformAssemblies.CoreLibrary;
 
     /// <summary>
     /// A type whose values are object references on the stack and in argument and local roots: an admitted class,
-    /// or <c>string</c>, which is opaque.
+    /// the CoreLib root object, or <c>string</c>.
     /// </summary>
-    internal static bool Reference(TypeReference type) => Is(type) || IsString(type);
+    internal static bool Reference(TypeReference type) => Is(type) || IsString(type) || IsObjectDefinition(type);
 
     /// <summary>
     /// A candidate class or <c>string</c>: its values live in roots without byte storage, so neither an argument,

@@ -166,7 +166,8 @@ Test("test entry points", () =>
             "lookups", "scaling", "unsafe"]);
     Equal(VerificationSelection.Select(["Tests/GenericOwners.cs"]), ["generics"]);
     Equal(VerificationSelection.Select(["Tests/MultiAssemblyGenerics.cs"]), ["assemblies"]);
-    Equal(VerificationSelection.Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies", "cli"]);
+    Equal(VerificationSelection.Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies", "audit", "cli"]);
+    Equal(VerificationSelection.Select(["Tests/DeepVerify.cs"]), ["audit"]);
     Equal(VerificationSelection.Select(["Tests/GenericLayouts.cs"]), ["generics"]);
     Equal(VerificationSelection.Select(["Tests/NativeManagedDispatch.cs"]), ["dispatch"]);
     Equal(VerificationSelection.Select(["Tests/NativeMethodTables.lean"]), ["dispatch"]);

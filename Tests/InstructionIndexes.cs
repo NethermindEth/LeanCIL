@@ -539,8 +539,6 @@ foreach (var rendered in new[] { "ret", "ldloc", "switch", "br", "brtrue", "call
 var readers = RenderedLeanReaders.Scan(sourceFiles, constructors);
 (string File, int Reads, string Reason)[] allowedReaders =
 [
-    ("Extractor/ProofGates.cs", 3,
-        "compares whole method definitions, the raw definitions decoded methods come from, and signatures"),
     ("scripts/ConsumerVerification.cs", 3, "the component splitter cuts module text at declaration boundaries"),
     ("scripts/VerifyReports.cs", 1, "reads the source location table of Symbols.lean, not an instruction"),
     ("scripts/BenchmarkExternalIdentities.cs", 1, "reads identity byte arrays from baseline extractions"),

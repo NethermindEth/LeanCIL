@@ -237,6 +237,7 @@ void IdentityCases()
     CheckRawNames();
     CheckKeysAndFlags();
     CheckPlatform();
+    CheckCoreReferenceTypes();
     CheckOwnership();
     CheckEntryType();
     Console.WriteLine("PASS raw identities, provenance, flags, platform equality and ownership");
@@ -355,6 +356,45 @@ void CheckPlatform()
     var signatures = pinnedType.GetProperty("Signatures", Internal)!.GetValue(noCore)!;
     var signatureOf = signatures.GetType().GetMethod("Type", Internal)!;
     ExpectOutside(() => signatureOf.Invoke(signatures, [Selected(noCore).TypeSystem.Int32]));
+}
+
+void CheckCoreReferenceTypes()
+{
+    var isString = extractor.GetType("Nethermind.LeanCIL.ObjectTypes", throwOnError: true)!
+        .GetMethod("IsString", BindingFlags.Static | BindingFlags.NonPublic)!
+        .CreateDelegate<Func<TypeReference, bool>>();
+    var objectReceiver = extractor.GetType("Nethermind.LeanCIL.GenericEvidence", throwOnError: true)!
+        .GetMethod("ObjectReceiver", BindingFlags.Static | BindingFlags.NonPublic)!
+        .CreateDelegate<Func<MethodDefinition, bool>>();
+    var referenceType = extractor.GetType("Nethermind.LeanCIL.ObjectTypes", throwOnError: true)!
+        .GetMethod("Reference", BindingFlags.Static | BindingFlags.NonPublic)!
+        .CreateDelegate<Func<TypeReference, bool>>();
+    using (var pinned = Pin(File.ReadAllBytes(typeof(string).Assembly.Location)))
+    {
+        var core = Selected(pinned);
+        var text = core.GetType("System.String");
+        Require(isString(text) && !isString(core.GetType("System.Object")) && !isString(new ArrayType(text)),
+            "The defining CoreLib string row must identify exactly the string class.");
+        Require(objectReceiver(text.Properties.Single(property => property.Name == "Length").GetMethod),
+            "The string length getter must take an object receiver.");
+        var monitor = core.GetType("System.Threading.Monitor");
+        var enter = monitor.Methods.Single(method => method.Name == "Enter" && method.Parameters.Count == 2);
+        Require(enter.Parameters[0].ParameterType == core.GetType("System.Object") &&
+            referenceType(enter.Parameters[0].ParameterType), "Monitor.Enter must receive a System.Object reference.");
+    }
+    using var other = AssemblyDefinition.CreateAssembly(new("System.Private.CoreLib", new Version(11, 0, 0, 0)),
+        "UnsignedCore", ModuleKind.Dll);
+    var rootObject = new TypeDefinition("System", "Object", Mono.Cecil.TypeAttributes.Public);
+    other.MainModule.Types.Add(rootObject);
+    other.MainModule.Types.Add(new TypeDefinition("System", "String", Mono.Cecil.TypeAttributes.Public, rootObject));
+    using var stream = new MemoryStream();
+    other.Write(stream);
+    using var unsigned = Pin(stream.ToArray());
+    Require(!isString(Selected(unsigned).GetType("System.String")),
+        "An unsigned assembly with matching names supplied a platform string definition.");
+    Require(!referenceType(Selected(unsigned).GetType("System.Object")),
+        "An unsigned root object was accepted as the CoreLib definition.");
+    Console.WriteLine("PASS the string and root object TypeDefs belong to the pinned CoreLib identity");
 }
 
 void CheckOwnership()

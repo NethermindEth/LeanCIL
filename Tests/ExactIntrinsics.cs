@@ -1171,8 +1171,8 @@ File.WriteAllText(reverseProof, $$"""
     """);
 pending.Add((new(selectors["ReverseLimbs"], reverseProof, reverseOutput), "arm64-advsimd",
     () => Console.WriteLine("PASS ReverseLimbs reverses the bytes of each lane under arm64-advsimd")));
-// Exchange the two leading loads and preserve the intrinsic and the rest of the body.
-(string Assembly, string Output) SwapFirstArguments(string methodName)
+// Exchange the two argument loads and preserve every other instruction.
+(string Assembly, string Output) SwapFirstArguments(string methodName, int secondLoad = 1)
 {
     var output = Path.Combine(root, "Swapped" + methodName);
     Directory.CreateDirectory(output);
@@ -1180,12 +1180,46 @@ pending.Add((new(selectors["ReverseLimbs"], reverseProof, reverseOutput), "arm64
     using var variant = ModuleDefinition.ReadModule(assembly);
     var method = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(m => m.Name == methodName);
     var code = method.Body.Instructions;
-    if (code[0].OpCode != OpCodes.Ldarg_0 || code[1].OpCode != OpCodes.Ldarg_1)
-        throw new InvalidDataException($"{methodName} must load arguments zero and one first.");
-    (code[0].OpCode, code[1].OpCode) = (code[1].OpCode, code[0].OpCode);
+    if (code[0].OpCode != OpCodes.Ldarg_0 || code[secondLoad].OpCode != OpCodes.Ldarg_1)
+        throw new InvalidDataException($"{methodName} must load arguments zero and one at the selected positions.");
+    (code[0].OpCode, code[secondLoad].OpCode) = (code[secondLoad].OpCode, code[0].OpCode);
     variant.Write(image);
     return (image, output);
 }
+
+var swappedAndNot = SwapFirstArguments("AndNot", secondLoad: 2);
+var andNot = runtime.GetMethod("AndNot")!.CreateDelegate<Func<ulong, ulong, ulong>>();
+var reversedAndNot = Assembly.Load(File.ReadAllBytes(swappedAndNot.Assembly))
+    .GetType("Examples.DivisionIntrinsics")!.GetMethod("AndNot")!.CreateDelegate<Func<ulong, ulong, ulong>>();
+if (andNot(1, 2) != 2 || reversedAndNot(1, 2) != 1)
+    throw new InvalidOperationException("AVX2 AndNot or its reversed entry complemented the wrong operand.");
+verification.VerifyContractVariant(assembly, "Examples", selectors["AndNot"], Path.Combine(root, "AndNotContract"),
+    swappedAndNot.Assembly, selectors["AndNot"], swappedAndNot.Output, """
+    /-- AND-NOT keeps the bits of the right word that are clear in the left word. -/
+    def andNot : MethodContract (W64 × W64) W64 where
+      args pair := [.scalar (.i64 pair.1), .scalar (.i64 pair.2)]
+      results value := [.scalar (.i64 value)]
+      pre _ _ := True
+      footprint _ := []
+      post pair before after value := after = before ∧ value = ((~~~pair.1) &&& pair.2)
+    """, """
+    theorem correctness : andNot.Holds Extracted.program 0 := by
+      rintro ⟨left, right⟩ memory -
+      apply MethodContract.Holds.intro (c := andNot) (input := (left, right)) memory
+        ((~~~left) &&& right) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      exact ⟨256, invoke_broadcastBinary_word Extracted.profile .andNot 3 left right _ memory
+        rfl rfl rfl Extracted.method0_model4 rfl (by decide) (checked_broadcast_andNot left right)⟩
+    """, """
+    /-- The reversed operands return one where the contract requires two. -/
+    theorem correctness : andNot.Refuted Extracted.program 0 := by
+      apply MethodContract.Refuted.of_return (c := andNot) (input := (1, 2))
+        (initial := Memory.empty) (fuel := 16) (final := Memory.empty)
+        (values := [.scalar (.i64 1)]) trivial (by rfl)
+      rintro ⟨_, value, encoded, _, rfl⟩
+      revert encoded
+      decide
+    """, profile: "x64-v3", imports: "import CIL.Safety.IntrinsicExecution");
+Console.WriteLine("PASS AVX2 AND-NOT contract and certified reversed operands at (1, 2)");
 
 var equalityArguments = SwapFirstArguments("EqualWords128");
 var equalWords = runtime.GetMethod("EqualWords128")!;

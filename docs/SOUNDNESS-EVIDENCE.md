@@ -277,6 +277,15 @@ What `MetadataResolution` and `MetadataBinding` check:
   any depth, including when an array or a byref contains the aggregate. For an unpinned platform
   type, Lean trusts the signature's kind marker. A `VALUETYPE` marker can therefore admit a class
   from that assembly as a value argument when the aggregate identity matches.
+  The extractor represents `System.String` as an object when a type reference names the
+  supported `System.Runtime` or a definition belongs to the pinned .NET 11
+  `System.Private.CoreLib`. It checks the defining assembly's name, version, culture and key
+  token. The operand retains that assembly identity. Within that image, the root
+  `System.Object` definition has no base type and occupies an object reference on the stack.
+  The two-argument `Monitor.Enter` wrapper reads the flag byte before calling either helper.
+  When the object overload returns successfully and the byref remains writable, the wrapper
+  sets that byte to one. Monitor ownership, the pinned object header and atomic updates are
+  outside this wrapper contract.
   An instance field access needs its owner's definition in a carried slice, which gives the
   field's index. Lean also binds the two fields of a platform ``ValueTuple`2`` when its generic
   signature marks the head as a value type and its own `TypeRef` names the supported

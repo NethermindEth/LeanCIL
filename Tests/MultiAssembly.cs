@@ -29,7 +29,6 @@ const string libName = "MultiFixture.Lib";
 const string unsigned = ", Culture=neutral, PublicKeyToken=null";
 Run(["dotnet", "run", "--file", At("Tests/DeepCheckInputs.cs")]);
 Run(["dotnet", "run", "--file", At("Tests/DeepSession.cs")]);
-Run(["dotnet", "run", "--file", At("Tests/DeepVerify.cs")]);
 Run(["dotnet", "run", "--file", At("Tests/DeepDiagnostics.cs")]);
 Run(["dotnet", "run", "--file", At("Tests/ConsumerDeepChecks.cs")]);
 const string libraryText = """

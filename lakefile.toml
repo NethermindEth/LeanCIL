@@ -40,6 +40,15 @@ name = "Tests.BodyEncoding"
 name = "Tests.BodyDecoding"
 
 [[lean_lib]]
+name = "Tests.CoreStringLength"
+
+[[lean_lib]]
+name = "Tests.CoreLibImage"
+
+[[lean_lib]]
+name = "Tests.CoreMonitor"
+
+[[lean_lib]]
 name = "Tests.BodyLiteral"
 
 [[lean_lib]]

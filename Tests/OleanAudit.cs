@@ -12,7 +12,11 @@
 using System.Text.Json;
 
 var listsOnly = args is ["--lists-only"];
-if (!listsOnly) Run(["dotnet", "run", "--file", "Tests/ConsumerInspection.cs"]);
+if (!listsOnly)
+{
+    Run(["dotnet", "run", "--file", "Tests/ConsumerInspection.cs"]);
+    Run(["dotnet", "run", "--file", "Tests/DeepVerify.cs"], streamOutput: true, progress: "Deep verification");
+}
 using var verification = new Program();
 var root = At("artifacts/OleanAudit");
 if (Directory.Exists(root)) Directory.Delete(root, true);

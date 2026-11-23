@@ -538,6 +538,14 @@ void RequireUnattributed(DeepCheckRun run, string stage)
         throw new InvalidOperationException("Unclassified failure attributed a binding rejection");
 }
 
+// Changing one byte preserves the size and every other input byte.
+static void WriteInputByte(string path, int offset, byte value)
+{
+    using var file = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+    file.Position = offset;
+    file.WriteByte(value);
+}
+
 void CheckFailureDiagnostics()
 {
     using Program privateChecker = new();
@@ -604,9 +612,12 @@ void CheckFailureDiagnostics()
             };
             var originalBytes = originalPath is null ? null : File.ReadAllBytes(originalPath);
             var originalTime = originalPath is null ? default : File.GetLastWriteTimeUtc(originalPath);
+            const int dosStubOffset = 0x50;
+            var byteOffset = target is "original-assembly" or "replay-assembly" ? dosStubOffset : 0;
             var run = new DeepCheckRun(inputs);
             bool changed = false;
             bool originalChanged = false;
+            string? savedAuditor = null;
             string lastStage = "";
             string[]? before = null;
             var diagnostic = target switch
@@ -628,16 +639,21 @@ void CheckFailureDiagnostics()
                     if (stage == (kernelForgery ? "replay diagnostics" : "theorem audit") &&
                         originalPath is not null && !originalChanged)
                     {
-                        var bytes = (byte[])originalBytes!.Clone();
-                        const int dosStubOffset = 0x50;
-                        var offset = target is "original-assembly" or "replay-assembly" ? dosStubOffset : 0;
-                        if (target is "original-assembly" or "replay-assembly" &&
-                            (bytes.Length <= dosStubOffset || BitConverter.ToInt32(bytes, 0x3c) <= dosStubOffset))
+                        if (byteOffset == dosStubOffset && (originalBytes!.Length <= dosStubOffset ||
+                            BitConverter.ToInt32(originalBytes, 0x3c) <= dosStubOffset))
                             throw new InvalidOperationException("Fixture has no DOS stub byte before the PE header");
-                        bytes[offset] ^= 1;
-                        File.WriteAllBytes(originalPath, bytes);
-                        File.SetLastWriteTimeUtc(originalPath, originalTime);
+                        // Keep the original runnable image outside the private library. Windows can rename
+                        // a mapped executable even while it denies write access to its contents.
+                        if (target == "replay-auditor" && OperatingSystem.IsWindows())
+                        {
+                            var saved = Path.Combine(Path.GetTempPath(), "leancil-auditor-" + Guid.NewGuid().ToString("N"));
+                            File.Move(originalPath, saved);
+                            savedAuditor = saved;
+                            File.Copy(saved, originalPath);
+                        }
+                        WriteInputByte(originalPath, byteOffset, (byte)(originalBytes![byteOffset] ^ 1));
                         originalChanged = true;
+                        File.SetLastWriteTimeUtc(originalPath, originalTime);
                     }
                     if (stage != "deep-check sources") return;
                     var fresh = Directory.EnumerateDirectories(output, "proof-*").Single();
@@ -686,10 +702,17 @@ void CheckFailureDiagnostics()
             }
             finally
             {
-                if (originalPath is not null)
+                if (savedAuditor is not null)
                 {
-                    File.WriteAllBytes(originalPath, originalBytes!);
-                    File.SetLastWriteTimeUtc(originalPath, originalTime);
+                    var changedAuditor = savedAuditor + ".changed";
+                    if (File.Exists(originalPath)) File.Move(originalPath, changedAuditor);
+                    File.Move(savedAuditor, originalPath!);
+                    File.Delete(changedAuditor);
+                }
+                else if (originalChanged)
+                {
+                    WriteInputByte(originalPath!, byteOffset, originalBytes![byteOffset]);
+                    File.SetLastWriteTimeUtc(originalPath!, originalTime);
                 }
             }
             var failed = run.Attempt!.Failure("theorem audit", diagnostic);

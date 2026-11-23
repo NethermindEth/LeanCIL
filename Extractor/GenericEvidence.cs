@@ -464,7 +464,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }
 
     static bool ObjectReceiver(MethodDefinition method) =>
-        method.HasThis && ObjectTypes.Is(method.DeclaringType);
+        method.HasThis && (ObjectTypes.Is(method.DeclaringType) || ObjectTypes.IsStringDefinition(method.DeclaringType));
 
     // The generic context is set here, so a type-level parameter is numbered by this method, not the last one.
     (string Parameters, string ReturnType) SignatureTypes(MethodDefinition method)

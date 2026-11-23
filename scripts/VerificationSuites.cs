@@ -194,8 +194,8 @@ internal static class VerificationSuites
             "profile-excluded branches, runtime-async refusal, self-admission, the admitted hole corpus and the " +
             "self-admitted, example and fixture methods defined from their decoder"),
         new("audit", "Tests/OleanAudit.cs",
-            "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts " +
-            "cannot forge"),
+            "theorem audits of replayed oleans, deep certificate reuse, and rejection of changed images, " +
+            "proofs, replay inputs and auditors"),
         new("docs", "Tests/DocSnippets.cs",
             "documentation Lean snippets, cited library names and documented commands against the library and tool")
     ];
