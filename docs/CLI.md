@@ -387,6 +387,9 @@ For a virtual class slot, Lean checks the owner's descendants, methods, local in
 supported explicit interface implementations in the slot's own image. It checks every reachable
 virtual site's selected targets. Multiple selected methods can have catalogs in different images.
 Each other pinned image must have locally closed parent chains ending at recognized core roots.
+The catalog reads the core assembly scope for primitive parameters and results from the image.
+At the supported System.Runtime scope, a string and a byref to a string retain their reference
+type. A changed core AssemblyRef version disagrees with the original numeric slot signature.
 For generic methods, the catalog checks the signature, including byrefs, and the ordinal, flags
 and constraints of each type parameter. A method parameter or primitive can appear inside
 nested generic classes and interfaces. For example, in `IScale<Box<ICode<U>>, T>` the audit

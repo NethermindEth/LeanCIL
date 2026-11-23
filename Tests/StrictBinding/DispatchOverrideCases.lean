@@ -40,6 +40,29 @@ private def mismatch (result : Except AuditError Bool) (expected : Nat) : Bool :
   | .error (.dispatchMismatch token) => token == expected
   | _ => false
 
+/-- Change only the major version of the AssemblyRef that supplies primitive signature types.
+    The entry's bytes still bind, but the slot's physical Int32 result has a different scope. -/
+private def changedPrimitiveScope : Option Bool := do
+  let bytes := DispatchImage.image
+  let pin : PinnedImage := ⟨Extracted.assembly0.identity, bytes⟩
+  let image ← (prepareOne pin).toOption
+  let row ← (List.range (image.layout.rowCount Table.assemblyRef)).find? fun index =>
+    (referenceIdentity image (StrictBinding.tokenOf Table.assemblyRef (index + 1))).toOption ==
+      some runtimeScope
+  let token := StrictBinding.tokenOf Table.assemblyRef (row + 1)
+  let (offset, width) ← (image.layout.cellAt token 0).toOption
+  guard (width == 2)
+  let changed := Tests.StrictBinding.flipByte bytes offset 1
+  let altered ← (prepareOne { pin with image := changed }).toOption
+  let _ ← (bodyBound altered Extracted.method0Original.token Extracted.method0Body.bytes).toOption
+  let some call := Extracted.method0Original.code[1]? | none
+  let .call site := call.operand | none
+  let .managed slot := site.target | none
+  return mismatch (audit changed) slot
+
+theorem primitiveScopeMismatch : changedPrimitiveScope = some true := by decide +kernel
+#print axioms primitiveScopeMismatch
+
 /-- Omitting the explicit slots from the carried declarations changes the entry catalog. -/
 theorem missingOverrides :
     mismatch (audit DispatchImage.image (Extracted.methodEvidence.map erase))

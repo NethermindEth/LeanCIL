@@ -11,6 +11,13 @@ private abbrev Reading := OptionT (Except AuditError)
 /-- Structural PE errors retain the token, heap offset or column that failed. -/
 private def physical (action : Except AuditError α) : Reading α := liftM action
 
+/-- An unsupported signature leaves the catalog partial. Structural errors retain their cause. -/
+private def signatureValue (read : Except AuditError α) : Reading α :=
+  match read with
+  | .ok value => pure value
+  | .error .uncoveredConstraint => failure
+  | .error error => throwThe AuditError error
+
 /-- The unambiguous Cecil spelling of a physical TypeDef and its enclosing declarations. -/
 private def declarationName (image : PreparedImage) : Nat → Nat → Reading String
   | 0, row => throwThe AuditError (.typeDefMismatch row .nesting)
@@ -71,11 +78,11 @@ private def descends (parents : Array Nat) (root : Nat) : Nat → Nat → Bool �
     descends parents root fuel parent (found || row == root)
 
 /-- A primitive, local class or in-range method type parameter in a catalog signature. -/
-private def formalElement (image : PreparedImage) (arity : Nat) : SigType → Reading TypeExpr
-  | .primitive 1 => return .void
+private def formalElement (image : PreparedImage) (core : Except AuditError String)
+    (arity token : Nat) : SigType → Reading TypeExpr
+  | .primitive 1 => throwThe AuditError (.dispatchMismatch token)
   | .primitive code => do
-    let some name := (primitiveName code).bind spelled? | failure
-    return .atom runtimeScope name
+    signatureValue (do primitiveElement (← core) code)
   | .named false token => do
     guard (tableOf token == Table.typeDef)
     className image (token % 2^24)
@@ -85,15 +92,14 @@ private def formalElement (image : PreparedImage) (arity : Nat) : SigType → Re
   | _ => failure
 
 /-- A managed reference in a slot signature preserves its physical element type. -/
-private def formalType (image : PreparedImage) (arity : Nat) : SigType → Reading TypeExpr
-  | .byref element => do
-    let value ← formalElement image arity element
-    guard (value != .void)
-    return .byref value
-  | element => formalElement image arity element
+private def formalType (image : PreparedImage) (core : Except AuditError String)
+    (arity token : Nat) : SigType → Reading TypeExpr
+  | .byref element => do return .byref (← formalElement image core arity token element)
+  | element => formalElement image core arity token element
 
 /-- A managed MethodDef with its physical flags, signature and type parameter declarations. -/
-private def classMethod (prepared : List PreparedImage) (image : PreparedImage) (row : Nat) : Reading DispatchMethod := do
+private def classMethod (prepared : List PreparedImage) (image : PreparedImage)
+    (core : Except AuditError String) (row : Nat) : Reading DispatchMethod := do
   let cell := image.layout.cellOfRow image.view Table.methodDef row
   let implementation ← physical (cell 1)
   let attributes ← physical (cell 2)
@@ -105,10 +111,8 @@ private def classMethod (prepared : List PreparedImage) (image : PreparedImage) 
   guard (sig.convention == convention || sig.convention == convention + hasThisFlag)
   guard (implementation == 0)
   let token := StrictBinding.tokenOf Table.methodDef row
-  let genericParameters ← match readParameterDeclarations image token sig.genericArity prepared with
-    | .ok declarations => pure declarations
-    | .error .uncoveredConstraint => failure
-    | .error error => throwThe AuditError error
+  let genericParameters ← signatureValue
+    (readParameterDeclarations image token sig.genericArity prepared)
   -- Method parameters are invariant. Other bits and conflicting class/struct constraints
   -- lie outside the catalog's supported declarations.
   guard (genericParameters.all fun parameter =>
@@ -117,13 +121,16 @@ private def classMethod (prepared : List PreparedImage) (image : PreparedImage) 
   let hasBody := (← physical (cell 0)) != 0
   let hasThis := sig.convention == convention + hasThisFlag
   guard (hasBody == !isAbstract && hasThis == (attributes &&& 0x10 == 0))
+  let result ← match sig.result with
+    | .primitive 1 => pure .void
+    | type => formalType image core sig.genericArity token type
   return {
     token, name, hasThis, isPublic := attributes % 8 == 6,
     isAbstract, isVirtual := attributes &&& virtualMethodAttribute != 0, hasBody,
     genericArity := sig.genericArity, genericParameters, explicitThis := false,
     callingConvention := convention,
-    attributes, implementation, returnType := ← formalType image sig.genericArity sig.result,
-    parameters := ← sig.parameters.mapM (formalType image sig.genericArity),
+    attributes, implementation, returnType := result,
+    parameters := ← sig.parameters.mapM (formalType image core sig.genericArity token),
     overrides := [] }
 
 /-- InterfaceImpl targets grouped by their physical TypeDef owner, in declaration order. -/
@@ -147,8 +154,9 @@ private def interfaceName (image : PreparedImage) (coded : Nat) : Reading TypeEx
 
 /-- Local MethodImpl rows bind the implementing MethodDef to its class and the overridden
     MethodDef to its interface. Both signatures describe the same nongeneric instance slot. -/
-private def localOverrides (prepared : List PreparedImage) (image : PreparedImage) (interfaces : Array (Array Nat))
-    (parents : Array Nat) (root : Nat) :
+private def localOverrides (prepared : List PreparedImage) (image : PreparedImage)
+    (core : Except AuditError String) (interfaces : Array (Array Nat)) (parents : Array Nat)
+    (root : Nat) :
     Reading (Array (List (Nat × TypeExpr))) := do
   let rowCount := image.layout.rowCount 0x19
   if rowCount == 0 then return #[]
@@ -173,8 +181,8 @@ private def localOverrides (prepared : List PreparedImage) (image : PreparedImag
     guard (direct.contains ((interfaceToken % 2^24) * 4))
     let name ← localName image (interfaceToken % 2^24) .interface
     let slotOwner := TypeExpr.atom image.identity name
-    let implementation ← classMethod prepared image (body / 2)
-    let declaration ← classMethod prepared image (slot / 2)
+    let implementation ← classMethod prepared image core (body / 2)
+    let declaration ← classMethod prepared image core (slot / 2)
     guard (implementation.genericArity == 0 && declaration.genericArity == 0)
     guard (implementation.hasThis && implementation.hasBody && implementation.isVirtual &&
       declaration.hasThis && declaration.isVirtual && declaration.isAbstract &&
@@ -208,7 +216,8 @@ def physicalHierarchy (image : PreparedImage) (owner : Nat) (includeDerived := t
   let count := image.layout.rowCount Table.typeDef
   let interfaces ← interfacesByOwner image count
   let parents ← localParents image
-  let overrides ← localOverrides prepared image interfaces parents owner
+  let core := primitiveScope image
+  let overrides ← localOverrides prepared image core interfaces parents owner
   let mut types := #[]
   for i in [:count] do
     let row := i+1
@@ -221,7 +230,7 @@ def physicalHierarchy (image : PreparedImage) (owner : Nat) (includeDerived := t
       else physical (image.layout.cellOfRow image.view Table.typeDef (row+1) 5)
     let mut methods := #[]
     for index in [first:finish] do
-      let method ← classMethod prepared image index
+      let method ← classMethod prepared image core index
       methods := methods.push { method with overrides := overrides[index]?.getD [] }
     let base ← if parents[row]! == 0 then pure TypeExpr.void else className image parents[row]!
     let owned ← interfaces[row]!.toList.mapM (interfaceName image)
@@ -313,7 +322,7 @@ private def selected (prepared : List PreparedImage) (image : PreparedImage) (it
     let attr ← physical (image.layout.cell image.view token 2)
     unless attr &&& virtualMethodAttribute != 0 do continue
     let owner := (← physical (methodDeclaringType image token)) % 2^24
-    let slot ← classMethod prepared image (token % 2^24)
+    let slot ← classMethod prepared image (primitiveScope image) (token % 2^24)
     unless site.declaringType == (← className image owner) && slot.name == site.name &&
         slot.hasThis && slot.returnType == site.returnType && slot.parameters == site.parameterTypes
       do throwThe AuditError (.dispatchMismatch token)

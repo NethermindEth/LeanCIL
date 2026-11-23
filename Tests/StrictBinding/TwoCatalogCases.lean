@@ -67,6 +67,39 @@ theorem wrongNestedArguments : checked [app, library] crossedArguments =
     .error (.dispatchMismatch Extracted.method0Original.token) := by cil_kernel_rfl
 #print axioms wrongNestedArguments
 
+/-- Change only the result of the library's Label method from a string reference to an atom. -/
+private def wrongStringResult := Extracted.methodEvidence.modify 1 fun item =>
+  { item with dispatchTypes := item.dispatchTypes.map fun entry =>
+    { entry with methods := entry.methods.map fun method =>
+      if method.name == "Label" then
+        { method with returnType := .atom runtimeScope "System.String" }
+      else method } }
+
+theorem stringResultMismatch : checked [app, library] wrongStringResult =
+    .error (.dispatchMismatch Extracted.method1Original.token) := by cil_kernel_rfl
+#print axioms stringResultMismatch
+
+/-- Replace the final OBJECT parameter of Label with VOID in its physical signature blob. -/
+private def voidParameter : Option Bool := do
+  let methods := Extracted.method1DispatchTypes.flatMap (·.methods)
+  let method ← methods.find? (·.name == "Label")
+  let image ← (prepareOne library).toOption
+  let key ← (image.layout.cell image.view method.token 4).toOption
+  let blob ← (image.layout.blobAt image.view key).toOption
+  guard (blob == [0, 2, 0x0E, 0x10, 0x0E, 0x1C])
+  let start := image.layout.pe.blobs.start + key
+  let (prefixSize, length) ← (blobPrefix image.view start).toOption
+  let bytes := Tests.StrictBinding.flipByte library.image (start + prefixSize + length - 1) (0x1C ^^^ 1)
+  let altered := { library with image := bytes }
+  let prepared ← (prepareOne altered).toOption
+  let _ ← (bodyBound prepared Extracted.method1Original.token Extracted.method1Body.bytes).toOption
+  return match checked [app, altered] Extracted.methodEvidence with
+    | .error (.dispatchMismatch token) => token == method.token
+    | _ => false
+
+theorem voidParameterMismatch : voidParameter = some true := by decide +kernel
+#print axioms voidParameterMismatch
+
 /-- Both pin orders locate the same declaring images. -/
 theorem reversed : (checked [library, app] Extracted.methodEvidence).toOption = some true :=
   by decide +kernel

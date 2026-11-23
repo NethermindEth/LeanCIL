@@ -409,6 +409,7 @@ void CheckTwoAssemblyCatalogs()
         public class Shape { }
         public class Second : Shape {
             public static T Keep<T, U>(T value) where T : IScale<T, U> => value;
+            public static string Label(ref string text, object tag) => text;
         }
         public static class Family { public sealed class Child : Second { } }
         public static class Reader { public static int Test(Shape value) => value is Second ? 2 : 0; }
@@ -421,6 +422,7 @@ void CheckTwoAssemblyCatalogs()
         public sealed class First : Shape {
             public static U Pick<T, U>(T first, U second)
                 where T : class, Far.IScale<Far.Box<Far.IScale<U, int>>, Far.IScale<T, string>>, new() => second;
+            public static object Tag(string text) => text;
         }
         public static class Reader {
             public static int Both(Shape local, Far.Shape other) => Far.Reader.Test(other) +

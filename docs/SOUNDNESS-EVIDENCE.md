@@ -441,6 +441,9 @@ interface slot, the MethodImpl row must name the implementing class and two loca
 with matching nongeneric instance signatures. The catalog records the interface and the exact
 declaration token. A class outside the selected hierarchy may implement an external interface
 when its body MethodDef belongs to that class.
+Primitive slot signatures use the image's core assembly identity, including its version and
+public key token. The result can be void. A System.Runtime string parameter, result or byref
+element carries its string reference type.
 For a generic method, Lean checks the signature's generic flag and arity, its byrefs and the
 position of each method type parameter. It reconstructs the owning GenericParam rows in
 ordinal order, with their flags and GenericParamConstraint rows. For a constraint such as

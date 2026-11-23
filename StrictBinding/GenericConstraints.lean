@@ -27,7 +27,7 @@ def referenceIdentity (image : PreparedImage) (token : Nat) :
   return String.ofList (text.map Char.ofNat)
 
 /-- The unambiguous core assembly used to spell primitive elements in this module. -/
-private def primitiveScope (image : PreparedImage) : Except AuditError String := do
+def primitiveScope (image : PreparedImage) : Except AuditError String := do
   if ← platformAssembly image then return image.identity
   let cell := image.layout.cellOfRow image.view Table.typeRef
   let mut found := none
@@ -45,6 +45,17 @@ private def primitiveScope (image : PreparedImage) : Except AuditError String :=
     found := some identity
   let some core := found | throw .uncoveredConstraint
   return core
+
+/-- The extracted type of a non-void primitive in a physical signature. In the supported
+    System.Runtime reference scope, STRING is a managed string and OBJECT is a scoped atom. -/
+def primitiveElement (scope : String) (code : Nat) : Except AuditError TypeExpr := do
+  let some name := (primitiveName code).bind spelled? | throw .uncoveredConstraint
+  if code == 1 then throw .uncoveredConstraint
+  if code == 0x0E then
+    unless scope == runtimeScope do throw .uncoveredConstraint
+    return .object scope name
+  if code == 0x1C && scope == coreLibraryScope then throw .uncoveredConstraint
+  return .atom scope name
 
 /-- A top-level simple name cannot include a namespace separator or a constructed type suffix. -/
 def ordinaryTypeName (space name : String) : Bool :=
@@ -164,14 +175,7 @@ private def openMethodConstraint? (images : List PreparedImage) (image : Prepare
     | .mvar index => do
       unless index < arity do throw (.constraintMismatch owner)
       return .parameter index
-    | .primitive code => do
-      let some name := (primitiveName code).bind spelled? | throw .uncoveredConstraint
-      if code == 1 then throw .uncoveredConstraint
-      let scope ← primitiveScope image
-      if code == 0x0E then
-        unless scope == runtimeScope do throw .uncoveredConstraint
-        return .object scope name
-      return .atom scope name
+    | .primitive code => do primitiveElement (← primitiveScope image) code
     | _ => throw .uncoveredConstraint
   return some (← readApplication images image leaf
     (fun scope name args => args.foldl TypeExpr.apply (.objectConstructor scope name))
