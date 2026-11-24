@@ -520,10 +520,12 @@ of `Throws.Percent`, the verifier checks that both original operands load even w
 The audited translation theorem supplies the entry through `Extracted.translation_valid.entry`.
 For a closed package without an external exception constructor or a folded throw, the entry
 uses the certified methods and loads literals from the original method evidence. On
-`.net11WinX64`, Lean binds one live `newobj` in a single-method extraction to one of four
+`.net11WinX64`, Lean binds one live `newobj` in a single-method extraction to one of five
 constructors: `ArgumentOutOfRangeException(string, string)`,
-`ArgumentOutOfRangeException(string, object, string)`, `ArgumentException(string, string, Exception)`
-and `InvalidOperationException(string, Exception)`. Lean resolves the original MemberRef through
+`ArgumentOutOfRangeException(string, object, string)`, `ArgumentException(string, string)`,
+`ArgumentException(string, string, Exception)` and `InvalidOperationException(string, Exception)`.
+Lean and the extractor select the overload by its owner and exact parameter types. Lean resolves
+the original MemberRef through
 the facade, checks the MethodDef and signature, and decodes the caller and every CoreLib method
 the constructor reaches with a non-null message. `Extracted.managedPackage` derives the
 executable table from the original body, metadata and flow inputs, and `Extracted.program`
@@ -534,9 +536,11 @@ and call targets. When the constructor reads a default message from `System.SR` 
 message, the final slot declares that physical getter. Lean checks its body bytes and signature
 and supplies no return-value fact for that declaration. Such a constructor is admitted only when
 the loads directly before `newobj` make the message a string literal on every path: `ldstr` for
-the range constructors and `ldstr; ldnull` for `InvalidOperationException`, with no branch into
-`newobj` or into a load after the first. A non-null message bypasses the getter. Open packages
-and constructors without a checked runtime binding produce `none` at this entry.
+the range constructors and `ldstr; ldnull` for `InvalidOperationException(string, Exception)`,
+with no branch into `newobj` or into a load after the first. A non-null message bypasses the getter.
+`ArgumentOutOfRangeException(string)` calls its getter on every path, since its argument is the
+parameter name, so it has no binding. Open packages and constructors without a checked runtime
+binding produce `none` at this entry.
 
 `Extracted.translation_valid.invoke target fuel args budget` starts from empty caller storage
 and reports binding, image loading and execution separately. The pinned .NET 11.0.0 Windows

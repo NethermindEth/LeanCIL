@@ -37,6 +37,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     ("Quotient", "Throws::Quotient(uint,uint)", [[7, 2], [7, 0], [0, 0], [uint.MaxValue, 1]]),
     ("Percent", "Throws::Percent(uint)", [[0], [100], [101], [uint.MaxValue]]),
     ("Inner", "Throws::Inner(uint)", [[0], [1]]),
+    ("NamedArgument", "Throws::NamedArgument(uint)", [[0], [1]]),
     ("ArgumentInner", "Throws::ArgumentInner(uint)", [[0], [1]]),
     ("ActualValue", "Throws::ActualValue(uint)", [[0], [1]])
 })
@@ -46,7 +47,8 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var extracted = Path.Combine(folder, "Extracted.lean");
     var source = File.ReadAllText(extracted);
     var entry = throwMethods.Single(candidate => candidate.Name == name);
-    var boundConstructor = name is "Percent" or "ActualValue" or "ArgumentInner" or "Inner";
+    var boundConstructor = name is "Percent" or "ActualValue" or "ArgumentInner" or "Inner" or
+        "NamedArgument";
     var method = name is "Null" or "Quotient" ? 1 : 0;
     var owner = method == 0 ? entry : ((MethodReference)entry.Body.Instructions
         .Single(instruction => instruction.OpCode.Code == Code.Call).Operand).Resolve();
@@ -182,7 +184,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         queue.Add(new(selector, proof, Path.Combine(root, name + "-Translated"), Assembly: image), () =>
             Console.WriteLine($"PASS {name}: the same boundary proof checks with translated exception literals"));
 
-        if (name is "ActualValue" or "ArgumentInner" or "Inner")
+        if (name is "ActualValue" or "ArgumentInner" or "Inner" or "NamedArgument")
         {
             foreach (var (suffix, path) in new[] { ("", assembly), ("-Translated", image) })
                 queue.Add(new(selector, At("Tests/ExceptionConstructor/Proof.lean"),
@@ -417,21 +419,72 @@ static string CompiledPercentProof(string folder)
 
 void CheckPercentVariants(ModuleDefinition image, MethodDefinition method, string selector)
 {
+    const string bounded = """
+        def bounded : OutcomeContract W32 W32 where
+          args value := [.scalar (.i32 value)]
+          results result := [.scalar (.i32 result)]
+          pre _ _ := True
+          footprint _ := []
+          post value _ _ result := result = value
+          raises value _ := if value ≤ 100 then none else some .argumentOutOfRange
+        """;
     // Preserve both translated ldstr operands and the constructor signature. Change only the exception class.
     var site = method.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Newobj);
     var original = (MethodReference)site.Operand;
-    var owner = new TypeReference("System", "ArgumentException", image, original.DeclaringType.Scope);
-    var replacement = new MethodReference(original.Name, original.ReturnType, owner) { HasThis = original.HasThis };
-    foreach (var parameter in original.Parameters)
-        replacement.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
-    site.Operand = replacement;
-    var changed = Path.Combine(root, "Percent-WrongType.dll");
-    image.Write(changed);
+    var throwPc = method.Body.Instructions.IndexOf(
+        method.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Throw));
+    string Retyped(Type raised)
+    {
+        var owner = new TypeReference("System", raised.Name, image, original.DeclaringType.Scope);
+        var replacement = new MethodReference(original.Name, original.ReturnType, owner) { HasThis = original.HasThis };
+        foreach (var parameter in original.Parameters)
+            replacement.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
+        site.Operand = replacement;
+        var changed = Path.Combine(root, $"Percent-{raised.Name}.dll");
+        image.Write(changed);
+        var invoked = Assembly.Load(File.ReadAllBytes(changed)).GetType("Examples.Throws")!.GetMethod("Percent")!;
+        try { invoked.Invoke(null, [101u]); throw new InvalidOperationException("Expected " + raised.Name); }
+        catch (TargetInvocationException error) when (error.InnerException?.GetType() == raised) { }
+        return changed;
+    }
 
-    var invoked = Assembly.Load(File.ReadAllBytes(changed)).GetType("Examples.Throws")!.GetMethod("Percent")!;
-    try { invoked.Invoke(null, [101u]); throw new InvalidOperationException("Expected ArgumentException"); }
-    catch (TargetInvocationException error) when (error.InnerException?.GetType() == typeof(ArgumentException)) { }
+    // ArgumentException(string, string) runs its CoreLib body, so the raised object refutes the range contract.
+    var argument = Retyped(typeof(ArgumentException));
+    var refuted = Path.Combine(root, "RetypedPercent.lean");
+    File.WriteAllText(refuted, $$"""
+        import Extracted
+        import CIL.Runtime.EntryContract
+        import CIL.Safety.Imports
+        namespace ExampleProof
+        open CIL CIL.Safety
+        {{bounded}}
+        private def image := (Extracted.translation_valid.entry .net11WinX64).getD (.translated [] [])
+        private def memory := image.initialMemory.toOption.getD Memory.empty
 
+        theorem correctness :
+            bounded.RefutedAtEntryCLR Extracted.program 0 Extracted.translation_valid .net11WinX64 := by
+          refine ⟨image, memory, by cil_kernel_rfl, by cil_kernel_rfl, by decide, ?_⟩
+          intro extra
+          apply OutcomeContract.RefutedCLR.of_fault (input := (101 : W32)) (initial := memory)
+            (observed := 66) (fault := ⟨0, {{throwPc}}, .thrown .argument⟩)
+          · exact ⟨rfl, trivial⟩
+          · decide
+          · apply invoke_extend (base := image.methods) ⟨extra, rfl⟩ _ _ _ _ _
+            · intro fault wrong
+              cases wrong
+              decide
+            · cil_kernel_rfl
+          · have above : ¬ ((101 : W32) ≤ 100) := by decide
+            simp only [OutcomeContract.ViolatesCLR, OutcomeContract.atStartup, bounded, ite_eq_right above]
+            decide
+        #print axioms correctness
+        end ExampleProof
+        """);
+    verification.Verify(argument, "Examples", selector, refuted, Path.Combine(root, "Percent-Type-Refuted"));
+    Console.WriteLine("PASS Percent: the bound ArgumentException constructor refutes the range contract");
+
+    // ArgumentNullException(string, string) has no runtime binding, so its entry supplies no counterexample.
+    var unboundImage = Retyped(typeof(ArgumentNullException));
     var unbound = Path.Combine(root, "UnboundPercent.lean");
     File.WriteAllText(unbound, """
         import Extracted
@@ -444,8 +497,8 @@ void CheckPercentVariants(ModuleDefinition image, MethodDefinition method, strin
         #print axioms correctness
         end ExampleProof
         """);
-    verification.Verify(changed, "Examples", selector, unbound, Path.Combine(root, "Percent-Type-Unbound"));
-    Console.WriteLine("PASS Percent: the CLR throws ArgumentException and its unbound constructor supplies no counterexample");
+    verification.Verify(unboundImage, "Examples", selector, unbound, Path.Combine(root, "Percent-Type-Unbound"));
+    Console.WriteLine("PASS Percent: ArgumentNullException has no binding and supplies no counterexample");
 
     site.Operand = original;
     var threshold = method.Body.Instructions.Single(instruction =>
@@ -454,15 +507,7 @@ void CheckPercentVariants(ModuleDefinition image, MethodDefinition method, strin
     var offByOne = Path.Combine(root, "Percent-OffByOne.dll");
     image.Write(offByOne);
     verification.VerifyContractVariant(assembly, "Examples", selector, Path.Combine(root, "Percent-Contract-Original"),
-        offByOne, selector, Path.Combine(root, "Percent-OffByOne"), """
-        def bounded : OutcomeContract W32 W32 where
-          args value := [.scalar (.i32 value)]
-          results result := [.scalar (.i32 result)]
-          pre _ _ := True
-          footprint _ := []
-          post value _ _ result := result = value
-          raises value _ := if value ≤ 100 then none else some .argumentOutOfRange
-        """, """
+        offByOne, selector, Path.Combine(root, "Percent-OffByOne"), bounded, """
         theorem correctness :
             bounded.HoldsAtEntryCLR Extracted.program 0 Extracted.translation_valid .net11WinX64 :=
           ExampleProof.correctness

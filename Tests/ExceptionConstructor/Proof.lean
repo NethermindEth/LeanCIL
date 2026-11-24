@@ -2,8 +2,8 @@ import Extracted
 import CIL.Safety.Imports
 import CIL.Safety.ValueSteps
 
-/-! Execution and constructor-argument checks for the exception constructor fixtures that pass a
-literal message and a null argument. -/
+/-! Execution and constructor-argument checks for the exception constructor fixtures that pass
+literal string arguments, with or without a null argument. -/
 
 namespace ExceptionConstructorProof
 open CIL CIL.Extraction CIL.Safety
@@ -11,24 +11,31 @@ open CIL CIL.Extraction CIL.Safety
 set_option maxRecDepth 65536
 set_option maxHeartbeats 30000000
 
-/-- The raised exception, its HResult and the original pcs of the null load, throw and return. -/
+/-- The raised exception, its HResult, the original pcs of the last constructor argument load, the
+throw and the return, and an instruction the certificate must refuse in place of that load. -/
 private structure Shape where
   raised : ExceptionType
   hresult : W32
-  nullLoad : Nat
+  argumentLoad : Nat
   throwAt : Nat
   returnAt : Nat
+  substitute : Instruction
 
 /-- The fixture's public method selects its exception and compiled instruction positions. -/
 private def expected? : Option Shape :=
   match Extracted.method0Signature with
   | "System.UInt32 Examples.Throws::ActualValue(System.UInt32)" =>
-    some ⟨.argumentOutOfRange, 0x80131502, 3, 6, 7⟩
+    some ⟨.argumentOutOfRange, 0x80131502, 3, 6, 7, message⟩
   | "System.UInt32 Examples.Throws::ArgumentInner(System.UInt32)" =>
-    some ⟨.argument, 0x80070057, 4, 6, 7⟩
+    some ⟨.argument, 0x80070057, 4, 6, 7, message⟩
   | "System.UInt32 Examples.Throws::Inner(System.UInt32)" =>
-    some ⟨.invalidOperation, 0x80131509, 3, 5, 6⟩
+    some ⟨.invalidOperation, 0x80131509, 3, 5, 6, message⟩
+  | "System.UInt32 Examples.Throws::NamedArgument(System.UInt32)" =>
+    some ⟨.argument, 0x80070057, 3, 5, 6, .ldnull⟩
   | _ => none
+where
+  /-- The message literal, which may not stand in for a null argument. -/
+  message := Extracted.method0.code[2]?.getD .nop
 
 private def expected := expected?.get (by cil_kernel_rfl)
 private def entry := ProgramEntry.range Extracted.boundPackage
@@ -81,7 +88,7 @@ theorem outcome (value : W32) (tail : Program) :
     exact congrFun thrown value
 #print axioms outcome
 
-/-- The certificate rejects replacing the original null argument or the stack throw. -/
+/-- The certificate rejects replacing the original argument load or the stack throw. -/
 private def acceptsReplacement (pc : Nat) (replacement : Instruction) : Bool :=
   let package := Extracted.boundPackage
   let changed := { package.root.2 with code := package.root.2.code.set pc replacement }
@@ -117,8 +124,8 @@ theorem correctness :
     Extracted.translation_valid.entry .net11WinX64 = some entry ∧
     Extracted.translation_valid.entry .portable = none ∧
     entry.initialMemory = .ok initial ∧
-    acceptsReplacement expected.nullLoad .nop = false ∧
-    acceptsReplacement expected.nullLoad (Extracted.method0.code[2]?.getD .nop) = false ∧
+    acceptsReplacement expected.argumentLoad .nop = false ∧
+    acceptsReplacement expected.argumentLoad expected.substitute = false ∧
     acceptsReplacement expected.throwAt (.throw (some expected.raised)) = false ∧
     raisedDetails = some expectedRaised ∧
     ∀ (value : W32) (tail : Program), invoke (Extracted.program ++ tail) 64 0 (args value) initial =

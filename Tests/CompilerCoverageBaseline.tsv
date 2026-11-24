@@ -801,6 +801,7 @@ Examples:System.UInt32 Examples.StaticScalars::ReadInt()	B	B	B	B	B	B	B	B
 Examples:System.UInt32 Examples.Throws::ActualValue(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::ArgumentInner(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::Inner(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Throws::NamedArgument(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::Null(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::Percent(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::Quotient(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A

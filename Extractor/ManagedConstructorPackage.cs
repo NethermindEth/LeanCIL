@@ -27,6 +27,7 @@ internal static class ManagedConstructorPackage
         {
             (ExceptionType.ArgumentOutOfRange, [MetadataType.String, MetadataType.String] or
                 [MetadataType.String, MetadataType.Object, MetadataType.String]) => [Code.Ldstr],
+            (ExceptionType.Argument, [MetadataType.String, MetadataType.String]) => [],
             (ExceptionType.Argument, [MetadataType.String, MetadataType.String, MetadataType.Class])
                 when innerException => [],
             (ExceptionType.InvalidOperation, [MetadataType.String, MetadataType.Class])

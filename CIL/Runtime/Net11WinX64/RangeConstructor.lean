@@ -3,9 +3,9 @@ import CIL.Runtime.Net11WinX64.ActualValueCtor
 import CIL.Runtime.Net11WinX64.InnerMethods
 
 /-! Managed execution of the bound exception constructors in the .NET 11.0.0 Windows x64 runtime:
-the two range constructors and the ArgumentException and InvalidOperationException constructors
-with an inner exception. A resource getter reached only by a null message is declared in the slot
-after the executable methods. -/
+the two range constructors, the ArgumentException constructors with a parameter name and with an
+inner exception, and the InvalidOperationException constructor with an inner exception. A resource
+getter reached only by a null message is declared in the slot after the executable methods. -/
 
 namespace CIL.Runtime.Net11WinX64
 open CIL.Extraction Core
@@ -156,6 +156,40 @@ private def invalidOperationInnerDependencies : List MetadataSlice := [{
     userStrings := [],
     corlib := 0,
     links := [⟨1, 100670309, 2, 33554816⟩] }]
+
+/-- Forwarders and MethodDef for the ArgumentException constructor with a message and a
+parameter name. -/
+private def argumentNameDependencies : List MetadataSlice := [{
+    assembly := facadeAssembly,
+    rows := [(587202561, (fixedBytes 20 0x0B00000000000000000000000100040000000000)),
+      (654311460, (fixedBytes 14 0x0000200000000000010003000500)),
+      (654311851, (fixedBytes 14 0x0000200000000000020003000500))],
+    strings := [(0, (fixedBytes 1 0x00)),
+      (1, (fixedBytes 18 0x417267756D656E74457863657074696F6E00)),
+      (2, (fixedBytes 7 0x4F626A65637400)),
+      (3, (fixedBytes 7 0x53797374656D00)),
+      (4, (fixedBytes 23 0x53797374656D2E507269766174652E436F72654C696200))],
+    blobs := [(1, (fixedBytes 9 0x087CEC85D7BEA7798E))],
+    userStrings := [],
+    corlib := 1,
+    links := [] }, {
+    assembly := CoreLib.assembly,
+    rows := [(33554594, (fixedBytes 18 0x0120100003000000040000000000FE021C07)),
+      (33554673, (fixedBytes 18 0x012010000200000004000000A407B603E00C)),
+      (33554674, (fixedBytes 18 0x01201000FFFFFFFF04000000C403B703EE0C)),
+      (33554921, (fixedBytes 18 0x01201000050000000400000040022F067826)),
+      (100666596, (fixedBytes 20 0x0000000000008618010000000100000010190000)),
+      (704643224, (fixedBytes 12 0x00002200D0010000FFFFFFFF)),
+      (704643225, (fixedBytes 12 0x00000000EE010000FFFFFFFF))],
+    strings := [(1, (fixedBytes 6 0x2E63746F7200)),
+      (2, (fixedBytes 18 0x417267756D656E74457863657074696F6E00)),
+      (3, (fixedBytes 7 0x4F626A65637400)),
+      (4, (fixedBytes 7 0x53797374656D00)),
+      (5, (fixedBytes 16 0x53797374656D457863657074696F6E00))],
+    blobs := [(1, (fixedBytes 6 0x052002010E0E))],
+    userStrings := [],
+    corlib := 0,
+    links := [⟨1, 100666596, 2, 33554673⟩] }]
 
 /-- Physical bodies reached by the constructor with a non-null message argument. -/
 def coreBytes : List (BodyEvidence × RawMethod) := [
@@ -317,18 +351,29 @@ private def loadString := 0x72
 /-- `ldnull`. -/
 private def loadNull := 0x14
 
-/-- Select the bound overload from the exception owner and arity. Binding then checks that the
-MemberRef resolves to the head method's MethodDef, so a different overload is rejected. -/
+/-- The bound overloads by exception owner and declared parameter types. -/
+private def boundOverloads : List (ExceptionType × List TypeExpr × BoundOverload) :=
+  let message := messageParameter
+  [(.argumentOutOfRange, [message, message],
+      ⟨rangeDependencies, coreBytes, some rangeResource, [loadString]⟩),
+    (.argumentOutOfRange, [message, actualParameter, message],
+      ⟨actualDependencies, ({ ActualValueCtor.body with names := ActualValueCtor.names },
+        ActualValueCtor.definition) :: coreBytes.tail, some rangeResource, [loadString]⟩),
+    (.argument, [message, message], ⟨argumentNameDependencies, coreBytes.tail, none, []⟩),
+    (.argument, [message, message, innerParameter],
+      ⟨argumentInnerDependencies, argumentInnerMethods, none, []⟩),
+    (.invalidOperation, [message, innerParameter],
+      ⟨invalidOperationInnerDependencies, invalidOperationInnerMethods,
+        some invalidOperationResource, [loadString, loadNull]⟩)]
+
+/-- Select the bound overload from the exception owner and its exact parameter types, as the
+extractor's selector does. Binding then checks that the MemberRef resolves to the head method's
+MethodDef. -/
 private def boundOverload? (constructor : CallSite) : Option BoundOverload := do
-  match ← exceptionConstructor? constructor, constructor.parameterCount with
-  | .argumentOutOfRange, 2 => some ⟨rangeDependencies, coreBytes, some rangeResource, [loadString]⟩
-  | .argumentOutOfRange, 3 =>
-    some ⟨actualDependencies, ({ ActualValueCtor.body with names := ActualValueCtor.names },
-      ActualValueCtor.definition) :: coreBytes.tail, some rangeResource, [loadString]⟩
-  | .argument, 3 => some ⟨argumentInnerDependencies, argumentInnerMethods, none, []⟩
-  | .invalidOperation, 2 => some ⟨invalidOperationInnerDependencies, invalidOperationInnerMethods,
-      some invalidOperationResource, [loadString, loadNull]⟩
-  | _, _ => none
+  let raised ← exceptionConstructor? constructor
+  let (_, _, image) ← boundOverloads.find? fun (owner, parameters, _) =>
+    owner == raised && parameters == constructor.parameterTypes
+  return image
 
 /-- Decode a single entry method and the framework methods reached with a non-null message.
 The caller must resolve its constructor through the two pinned runtime slices. -/
