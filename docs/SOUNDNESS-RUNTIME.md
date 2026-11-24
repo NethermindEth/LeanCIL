@@ -371,11 +371,11 @@ derived instance and a field of an unrelated class on none, and a null receiver 
 in the method's table) checks the constructor's arguments, then allocates a fresh live instance
 (`allocateObject`): an allocation of kind `.object` with the constructor's class and the link's
 bases as its runtime type, one zeroed 8-byte slot per instance field, inherited fields included,
-and authority over all of it. It charges the
-instance's size to `Memory.heapBudget`, the bytes the caller grants for objects, and fails with
-`allocationFailure` when the budget is short; that fault is a model resource fault and is not a
-CLR exception, so no proof of an expected exception can rest on it. The budget never grows back:
-it is a conservative bound that ignores collection. The constructor then runs with the
+and authority over all of it. Ordinary execution assumes global heap availability
+(`Memory.heapBudget = none`). A caller can set `some bytes` to bound cumulative allocation.
+Each instance consumes its modeled size. A request exceeding the remaining budget produces
+the model fault `allocationFailure`. The bound excludes collection and object headers.
+The constructor then runs with the
 instance as its receiver, and the instance is pushed once it returns. Lean rechecks
 (`validateConstructionWith`) that the raw instruction is `newobj` of a managed site naming exactly
 the instruction's constructor, that the linked method is the one the site names, that a class
@@ -521,9 +521,9 @@ An array of a class `E` is itself a class instance: `.newarr E` allocates, throu
 `allocateObject`, an allocation of kind `.object` whose runtime type is `E[]`
 (`referenceArrayType`) with no bases, one 8-byte slot per element and nothing else, so its
 length is its size over the slot width. Its elements are references held in
-`Memory.slots`, as class-typed fields are, and fresh elements are null. The array is charged
-to `Memory.heapBudget` like any instance, without the CoreCLR header and length word the model
-does not lay out, and a short budget is the model's `allocationFailure`. The length decodes as
+`Memory.slots`, as class-typed fields are, and fresh elements are null. With an explicit heap budget, the array consumes eight bytes per element.
+This accounting excludes the CoreCLR header and length word. A short budget produces
+`allocationFailure`. The length decodes as
 `newarr` decodes it for value arrays: a negative `int32` or native length throws
 `System.OverflowException`, and one above `0x7fffffc7` is unsupported.
 

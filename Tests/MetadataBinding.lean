@@ -955,10 +955,10 @@ theorem binds_generic_owner_without_link :
 /-- The carried class admits object storage. The carried interface refuses that same storage. -/
 theorem instantiates_owners_with_only_carried_classes_as_objects :
     (receiverIdentity "Object" false false false true
-      (argument := .named (.definition (bytesOf libScope) 0x02000002))
+      (argument := .named (.definition ⟨bytesOf "Lib", ⟨1, 0, 0, 0⟩, [], []⟩ 0x02000002))
       (claimed := .object libScope "Lib.Box")).isOk = true ∧
     (receiverIdentity "Object" false false false true
-      (argument := .named (.definition (bytesOf libScope) 0x02000005))
+      (argument := .named (.definition ⟨bytesOf "Lib", ⟨1, 0, 0, 0⟩, [], []⟩ 0x02000005))
       (claimed := .object libScope "Lib.IShape")).isOk = false := by
   decide +kernel
 #print axioms instantiates_owners_with_only_carried_classes_as_objects
@@ -966,7 +966,7 @@ theorem instantiates_owners_with_only_carried_classes_as_objects :
 /-- A closed owner argument names a platform enum with the storage its entry supplies. -/
 theorem binds_closed_enum_argument :
     (receiverIdentity "Object" false false false true
-      (argument := .named (.platform runtimeScopeBytes [systemNamespace, bytesOf "DayOfWeek"]))
+      (argument := .named (.platform runtimeColumns [systemNamespace, bytesOf "DayOfWeek"]))
       (claimed := .enum (Tests.enumIdentity "System.DayOfWeek" runtimeAssembly) int32)
       (platform := platform_table%
         [runtimeType "Object" .objectRoot, runtimeType "DayOfWeek" (.enumType 8)])).isOk =
@@ -1293,7 +1293,8 @@ private def int32Atom : TypeExpr := .atom "C" "System.Int32"
 /-- The tested enum declaration supplies its actual scope and both TypeDef name columns. -/
 private def enumRow (kind : Extraction.TypeKind) (pinned := false) : NamedType :=
   { scope := bytesOf "L, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
-    name := bytesOf "E", parts := [[], bytesOf "E"], kind, pinned }
+    name := bytesOf "E", parts := [[], bytesOf "E"], kind, pinned,
+    assembly := some ⟨bytesOf "L", ⟨1, 0, 0, 0⟩, [], []⟩ }
 
 /-- The physical type proposed for this enum row. -/
 private def enumE : TypeIdentity := Tests.enumIdentity "E" (Tests.enumAssembly name!"L")

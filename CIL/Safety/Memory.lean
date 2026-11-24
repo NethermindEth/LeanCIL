@@ -99,9 +99,9 @@ structure Memory where
   /-- Admitted dynamic-stack bytes per activation; deployment must justify this quota.
       Zero is the default, so existing memory grants no dynamic stack storage. -/
   stackLimit : Nat := 0
-  /-- Bytes still available for object allocations; deployment must justify it, and each
-      allocation consumes its size. Zero is the default, so existing memory grants none. -/
-  heapBudget : Nat := 0
+  /-- An explicit byte budget bounds cumulative object and reference-array allocation.
+      With no budget, execution assumes global heap availability. Local extent checks still apply. -/
+  heapBudget : Option Nat := none
   /-- The object reference each reference-typed field of a class instance holds, by allocation
       and field byte offset. No field's bytes encode a reference; zeroed storage holds null. -/
   slots : AllocationId → Nat → ManagedReference := fun _ _ => .null

@@ -154,19 +154,19 @@ def objectMemory (memory : Memory) (type : RuntimeType) (size : Nat) : Memory :=
       if identity = memory.nextIdentity then .null else memory.slots identity offset
     views := ⟨memory.nextIdentity, 0, size, true, true⟩ :: memory.views
     nextIdentity := memory.nextIdentity + 1
-    heapBudget := memory.heapBudget - size }
+    heapBudget := memory.heapBudget.map (· - size) }
 
 /-- A fresh instance of `type` with `size` zeroed bytes and authority over all of them, or
     `allocationFailure` when `size` exceeds the heap budget, which it otherwise consumes. No
     frame owns the instance, so it lives as long as some reference to it can be observed. -/
 def allocateObject (memory : Memory) (type : RuntimeType) (size : Nat) :
     ExecutionResult (Reference × Memory) := do
-  if size > memory.heapBudget then
-    .error (.allocationFailure size memory.heapBudget) else pure ()
+  if size > memory.heapBudget.getD size then
+    .error (.allocationFailure size (memory.heapBudget.getD size)) else pure ()
   let (identity, allocated) ← checkedAt .null size
     (allocate memory ⟨.object type, ⟨size, objectAlignment, []⟩, true, [size]⟩)
   return (⟨identity, 0⟩,
-    { arrayMemory allocated identity size with heapBudget := memory.heapBudget - size })
+    { arrayMemory allocated identity size with heapBudget := memory.heapBudget.map (· - size) })
 
 /-- The runtime type of an array of `element` references. System.Array and System.Object are
     left out of its bases, as System.Object is left out of a class's. -/

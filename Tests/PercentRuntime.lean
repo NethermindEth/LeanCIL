@@ -18,10 +18,10 @@ local elab "percent_rfl" : tactic => withMainContext do
   replaceMainGoal []
 
 /-- Installing or reusing a runtime literal leaves the method's allocation budget independent. -/
-def atBudget (budget : Nat) (m : Safety.Memory) : Safety.Memory := { m with heapBudget := budget }
+def atBudget (budget : Option Nat) (m : Safety.Memory) : Safety.Memory := { m with heapBudget := budget }
 
 /-- Changing the deployment quota preserves the object reached by a loaded string. -/
-private theorem loadWithBudget (budget : Nat) (text : String) (m : Safety.Memory) (ref : Reference)
+private theorem loadWithBudget (budget : Option Nat) (text : String) (m : Safety.Memory) (ref : Reference)
     (loaded : stringLiteralInstruction text [] m = .ok (m, [.object (.address ref)])) :
     literalObject (atBudget budget m) text = .ok (.object (.address ref)) := by
   change literalObject m text = _
@@ -67,14 +67,14 @@ private theorem checkedLiteralArgument (memory : Safety.Memory) (frame : Safety.
 
 /-- On the original exceptional branch, a short budget fails at the allocation. Every sufficient
 quota admits the constructor and reaches the typed throw. Both literal operands vary freely. -/
-theorem initializedPercentAtBudget (budget : Nat) (name message : String)
+theorem initializedPercentAtBudget (budget : Option Nat) (name message : String)
     (nameFits : (CIL.utf16Units name).length ≤ 0x7fffffff)
     (messageFits : (CIL.utf16Units message).length ≤ 0x7fffffff) :
     ∃ first final, intern Safety.Memory.empty name = .ok (⟨0,0⟩, first) ∧
       intern first message = .ok (⟨if name = message then 0 else 1,0⟩, final) ∧
       ∀ value : W32, invoke (program name message) 66 0 [.scalar (.i32 value)] (atBudget budget final) =
         if value ≤ 100 then .ok (atBudget budget final, [.scalar (.i32 value)])
-        else if budget < 128 then .error ⟨0, 5, .allocationFailure 128 budget⟩
+        else if budget.getD 128 < 128 then .error ⟨0, 5, .allocationFailure 128 (budget.getD 128)⟩
         else .error ⟨0, 6, .thrown .argumentOutOfRange⟩ := by
   obtain ⟨first, final, installed, repeated, _, nameLoad, messageLoad⟩ :=
     constructorLiterals name message nameFits messageFits
@@ -98,7 +98,7 @@ theorem initializedPercentAtBudget (budget : Nat) (name message : String)
     (load 3 [] name _ (loadWithBudget budget _ _ _ nameLoad))]
   rw [run_next (body := caller name message) (op := .ldstr message) rfl (by percent_rfl)
     (load 4 _ message _ (loadWithBudget budget _ _ _ messageLoad))]
-  by_cases short : budget < 128
+  by_cases short : budget.getD 128 < 128
   · rw [ite_eq_left short]
     have firstArg := checkedLiteralArgument _ activation name _ (loadWithBudget budget _ _ _ nameLoad)
     have secondArg := checkedLiteralArgument _ activation message _
@@ -116,12 +116,17 @@ theorem initializedPercentAtBudget (budget : Nat) (name message : String)
     rw [original]
     dsimp only [stack]
     have arity : Source.member.method.parameters.length = 2 := by cil_kernel_rfl
-    have insufficient : (atBudget budget final).heapBudget < 128 := short
+    have insufficient : (atBudget budget final).heapBudget.getD 128 < 128 := short
     simp [newobjStep, arity, constructObject, List.mapM_cons, List.mapM_nil, firstArg, secondArg,
       allocateObject, insufficient, bind, Except.bind, pure, Except.pure]
     rfl
   rw [ite_eq_right short]
-  obtain ⟨spare, rfl⟩ : ∃ spare, budget = spare + 128 := ⟨budget - 128, by omega⟩
+  have enough : budget = none ∨ ∃ spare, budget = some (spare + 128) := by
+    cases budget with
+    | none => exact Or.inl rfl
+    | some bytes =>
+      change ¬bytes < 128 at short
+      exact Or.inr ⟨bytes - 128, by congr 1; omega⟩
   have valid (text : String) (fits : (CIL.utf16Units text).length ≤ 0x7fffffff) :
       (storage (bytesOfString text)).valid = true := by
     apply validStorage
@@ -137,19 +142,19 @@ theorem initializedPercentAtBudget (budget : Nat) (name message : String)
     simp [intern, LiteralImage.loaded, pure, Except.pure] at repeated
     subst final
     simp only [ite_true, args, activation]
-    percent_rfl
+    rcases enough with rfl | ⟨spare, rfl⟩ <;> percent_rfl
   · have reverse : (message == name) = false := by simpa using Ne.symm same
     simp [-List.length_flatMap, intern, LiteralImage.loaded, List.lookup, reverse,
       Nat.not_lt.mpr messageFits, allocate, valid message messageFits,
       same, bind, Except.bind, pure, Except.pure] at repeated
     subst final
     simp only [same, ite_false, args, activation]
-    percent_rfl
+    rcases enough with rfl | ⟨spare, rfl⟩ <;> percent_rfl
 #print axioms initializedPercentAtBudget
 
 
 /-- Startup state with exactly the checked exception instance size available. -/
-def funded (m : Safety.Memory) := atBudget 128 m
+def funded (m : Safety.Memory) := atBudget (some 128) m
 
 /-- A quota of 128 bytes admits the real allocation for any representable pair of strings. -/
 theorem initializedPercent (name message : String)
@@ -160,7 +165,7 @@ theorem initializedPercent (name message : String)
       ∀ value : W32, invoke (program name message) 66 0 [.scalar (.i32 value)] (funded final) =
         if value ≤ 100 then .ok (funded final, [.scalar (.i32 value)])
         else .error ⟨0,6,.thrown .argumentOutOfRange⟩ :=
-  initializedPercentAtBudget 128 name message nameFits messageFits
+  initializedPercentAtBudget (some 128) name message nameFits messageFits
 #print axioms initializedPercent
 
 /-- Reading the two original operands reconstructs the decoded instruction sequence exactly. -/
@@ -171,13 +176,13 @@ private theorem compiledProgram_eq :
 
 /-- Every UInt32 input to the original method returns its value or reaches the source throw.
     Only the loader reads the actual literal texts. The contract observes the exception type. -/
-private theorem compiledAtBudget (budget : Nat) :
+private theorem compiledAtBudget (budget : Option Nat) :
     ∃ name message first final, physicalLiterals = some (name, message) ∧
       intern Safety.Memory.empty name = .ok (⟨0,0⟩, first) ∧
       intern first message = .ok (⟨if name = message then 0 else 1,0⟩, final) ∧
       ∀ value : W32, invoke compiledProgram 66 0 [.scalar (.i32 value)] (atBudget budget final) =
         if value ≤ 100 then .ok (atBudget budget final, [.scalar (.i32 value)])
-        else if budget < 128 then .error ⟨0, 5, .allocationFailure 128 budget⟩
+        else if budget.getD 128 < 128 then .error ⟨0, 5, .allocationFailure 128 (budget.getD 128)⟩
         else .error ⟨0, 6, .thrown .argumentOutOfRange⟩ := by
   let texts := physicalLiterals.getD ("","")
   have bound : physicalLiterals = some texts := by dsimp only [texts]; cil_kernel_rfl
@@ -199,7 +204,7 @@ theorem compiledPercent :
       intern first message = .ok (⟨if name = message then 0 else 1,0⟩, final) ∧
       ∀ value : W32, invoke compiledProgram 66 0 [.scalar (.i32 value)] (funded final) =
         if value ≤ 100 then .ok (funded final, [.scalar (.i32 value)])
-        else .error ⟨0,6,.thrown .argumentOutOfRange⟩ := compiledAtBudget 128
+        else .error ⟨0,6,.thrown .argumentOutOfRange⟩ := compiledAtBudget (some 128)
 #print axioms compiledPercent
 
 /-- Execute the ordinary decoded program on arbitrary UInt32 input after runtime initialization.

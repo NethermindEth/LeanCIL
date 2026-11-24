@@ -168,7 +168,7 @@ theorem Memory.Equivalent.allocateArray {m n : Memory} (same : m.Equivalent n)
 
 /-- Equivalent memories stay equivalent when both are given the same heap budget. -/
 theorem Memory.Equivalent.withHeapBudget {m n : Memory} (same : m.Equivalent n)
-    (budget : Nat) :
+    (budget : Option Nat) :
     Memory.Equivalent { m with heapBudget := budget } { n with heapBudget := budget } :=
   ⟨same.allocations, same.cells, same.permissions, same.nextIdentity, same.staticBindings,
     same.stackLimit, rfl, same.slots, same.literals⟩

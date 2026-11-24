@@ -206,7 +206,7 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
     (capacity : ItemPool._capacity.Readable memory pool)
     (room : ItemPool._live.of memory pool ≠ ItemPool._capacity.of memory pool)
     (nextId : ItemPool._nextId.Owned memory pool)
-    (budget : itemSize ≤ memory.heapBudget) :
+    (budget : itemSize ≤ memory.heapBudget.getD itemSize) :
     ∃ fuel final item, invoke Extracted.program fuel rent [.object (.address pool)] memory =
         .ok (final, [.object (.address item)]) ∧
       memory.nextIdentity ≤ item.allocation ∧
@@ -250,7 +250,7 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
   have numberedFormed : numbered.WellFormed :=
     write_preserves_wellFormed _ _ _ _ _
       (write_preserves_wellFormed _ _ _ _ _ enter.entryMemory.wellFormed idWritten) nextWritten
-  have numberedBudget : itemSize ≤ numbered.heapBudget := by
+  have numberedBudget : itemSize ≤ numbered.heapBudget.getD itemSize := by
     rw [write_heapBudget nextWritten, write_heapBudget idWritten, enterFrame_heapBudget enter.setup]
     exact budget
   -- `newobj` creates the item above everything the caller and the frame hold.

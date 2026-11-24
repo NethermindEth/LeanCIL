@@ -47,6 +47,8 @@ structure NamedType where
   kind : TypeKind
   pinned : Bool
   platformArity : Nat := 0
+  /-- Identity columns of the defining Assembly or the external AssemblyRef. -/
+  assembly : Option AssemblyColumns := none
   deriving DecidableEq, Repr
 
 mutual
@@ -313,7 +315,7 @@ theorem MetadataEnv.referencePosition_columns {env : MetadataEnv} {columns : Ass
 /-- The scope, full name and name parts a `TypeRef` spells: its assembly, or the outermost
     enclosing type's. -/
 def typeRefQualified (env : MetadataEnv) (position : Nat) :
-    Nat → Nat → Except MetadataError (List Nat × List Nat × List (List Nat))
+    Nat → Nat → Except MetadataError (AssemblyColumns × List Nat × List (List Nat))
   | 0, token => .error (.unresolvedType token)
   | fuel + 1, token => do
     let index ← env.slice position token
@@ -325,8 +327,10 @@ def typeRefQualified (env : MetadataEnv) (position : Nat) :
     | 0x23 => do
       let columns ← index.referenceColumns row.scope
       let _ ← env.referencePosition columns token
-      return (columns.spelling, name, [namespace_, simple])
-    | 0x00 => .ok (index.identity, name, [namespace_, simple])
+      return (columns, name, [namespace_, simple])
+    | 0x00 => do
+      let some assembly := index.assembly | throw (.missingSlice token)
+      return (assembly, name, [namespace_, simple])
     | 0x01 =>
       let (scope, enclosing, parts) ← typeRefQualified env position fuel row.scope
       .ok (scope, nestedName enclosing simple, parts ++ [namespace_, simple])
@@ -578,7 +582,8 @@ private def modifierDefinition (env : MetadataEnv) (position : Nat) :
         if nested.nested != token then throw (.unresolvedType token)
         let enclosing ← modifierDefinition env position fuel nested.enclosing
         pure (nestedName enclosing.name simple, enclosing.parts ++ [namespace_, simple])
-    .ok { scope := index.identity, name, parts, kind := .external none, pinned := false }
+    .ok { scope := index.identity, name, parts, kind := .external none, pinned := false,
+          assembly := index.assembly }
 
 /-- The storage kind of a resolved platform type, including an enum's integer element code. -/
 def PlatformKind.resolvedKind : PlatformKind → TypeKind
@@ -588,24 +593,26 @@ def PlatformKind.resolvedKind : PlatformKind → TypeKind
 /-- The named type of a reference to a type no carried slice defines: a scope of a pinned name
     is refused, and the type's platform definition must agree with the value-or-class hint and
     gives its kind. -/
-def MetadataEnv.externalNamed (env : MetadataEnv) (token : Nat) (scope name : List Nat)
-    (parts : List (List Nat)) (hint : Option Bool) : Except MetadataError NamedType :=
+def MetadataEnv.externalNamed (env : MetadataEnv) (token : Nat) (assembly : AssemblyColumns)
+    (name : List Nat) (parts : List (List Nat)) (hint : Option Bool) : Except MetadataError NamedType :=
+  let scope := assembly.spelling
   if env.pinned.matches scope then .error (.missingSlice token)
   else match env.platform.require token scope parts (PlatformKind.fitsHint hint) with
     | .error error => .error error
     | .ok kind =>
       .ok { scope, name, parts, kind := kind.resolvedKind, pinned := false,
-            platformArity := kind.arity }
+            platformArity := kind.arity, assembly := some assembly }
 
 /-- An external type has a platform definition of its scope and name parts that agrees with the
     hint it was read with and determines its storage kind. -/
-theorem MetadataEnv.externalNamed_ok {env : MetadataEnv} {token : Nat} {scope name : List Nat}
+theorem MetadataEnv.externalNamed_ok {env : MetadataEnv} {token : Nat} {scope : AssemblyColumns}
+    {name : List Nat}
     {parts : List (List Nat)} {hint : Option Bool} {named : NamedType}
     (resolved : env.externalNamed token scope name parts hint = .ok named) :
     ∃ kind, { scope := named.scope, parts := named.parts, kind } ∈ env.platform.definitions ∧
       kind.fitsHint hint = true /\ named.kind = kind.resolvedKind /\
       named.platformArity = kind.arity /\ named.pinned = false := by
-  unfold MetadataEnv.externalNamed at resolved
+  simp only [MetadataEnv.externalNamed] at resolved
   split at resolved
   · cases resolved
   · split at resolved
@@ -627,18 +634,20 @@ private def modifierFullName : List (List Nat) → List Nat
 /-- A custom modifier names its assembly and enclosing types without requiring the definition
     of an externally referenced modifier or the base type of a local one. -/
 def modifierNamed (env : MetadataEnv) (position token : Nat) : Except MetadataError NamedType := do
-  let (scope, _, parts) ← match metadataTableOf token with
+  let (assembly, _, parts) ← match metadataTableOf token with
     | 0x01 => typeRefQualified env position resolveFuel token
     | 0x02 => do
       let named ← modifierDefinition env position resolveFuel token
-      pure (named.scope, named.name, named.parts)
+      let some columns := named.assembly | throw (.missingSlice token)
+      pure (columns, named.name, named.parts)
     | _ => throw (.unsupportedTable token)
-  pure { scope, name := modifierFullName parts, parts, kind := .external none, pinned := false }
+  pure { scope := assembly.spelling, name := modifierFullName parts, parts,
+         kind := .external none, pinned := false, assembly := some assembly }
 
 /-- A named type in a closed argument comes from a definition row or a scoped platform entry. -/
 inductive ArgumentHead where
-  | definition (scope : List Nat) (token : Nat)
-  | platform (scope : List Nat) (parts : List (List Nat))
+  | definition (scope : AssemblyColumns) (token : Nat)
+  | platform (scope : AssemblyColumns) (parts : List (List Nat))
   deriving DecidableEq, Repr
 
 mutual
@@ -736,16 +745,16 @@ def resolveList (env : MetadataEnv) (position : Nat)
 end
 
 /-- The definition of a resolved reference, or its external scope, spelling and name parts. -/
-abbrev ReferenceTarget := Sum NamedType (Prod (List Nat) (Prod (List Nat) (List (List Nat))))
+abbrev ReferenceTarget := Sum NamedType (AssemblyColumns × List Nat × List (List Nat))
 
 /-- A reference links to its scoped definition or identifies an external name. -/
 private def referenceTarget (env : MetadataEnv) (position token : Nat)
     (resolve : Nat -> Nat -> Except MetadataError NamedType) :
     Except MetadataError ReferenceTarget := do
   let (scope, name, parts) <- typeRefQualified env position resolveFuel token
-  match env.identities[scope]? with
+  match env.identities[scope.spelling]? with
   | none => return .inr (scope, name, parts)
-  | some target => .inl <$> linkedType env position token target scope parts resolve
+  | some target => .inl <$> linkedType env position token target scope.spelling parts resolve
 
 /-- A signature head resolves through its definition or its scoped platform entry. -/
 private def signatureHead (env : MetadataEnv) (position : Nat)
@@ -759,9 +768,10 @@ private def signatureHead (env : MetadataEnv) (position : Nat)
       | .inr (scope, name, parts) =>
         match env.externalNamed token scope name parts hint with
         | .error (.missingPlatformDefinition missing) =>
-          let published := containsName env.publishedLayouts (scope ++ [58, 58] ++ name)
+          let published := containsName env.publishedLayouts (scope.spelling ++ [58, 58] ++ name)
           if hint != some false && published then
-            pure { scope, name, parts, kind := .valueType, pinned := false }
+            pure { scope := scope.spelling, name, parts, kind := .valueType, pinned := false,
+                   assembly := some scope }
           else throw (.missingPlatformDefinition missing)
         | result => result
     | _ => throw (.unsupportedTable token)
@@ -835,7 +845,8 @@ def typeDefKind (env : MetadataEnv) (index : MetadataIndex) (position token : Na
         carriedRootKind index token index.identity
           (<- definitionParts index position resolveFuel row.extends_ base)
     | 0x01 => do
-      let (scope, _, parts) <- typeRefQualified env position resolveFuel row.extends_
+      let (assembly, _, parts) <- typeRefQualified env position resolveFuel row.extends_
+      let scope := assembly.spelling
       match env.identities[scope]? with
       | none => do
         let core <- index.coreLibraryReference row.extends_
@@ -860,7 +871,7 @@ def typeDefNamed (env : MetadataEnv) (position fuel token : Nat) :
   let parts <- definitionParts index position fuel token row
   let some name := partsName parts | throw (.unresolvedType token)
   let kind <- typeDefKind env index position token row parts
-  return { scope := index.identity, name, parts, kind, pinned := true }
+  return { scope := index.identity, name, parts, kind, pinned := true, assembly := index.assembly }
 
 /-- Once the enclosing names resolve, any larger nesting budget recovers the same definition. -/
 theorem typeDefNamed_of_le {env : MetadataEnv} {position fuel budget token : Nat} {named : NamedType}
@@ -910,13 +921,13 @@ def namedOf (env : MetadataEnv) (position token : Nat) (hint : Option Bool) :
 def ArgumentHead.resolve (env : MetadataEnv) (method arity : Nat) :
     ArgumentHead → Except MetadataError NamedType
   | .definition scope token => do
-    if !env.exactPins.contains scope then throw (.missingSlice token)
-    let some position := env.identities[scope]? | throw (.missingSlice token)
+    if !env.exactPins.contains scope.spelling then throw (.missingSlice token)
+    let some position ← env.referencePosition scope token | throw (.missingSlice token)
     let named ← typeDefNamed env position resolveFuel token
     env.requireArity position token named arity
     return named
   | .platform scope parts => do
-    if env.identities.contains scope then throw (.unresolvedType method)
+    if env.identities.contains scope.spelling then throw (.unresolvedType method)
     let some name := partsName parts | throw (.unresolvedType method)
     let named <- env.externalNamed method scope name parts none
     if named.platformArity != arity then throw (.genericMismatch method)
@@ -1417,7 +1428,7 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
       bytesOf identity == named.scope ++ [58, 58] ++ named.name && valueLike named.kind &&
         !named.fixedStorage && frame.layoutMatches index identity named none
     | .named named, .enum identity underlying =>
-      ((assemblyScope? identity.assembly).map bytesOf == some named.scope &&
+      (named.assembly.any (·.matches identity.assembly) &&
         declarationMatches identity.levels named.parts) &&
         match named.kind with
         | .enumType code =>
@@ -1519,8 +1530,21 @@ def Frame.admitsHeld (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : B
           (named.name == systemStringName || named.name == systemObjectName)))
     | _, _ => false
 
+/-- Every admitted enum parameter has the assembly columns of its resolved definition or reference. -/
+theorem typeAdmits_enum_assembly {frame : Frame} {fuel : Nat} {named : NamedType}
+    {identity : TypeIdentity} {underlying : TypeExpr}
+    (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity underlying) = true) :
+    ∃ columns, named.assembly = some columns ∧ columns.matches identity.assembly = true := by
+  cases row : named.assembly with
+  | none => simp [typeAdmits, row] at admitted
+  | some columns =>
+    simp only [typeAdmits, row, Option.any, Bool.and_eq_true] at admitted
+    exact ⟨columns, rfl, admitted.1.1⟩
+#print axioms typeAdmits_enum_assembly
+
 /-- An admitted platform enum has the name and integer storage of its scoped definition. -/
-theorem typeAdmits_external_enum {env : MetadataEnv} {token : Nat} {scope name : List Nat}
+theorem typeAdmits_external_enum {env : MetadataEnv} {token : Nat} {scope : AssemblyColumns}
+    {name : List Nat}
     {parts : List (List Nat)} {hint : Option Bool} {frame : Frame} {fuel : Nat}
     {named : NamedType} {identity : TypeIdentity} {underlying : TypeExpr}
     (resolved : env.externalNamed token scope name parts hint = .ok named)

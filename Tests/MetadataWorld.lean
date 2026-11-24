@@ -212,6 +212,10 @@ def int32 : TypeExpr := .atom runtimeScope "System.Int32"
 def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
 def uint64 : TypeExpr := .atom runtimeScope "System.UInt64"
 
+/-- The platform AssemblyRef columns used by the fixture signatures. -/
+def runtimeColumns : AssemblyColumns :=
+  ⟨bytesOf "System.Runtime", ⟨11, 0, 0, 0⟩, [], bytesOf "b03f5f7f11d50a3a"⟩
+
 def libScope : String := "Lib, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 
 /-- `System.Console.WriteLine(int)`: an external static call. -/

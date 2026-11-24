@@ -86,7 +86,7 @@ theorem Memory.Renamed.allocateArray {mapping : AllocationRenaming} {scopes : Na
 /-- Renamed memories stay renamed when both are given the same heap budget. -/
 theorem Memory.Renamed.withHeapBudget {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
-    (related : Memory.Renamed mapping scopes source target) (budget : Nat) :
+    (related : Memory.Renamed mapping scopes source target) (budget : Option Nat) :
     Memory.Renamed mapping scopes { source with heapBudget := budget }
       { target with heapBudget := budget } :=
   ⟨related.sourceLimit, related.targetLimit, related.allocations, related.cells,
@@ -134,7 +134,7 @@ theorem Memory.Renamed.allocateObject {mapping : AllocationRenaming}
       have image : mapping.allocate.image source.nextIdentity = target.nextIdentity := by
         rw [← related.sourceLimit, mapping.allocate_fresh, related.targetLimit]
       refine ⟨{ CIL.Safety.arrayMemory targetMade target.nextIdentity size with
-        heapBudget := source.heapBudget - size }, ?_, ?_⟩
+        heapBudget := source.heapBudget.map (· - size) }, ?_, ?_⟩
       · simp [CIL.Safety.allocateObject, related.heapBudget, affordable, targetAllocated,
           checkedAt, AllocationRenaming.reference, image, Except.mapError,
           Bind.bind, Except.bind, Pure.pure, Except.pure]

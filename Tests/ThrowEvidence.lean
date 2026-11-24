@@ -307,7 +307,7 @@ private theorem argument_of_literal {text : String} {memory : Safety.Memory}
 /-- Once both literal arguments load, a linked class constructor still needs space for its
     instance. With zero modeled heap budget the original newobj fails before the constructor. -/
 theorem literal_constructor_allocation (name message : String) (nameRef messageRef : Reference)
-    (memory : Safety.Memory) (budget : memory.heapBudget = 0) (method : MethodRef)
+    (memory : Safety.Memory) (budget : memory.heapBudget = some 0) (method : MethodRef)
     (arguments : method.parameters.length = 2) (constructor : Nat) (bases : List TypeExpr)
     (size : Nat) (positive : 0 < size) (body : Method) (pc : Nat) (frame : Safety.Frame)
     (nameLoaded : stringLiteralInstruction name [] memory =
@@ -335,7 +335,7 @@ theorem literal_constructor_throw (program : CIL.Program) (entry pc callee fuel 
     (linked : body.linkAt (pc + 2) = some (.object callee bases size))
     (throws : body.code[pc + 3]? = some .throw) (arity : method.parameters.length = 2)
     (owner : runtimeException? method.owner = some raised)
-    (formed : memory.WellFormed) (affordable : size ≤ memory.heapBudget)
+    (formed : memory.WellFormed) (affordable : size ≤ memory.heapBudget.getD size)
     (bounded : size < nativeLimit)
     (nameLoaded : literalObject memory name = .ok (.object (.address nameRef)))
     (messageLoaded : literalObject memory message = .ok (.object (.address messageRef)))

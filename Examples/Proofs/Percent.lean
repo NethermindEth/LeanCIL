@@ -36,14 +36,14 @@ image. Every input above 100 then raises the contract's exception, with zero cal
 theorem loadedException :
     let methods := Extracted.methodEvidence.map (·.original)
     ∃ initial name message first second,
-      LiteralImage.initialMemory methods 0 = .ok initial ∧
-      LiteralImage.operands methods = [name, message] ∧ initial.heapBudget = 0 ∧
+      LiteralImage.initialMemory methods (some 0) = .ok initial ∧
+      LiteralImage.operands methods = [name, message] ∧ initial.heapBudget = some 0 ∧
       literalObject initial name = .ok (.object (.address first)) ∧
       literalObject initial message = .ok (.object (.address second)) ∧
       ∀ value : W32, 100 < value →
         RaisesCLR Extracted.program 0 [.scalar (.i32 value)] initial .argumentOutOfRange := by
   let methods := Extracted.methodEvidence.map (·.original)
-  let initial := (LiteralImage.initialMemory methods 0).toOption.getD Memory.empty
+  let initial := (LiteralImage.initialMemory methods (some 0)).toOption.getD Memory.empty
   let operands := LiteralImage.operands methods
   let name := operands[0]?.getD ""
   let message := operands[1]?.getD ""

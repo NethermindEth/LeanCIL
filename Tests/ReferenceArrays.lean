@@ -13,7 +13,7 @@ open CIL CIL.Safety
 private def node : CIL.Extraction.TypeExpr := .object "Examples" "Examples.Node"
 
 /-- Caller memory granting 32 bytes of object budget and no other storage. -/
-private def budgeted : CIL.Safety.Memory := { Memory.empty with heapBudget := 32 }
+private def budgeted : CIL.Safety.Memory := { Memory.empty with heapBudget := some 32 }
 
 private def creator : CIL.Method :=
   { returnsValue := true, locals := [],
@@ -24,7 +24,7 @@ theorem allocation_charges_budget :
     (newReferenceArray budgeted node (.i32 3)).map (fun result =>
       (result.1, result.2.heapBudget, result.2.allocations 0 |>.map (·.kind),
         result.2.slots 0 16)) =
-      .ok (⟨0, 0⟩, 8, some (.object (referenceArrayType node)), .null) := rfl
+      .ok (⟨0, 0⟩, some 8, some (.object (referenceArrayType node)), .null) := rfl
 #print axioms allocation_charges_budget
 
 /-- The array is returned as an object reference. -/
@@ -40,10 +40,33 @@ theorem allocation_faults :
       .error (.unsupported "Array length outside supported extent") := ⟨rfl, rfl, rfl⟩
 #print axioms allocation_faults
 
+/-- The first array stays on the evaluation stack while the second is allocated. -/
+private def twoArrays : CIL.Method :=
+  { returnsValue := true, locals := [], code := [
+      .ldc_i4 3, .newarr node, .ldc_i4 3, .newarr node, .pop, .ret] }
+
+/-- Both arrays require 48 bytes together. A 32-byte budget leaves eight bytes when the
+second `newarr` requests 24. Ordinary execution returns the first array. -/
+theorem cumulative_array_budget :
+    (invoke [twoArrays] 16 0 [] Memory.empty).map Prod.snd =
+      .ok [.object (.address ⟨0, 0⟩)] ∧
+    invoke [twoArrays] 16 0 [] budgeted = .error ⟨0, 3, .allocationFailure 24 8⟩ ∧
+    (invoke [twoArrays] 16 0 [] { Memory.empty with heapBudget := some 48 }).map
+      (fun (memory, values) => (memory.heapBudget, values)) =
+      .ok (some 0, [.object (.address ⟨0, 0⟩)]) := ⟨rfl, rfl, rfl⟩
+#print axioms cumulative_array_budget
+
+/-- Array extents are checked in ordinary execution even when global memory is available. -/
+theorem ordinary_extent_checks :
+    newReferenceArray Memory.empty node (.i32 (-1)) = .error (.thrown .overflow) ∧
+    newReferenceArray Memory.empty node (.i64 0x80000000) =
+      .error (.unsupported "Array length outside supported extent") := ⟨rfl, rfl⟩
+#print axioms ordinary_extent_checks
+
 /-- An empty array costs nothing and still has its own identity. -/
 theorem empty_allocation :
     (newReferenceArray budgeted node (.i32 0)).map (fun result =>
-      (result.1, result.2.heapBudget)) = .ok (⟨0, 0⟩, 32) := rfl
+      (result.1, result.2.heapBudget)) = .ok (⟨0, 0⟩, some 32) := rfl
 #print axioms empty_allocation
 
 private def shape : CIL.Extraction.TypeExpr := .object "Examples" "Examples.Shape"
@@ -169,7 +192,7 @@ theorem root_object_refused :
     `newReferenceArray`, so its budget fact discharges the allocation and the fresh array
     forms where it is returned. -/
 theorem stepped_allocation (memory : CIL.Safety.Memory) (formed : memory.WellFormed)
-    (budget : objectFieldSlot * 2 ≤ memory.heapBudget) :
+    (budget : objectFieldSlot * 2 ≤ memory.heapBudget.getD (objectFieldSlot * 2)) :
     ∃ fuel, invoke [allocating] fuel 0 [] memory =
       .ok (objectMemory memory (referenceArrayType node) (objectFieldSlot * 2),
         [.object (.address ⟨memory.nextIdentity, 0⟩)]) := by

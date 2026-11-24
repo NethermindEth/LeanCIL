@@ -847,7 +847,7 @@ equation for its `ldstr` site. The same proof then applies when the assembly cha
 [GuardIndex](../Examples/Proofs/GuardIndex.lean)).
 
 A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
-well-formed memory and a `Memory.heapBudget` covering the instance, or with
+well-formed memory and either ordinary heap availability or an explicit budget covering the instance. Use
 `allocateObject_insufficient` for the `allocationFailure` fault when the budget does not cover
 it. `objectMemory_formObject`, `objectMemory_field` and `objectMemory_access` give the fresh
 instance's formation, field addresses and access, and `allocateObject_effect` its `MemoryBelow`
@@ -894,7 +894,7 @@ predicates in the `ReferenceArray` namespace:
 
 | Example | Shows |
 | --- | --- |
-| [NodePair](../Examples/Proofs/NodePair.lean) | Fills a fresh array and reads it back, with its `allocationFailure` without budget |
+| [NodePair](../Examples/Proofs/NodePair.lean) | Fills a fresh array and reads it back, and reports `allocationFailure` when its explicit budget is too small |
 | [ArrayElement](../Examples/Proofs/ArrayElement.lean), [ArrayLength](../Examples/Proofs/ArrayLength.lean) | Read an element and the length, with the bounds and null faults |
 | [ArrayCovariance](../Examples/Proofs/ArrayCovariance.lean) | Stores into a `Circle[]` passed as a `Shape[]`, proving the `ArrayTypeMismatchException` of a `Square` |
 | [BucketItems](../Examples/Proofs/BucketItems.lean) | Reads an element through a field holding such an array, with its null and bounds faults. The field is a `ReferenceField` whose held reference is the array |

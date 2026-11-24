@@ -251,6 +251,8 @@ What `MetadataResolution` and `MetadataBinding` check:
   token from its AssemblyRef with the individual fields of the defining Assembly row. It makes
   the same comparison at the destination of an ExportedType forwarder. An empty culture and the
   literal bytes of `neutral` both print as `Culture=neutral` and select different identities.
+  Enum operands match the four assembly fields of their resolved TypeDef or external TypeRef.
+  Closed generic arguments carry the individual fields of the definition or reference scope.
   Nested types print as `Outer/Inner`. Each declaring row retains its namespace and simple name,
   so namespace `A.B` with name `C` differs from namespace `A` with name `B.C`. A type defined
   in a carried slice has the value type, enum (with its integer type), class or interface kind its
@@ -503,12 +505,13 @@ preserves both the recognized type and the number of argument instructions consu
 translated assembly still binds its own literal operands and requires verification against its
 own image digest. For two raw `ldstr` instructions followed by a linked `newobj` and `throw`,
 Lean proves the same type outcome when both literals load in well-formed memory, the instance
-size is representable and fits the heap budget, and the constructor returns normally. The fresh
+size is representable and fits any explicit heap budget, and the constructor returns normally. The fresh
 object retains its runtime type across the call. With a zero budget, a positive-sized allocation
 fails even when both literals load.
 
 A proof can construct entry memory with `CIL.Safety.LiteralImage.initialMemory`, passing the
-original methods in its extraction evidence and an explicit heap quota. The loader reads the
+original methods in its extraction evidence. Ordinary entry assumes global heap availability.
+Pass `some heapBytes` to analyze a finite quota. The loader reads the
 original `ldstr` operands, interns repeated text once and grants read-only access to each string.
 The supplied quota remains available for allocations during execution. For both compiled locales
 of `Throws.Percent`, the verifier checks that both original operands load even with zero heap quota.
@@ -517,10 +520,13 @@ The ordinary packaged exception proof uses the recognized constructor fold.
 For the pinned .NET 11 Windows x64 body of `Throws.Percent(uint)`, Lean checks the original
 caller and the CoreLib constructor methods reached on the throwing path. Starting from empty
 memory, the loader interns both strings. Inputs through 100 return with the initial memory for
-every heap quota. For each larger input, a quota below 128 bytes reports the modeled allocation
-failure at `newobj`. A quota of 128 bytes or more reaches the original `throw` and raises
-`ArgumentOutOfRangeException`. The proof
-works for arbitrary representable literal texts, including equal texts. Inputs through 100 also
+ordinary execution and every finite heap quota. For each larger input, ordinary execution
+throws `ArgumentOutOfRangeException`. A finite quota below 128 bytes reports the modeled
+allocation failure at `newobj`. At image entry, the decoded method satisfies `RaisesCLR` for
+`ArgumentOutOfRangeException` on an input above 100 exactly when the quota is at least 128
+bytes. Allocation failure settles the modeled run at every sufficient fuel. The quota measures
+modeled allocation capacity. The proof works for arbitrary representable literal texts, including
+equal texts. Inputs through 100 also
 return with every caller memory untouched, before any runtime preparation. The ordinary entry from
 unprepared empty memory still relies on the recognized constructor fold for its exception guarantee.
 

@@ -182,13 +182,14 @@ set_option maxRecDepth 8192
 namespace ExampleProof
 open CIL.Safety
 
-/-- With heap budget `Return` yields an object reference; without, its 8-byte instance faults. -/
+/-- Normal execution allocates the object. An explicit zero-byte budget rejects its allocation. -/
 theorem correctness :
     (match invoke Extracted.program 128 0 [.scalar (.i64 5)]
-        { Memory.empty with heapBudget := 64 } with
+        Memory.empty with
       | .ok (_, [.object (.address _)]) => true
       | _ => false) = true ∧
-    (match invoke Extracted.program 128 0 [.scalar (.i64 5)] Memory.empty with
+    (match invoke Extracted.program 128 0 [.scalar (.i64 5)]
+        { Memory.empty with heapBudget := some 0 } with
       | .error failure => failure.fault = .allocationFailure 8 0
       | .ok _ => False) := ⟨rfl, rfl⟩
 
@@ -196,7 +197,7 @@ end ExampleProof
 """);
 verification.Verify(classDll, "Examples", "Constructors::Return(ulong)", classProof,
     Path.Combine(classOutput, "Verified"));
-Console.WriteLine("PASS class: newobj allocates a heap instance and faults without heap budget");
+Console.WriteLine("PASS class: newobj allocates a heap instance and faults at an explicit zero-byte budget");
 
 Console.WriteLine($"PASS {cases} constructor comparisons, universal value proof, class allocation and " +
     "five malformed constructor rejections");

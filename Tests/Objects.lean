@@ -135,12 +135,12 @@ theorem buffer_has_no_fields :
 #print axioms buffer_has_no_fields
 
 /-- Caller memory granting 16 bytes of object budget and no other storage. -/
-private def budgeted : CIL.Safety.Memory := { memory with heapBudget := 16 }
+private def budgeted : CIL.Safety.Memory := { memory with heapBudget := some 16 }
 
 /-- An allocation within budget takes the next identity and consumes its size. -/
 theorem allocation_charges_budget :
     (allocateObject budgeted account 8).map (fun result => (result.1, result.2.heapBudget,
-      result.2.nextIdentity)) = .ok (⟨3, 0⟩, 8, 4) := rfl
+      result.2.nextIdentity)) = .ok (⟨3, 0⟩, some 8, 4) := rfl
 #print axioms allocation_charges_budget
 
 /-- An allocation over budget fails with the model resource fault, not a CLR exception. -/
@@ -165,7 +165,7 @@ theorem construction_returns_instance :
 
 /-- Without budget the construction stops at `newobj`, before the constructor runs. -/
 theorem construction_over_budget :
-    invoke [creator, constructor] 8 0 [] memory = .error ⟨0, 0, .allocationFailure 8 0⟩ := rfl
+    invoke [creator, constructor] 8 0 [] { memory with heapBudget := some 0 } = .error ⟨0, 0, .allocationFailure 8 0⟩ := rfl
 #print axioms construction_over_budget
 
 private def node : RuntimeType := ⟨.object "Examples" "Examples.Node", []⟩

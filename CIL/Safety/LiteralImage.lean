@@ -3,7 +3,7 @@ import CIL.Safety.InstructionMemory
 import CIL.Safety.HeapObjects
 
 /-! Entry memory for decoded programs on the modeled 64-bit profile. Literal objects belong to
-    the loaded image. The deployment supplies the quota for allocations made during execution. -/
+    the loaded image. A deployment can bound allocations made during execution. -/
 namespace CIL.Safety.LiteralImage
 open CIL.Extraction CIL.Safety
 
@@ -79,14 +79,14 @@ def operands (methods : List RawMethod) : List String :=
     | _, _ => none
 
 /-- Load the program's literals before entry. A repeated operand keeps its object identity.
-The explicit heap quota is available to executed allocations after the image has loaded. -/
-def initialMemory (methods : List RawMethod) (heapBytes : Nat) : Checked Memory := do
+Ordinary execution assumes global heap availability. An explicit budget applies after loading. -/
+def initialMemory (methods : List RawMethod) (heapBytes : Option Nat := none) : Checked Memory := do
   let memory ← (operands methods).foldlM
     (fun memory text => Prod.snd <$> intern memory text) Memory.empty
   return { memory with heapBudget := heapBytes }
 
 /-- Code without literal operands enters with no loader allocations. -/
-theorem withoutLiterals (methods : List RawMethod) (heapBytes : Nat) (none : operands methods = []) :
+theorem withoutLiterals (methods : List RawMethod) (heapBytes : Option Nat) (none : operands methods = []) :
     initialMemory methods heapBytes = .ok { Memory.empty with heapBudget := heapBytes } := by
   rw [initialMemory, none]
   rfl

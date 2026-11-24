@@ -10,7 +10,7 @@ theorem fromEmpty (text : String) (stack : List Value)
     (lengthFits : (CIL.utf16Units text).length ≤ 0x7fffffff) :
     ∃ memory, intern Memory.empty text = .ok (⟨0,0⟩, memory) ∧
       intern memory text = .ok (⟨0,0⟩, memory) ∧ memory.nextIdentity = 1 ∧
-      memory.heapBudget = 0 ∧
+      memory.heapBudget = none ∧
       stringLiteralInstruction text stack memory =
         .ok (memory, .object (.address ⟨0,0⟩) :: stack) := by
   have fits : (bytesOfString text).length < nativeLimit := by
@@ -32,7 +32,7 @@ theorem constructorLiterals (name message : String)
     (messageFits : (CIL.utf16Units message).length ≤ 0x7fffffff) :
     ∃ first final, intern Memory.empty name = .ok (⟨0, 0⟩, first) ∧
       intern first message = .ok (⟨if name = message then 0 else 1, 0⟩, final) ∧
-      final.heapBudget = 0 ∧
+      final.heapBudget = none ∧
       stringLiteralInstruction name [] final = .ok (final, [.object (.address ⟨0,0⟩)]) ∧
       stringLiteralInstruction message [] final =
         .ok (final, [.object (.address ⟨if name = message then 0 else 1, 0⟩)]) := by

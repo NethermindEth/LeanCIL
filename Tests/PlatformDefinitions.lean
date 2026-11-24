@@ -119,7 +119,7 @@ theorem missing_owner_requires_link :
         (platform := removing worldPlatform "Console")
       let missing := MetadataError.missingPlatformDefinition tokens.consoleRef
       let type := SigType.named false tokens.consoleRef
-      let head := ArgumentHead.platform runtimeScopeBytes [systemNamespace, bytesOf "Console"]
+      let head := ArgumentHead.platform runtimeColumns [systemNamespace, bytesOf "Console"]
       return failedWith (env.methodSite tokens.writeLine) missing &&
         failedWith (env.resolve 0 type) missing &&
         failedWith (env.resolveToken 0 tokens.consoleRef) missing &&
@@ -236,8 +236,8 @@ theorem platform_arity_matches (env : MetadataEnv) (named : NamedType) (position
 #print axioms platform_arity_matches
 
 /-- A closed argument from a definition requires the complete assembly identity among the pins. -/
-theorem definition_requires_pin (env : MetadataEnv) (scope : List Nat) (method token count : Nat)
-    (absent : env.exactPins.contains scope = false) :
+theorem definition_requires_pin (env : MetadataEnv) (scope : AssemblyColumns) (method token count : Nat)
+    (absent : env.exactPins.contains scope.spelling = false) :
     ArgumentHead.resolve env method count (.definition scope token) =
       .error (.missingSlice token) := by
   simp [ArgumentHead.resolve, absent]
@@ -282,7 +282,9 @@ theorem aggregate_argument_keeps_scope (head argument : NamedType) (corlib : Opt
 /-! ## An external enum -/
 
 /-- The scope bytes from the enum assembly row. -/
-private def enumScope := bytesOf "E, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+private def enumColumns : AssemblyColumns := ⟨bytesOf "E", ⟨1, 0, 0, 0⟩, [], []⟩
+
+private def enumScope := enumColumns.spelling
 
 /-- The platform enum `Number` of `E` over `int`. -/
 private def numberPlatform : PlatformTable := platform_table%
@@ -294,7 +296,7 @@ private def admitsNumber (platform : PlatformTable) (name : String) (spelled := 
   let frame : Frame :=
     { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
   let env := MetadataEnv.ofSlices [] (platform := platform)
-  match env.externalNamed 0 enumScope (bytesOf spelled) [[], bytesOf "Number"] none with
+  match env.externalNamed 0 enumColumns (bytesOf spelled) [[], bytesOf "Number"] none with
   | .ok named => frame.admits (.named named) (.enum (Tests.enumIdentity spelled (Tests.enumAssembly name!"E")) (.atom runtimeScope name))
   | .error _ => false
 
@@ -307,7 +309,7 @@ theorem enums_refuse_aggregate_storage (frame : Frame) (named : NamedType) (code
 
 /-- A missing entry for a closed platform argument preserves the diagnostic and method token. -/
 theorem missing_closed_argument_definition (method : Nat) :
-    (InstanceArgument.named (.platform (bytesOf "E") [[], bytesOf "Number"])).resolve
+    (InstanceArgument.named (.platform enumColumns [[], bytesOf "Number"])).resolve
       (MetadataEnv.ofSlices []) method resolveFuel =
         .error (.missingPlatformDefinition method) := by
   rfl

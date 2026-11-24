@@ -787,17 +787,27 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         return chain.Append(".nil").Append(')', generic.GenericArguments.Count).ToString();
     }
 
+    string ArgumentScope(AssemblyNameReference reference, ModuleDefinition module)
+    {
+        var assembly = AssemblyName.Of(reference, Pinned.IdentityMetadata(module)) ??
+            throw new InvalidDataException($"Invalid assembly scope for {reference.Name}");
+        var name = ByteLiterals.Of(assembly.Name.Bytes.ToArray());
+        var culture = ByteLiterals.Of(assembly.Culture.Bytes.ToArray());
+        var token = assembly.PublicKeyToken is ulong key ? Utf8(key.ToString("x16", CultureInfo.InvariantCulture)) : "[]";
+        return $"{{ name := {name}, version := {assembly.Version.ToLean()}, culture := {culture}, token := {token} }}";
+    }
+
     string ArgumentHead(TypeReference type, HashSet<TypeDefinition> definitions)
     {
         if (type.Scope is AssemblyNameReference reference && Pinned.IsPlatform(reference))
         {
             statedTypes.Add(type);
             var parts = PlatformDefinitions.NameParts(type).Select(Utf8);
-            return $"(.platform {Utf8(reference.FullName)} {List(parts)})";
+            return $"(.platform {ArgumentScope(reference, type.Module)} {List(parts)})";
         }
         var definition = type.Resolve() ?? throw new InvalidDataException($"Unresolved type argument {type.FullName}");
         definitions.Add(definition);
-        var scope = Utf8(definition.Module.Assembly.Name.FullName);
+        var scope = ArgumentScope(definition.Module.Assembly.Name, definition.Module);
         return $"(.definition {scope} {definition.MetadataToken.ToUInt32()})";
     }
 

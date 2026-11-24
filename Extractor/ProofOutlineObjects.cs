@@ -1105,7 +1105,7 @@ internal static partial class ProofOutline
             // A fresh array is charged to the heap budget, and its elements are no memory of the caller's.
             foreach (var made in Flattened.OfType<Allocation>().DistinctBy(made => made.Array))
             {
-                plan.Premises.Add((made.Array + "Budget", $"CIL.objectFieldSlot * {made.Length} ≤ initial.heapBudget"));
+                plan.Premises.Add((made.Array + "Budget", $"CIL.objectFieldSlot * {made.Length} ≤ initial.heapBudget.getD (CIL.objectFieldSlot * {made.Length})"));
                 foreach (var store in elements
                     .Where(access => access.Array == made.Array && access.Storable is not null)
                     .DistinctBy(access => access.Slot))

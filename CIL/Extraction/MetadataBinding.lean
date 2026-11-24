@@ -243,7 +243,7 @@ def MetadataEnv.classChain (env : MetadataEnv) (fuel position token : Nat)
         if (← env.definitionArity position row.extends_) != 0 then throw (.unsupportedBase token)
         lineage <$> env.classChain fuel linked definition true
       | .inr (scope, _, parts) =>
-        lineage <$> env.chainRoot token row.extends_ scope parts
+        lineage <$> env.chainRoot token row.extends_ scope.spelling parts
           (← index.coreLibraryReference row.extends_)
     | _ => .error (.unsupportedBase token)
 
@@ -492,10 +492,12 @@ private def MetadataEnv.callOwner (env : MetadataEnv) (token : Nat) (linked : Bo
     Except MetadataError ResolvedType := do
   if !linked then return <- { env with publishedLayouts := #[] }.resolveToken 0 token
   if metadataTableOf token != Table.typeRef then throw (.unresolvedMember token)
-  let (scope, name, parts) <- typeRefQualified env 0 resolveFuel token
+  let (assembly, name, parts) <- typeRefQualified env 0 resolveFuel token
+  let scope := assembly.spelling
   if env.identities.contains scope || env.pinned.matches scope ||
       (env.platform.kindOf scope parts).isSome then throw (.unresolvedMember token)
-  return .named { scope, name, parts, kind := .importedOwner, pinned := false }
+  return .named { scope, name, parts, kind := .importedOwner, pinned := false,
+                  assembly := some assembly }
 
 /-- Read a definition or member reference, resolving an opaque owner only for a linked call. -/
 private def MetadataEnv.readMemberSite (env : MetadataEnv) (token : Nat) (linked : Bool) :

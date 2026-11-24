@@ -655,7 +655,7 @@ closed from `pre` by `cil_loop_obligation`. The outline handles these shapes:
   `not outlined:` hole, since the two elements may be one element. A reference outside the model
   used after a call that writes is also a `not outlined:` hole. A `newarr` of class references of a
   literal length, the body's first write, adds the premise
-  `CIL.objectFieldSlot * 2 ≤ initial.heapBudget` for its slots and a `fresh1Element` def naming its
+  `CIL.objectFieldSlot * 2 ≤ initial.heapBudget.getD (CIL.objectFieldSlot * 2)` for its slots and a `fresh1Element` def naming its
   element class; its elements start as owned nulls, the array is `fresh1` with `fresh1Identity`
   dating it after every caller allocation, and the footprint forgets its elements through
   `Confined.forget_fresh`. An index into it that is not a literal below its length is a

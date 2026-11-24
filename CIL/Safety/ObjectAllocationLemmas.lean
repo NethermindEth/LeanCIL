@@ -17,11 +17,11 @@ namespace CIL.Safety
 inductive ObjectAllocationEffect (memory : Memory) (type : RuntimeType) :
     Reference → Memory → Prop where
   | fresh {size identity allocated}
-      (affordable : size ≤ memory.heapBudget)
+      (affordable : size ≤ memory.heapBudget.getD size)
       (allocation : allocate memory ⟨.object type, ⟨size, objectAlignment, []⟩, true, [size]⟩ =
         .ok (identity, allocated)) :
       ObjectAllocationEffect memory type ⟨identity, 0⟩
-        { arrayMemory allocated identity size with heapBudget := memory.heapBudget - size }
+        { arrayMemory allocated identity size with heapBudget := memory.heapBudget.map (· - size) }
 
 /-- A successful allocation retains its checked allocation evidence and budget. -/
 theorem allocateObject_effect {memory result : Memory} {type : RuntimeType} {size : Nat}
@@ -139,7 +139,7 @@ theorem ObjectAllocationEffect.registry {memory result : Memory} {type : Runtime
 /-- In well-formed memory with budget for it, an instance of fewer than `nativeLimit` bytes is
     allocated at the next identity, giving `objectMemory`. -/
 theorem allocateObject_ok {memory : Memory} (formed : memory.WellFormed) (type : RuntimeType)
-    {size : Nat} (affordable : size ≤ memory.heapBudget) (bounded : size < nativeLimit) :
+    {size : Nat} (affordable : size ≤ memory.heapBudget.getD size) (bounded : size < nativeLimit) :
     allocateObject memory type size =
       .ok (⟨memory.nextIdentity, 0⟩, objectMemory memory type size) := by
   have unused : memory.allocations memory.nextIdentity = none := by
@@ -160,9 +160,9 @@ theorem allocateObject_ok {memory : Memory} (formed : memory.WellFormed) (type :
 
 /-- Without budget for it, `newobj` fails with `allocationFailure`, before any allocation. -/
 theorem allocateObject_insufficient {memory : Memory} (type : RuntimeType) {size : Nat}
-    (insufficient : memory.heapBudget < size) :
+    (insufficient : memory.heapBudget.getD size < size) :
     allocateObject memory type size =
-      .error (.allocationFailure size memory.heapBudget) := by
+      .error (.allocationFailure size (memory.heapBudget.getD size)) := by
   simp [allocateObject, insufficient, Bind.bind, Except.bind]
 
 #print axioms allocateObject_insufficient
@@ -210,7 +210,7 @@ theorem newReferenceArray_ok {memory : Memory} (formed : memory.WellFormed)
     (element : CIL.Extraction.TypeExpr) {value : CIL.Value} {length : Nat}
     (decoded : value = .i32 (BitVec.ofNat 32 length) ∨ value = .i64 (BitVec.ofNat 64 length))
     (small : length < 2^31) (bounded : length ≤ maxArrayLength)
-    (affordable : objectFieldSlot * length ≤ memory.heapBudget) :
+    (affordable : objectFieldSlot * length ≤ memory.heapBudget.getD (objectFieldSlot * length)) :
     newReferenceArray memory element value =
       .ok (⟨memory.nextIdentity, 0⟩,
         objectMemory memory (referenceArrayType element) (objectFieldSlot * length)) := by
@@ -227,9 +227,9 @@ theorem newReferenceArray_insufficient (memory : Memory) (element : CIL.Extracti
     {value : CIL.Value} {length : Nat}
     (decoded : value = .i32 (BitVec.ofNat 32 length) ∨ value = .i64 (BitVec.ofNat 64 length))
     (small : length < 2^31) (bounded : length ≤ maxArrayLength)
-    (short : memory.heapBudget < objectFieldSlot * length) :
+    (short : memory.heapBudget.getD (objectFieldSlot * length) < objectFieldSlot * length) :
     newReferenceArray memory element value =
-      .error (.allocationFailure (objectFieldSlot * length) memory.heapBudget) := by
+      .error (.allocationFailure (objectFieldSlot * length) (memory.heapBudget.getD (objectFieldSlot * length))) := by
   rw [newReferenceArray_decoded memory element decoded small bounded]
   exact allocateObject_insufficient _ short
 

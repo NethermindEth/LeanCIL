@@ -894,6 +894,18 @@ def AssemblyColumns.spelling (columns : AssemblyColumns) : List Nat :=
   assemblySpelling columns.name v.major v.minor v.build v.revision columns.culture
     (if columns.token.isEmpty then nullToken else columns.token)
 
+/-- A typed scope agrees with the name and culture bytes, version, and optional eight-byte
+publisher token of the metadata row. -/
+def AssemblyColumns.matches (columns : AssemblyColumns) (assembly : AssemblyName) : Bool :=
+  MetadataName.ofBytes? columns.name == some assembly.name &&
+    columns.version == assembly.version &&
+    MetadataName.ofBytes? columns.culture == some assembly.culture &&
+    match assembly.publicKeyToken with
+    | none => columns.token.isEmpty
+    | some token =>
+      let bytes := (List.range 8).reverse.map fun index => (token >>> (8 * index)) % 256
+      token < 2^64 && columns.token == hexDigits bytes
+
 /-- Decoded identity columns shared by the typed and display forms of an assembly reference. -/
 private structure AssemblyRefParts where
   name : List Nat
