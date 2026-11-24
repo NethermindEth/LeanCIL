@@ -11,39 +11,28 @@ set_option maxHeartbeats 30000000
 
 /-- MemberRef operand of the compiled exception constructor. -/
 def memberToken (body : BodyEvidence) : Option Nat :=
-  body.tokens.operands.findSome? fun (token, operand) => match operand with
-    | .call _ => some token
-    | _ => none
+  body.constructorTokenAt? 0 0 5
 
-/-- Caller-local constructor token, declaring type and referenced types. -/
-def references (body : BodyEvidence) : Option (Nat × Nat × List Nat) := do
-  let token ← memberToken body
-  let env ← body.environment.toOption
-  let slice ← (env.slice 0 token).toOption
-  let member ← (slice.memberRef token).toOption
-  let refs := (body.metadata.own.rows.map Prod.fst).filterMap fun key =>
-    if metadataTableOf key == Table.typeRef then some key else none
-  return (token, member.parent, refs)
+/-- Bind the packaged caller using the facade and CoreLib rows carried with the runtime. -/
+def pinnedCaller : Option BodyEvidence :=
+  Extracted.method0BindConstructor5 Source.rows.others
+    ⟨[], Core.RangeCtor.definition, ⟨coreLibraryScope⟩⟩
 
-
-/-- Add pinned facade and CoreLib resolution evidence to the packaged method's own rows. -/
-def pinnedCaller : Option BodyEvidence := do
-  let original := Extracted.method0Body
-  let (token, owner, refs) ← references original
-  let [root] := refs.filter (· != owner) | none
-  let own := original.metadata.own
-  -- System.Object and ArgumentOutOfRangeException have fixed rows in the two pinned images.
-  let links : List MetadataLink :=
-    [⟨linkDefinition, root, 2, 0x020000A2⟩, ⟨linkDefinition, owner, 2, 0x020000F3⟩,
-     ⟨linkDefinition, token, 2, Core.RangeCtor.definition.token⟩] ++ own.links ++
-    [⟨linkForwarder, root, 1, 0x270001AB⟩, ⟨linkForwarder, owner, 1, 0x27000026⟩]
-  let metadata := { original.metadata with own := { own with links }, others := Source.rows.others }
-  let operands := original.tokens.operands.map fun (key, operand) =>
-    (key, if key == token then .call Source.member else operand)
-  let tables ← metadata.tables.toOption
-  return { original with
-    metadata, tables, identities := Source.source.identities, pinned := Source.source.pinned
-    tokens := { operands } }
+/-- The neighboring throw, a missing defining image, the facade with the same MethodDef
+number, a different MethodDef and a mismatched constructor signature are all refused. -/
+theorem rejectsInvalidBindings :
+    let callee : SpecializedMethod := ⟨[], Core.RangeCtor.definition, ⟨coreLibraryScope⟩⟩
+    (Extracted.method0Body.constructorTokenAt? 0 0 6).isNone ∧
+    (Extracted.method0BindConstructor5 [] callee).isNone ∧
+    (Extracted.method0BindConstructor5 Source.rows.others
+      { callee with assembly := ⟨runtimeScope⟩ }).isNone ∧
+    (Extracted.method0BindConstructor5 Source.rows.others
+      { callee with closed := { callee.closed with token := Core.ArgumentCtor.definition.token } }).isNone ∧
+    (Extracted.method0BindConstructor5 Source.rows.others
+      { callee with closed := { callee.closed with parameters := [] } }).isNone := by
+  repeat' constructor
+  all_goals cil_kernel_rfl
+#print axioms rejectsInvalidBindings
 
 /-- Pinned definition selected by the caller’s actual constructor token. -/
 def binding := do
@@ -75,8 +64,16 @@ theorem callerEvidence :
     BodyDecodes (Extracted.assemblies ++ [⟨runtimeScope⟩, ⟨coreLibraryScope⟩])
       Extracted.platformDefinitions Extracted.assembly0 body raw [] Extracted.method0Signature := by
   refine ⟨by cil_kernel_rfl, ?_⟩
-  refine ⟨.cons Extracted.assembly0_identified (.cons Source.image1_identified
-    (.cons Source.image2_identified .nil)), ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  have images : body.metadata.slices.map (·.assembly) =
+      [Extracted.assembly0Metadata, Source.assembly1Metadata, Tests.CoreLibImage.assembly] := by
+    cil_kernel_rfl
+  have ids : body.identities = [Extracted.assembly0Identity, Source.id1, Source.id2] := by
+    cil_kernel_rfl
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · unfold AssembliesIdentified
+    rw [images, ids]
+    exact .cons Extracted.assembly0_identified (.cons Source.image1_identified
+      (.cons Source.image2_identified .nil))
   all_goals first | cil_kernel_rfl | decide +kernel | cil_body_decodes
 
 /-- Decoded caller linked to the seven CoreLib method bodies reached by Percent. -/

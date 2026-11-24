@@ -696,6 +696,18 @@ def BodyEvidence.environment (body : BodyEvidence) : Except MetadataError Metada
   return { env with publishedLayouts := body.imports.layouts,
                     layoutDeclarations := some body.layoutDeclarations }
 
+/-- The metadata token encoded at a decoded `newobj` instruction. The byte offset comes from
+the decoder, so an earlier call or a matching byte inside another operand cannot select it. -/
+def BodyEvidence.constructorTokenAt? (body : BodyEvidence) (arity ownerArity pc : Nat) :
+    Option Nat := do
+  let env ← body.environment.toOption
+  let decoded ← (decodeBody env arity ownerArity body).toOption
+  let site ← decoded.code[pc]?
+  guard (site.opcode == 0x73)
+  let (_, code) ← (decodeHeader false body.bytes).toOption
+  let (token, _) ← (readUnsigned site.offset 4 (code.drop (site.offset + 1))).toOption
+  return token
+
 /-- The method's definition, its locals and its body, each checked against the metadata the
     body carries: the decoded body, when everything agrees with the method instantiated at
     `arguments`. -/

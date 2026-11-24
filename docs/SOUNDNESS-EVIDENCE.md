@@ -515,7 +515,10 @@ Pass `some heapBytes` to analyze a finite quota. The loader reads the
 original `ldstr` operands, interns repeated text once and grants read-only access to each string.
 The supplied quota remains available for allocations during execution. For both compiled locales
 of `Throws.Percent`, the verifier checks that both original operands load even with zero heap quota.
-The ordinary packaged exception proof uses the recognized constructor fold.
+The extractor emits a binding function for each reachable folded constructor site. Given the
+facade and defining assembly slices and a constructor candidate, it reads the original
+`newobj` token, resolves its declaring type through the carried rows and checks the MethodDef
+and signature. The ordinary packaged exception proof uses the recognized constructor fold.
 
 For the pinned .NET 11 Windows x64 body of `Throws.Percent(uint)`, Lean checks the original
 caller and the CoreLib constructor methods reached on the throwing path. Starting from empty

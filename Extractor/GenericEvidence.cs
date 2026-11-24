@@ -746,6 +746,12 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $"""identities := {identities}, tables := method{number}Tables, names := method{number}Names,""",
             "pinned := pinnedIndex, layoutDeclarations := Extraction.layoutDeclarations rawLayouts,",
             $$"""platform := {{platform}} }""");
+        foreach (var raise in Throws.Analyze(admitted).Raises.Keys.Where(reachable.Contains))
+        {
+            var pc = admitted.Body.Instructions.IndexOf(raise.Previous);
+            definition += $"\n/-- Bind the original newobj at instruction {pc} to its pinned runtime constructor. -/\n" +
+                $"def method{number}BindConstructor{pc} := method{number}Body.bindConstructor? method{number}Original {pc}";
+        }
         return ($"""def method{number}Bytes : List Nat := {data}""", slices, definition,
             identified, $"""method{number}_tables_valid""");
     }

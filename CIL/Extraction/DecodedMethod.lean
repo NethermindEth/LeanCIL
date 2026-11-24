@@ -48,6 +48,85 @@ def _root_.CIL.Method.ofBody? (profile : FeatureProfile) (environment : LayoutEn
   Method.ofRaw? profile environment links reachable
     { original with code := decoded.code, initLocals := decoded.initLocals } arguments
 
+/-- Find a unique matching type row in a carried slice. Forwarders are resolved against
+the referenced assembly's identity columns before the implementation is searched. -/
+private def constructorTypeLinks (env : MetadataEnv) (slices : List MetadataSlice)
+    (token : Nat) : Option (List MetadataLink) := do
+  let (columns, _, parts) ← (typeRefQualified env 0 resolveFuel token).toOption
+  let some referenced ← (env.referencePosition columns token).toOption | none
+  let slice ← slices[referenced]?
+  let index ← (env.slice referenced token).toOption
+  let routes := slice.rows.filterMap fun (key, _) => do
+    guard (metadataTableOf key == Table.exportedType)
+    let target ← (index.forwardedAssembly key parts).toOption
+    let some position ← (env.referencePosition target key).toOption | none
+    return (position, [(⟨linkForwarder, token, referenced, key⟩ : MetadataLink)])
+  let candidates := ((referenced, []) :: routes).flatMap fun (position, forwarders) =>
+    (slices[position]?.toList.flatMap (·.rows)).filterMap fun (key, _) => do
+      guard (metadataTableOf key == Table.typeDef)
+      let named ← (typeDefNamed env position resolveFuel key).toOption
+      guard (named.parts == parts)
+      return (⟨linkDefinition, token, position, key⟩ : MetadataLink) :: forwarders
+  let [result] := candidates | none
+  return result
+
+/-- Insert a candidate link in the order required by the metadata table. Duplicate keys
+remain in the list so table construction rejects conflicting or redundant evidence. -/
+private def insertConstructorLink (link : MetadataLink) : List MetadataLink → List MetadataLink
+  | [] => [link]
+  | head :: tail =>
+    if link.kind < head.kind || (link.kind == head.kind && link.source ≤ head.source) then
+      link :: head :: tail
+    else head :: insertConstructorLink link tail
+
+/-- Bind an external class constructor in the original caller to a managed definition.
+The added rows resolve the original MemberRef. Its defining assembly, MethodDef and signature
+must match the supplied callee. The caller retains its own bytes, rows and declared signature. -/
+def BodyEvidence.bindConstructor? (body : BodyEvidence) (source : RawMethod) (pc : Nat)
+    (dependencies : List MetadataSlice)
+    (callee : SpecializedMethod) : Option BodyEvidence := do
+  let token ← body.constructorTokenAt? source.genericParameters.length source.ownerParameters.length pc
+  let .call external ← body.tokens.operands.lookup token | none
+  let .external _ := external.target | none
+  guard (external.method.name == name!".ctor" && callee.arguments.isEmpty &&
+    callee.closed.genericParameters.isEmpty && callee.closed.ownerParameters.isEmpty)
+  let slices := body.metadata.others ++ dependencies
+  let initial := { body.metadata with others := slices }
+  let added := dependencies.map (fun slice => bytesOf slice.assembly.identity)
+  let identities := body.identities ++ added
+  let pins := PinnedIndex.ofIdentities (body.pinned.identities ++ added)
+  let tables ← initial.tables.toOption
+  let base := { body with metadata := initial, identities, tables, pinned := pins }
+  let env ← base.environment.toOption
+  let [position] := identities.zipIdx.filterMap (fun (id, i) =>
+      if id == bytesOf callee.assembly.identity then some i else none) | none
+  let index ← (env.slice 0 token).toOption
+  let links := body.metadata.own.rows.flatMap fun (key, _) =>
+    if metadataTableOf key == Table.typeRef && (index.link linkDefinition key).isNone then
+      (constructorTypeLinks env initial.slices key).getD []
+    else []
+  let member : MetadataLink := ⟨linkDefinition, token, position, callee.closed.token⟩
+  let ordered := (member :: links).foldr insertConstructorLink body.metadata.own.links
+  let own := { body.metadata.own with links := ordered }
+  let metadata := { initial with own }
+  let tables ← metadata.tables.toOption
+  let linked := { body with metadata, identities, tables, pinned := pins }
+  let env ← linked.environment.toOption
+  let site ← (env.methodSite token).toOption
+  let (position, definition) ← site.definition
+  guard (identities[position]? == some (bytesOf callee.assembly.identity) &&
+    definition == callee.closed.token)
+  let owner ← callee.closed.receiverClass
+  let method := { external.method with
+    owner, hasThis := callee.closed.hasThis, parameters := callee.closed.parameters,
+    returnType := callee.closed.returnType }
+  let managed := { external with method, target := .managed definition }
+  let frame ← (env.frame source.genericParameters.length source.ownerParameters.length).toOption
+  let _ ← (checkCallOperand env frame token managed).toOption
+  let operands := body.tokens.operands.map fun entry =>
+    if entry.1 == token then (token, .call managed) else entry
+  return { linked with tokens := { operands } }
+
 /-- The feature certificate checks this method's mask and code against its pinned body's
     specialization, using the constant returns of the surrounding records. -/
 abbrev MethodEvidence.MaskValid (item : MethodEvidence) (all : List MethodEvidence)
