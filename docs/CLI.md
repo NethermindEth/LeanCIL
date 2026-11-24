@@ -338,11 +338,18 @@ arguments. The verifier retains the checked bytes and matches pins after any req
 rebuild. Each request must explicitly supply the option; saved verification settings contain no
 deep-check input. Batch verification, gates, watch and workspace reject the option.
 
-The report lists twelve binding facts. Default verification lists them as `trusted` and performs
+The report lists thirteen binding facts. Default verification lists them as `trusted` and performs
 no image binding work. Deep verification reconfirms `body-bytes`, `metadata-rows`, `static-data` and the
 digests of pinned images. For RVA fields the audit reads the field signature, packing, class
 size and relative virtual address, then compares the entire byte range in the mapped section.
 Constructor-initialized fields must have no RVA.
+
+These three facts cover the whole method evidence, including the System.Private.CoreLib rows
+that a packaged managed constructor, such as the one of `Throws.Percent(uint)`, carries behind
+System.Runtime forwarders. When the evidence names an assembly that no supplied image is pinned
+under, the three facts are `not covered` and the reason names each missing identity. No claim
+reads the bodies and rows of managed declarations, so an extraction that has declarations reports
+`body-bytes` and `metadata-rows` as `not covered`.
 
 To check `object-fields`, add the platform reference assembly used at compilation, such as
 `ref/net11.0/System.Runtime.dll`, to the digest file. The audit resolves the version, culture
@@ -379,6 +386,15 @@ signatures, and explicit field offsets. The certified extraction uses those same
 to compute sizes, alignments and offsets for its architecture. An empty selection, imports,
 missing images, or structs with unhandled fields, generics, custom attributes or interfaces
 leave the fact `not covered`. A conflicting supported layout fails the audit.
+
+For `imported-layouts`, supply the implementation image of each typed import, the file whose
+digest the extraction records for the import. Lean reconstructs each layout an import slot
+selected from its TypeDef in that image, as for `layout-content`, and compares the layout kind,
+packing, declared size, field order, field signatures and explicit offsets. The extraction
+certificate makes the published layouts of a slot equal its selected layouts, so the check covers
+both. An extraction without selected layouts, a layout whose assembly is not pinned under the
+recorded implementation digest, or a nested struct field leaves the fact `not covered`. A
+selected layout that differs from the image fails the audit.
 
 For `dispatch-catalogs`, supply the method images and the images defining the classes they
 test. For `isinst` and `castclass`, Lean reads the token at the original instruction offset.
@@ -1097,13 +1113,13 @@ Verified: ExampleProof.addTwo_holds
   its arguments or recurses is printed as Lean elaborates it, in terms of the auxiliary
   definitions it compiles to, and the field accessors of a structure the proof declares are not
   listed. Definitions of modules the proof imports are named in the statement and not printed.
-- `verified.json` is the certificate, schema 7. Its `binding` section has the run's `mode`, the
+- `verified.json` is the certificate, schema 8. Its `binding` section has the run's `mode`, the
   `digests` file, statement `sources` and `images` the run read, and, as `facts`, every fact about
   the assembly image that verification trusts, each with its `id`, `status`, `theorem` and
   `reason`, in this order: `body-bytes`, `metadata-rows`, `platform-type-kinds`,
   `enum-underlying-types`, `value-tuple-field-order`, `object-fields`, `layout-content`,
-  `dispatch-catalogs`, `static-data`, `generic-constraints`, `public-key-tokens` and
-  `import-identities`. `verify` writes `mode` `default`, reads no digest file, sources or image,
+  `dispatch-catalogs`, `static-data`, `generic-constraints`, `public-key-tokens`,
+  `import-identities` and `imported-layouts`. `verify` writes `mode` `default`, reads no digest file, sources or image,
   and lists every fact as `trusted`, with no theorem or reason.
   `verify` accepts no certificate of another schema, mode or fact list, nor one with a missing,
   repeated or reordered fact or an unknown status: a cached result whose certificate it refuses

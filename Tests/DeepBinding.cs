@@ -17,12 +17,12 @@ partial class Program
             var report = JsonSerializer.Deserialize<JsonElement>(result.Stdout);
             var binding = report.GetProperty("binding");
             if (binding.GetProperty("mode").GetString() != "deep" ||
-                binding.GetProperty("facts").GetArrayLength() != 12 ||
+                binding.GetProperty("facts").GetArrayLength() != 13 ||
                 binding.GetProperty("images").GetArrayLength() != 2 ||
                 binding.GetProperty("facts").EnumerateArray().Count(fact =>
                     fact.GetProperty("status").GetString() == "reconfirmed") != 3)
                 throw new InvalidOperationException("Unexpected joint binding report: " + result.Stdout);
-            Console.WriteLine("PASS joint CLI verification reports image digests and all twelve facts");
+            Console.WriteLine("PASS joint CLI verification reports image digests and all thirteen facts");
         }
         var inputs = DeepCheckInputs.Read(manifest);
         var identity = ExtractionIdentity.Read(extraction);

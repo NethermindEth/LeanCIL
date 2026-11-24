@@ -348,6 +348,25 @@ foreach ((string name, string selector, string proof) in new[]
     }
     else
     {
+        if (name == "Forward")
+        {
+            // Pair nests Leaf, so the selected layouts stay uncovered even with the implementation pinned.
+            string pins = Path.Combine(root, "imported-layouts.sha256");
+            foreach (var (images, reason) in new[]
+            {
+                (new[] { app }, "the implementation digest"), (new[] { app, lib }, "a nested struct field")
+            })
+            {
+                File.WriteAllLines(pins, images.Select(image => Sha(image) + "  " + image));
+                Run([.. verify, "--deep-checks", pins]);
+                using var certificate = JsonDocument.Parse(File.ReadAllText(Path.Combine(artifact, "verified.json")));
+                var fact = certificate.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+                    .Single(entry => entry.GetProperty("id").GetString() == "imported-layouts");
+                if (fact.GetProperty("status").GetString() != "not covered" ||
+                    fact.GetProperty("reason").GetString()?.Contains(reason, StringComparison.Ordinal) != true)
+                    throw new InvalidOperationException("Incorrect imported layout coverage: " + fact);
+            }
+        }
         Run(verify);
         Run([.. verify, "--force-full-verify"]);
     }

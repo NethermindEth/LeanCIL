@@ -41,6 +41,11 @@ if (args is ["--enums"])
     CheckEnumStorage();
     return;
 }
+if (args is ["--package"])
+{
+    CheckPackageEvidence();
+    return;
+}
 
 const string libName = "DeepCli.Library";
 var lib = fixture.Build("Library", libName,
@@ -641,6 +646,10 @@ void CheckLayoutContent()
             if (fact.GetProperty("status").GetString() != "reconfirmed" ||
                 fact.GetProperty("theorem").GetString() != "BindingAudit.layoutContent")
                 throw new InvalidOperationException("Incorrect layout binding report: " + fact);
+            if (method != "Read") continue;
+            ReplayImageCases(output, assembly, "LayoutImage", At("Tests/StrictBinding/ImportedLayoutCases.lean"),
+                ["StrictBinding.ImportedLayouts"]);
+            Console.WriteLine("PASS an import slot's extracted Overlay rows bind and forged rows are refused");
         }
     }
     // Both assemblies contain the same ReadPacked instructions. The changed packing moves Count.
@@ -674,6 +683,34 @@ void CheckLayoutContent()
         !rows["claimed-same"].GetProperty("error").GetString()!.Contains("but it is different.", StringComparison.Ordinal))
         throw new InvalidOperationException(compared.Output);
     Console.WriteLine("PASS unchanged ReadPacked IL with a relocated field compares as a different program");
+}
+
+// The packaged constructor rows of Throws.Percent are System.Private.CoreLib rows behind System.Runtime forwarders.
+// A digest file that pins only Examples.dll leaves every whole-evidence fact not covered, with the names it lacks.
+void CheckPackageEvidence()
+{
+    var examples = At("Examples/Assembly/bin/Examples.dll");
+    var output = fixture.Artifact("Percent");
+    Run([.. cli, "extract", examples, "Examples.Throws::Percent(System.UInt32)", output]);
+    var pins = Path.Combine(fixture.Root, "percent.sha256");
+    File.WriteAllText(pins, Sha(examples) + "  " + examples + Environment.NewLine);
+    Run([.. cli, "verify", output, "--proof", At("Examples/Proofs/Percent.lean"), "--theorem",
+        "ExampleProof.correctness", "--deep-checks", pins]);
+    using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "verified.json")));
+    var facts = report.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+        .ToDictionary(fact => fact.GetProperty("id").GetString()!);
+    foreach (var (id, declarations) in new[] { ("body-bytes", true), ("metadata-rows", true), ("static-data", false) })
+    {
+        var fact = facts[id];
+        var reason = fact.GetProperty("reason").GetString() ?? "";
+        if (fact.GetProperty("status").GetString() != "not covered" ||
+            !reason.Contains("System.Private.CoreLib, Version=11.0.0.0", StringComparison.Ordinal) ||
+            !reason.Contains("System.Runtime, Version=11.0.0.0", StringComparison.Ordinal) ||
+            reason.Contains("Examples, Version", StringComparison.Ordinal) ||
+            reason.Contains("1 managed declarations", StringComparison.Ordinal) != declarations)
+            throw new InvalidOperationException("Packaged evidence coverage is misreported: " + fact);
+    }
+    Console.WriteLine("PASS packaged CoreLib rows are not covered when the CoreLib and facade images are missing");
 }
 
 void CheckEnumStorage()
@@ -859,19 +896,19 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
 
     var ordinary = Execute(verify);
     if (ordinary.Code != 0 || !ordinary.Stdout.Contains("Binding: default", StringComparison.Ordinal) ||
-        ordinary.Stdout.Split(": trusted", StringSplitOptions.None).Length != 13 ||
+        ordinary.Stdout.Split(": trusted", StringSplitOptions.None).Length != 14 ||
         ordinary.Output.Contains("BindingAudit", StringComparison.Ordinal))
         throw new InvalidOperationException("Default binding output or work changed: " + ordinary.Output);
     var deep = Execute([.. verify, "--deep-checks", digestFile]);
     string[] reconfirmed = ["body-bytes", "metadata-rows", "static-data"];
     if (deep.Code != 0 || !deep.Stdout.Contains("StrictBinding sources:", StringComparison.Ordinal) ||
-        deep.Stdout.Split(": not covered", StringSplitOptions.None).Length != 10)
+        deep.Stdout.Split(": not covered", StringSplitOptions.None).Length != 11)
         throw new InvalidOperationException("Deep binding text is incomplete: " + deep.Output);
     string[] factNames =
     [
         "body-bytes", "metadata-rows", "platform-type-kinds", "enum-underlying-types", "value-tuple-field-order",
         "object-fields", "layout-content", "dispatch-catalogs", "static-data", "generic-constraints",
-        "public-key-tokens", "import-identities"
+        "public-key-tokens", "import-identities", "imported-layouts"
     ];
     foreach (var fact in factNames)
         if (!ordinary.Stdout.Contains(fact + ": trusted", StringComparison.Ordinal) ||
@@ -886,6 +923,7 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
     CheckGenericConstraints();
     CheckLayoutContent();
     CheckDispatchCatalogs();
+    CheckPackageEvidence();
 
     var tables = fixture.Build("Table", "DeepCli.Table", """
         public static class Table {
@@ -982,7 +1020,7 @@ if (args is not (["--mutations"] or ["--controls"] or ["--final-mutations"]))
     var consumerReport = JsonSerializer.Deserialize<JsonElement>(checkedConsumer.Stdout);
     var binding = consumerReport.GetProperty("binding");
     if (binding.GetProperty("mode").GetString() != "deep" ||
-        binding.GetProperty("facts").GetArrayLength() != 12 ||
+        binding.GetProperty("facts").GetArrayLength() != 13 ||
         binding.GetProperty("facts")[0].GetProperty("status").GetString() != "reconfirmed")
         throw new InvalidOperationException("Consumer CLI did not retain deep binding");
     Console.WriteLine("PASS proof-root CLI deep verification");
@@ -996,7 +1034,7 @@ if (args is not (["--mutations"] or ["--controls"] or ["--final-mutations"]))
     var failedFile = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "failed.json")));
     var failureBinding = failed.GetProperty("binding");
     if (!JsonElement.DeepEquals(failureBinding, failedFile.GetProperty("binding")) ||
-        failureBinding.GetProperty("facts").GetArrayLength() != 12 ||
+        failureBinding.GetProperty("facts").GetArrayLength() != 13 ||
         failureBinding.GetProperty("facts").EnumerateArray().Any(fact =>
             fact.GetProperty("status").GetString() != "not covered"))
         throw new InvalidOperationException("Failed consumer binding payload is inconsistent: " + rejected.Output);

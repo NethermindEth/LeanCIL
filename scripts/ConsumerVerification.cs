@@ -2616,7 +2616,7 @@ partial class Program
                     deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
                         deep!.Requests, new(bindingSourcesKey!,
                             File.ReadAllText(Path.Combine(bindingSession!, "lean-toolchain")).Trim(),
-                            Sha(LeanExecutable)), audits[i].Result),
+                            Sha(LeanExecutable)), audits[i].Result, deep.Uncovered),
                     libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
                         ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null,

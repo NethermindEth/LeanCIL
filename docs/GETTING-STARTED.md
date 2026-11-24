@@ -60,6 +60,7 @@ Verified: ExampleProof.correctness
   generic-constraints: trusted
   public-key-tokens: trusted
   import-identities: trusted
+  imported-layouts: trusted
   Settings: artifacts/Add/verification.json
   Report: artifacts/Add/verified.json
   Statement:

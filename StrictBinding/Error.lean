@@ -126,6 +126,8 @@ inductive AuditError where
   | uncoveredConstraint
   /-- The claimed value layout differs from the fields or layout metadata in the image. -/
   | layoutMismatch (identity : String)
+  /-- The layout an import slot selected differs from the layout its implementation image defines. -/
+  | importedLayoutMismatch (slot identity : String)
   /-- A physical class slot, linked target or complete catalog differs from the extraction. -/
   | dispatchMismatch (method : Nat)
   /-- The carried entry with this key is not the entry of the image at the offset the key names. -/

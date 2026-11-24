@@ -4455,7 +4455,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     /// <summary>The version of the certificate `verified.json` holds; every reader rejects any other.</summary>
-    internal const int CertificateSchema = 7;
+    internal const int CertificateSchema = 8;
 
     /// <summary>
     /// A fact the default verification trusts about the assembly images, which a deep check reconfirms from them.
@@ -4493,7 +4493,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         /// <summary>The AssemblyRef public key tokens are the tokens of the referenced images' keys.</summary>
         PublicKeyTokens,
         /// <summary>Each generic import identity names its pinned implementation definition.</summary>
-        ImportIdentities
+        ImportIdentities,
+        /// <summary>Each layout an import slot selected is the layout its implementation image defines.</summary>
+        ImportedLayouts
     }
 
     /// <summary>What a run established about one binding fact.</summary>
@@ -4542,7 +4544,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         (BindingFact.ValueTupleFieldOrder, "value-tuple-field-order"), (BindingFact.ObjectFields, "object-fields"),
         (BindingFact.LayoutContent, "layout-content"), (BindingFact.DispatchCatalogs, "dispatch-catalogs"),
         (BindingFact.StaticData, "static-data"), (BindingFact.GenericConstraints, "generic-constraints"),
-        (BindingFact.PublicKeyTokens, "public-key-tokens"), (BindingFact.ImportIdentities, "import-identities"));
+        (BindingFact.PublicKeyTokens, "public-key-tokens"), (BindingFact.ImportIdentities, "import-identities"),
+        (BindingFact.ImportedLayouts, "imported-layouts"));
 
     sealed class BindingStatusNames() : ExactNames<BindingStatus>((BindingStatus.Trusted, "trusted"),
         (BindingStatus.Reconfirmed, "reconfirmed"), (BindingStatus.NotCovered, "not covered"),
@@ -5285,7 +5288,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             var report = new Report(CertificateSchema, Sha(assembly), identityHash, theorem, axioms, audit, before,
                 deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
                     deep!.Requests, new(bindingSourcesKey!,
-                        File.ReadAllText(Path.Combine(session, "lean-toolchain")).Trim(), Sha(LeanExecutable)), audited),
+                        File.ReadAllText(Path.Combine(session, "lean-toolchain")).Trim(), Sha(LeanExecutable)), audited,
+                    deep.Uncovered),
                 libraryKey, libraryBuild, extractionAudit, initializedTypes,
                 staticValues: StaticValueAssumptions(extraction.Root),
                 opaqueStaticValues: OpaqueStaticValues(extraction.Root),

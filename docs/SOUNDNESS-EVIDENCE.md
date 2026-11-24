@@ -16,7 +16,7 @@ cannot substitute for it.
 | Specialization | Substitute closed method/owner arguments through signatures, locals, operands and calls, including the owner segment of an external call identity (`scope::result owner::member`, open owners spelled `!!n`/`!n`); preserve control flow | Faithful raw definitions and admitted constraints |
 | Feature flow | Entry, transfers, joins, required successors, reachable mask and feature-dependent operations | No complete concrete CLI simulation for every opcode |
 | Method body decoding | Decode the bytes the extractor emitted for a body (tiny or fat header, every standard opcode, branch targets as instruction indices) through the token table and compare `maxStack`, `initLocals`, the locals and every instruction with the original definition | That the bytes are the method's body in the image (reconfirmed by the opt-in [deep verification](CLI.md#deep-verification)) and the PE container stay trusted; bodies with exception sections are rejected |
-| Metadata binding | Decode the table rows, heap entries and signature blobs each method carries and check every token-table entry, every local type and the method's own definition against them, including generic import descriptors and their open signatures and closed arguments | That the carried bytes are the image's, that each platform definition states its type as the platform assembly defines it, public key tokens, imported implementation definitions, raw layout content, dispatch catalogs, static data and generic parameter constraints |
+| Metadata binding | Decode the table rows, heap entries and signature blobs each method carries and check every token-table entry, every local type and the method's own definition against them, including generic import descriptors and their open signatures and closed arguments | That the carried bytes are the image's, that each platform definition states its type as the platform assembly defines it, public key tokens, imported implementation definitions, raw layout content, imported layouts, dispatch catalogs, static data and generic parameter constraints |
 | Scalar flow | Complete stack kinds, raw maximum stack, joins/backedges, call arguments/results, homes and returns | Unknown types remain opaque |
 | Scalar translations | Exact literal values, arithmetic, comparisons, conversion flags and branch targets | Other operations require specialized checks or retain stack-effect fallback |
 | Managed/imported calls | Target slot, scoped identity, full signature, argument count, receiver and result | An import slot does not prove its implementation contract |
@@ -403,8 +403,9 @@ copy cannot be detected without the whole stream; every row must still have the 
 widths give, every blob its length prefix and every string one terminating zero), the PE container
 where a body sits in the image and the mapping of its address to its bytes, definitions in platform assemblies (so whether a
 platform type is a value type, a class or an enum, an enum's underlying type, the field order of
-`ValueTuple`, and that `System.Object` declares no instance fields), public key tokens of referenced assemblies, imported implementation definitions,
-raw layout content, dispatch catalog completeness, static data bytes and generic parameter constraints.
+`ValueTuple`, and that `System.Object` declares no instance fields), public key tokens of referenced assemblies,
+imported implementation definitions, raw layout content, the layouts import slots select, dispatch catalog
+completeness, static data bytes and generic parameter constraints.
 For a generic contract import, Lean reconstructs the open definition key from the caller's
 metadata, encodes its bytes in uppercase hexadecimal and checks the closed arguments and
 signature. Lean does not recompute the implementation and interface digests, the hashed part of a generic
@@ -426,6 +427,8 @@ the names and signatures of its two instance fields in physical declaration orde
 For explicit and sequential scalar structs without custom attributes or interfaces, the audit
 compares the entire raw layout with the defining TypeDef, ClassLayout, Field and FieldLayout
 rows. It checks instance field signatures and order, packing, declared size and explicit offsets.
+The audit compares each layout an import slot selected with the same rows of the image pinned
+under the recorded implementation digest; a nested struct field leaves those layouts uncovered.
 For a supported generic selection, Lean reads the GenericParam and GenericParamConstraint
 rows of each MethodDef and its declaring TypeDef. It resolves the constraint identities,
 including the primitive arguments of a closed local interface, and compares the InterfaceImpl
@@ -560,7 +563,9 @@ allocation failure at `newobj`. At image entry, the decoded method satisfies `Ra
 bytes. Allocation failure settles the modeled run at every sufficient fuel. The quota measures
 modeled allocation capacity. The proof works for arbitrary representable literal texts, including
 equal texts. Inputs through 100 also return with every caller memory untouched in the bare
-interpreter.
+interpreter. Deep verification does not reconfirm the bodies and rows of these CoreLib methods:
+the package declares the resource getter, whose bytes no claim reads, so `body-bytes` and
+`metadata-rows` are `not covered` for this extraction.
 
 An in-place span constructor runs as a runtime-model call on a span home.
 `ObjectOperandsValid` requires its receiver to be the address of a local or parameter of the

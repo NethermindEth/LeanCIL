@@ -141,8 +141,13 @@ partial class Program
     /// <summary>What a run audits: the extraction, the files it pinned and where the generated modules go.</summary>
     sealed record BindingPlan(string Output, BindingImagePin[] Images, int Methods,
         bool? ObjectFields = null, bool? TupleFields = null, bool? PublicKeys = null,
-        BindingPublication[]? Imports = null)
+        BindingPublication[]? Imports = null, bool ImportedLayouts = false,
+        IReadOnlyDictionary<BindingFact, string>? Uncovered = null)
     {
+        /// <summary>The whole-evidence facts this run checks, in the order their modules build.</summary>
+        internal BindingFact[] EvidenceFacts => [.. PagedFacts.Append(BindingFact.StaticData)
+            .Where(fact => Uncovered?.ContainsKey(fact) != true)];
+
         internal IEnumerable<BindingData> Files => Images.Cast<BindingData>()
             .Concat((Imports ?? []).SelectMany(import => new[] { import.Sidecar, import.Closure }))
             .DistinctBy(file => file.Digest);
@@ -155,7 +160,7 @@ partial class Program
     sealed record DeepSessionContribution(string[] Modules, BindingTargets Targets,
         SortedDictionary<string, string> Artifacts, SortedDictionary<string, string> Hashes,
         SortedDictionary<string, string> SourceHashes, string SourceDirectory, string? ResultKey = null,
-        bool Restored = false)
+        bool Restored = false, IReadOnlyDictionary<BindingFact, string>? Uncovered = null)
     {
         internal BindingRequest[] Requests => Targets.Requests;
 
@@ -281,11 +286,17 @@ partial class Program
                 bytes.Add(pin.Image.Digest, snapshot = pin.Image.Bytes.ToArray());
             return new BindingImagePin(pin.Identity, pin.Image.Digest, snapshot);
         }).ToArray();
-        BindingPlan plan = new(session, pins,
-            identity.Root.GetProperty("methods").GetArrayLength(), matchedPins.FirstOrDefault(pin =>
+        var survey = SurveyEvidence(leanPath);
+        var unpinnedLayouts = UnpinnedImportedLayouts(identity, pins);
+        var uncovered = UncoveredEvidence(survey, pins);
+        if (unpinnedLayouts is { Length: > 0 })
+            uncovered.Add(BindingFact.ImportedLayouts, "no supplied image is pinned under the implementation digest " +
+                "the import records for the assemblies of its selected layouts: " + string.Join("; ", unpinnedLayouts));
+        BindingPlan plan = new(session, pins, survey.Methods, matchedPins.FirstOrDefault(pin =>
                 pin.ObjectCoverage.HasValue)?.ObjectCoverage, matchedPins.FirstOrDefault(pin =>
                 pin.TupleCoverage.HasValue)?.TupleCoverage, matchedPins.FirstOrDefault(pin =>
-                pin.KeyCoverage.HasValue)?.KeyCoverage, ReadPublishedImports(identity, pins, checkedClosures));
+                pin.KeyCoverage.HasValue)?.KeyCoverage, ReadPublishedImports(identity, pins, checkedClosures),
+            unpinnedLayouts is { Length: 0 }, uncovered);
         var directory = Path.Combine(session, "BindingAudit");
         if (Directory.Exists(directory))
             throw new InvalidOperationException("Deep-check modules already exist in the session: " + directory);
@@ -319,7 +330,7 @@ partial class Program
         if (!Same(extractedHashes, BindingArtifactHashes([extractedOlean])))
             throw new InvalidDataException("Deep-check artifact changed: " + extractedOlean);
         DeepSessionContribution contribution = new(modules, targets, artifacts,
-            BindingArtifactHashes(artifacts.Values), sources, directory, resultKey, restored);
+            BindingArtifactHashes(artifacts.Values), sources, directory, resultKey, restored, plan.Uncovered);
         contribution.RequireStable();
         return contribution;
 
@@ -501,7 +512,8 @@ partial class Program
 
     /// <summary>Report each fact and image from the requests that passed the joint audit.</summary>
     static BindingSection DeepBindingSection(DeepCheckInputs inputs, IReadOnlyList<DeepCheckInputs.Pin> pins,
-        IReadOnlyList<BindingRequest> audited, StatementSources sources, AuditedOleans oleanAudit)
+        IReadOnlyList<BindingRequest> audited, StatementSources sources, AuditedOleans oleanAudit,
+        IReadOnlyDictionary<BindingFact, string>? uncovered = null)
     {
         Dictionary<BindingFact, string> factTheorems = [];
         Dictionary<Sha256Digest, string> imageTheorems = [];
@@ -538,7 +550,8 @@ partial class Program
         BindingFactResult[] facts = [.. Enum.GetValues<BindingFact>().Select(fact =>
             factTheorems.TryGetValue(fact, out var theorem)
                 ? new BindingFactResult(fact, BindingStatus.Reconfirmed, theorem, null)
-                : new BindingFactResult(fact, BindingStatus.NotCovered, null, NotCoveredReason(fact)))];
+                : new BindingFactResult(fact, BindingStatus.NotCovered, null,
+                    uncovered?.GetValueOrDefault(fact) ?? NotCoveredReason(fact)))];
         return new(BindingMode.Deep, new(inputs.Path, inputs.Digest.ToString()), sources, images, facts);
     }
 
@@ -561,6 +574,9 @@ partial class Program
             "no generic parameter was selected, or a declaration, layout or import lacks physical coverage",
         BindingFact.PublicKeyTokens => "the supplied images do not cover the extraction pins' AssemblyRef targets",
         BindingFact.ImportIdentities => "no complete check binds every generic call to its pinned producer and published contract",
+        BindingFact.ImportedLayouts =>
+            "no import selected a layout, or a selected layout has a nested struct field or another form the image " +
+            "reader does not reconstruct",
         _ => throw new InvalidOperationException("Missing binding fact reason: " + fact)
     };
 
@@ -569,6 +585,8 @@ partial class Program
     const string LayoutContentTheorem = "BindingAudit.layoutContent";
     const string ImportsModule = "BindingAudit.GenericImports";
     const string ImportsTheorem = "BindingAudit.genericImports";
+    const string ImportedLayoutsModule = "BindingAudit.ImportedLayouts";
+    const string ImportedLayoutsTheorem = "BindingAudit.importedLayouts";
     const string DispatchCatalogsModule = "BindingAudit.DispatchCatalogs";
     const string DispatchCatalogsTheorem = "BindingAudit.dispatchCatalogs";
     const string GenericConstraintsModule = "BindingAudit.GenericConstraints";
@@ -787,7 +805,8 @@ partial class Program
             "GenericConstraints", "Extracted.methodEvidence Extracted.rawLayouts Extracted.imports"));
         File.WriteAllText(ModuleSource(plan.Output, PlatformKindsModule), CoverageSource(
             "checkPlatformKinds", "PlatformKindsChecked", "platformKinds", "kindCoverage", "PlatformKinds"));
-        File.WriteAllText(ModuleSource(plan.Output, StaticDataModule), """
+        if (plan.EvidenceFacts.Contains(BindingFact.StaticData))
+            File.WriteAllText(ModuleSource(plan.Output, StaticDataModule), """
             import BindingAudit.Images
             import Extracted
             import StrictBinding.StaticData
@@ -852,9 +871,97 @@ partial class Program
                 """);
         if (plan.Imports is { } publications)
             File.WriteAllText(ModuleSource(plan.Output, ImportsModule), PublishedImportsSource(publications));
-        foreach (var fact in PagedFacts)
+        if (plan.ImportedLayouts)
+            File.WriteAllText(ModuleSource(plan.Output, ImportedLayoutsModule), CoverageSource(
+                "checkImportedLayouts", "ImportedLayoutsChecked", "importedLayouts", "importedLayoutCoverage",
+                "ImportedLayouts", "Extracted.imports"));
+        foreach (var fact in PagedFacts.Intersect(plan.EvidenceFacts))
             File.WriteAllText(ModuleSource(plan.Output, PagedFact(fact).Module), PagedFactModuleSource(fact,
                 plan.Methods, BindingPageSize(plan.Methods)));
+    }
+
+    /// <summary>The size of the certified method evidence and declarations, and the assemblies their bodies and
+    /// metadata name.</summary>
+    sealed record EvidenceSurvey(int Methods, int Declarations, string[] Identities);
+
+    /// <summary>Prints the evidence size and the identities its bodies and metadata slices name.</summary>
+    const string EvidenceSurveySource = """
+        import Extracted
+
+        #eval show IO Unit from do
+          let evidence := Extracted.methodEvidence ++ Extracted.managedDeclarations
+          IO.println s!"methods {Extracted.methodEvidence.length}"
+          IO.println s!"declarations {Extracted.managedDeclarations.length}"
+          let named := evidence.map (fun item => item.assembly.identity) ++
+            evidence.flatMap fun item => item.body.metadata.slices.map fun slice => slice.assembly.identity
+          for identity in named.eraseDups do
+            IO.println s!"identity {identity}"
+
+        """;
+
+    /// <summary>
+    /// Reads the size of the certified evidence and the assemblies it names from the extraction. The survey only
+    /// shapes the generated modules: the kernel checks every page count and claim they state.
+    /// </summary>
+    EvidenceSurvey SurveyEvidence(string leanPath)
+    {
+        var directory = Directory.CreateTempSubdirectory("leancil-survey-").FullName;
+        try
+        {
+            var source = Path.Combine(directory, "EvidenceSurvey.lean");
+            File.WriteAllText(source, EvidenceSurveySource);
+            var result = Execute([LeanExecutable, source], leanPath: leanPath, progress: "Surveying the method evidence",
+                environment: LeanEnvironment);
+            if (result.Code != 0)
+                throw new InvalidOperationException("Evidence survey failed: " + BindingDiagnostic(result.Output));
+            string[] lines = result.Stdout.Split('\n', StringSplitOptions.TrimEntries);
+            int Count(string label) => int.Parse(lines.Single(line => line.StartsWith(label + " ",
+                StringComparison.Ordinal))[(label.Length + 1)..], NumberStyles.None, CultureInfo.InvariantCulture);
+            return new(Count("methods"), Count("declarations"), [.. lines
+                .Where(line => line.StartsWith("identity ", StringComparison.Ordinal))
+                .Select(line => line["identity ".Length..])]);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Why a whole-evidence fact is not checked: the evidence names an assembly no image is pinned under, or
+    /// managed declarations carry bodies and rows that no claim reads. No entry means every such fact is checked.
+    /// </summary>
+    static Dictionary<BindingFact, string> UncoveredEvidence(EvidenceSurvey survey, BindingImagePin[] pins)
+    {
+        var missing = survey.Identities.Where(identity => !pins.Any(pin => pin.Identity == identity)).ToArray();
+        var unpinned = missing.Length == 0 ? null
+            : "the method evidence names assemblies no supplied image is pinned under: " + string.Join("; ", missing);
+        var declared = survey.Declarations == 0 ? null
+            : $"no deep check reads the bodies and rows of the {survey.Declarations} managed declarations";
+        Dictionary<BindingFact, string> uncovered = [];
+        foreach (var fact in PagedFacts.Append(BindingFact.StaticData))
+        {
+            string?[] reasons = [unpinned, fact == BindingFact.StaticData ? null : declared];
+            if (reasons.Any(reason => reason is not null))
+                uncovered.Add(fact, string.Join(", and ", reasons.OfType<string>()));
+        }
+        return uncovered;
+    }
+
+    /// <summary>
+    /// The assemblies of the layouts import slots selected that no supplied image is pinned under with the digest
+    /// its import records, so the imported layout check would read other bytes; null when no import selected one.
+    /// </summary>
+    static string[]? UnpinnedImportedLayouts(ExtractionIdentity identity, BindingImagePin[] pins)
+    {
+        var selected = identity.Imports.SelectMany(import =>
+            import.TryGetProperty("actualLayouts", out var layouts) && layouts.ValueKind == JsonValueKind.Array
+                ? layouts.EnumerateArray().Select(layout => (Import: import, Layout: layout)) : []).ToArray();
+        if (selected.Length == 0) return null;
+        return [.. selected.Where(entry =>
+        {
+            var digest = Sha256Digest.Parse(entry.Import.GetProperty("implementationSha256").GetString(),
+                "the extraction identity");
+            var scope = entry.Layout.GetProperty("scope").GetString();
+            return !pins.Any(pin => pin.Identity == scope && pin.Digest == digest);
+        }).Select(entry => entry.Layout.GetProperty("scope").GetString()!).Distinct(StringComparer.Ordinal)];
     }
 
     /// <summary>Only a selected physical producer and a replayed interface can supply a publication.</summary>
@@ -1132,6 +1239,9 @@ partial class Program
             platform.Add(new(ImportsModule, new(ImportsTheorem, statement, ApprovedAxioms, term: true),
                 new BindingSubject.Fact(BindingFact.ImportIdentities), "GenericImportsChecked"));
         }
+        if (plan.ImportedLayouts)
+            platform.Add(Coverage(ImportedLayoutsModule, ImportedLayoutsTheorem, "ImportedLayoutsChecked",
+                BindingFact.ImportedLayouts, "imports"));
         return
         [
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
@@ -1146,13 +1256,13 @@ partial class Program
                 "platformDefinitions", "methodEvidence"),
             Coverage(EnumStorageModule, EnumStorageTheorem, "EnumStorageChecked", BindingFact.EnumUnderlyingTypes,
                 "platformDefinitions", "methodEvidence"),
-            .. PagedFacts.Select(fact => (Fact: fact, Paged: PagedFact(fact))).Select(item => new BindingRequest(
-                item.Paged.Module, new("BindingAudit." + item.Paged.Theorem, App(Const(item.Paged.Proposition),
-                    Const("BindingAudit.images"), Const("Extracted.methodEvidence")), ApprovedAxioms),
-                new BindingSubject.Fact(item.Fact))),
-            new(StaticDataModule, new("BindingAudit.staticData", App(Const("StrictBinding.StaticDataBound"),
-                Const("BindingAudit.images"), Const("Extracted.methodEvidence")), ApprovedAxioms),
-                new BindingSubject.Fact(BindingFact.StaticData)),
+            .. plan.EvidenceFacts.Select(fact => fact == BindingFact.StaticData
+                ? new BindingRequest(StaticDataModule, new("BindingAudit.staticData",
+                    App(Const("StrictBinding.StaticDataBound"), Const("BindingAudit.images"),
+                        Const("Extracted.methodEvidence")), ApprovedAxioms), new BindingSubject.Fact(fact))
+                : new BindingRequest(PagedFact(fact).Module, new("BindingAudit." + PagedFact(fact).Theorem,
+                    App(Const(PagedFact(fact).Proposition), Const("BindingAudit.images"),
+                        Const("Extracted.methodEvidence")), ApprovedAxioms), new BindingSubject.Fact(fact))),
             .. platform,
             .. plan.Files.Select(image => new BindingRequest(image.Module,
                 new(image.Theorem,
@@ -1181,10 +1291,11 @@ partial class Program
         if (plan.Files.Any(image => failures.ContainsKey(image.Module)))
             failures[ImagesModule] = "build: an image module did not build";
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
-        var facts = PagedFacts.Select(fact => PagedFact(fact).Module)
-            .Append(StaticDataModule).Append(EnumStorageModule).Append(PlatformKindsModule)
+        var facts = plan.EvidenceFacts.Select(fact => fact == BindingFact.StaticData ? StaticDataModule
+                : PagedFact(fact).Module).Append(EnumStorageModule).Append(PlatformKindsModule)
             .Append(GenericConstraintsModule).Append(LayoutContentModule).Append(DispatchCatalogsModule);
         if (plan.Imports is not null) facts = facts.Append(ImportsModule);
+        if (plan.ImportedLayouts) facts = facts.Append(ImportedLayoutsModule);
         if (plan.ObjectFields.HasValue) facts = facts.Append(ObjectFieldsModule);
         if (plan.TupleFields.HasValue) facts = facts.Append(TupleFieldsModule);
         if (plan.PublicKeys.HasValue) facts = facts.Append(PublicKeysModule);

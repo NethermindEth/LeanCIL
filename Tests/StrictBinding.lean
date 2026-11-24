@@ -9,6 +9,7 @@ import Tests.StrictBinding.EnumEvidence
 import Tests.StrictBinding.PlatformKinds
 import Tests.StrictBinding.StaticData
 import Tests.StrictBinding.LayoutContent
+import Tests.StrictBinding.ImportedLayouts
 import Tests.StrictBinding.DispatchCatalogs
 import Tests.StrictBinding.GenericImports
 

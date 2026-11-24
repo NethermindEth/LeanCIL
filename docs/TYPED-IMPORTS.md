@@ -70,7 +70,9 @@ computed layout with its selected implementation layout. The caller's required
 `TranslationValid` evidence includes `ImportedLayoutsValid`: exact published and
 selected metadata values, `LayoutsValid`, unique identities and complete typed
 signature coverage. The raw layout algorithm and architecture rules
-apply unchanged.
+apply unchanged. With the implementation pinned under the digest the import records,
+[deep verification](CLI.md#deep-verification) compares each selected layout with its TypeDef in
+that image and reports the result as the `imported-layouts` binding fact.
 
 The typed signature boundary rejects open types, generic declaring types (an extraction entry may
 be a static method of a generic class, but such a method cannot be exported or imported),
