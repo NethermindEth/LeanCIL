@@ -15,19 +15,22 @@ def memberToken (body : BodyEvidence) : Option Nat :=
 
 /-- Bind the packaged caller using the facade and CoreLib rows carried with the runtime. -/
 def pinnedCaller : Option BodyEvidence :=
-  Extracted.method0RangeImage5.map (·.caller)
+  match Extracted.translation_valid.entry .net11WinX64 with
+  | some (.range image) => some image.caller
+  | _ => none
 
 /-- The neighboring throw, a missing defining image, the facade with the same MethodDef
 number, a different MethodDef and a mismatched constructor signature are all refused. -/
 theorem rejectsInvalidBindings :
+    let bindCtor := Extracted.method0Body.bindConstructor? Extracted.method0Original 5
     let callee : SpecializedMethod := ⟨[], Core.RangeCtor.definition, ⟨coreLibraryScope⟩⟩
     (Extracted.method0Body.constructorTokenAt? 0 0 6).isNone ∧
-    (Extracted.method0BindConstructor5 [] callee).isNone ∧
-    (Extracted.method0BindConstructor5 rangeDependencies
+    (bindCtor [] callee).isNone ∧
+    (bindCtor rangeDependencies
       { callee with assembly := ⟨runtimeScope⟩ }).isNone ∧
-    (Extracted.method0BindConstructor5 rangeDependencies
+    (bindCtor rangeDependencies
       { callee with closed := { callee.closed with token := Core.ArgumentCtor.definition.token } }).isNone ∧
-    (Extracted.method0BindConstructor5 rangeDependencies
+    (bindCtor rangeDependencies
       { callee with closed := { callee.closed with parameters := [] } }).isNone := by
   repeat' constructor
   all_goals cil_kernel_rfl
@@ -35,11 +38,13 @@ theorem rejectsInvalidBindings :
 
 /-- The Windows x64 constructor image requires a compatible target and the actual newobj. -/
 theorem rejectsOtherTarget :
+    (Extracted.translation_valid.entry .portable).isNone ∧
     (rangeImage? Extracted.method0Body Extracted.method0Original 5
       { Extracted.profile with architecture := .arm64 } Extracted.environment).isNone ∧
     (rangeImage? Extracted.method0Body Extracted.method0Original 6
       Extracted.profile Extracted.environment).isNone := by
-  constructor <;> cil_kernel_rfl
+  repeat' constructor
+  all_goals cil_kernel_rfl
 #print axioms rejectsOtherTarget
 
 /-- Pinned definition selected by the caller’s actual constructor token. -/
@@ -85,10 +90,10 @@ theorem callerEvidence :
   all_goals first | cil_kernel_rfl | decide +kernel | cil_body_decodes
 
 /-- Decoded caller linked to the seven CoreLib method bodies reached by Percent. -/
-def linkedProgram : Option Program := Extracted.method0RangeImage5.map (·.methods)
+def linkedProgram : Option Program := (Extracted.translation_valid.entry .net11WinX64).map (·.methods)
 
 /-- Original bodies used by the package's image loader. -/
-def inputs : List RawMethod := (Extracted.method0RangeImage5.map (·.originals)).getD []
+def inputs : List RawMethod := ((Extracted.translation_valid.entry .net11WinX64).map (·.originals)).getD []
 
 /-- Decoded execution for every unsigned input at a caller-selected allocation budget. -/
 theorem outcome (budget : Option Nat) :
@@ -166,7 +171,7 @@ theorem rangeExceptionAtEntry {executable : Program} {initial : Safety.Memory} {
 /-- The generated image loads and executes from empty caller storage, including for an
 explicit deployment quota. Neither the caller nor the proof supplies runtime method bodies. -/
 def imageExecution (budget : Option Nat) : Prop :=
-  ∃ image initial, Extracted.method0RangeImage5 = some image ∧
+  ∃ image initial, (Extracted.translation_valid.entry .net11WinX64) = some image ∧
     image.initialMemory budget = .ok initial ∧
     ∀ value : W32, image.invoke 66 [.scalar (.i32 value)] budget = .ok
       (if value ≤ 100 then .ok (initial, [.scalar (.i32 value)])
@@ -175,15 +180,15 @@ def imageExecution (budget : Option Nat) : Prop :=
 
 theorem imageFromEmpty (budget : Option Nat) : imageExecution budget := by
   obtain ⟨executable, initial, generated, loaded, runs⟩ := outcome budget
-  cases found : Extracted.method0RangeImage5 with
+  cases found : (Extracted.translation_valid.entry .net11WinX64) with
   | none => simp [linkedProgram, found] at generated
   | some image =>
     have same : image.methods = executable := by simpa [linkedProgram, found] using generated
     have ready : image.initialMemory budget = .ok initial := by
-      simpa [RangeImage.initialMemory, inputs, found] using loaded
+      simpa [ProgramEntry.initialMemory, inputs, found] using loaded
     refine ⟨image, initial, found, ready, ?_⟩
     intro value
-    rw [RangeImage.invoke, ready, same]
+    rw [ProgramEntry.invoke, ready, same]
     exact congrArg Except.ok (runs value)
 #print axioms imageFromEmpty
 

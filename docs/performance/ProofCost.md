@@ -281,7 +281,7 @@ compiled library and extraction on the Lean search path.
 `System.ArgumentOutOfRangeException` above 100. The public contract holds for any caller
 memory. At 101, both consumers prove the exception type from `Memory.empty`. One steps the
 compiled instructions and the other applies the public theorem.
-[Public contract](../../Examples/Proofs/Percent.lean) ·
+[Measured folded contract](../../Tests/CompiledPercent/FoldedContract.lean) ·
 [Boundary consumers](../../Tests/ThrowVariants/PercentReuse.lean.in)
 
 The base interpreter at `27953edb` represents the exception type with its full CLR name.

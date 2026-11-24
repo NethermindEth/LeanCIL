@@ -1050,9 +1050,11 @@ overflow for signed minimum divided by negative one, including its remainder ins
 arithmetic operands, invalid bounds, memory faults, unsupported instructions, invalid state and fuel
 exhaustion have no name in this mode. The mode does not change `Raises` or `.thrown`.
 `OutcomeContract.Holds.clr` lifts a thrown-outcome proof (`Holds`) to `HoldsCLR`.
-The compiled `Throws.Percent(uint)` returns its input through 100 inclusive and raises
-`ArgumentOutOfRangeException` above 100, from any caller memory. The same proof applies
-when the constructor's message and parameter name are translated.
+For the compiled `Throws.Percent(uint)`, the default proof selects the .NET 11 Windows x64
+entry from `Extracted.translation_valid`. The loader starts with empty caller storage.
+Inputs through 100 return unchanged. Larger inputs raise `ArgumentOutOfRangeException`
+under ordinary heap availability. An explicit zero quota fails at the original allocation.
+The proof applies to both compiled locales.
 [Percent](../Examples/Proofs/Percent.lean)
 
 For a wide-integer `Divide` or `Mod` contract, select `some .divideByZero` in

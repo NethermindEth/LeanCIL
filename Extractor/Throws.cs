@@ -67,20 +67,6 @@ internal static class Throws
 
     internal static Analysis Analyze(MethodDefinition method) => cache.GetValue(method, Compute);
 
-    // The Windows x64 runtime image carries this overload and its managed dependencies.
-    internal static Instruction? TwoStringRangeConstructor(MethodDefinition method)
-    {
-        foreach (var (raise, exception) in Analyze(method).Raises)
-        {
-            if (exception == ExceptionType.ArgumentOutOfRange && raise.Previous.Previous?.OpCode.Code == Code.Ldstr &&
-                raise.Previous.Operand is MethodReference constructor &&
-                constructor.Parameters is [{ ParameterType.MetadataType: MetadataType.String },
-                    { ParameterType.MetadataType: MetadataType.String }])
-                return raise.Previous;
-        }
-        return null;
-    }
-
     static Analysis Compute(MethodDefinition method)
     {
         var code = method.Body.Instructions;

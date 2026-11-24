@@ -1,6 +1,4 @@
 import CIL.Runtime.Net11WinX64.RangeMethods
-import CIL.Safety.LiteralImage
-import CIL.Safety.Execution
 
 /-! Managed execution of the two-string range exception constructor in the .NET 11.0.0
 Windows x64 runtime. The resource getter on the null-message branch occupies the first
@@ -105,21 +103,15 @@ structure RangeImage where
   originals : List RawMethod
   resourceImport : SpecializedMethod
 
-/-- Load literals from the original bodies before entering the managed program. -/
-def RangeImage.initialMemory (image : RangeImage) (budget : Option Nat := none) :=
-  Safety.LiteralImage.initialMemory image.originals budget
-
-/-- Invoke method zero from empty caller storage after interning this image's literals.
-The outer result reports image loading and the inner result reports method execution. -/
-def RangeImage.invoke (image : RangeImage) (fuel : Nat) (args : List Safety.Value)
-    (budget : Option Nat := none) :=
-  (image.initialMemory budget).map (Safety.invoke image.methods fuel 0 args)
+/-- The scalar and x64 execution profiles with the runtime image's pointer width and byte order. -/
+def supportsProfile (profile : FeatureProfile) : Bool :=
+  profile.nativeWidth == 64 && profile.littleEndian && profile.architecture != .arm64
 
 /-- Decode a single entry method and the seven framework methods reached with a non-null
 message. The caller must resolve its constructor through the two pinned runtime slices. -/
 def rangeImage? (original : BodyEvidence) (source : RawMethod) (pc : Nat)
     (profile : FeatureProfile) (environment : LayoutEnvironment) : Option RangeImage := do
-  guard (profile.nativeWidth == 64 && profile.littleEndian && profile.architecture != .arm64)
+  guard (supportsProfile profile)
   let body ← original.bindConstructor? source pc rangeDependencies
     ⟨[], RangeCtor.definition, ⟨coreLibraryScope⟩⟩
   let code ← (checkBody body source []).toOption

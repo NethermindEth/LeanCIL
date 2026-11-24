@@ -515,17 +515,21 @@ Pass `some heapBytes` to analyze a finite quota. The loader reads the
 original `ldstr` operands, interns repeated text once and grants read-only access to each string.
 The supplied quota remains available for allocations during execution. For both compiled locales
 of `Throws.Percent`, the verifier checks that both original operands load even with zero heap quota.
-The extractor emits a binding function for each reachable folded constructor site. Given the
-facade and defining assembly slices and a constructor candidate, it reads the original
-`newobj` token, resolves its declaring type through the carried rows and checks the MethodDef
-and signature. For single-entry methods with a two-string range constructor and an original
-`ldstr` message immediately before `newobj`, the generated `methodNRangeImagePC` can decode
-the caller and its seven managed runtime bodies. The named target is .NET 11.0.0 Windows x64.
-Its CoreLib SHA-256 is `7b82f62a60e1673863813dd78af931a775be0630570a377cffa9e8cb9cb7abab`
-and its System.Runtime facade SHA-256 is `fa44e6e28f385224ff981086d9ca7aad2c9f49ee4de0152913eff60cb4e25416`.
-`RangeImage.invoke` loads the image from empty caller storage before running method zero.
-The resource getter occupies the first import slot. A non-null message bypasses that call.
-The ordinary `Extracted.program` exception proof uses the recognized constructor fold.
+The audited translation theorem supplies the entry through `Extracted.translation_valid.entry`.
+For a closed package without an external exception constructor or a folded throw, the entry
+uses the certified methods and loads literals from the original method evidence. For the
+two-string range constructor on `.net11WinX64`, Lean locates the live `newobj`, resolves the
+original MemberRef through the facade, checks the MethodDef and signature, and decodes the
+caller and seven runtime methods. The constructor requires an immediately preceding `ldstr`
+message with no branch into `newobj`. The resource getter occupies the first import slot.
+A non-null message bypasses it. Open packages and constructors without a checked runtime
+binding produce `none` at this entry.
+
+`Extracted.translation_valid.invoke target fuel args budget` starts from empty caller storage
+and reports binding, image loading and execution separately. The pinned .NET 11.0.0 Windows
+x64 CoreLib SHA-256 is `7b82f62a60e1673863813dd78af931a775be0630570a377cffa9e8cb9cb7abab`.
+The facade SHA-256 is `fa44e6e28f385224ff981086d9ca7aad2c9f49ee4de0152913eff60cb4e25416`.
+Direct calls to `Safety.invoke Extracted.program` use the translated methods and caller memory.
 
 For the pinned .NET 11 Windows x64 body of `Throws.Percent(uint)`, Lean checks the original
 caller and the CoreLib constructor methods reached on the throwing path. Starting from empty
@@ -536,9 +540,8 @@ allocation failure at `newobj`. At image entry, the decoded method satisfies `Ra
 `ArgumentOutOfRangeException` on an input above 100 exactly when the quota is at least 128
 bytes. Allocation failure settles the modeled run at every sufficient fuel. The quota measures
 modeled allocation capacity. The proof works for arbitrary representable literal texts, including
-equal texts. Inputs through 100 also
-return with every caller memory untouched, before any runtime preparation. The ordinary entry from
-unprepared empty memory still relies on the recognized constructor fold for its exception guarantee.
+equal texts. Inputs through 100 also return with every caller memory untouched in the bare
+interpreter. The legacy proof over `Extracted.program` uses the constructor fold.
 
 An in-place span constructor runs as a runtime-model call on a span home.
 `ObjectOperandsValid` requires its receiver to be the address of a local or parameter of the

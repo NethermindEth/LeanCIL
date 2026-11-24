@@ -118,11 +118,18 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         $"example : Extracted.method{method}.code[{item.index}]? = some .ldnull := " +
         $"Extracted.method{method}_instruction{item.index}"));
     var raisedInstruction = name == "Null" ? ".throw" : $"(.throw (some .{label}))";
+    var entryCheck = name switch
+    {
+        "Null" => "example : (Extracted.translation_valid.entry .portable).map (·.methods) = some Extracted.program := by cil_kernel_rfl",
+        "Inner" or "ActualValue" => "example : (Extracted.translation_valid.entry .net11WinX64).isNone = true := by cil_kernel_rfl",
+        _ => ""
+    };
     var proof = Path.Combine(folder, "BoundaryProof.lean");
     File.WriteAllText(proof, $$"""
         import Extracted
         import CIL.Safety.Execution
         namespace ExampleProof
+        {{entryCheck}}
         {{nullEquations}}
         example : Extracted.method{{method}}.code[{{pc}}]? = some {{raisedInstruction}} :=
           Extracted.method{{method}}_instruction{{pc}}
@@ -155,7 +162,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         queue.Add(new(selector, proof, Path.Combine(root, "Percent-Translated"), Assembly: image), () =>
             Console.WriteLine("PASS Percent: the same boundary proof checks with translated exception literals"));
 
-        var contract = At("Examples/Proofs/Percent.lean");
+        var contract = At("Tests/CompiledPercent/FoldedContract.lean");
         queue.Add(new(selector, contract, Path.Combine(root, "Percent-Contract")), () =>
             Console.WriteLine("PASS Percent: the CLR contract holds for every uint and caller memory"));
         queue.Add(new(selector, contract, Path.Combine(root, "Percent-Contract-Translated"), Assembly: image), () =>
@@ -163,12 +170,12 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         var rawProof = CompiledPercentProof(folder);
         foreach (var (suffix, assemblyPath) in new[] { ("", assembly), ("-Translated", image) })
         {
-            queue.Add(new(selector, At("Examples/Proofs/PercentWindowsX64.lean"),
-                Path.Combine(root, "Percent-Managed" + suffix), Theorem: "ExampleProof.managedException",
+            queue.Add(new(selector, At("Examples/Proofs/Percent.lean"),
+                Path.Combine(root, "Percent-Managed" + suffix), Theorem: "ExampleProof.correctness",
                 Assembly: assemblyPath), () => Console.WriteLine("PASS Percent: managed entry from empty storage" + suffix));
-            queue.Add(new(selector, contract, Path.Combine(root, "Percent-Image" + suffix),
-                Theorem: "ExampleProof.loadedException", Assembly: assemblyPath), () =>
-                Console.WriteLine("PASS Percent: original string operands load from the certified image" + suffix));
+            queue.Add(new(selector, At("Examples/Proofs/Percent.lean"),
+                Path.Combine(root, "Percent-ZeroBudget" + suffix), Theorem: "ExampleProof.zeroBudget",
+                Assembly: assemblyPath), () => Console.WriteLine("PASS Percent: zero quota fails at newobj" + suffix));
             verification.Verify(assemblyPath, "Examples", selector, rawProof, Path.Combine(root, "Percent-Raw" + suffix),
                 theorem: "CompiledPercent.verified");
             Console.WriteLine("PASS Percent: decoded caller and CoreLib exception path at every heap quota" + suffix);
