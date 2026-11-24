@@ -200,48 +200,14 @@ internal sealed class LayoutEvidence
             // Field resolution compares the owner's and held type's bytes with the bytes in the layout row.
             namedOperandTypes[$".aggregate {identityTerms[index]} {index}"] = $".aggregate {name} {index}";
         }
-        lean.AppendLine("def rawLayouts : List Extraction.RawLayout := [");
-        lean.AppendLine(string.Join(",\n", rawTypes.Select((type, index) =>
+        // One definition per row keeps the compiler's recursion depth independent of the table size.
+        for (var index = 0; index < rawTypes.Length; index++)
         {
-            var metadata = ValueTuples.Is(type) ? ((GenericInstanceType)type).ElementType.Resolve() : type.Resolve();
-            var genericEvidence = "";
-            if (GenericStructs.Is(type) && type is GenericInstanceType closed)
-            {
-                var serializer = new GenericEvidence(null, this);
-                var owner = $".constructor {IdentityText.Quote(Scope(type))} {GenericEvidence.ClassName(metadata)}";
-                var arguments = string.Join(", ", closed.GenericArguments.Select(serializer.Type));
-                var parameters = $"arity := {metadata.GenericParameters.Count}, arguments := [{arguments}]";
-                var openFields = string.Join(", ", metadata.Fields.Where(field => !field.IsStatic)
-                    .Select(field => serializer.Type(field.FieldType)));
-                var constraints = metadata.GenericParameters.Select(parameter =>
-                {
-                    var names = parameter.Constraints.Select(constraint =>
-                        IdentityText.Quote(GenericEvidence.ConstraintType(constraint.ConstraintType)));
-                    return $"({(uint)parameter.Attributes}, [{string.Join(", ", names)}])";
-                });
-                var members = $"fields := [{openFields}], constraints := [{string.Join(", ", constraints)}]";
-                genericEvidence = $$"""generic := some { owner := {{owner}}, {{parameters}}, {{members}} }, """;
-            }
-            var fields = layouts.Fields(type).Select(field =>
-                $"{{ type := {RawFieldType(field.Type, type.Module)}, offset := {(field.Definition.Offset < 0 ? "none" : $"some {field.Definition.Offset}")} }}");
-            var kind = $"explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, ";
-            var auto = metadata.IsAutoLayout ? "auto := true, " : "";
-            var marker = MetadataValidation.IsByRefLike(type) ? "byRefLike := true, " : "";
-            // An imported entry repeats its published layout, which carries no interfaces.
-            var interfaces = layouts.IsImported(type) ? "" : $"interfaces := [{string.Join(", ",
-                metadata.Interfaces.Select(implementation => IdentityText.Quote(InterfaceIdentity(
-                    GenericStructs.Substitute(implementation.InterfaceType, type as GenericInstanceType)))))}], ";
-            var head = type is GenericInstanceType constructed ? constructed.ElementType : metadata;
-            var declaration = $"declaration := {Declaration(head)}, ";
-            if (type is GenericInstanceType instance)
-                declaration += $"genericArguments := some {LayoutArguments(instance)}, ";
-            var attributes = $"{declaration}{genericEvidence}{kind}{auto}{marker}{interfaces}";
-            var size = $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}";
-            var fieldList = string.Join(", ", fields);
-            var identity = rowIdentities[index];
-            return $$"""  { identity := {{identity}}, {{attributes}}{{size}}, fields := [{{fieldList}}] }""";
-        })));
-        lean.AppendLine("]");
+            var row = RawRow(rawTypes[index], rowIdentities[index]);
+            lean.AppendLine($"def rawLayout{index} : Extraction.RawLayout := {row}");
+        }
+        var rowNames = string.Join(", ", Enumerable.Range(0, rawTypes.Length).Select(index => $"rawLayout{index}"));
+        lean.AppendLine($"def rawLayouts : List Extraction.RawLayout := [{rowNames}]");
         lean.AppendLine("def computedLayouts : Array Extraction.ComputedLayout := #[" +
             string.Join(", ", rawTypes.Select(type =>
             {
@@ -252,6 +218,50 @@ internal sealed class LayoutEvidence
         decoderInputs?.Append(lean, start, lean.Length - start);
         lean.AppendLine("theorem layouts_validated : Extraction.LayoutsValid rawLayouts computedLayouts " +
             $".{Architecture} := " + LeanEmitter.Decide);
+    }
+
+    /// <summary>The raw metadata row of a layout type, naming its identity by `identity`.</summary>
+    string RawRow(TypeReference type, string identity)
+    {
+        var metadata = ValueTuples.Is(type) ? ((GenericInstanceType)type).ElementType.Resolve() : type.Resolve();
+        var genericEvidence = "";
+        if (GenericStructs.Is(type) && type is GenericInstanceType closed)
+        {
+            var serializer = new GenericEvidence(null, this);
+            var owner = $".constructor {IdentityText.Quote(Scope(type))} {GenericEvidence.ClassName(metadata)}";
+            var arguments = string.Join(", ", closed.GenericArguments.Select(serializer.Type));
+            var parameters = $"arity := {metadata.GenericParameters.Count}, arguments := [{arguments}]";
+            var openFields = string.Join(", ", metadata.Fields.Where(field => !field.IsStatic)
+                .Select(field => serializer.Type(field.FieldType)));
+            var constraints = metadata.GenericParameters.Select(parameter =>
+            {
+                var names = parameter.Constraints.Select(constraint =>
+                    IdentityText.Quote(GenericEvidence.ConstraintType(constraint.ConstraintType)));
+                return $"({(uint)parameter.Attributes}, [{string.Join(", ", names)}])";
+            });
+            var members = $"fields := [{openFields}], constraints := [{string.Join(", ", constraints)}]";
+            genericEvidence = $$"""generic := some { owner := {{owner}}, {{parameters}}, {{members}} }, """;
+        }
+        var fields = layouts.Fields(type).Select(field =>
+        {
+            var offset = field.Definition.Offset < 0 ? "none" : $"some {field.Definition.Offset}";
+            return $"{{ type := {RawFieldType(field.Type, type.Module)}, offset := {offset} }}";
+        });
+        var kind = $"explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, ";
+        var auto = metadata.IsAutoLayout ? "auto := true, " : "";
+        var marker = MetadataValidation.IsByRefLike(type) ? "byRefLike := true, " : "";
+        // An imported entry repeats its published layout, which carries no interfaces.
+        var interfaces = layouts.IsImported(type) ? "" : $"interfaces := [{string.Join(", ",
+            metadata.Interfaces.Select(implementation => IdentityText.Quote(InterfaceIdentity(
+                GenericStructs.Substitute(implementation.InterfaceType, type as GenericInstanceType)))))}], ";
+        var head = type is GenericInstanceType constructed ? constructed.ElementType : metadata;
+        var declaration = $"declaration := {Declaration(head)}, ";
+        if (type is GenericInstanceType instance)
+            declaration += $"genericArguments := some {LayoutArguments(instance)}, ";
+        var attributes = $"{declaration}{genericEvidence}{kind}{auto}{marker}{interfaces}";
+        var size = $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}";
+        var fieldList = string.Join(", ", fields);
+        return $$"""{ identity := {{identity}}, {{attributes}}{{size}}, fields := [{{fieldList}}] }""";
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number, HashSet<Instruction> reachable,

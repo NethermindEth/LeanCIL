@@ -21,8 +21,61 @@ var root = At("artifacts/GenericLayouts");
 Directory.CreateDirectory(root);
 var extractor = Assembly.LoadFrom(ExtractorPath);
 if (!LayoutVisits() || args.Contains("--layout-visits-only", StringComparer.Ordinal)) return;
+CheckLargeLayoutTable();
 
 VerifyGenericOwners(assembly, root);
+
+// Lean's compiler exceeded its maximum recursion depth on one list literal of 512 generic rows holding structs.
+void CheckLargeLayoutTable()
+{
+    // Chains stay below the extractor's nesting limit of 128 aggregates.
+    const int rows = 512, chain = 64;
+    var output = Path.Combine(root, "LargeTable");
+    Directory.CreateDirectory(output);
+    var image = Path.Combine(output, "LargeTable.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var template = module.GetType("Examples.GenericPair`1");
+        var method = new MethodDefinition("LargeTable", Mono.Cecil.MethodAttributes.Public |
+            Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
+        module.GetType("Examples.GenericLayouts").Methods.Add(method);
+        TypeDefinition? previous = null;
+        for (int index = 0; index < rows; index++)
+        {
+            var row = new TypeDefinition("Examples", $"Row{index}`1", template.Attributes, template.BaseType);
+            var parameter = new GenericParameter("T", row);
+            row.GenericParameters.Add(parameter);
+            // Row(k)<T> holds Row(k - 1)<T>, so each raw row names the aggregate before it.
+            TypeReference held = parameter;
+            if (index % chain != 0)
+                held = new GenericInstanceType(previous) { GenericArguments = { parameter } };
+            row.Fields.Add(new FieldDefinition("Value", Mono.Cecil.FieldAttributes.Public, held));
+            module.Types.Add(row);
+            previous = row;
+            var closed = new GenericInstanceType(row);
+            closed.GenericArguments.Add(module.TypeSystem.UInt32);
+            method.Body.Variables.Add(new VariableDefinition(closed));
+        }
+        var il = method.Body.GetILProcessor();
+        il.Emit(OpCodes.Ldc_I4_0);
+        il.Emit(OpCodes.Ret);
+        module.Write(image);
+    }
+    Run(Extract("extract", image, "Examples", "GenericLayouts::LargeTable()", output));
+    var emitted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    int start = emitted.IndexOf("def layoutIdentity0 :", StringComparison.Ordinal);
+    int end = emitted.IndexOf("def computedLayouts :", start, StringComparison.Ordinal);
+    var table = Path.Combine(output, "Table.lean");
+    File.WriteAllText(table, $"""
+        import CIL.Extraction.DecodedDefinition
+        open CIL
+        set_option maxRecDepth 4096
+        {emitted[start..end]}
+        #guard rawLayouts.length == {rows}
+        """ + "\n");
+    Run(["lake", "env", "lean", table], cwd: FixturePackage());
+    Console.WriteLine($"PASS a table of {rows} generic layout rows compiles");
+}
 
 bool LayoutVisits()
 {

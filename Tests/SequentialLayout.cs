@@ -54,7 +54,7 @@ void CheckIdentityLiterals()
         module.Write(dll);
         Run(["dotnet", ExtractorPath, "extract", dll, "Sequential::Sizes()", output]);
         var emitted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-        int start = emitted.IndexOf("def rawLayouts :", StringComparison.Ordinal);
+        int start = emitted.IndexOf("def rawLayout0 :", StringComparison.Ordinal);
         int end = emitted.IndexOf("def computedLayouts :", start, StringComparison.Ordinal);
         source.AppendLine($$"""
             namespace Table{{count}}

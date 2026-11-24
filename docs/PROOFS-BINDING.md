@@ -749,6 +749,9 @@ The extraction lists a `LayoutUse` for each struct construction, local and param
 requires one. A field operand identifies its owner, field index, metadata name and held type.
 `Method.fieldShape` reads the offset and width from the checked layout for the selected profile.
 
+`Extracted.rawLayout{k}` is the raw metadata row at layout index `k`, and `Extracted.rawLayouts`
+lists those rows in index order.
+
 For a closed generic struct, including a runtime value tuple, `Extracted.layoutIdentity{k}`
 stores the checked UTF-8 bytes of its fully scoped name at layout index `k`. The layout row
 and decoded operands, including call signatures, share that definition. Decoded owners and
