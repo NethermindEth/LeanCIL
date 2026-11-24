@@ -3667,6 +3667,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// </summary>
     sealed record StatementIdentity(JsonElement? term, string? termError, bool? matches, string? mismatch);
 
+    /// <summary>
+    /// A theorem that verified but that the kernel did not accept at the statement its request expected, so it
+    /// does not prove, or refute, that statement.
+    /// </summary>
+    internal sealed class StatementMismatchException(string? mismatch) : InvalidOperationException(
+        $"Verified statement does not match the requested contract: {mismatch}");
+
     static StatementIdentity Identity(AuditedTheorem audited) =>
         new(audited.term, audited.termError, audited.matches, audited.mismatch);
     sealed record AuditConstantRequest(string name, object value, object? type = null, string[]? axioms = null);
@@ -5244,8 +5251,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             var proved = auditedTheorems[theorem];
             refutation = ExtractedRefutation(proved, extraction.Root);
             if (statement?.Expected is not null && proved.matches != true)
-                throw new InvalidOperationException(
-                    $"Verified statement does not match the requested contract: {proved.mismatch}");
+                throw new StatementMismatchException(proved.mismatch);
             if (statement?.Term == true && proved.term is null)
                 throw new InvalidOperationException($"Cannot compare the verified statement: {proved.termError}");
             RequireOriginalProofSources();

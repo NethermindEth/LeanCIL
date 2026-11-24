@@ -295,8 +295,9 @@ verification.Verify(At("Examples/Hardware/bin/Examples.Hardware.dll"),
     At("Examples/Proofs/Hardware.lean"), At("artifacts/Hardware"));
 Passed("independent hardware assembly");
 
-// The addition contract is refuted for the subtraction implementation by a kernel-checked counterexample.
-var add = verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/AddModel.lean"),
+// The addition contract Add.lean proves as `holds` is refuted for the subtraction implementation by a
+// kernel-checked counterexample, which must state that statement's counterexample predicate.
+var add = verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"),
     At("artifacts/AddContract"), theorem: "ExampleProof.holds", statement: new(Term: true));
 var expectedAddition = add.statementIdentity!.term!.Value.GetRawText();
 var wrongAdd = verification.Verify(assembly, identity, signatures["WrongAdd"], At("Examples/Proofs/WrongAdd.lean"),
@@ -305,7 +306,7 @@ var wrongAdd = verification.Verify(assembly, identity, signatures["WrongAdd"], A
 if (wrongAdd.refutation?.method.signature != signatures["WrongAdd"])
     throw new InvalidOperationException("Subtraction has no verified refutation of the addition contract");
 
-Passed("incorrect addition refuted against the addition contract");
+Passed("incorrect addition refuted against the addition contract Add.lean proves");
 
 // Unsupported instructions and malformed metadata must fail during extraction.
 Rejected(Extract("extract", assembly, identity, "System.Int32 Examples.Arithmetic::Unsupported(System.Int32)", At("artifacts/Unsupported")), "Unsupported instruction");

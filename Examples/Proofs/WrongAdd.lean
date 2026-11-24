@@ -7,8 +7,8 @@ import CIL.Safety.MethodContract
 open CIL.Safety
 namespace ExampleProof
 
-/-- The addition contract `Add` meets: every pair of words returns their wrapping sum and leaves
-    memory unchanged. -/
+/-- The `addContract` of `Add.lean`: every pair of words returns their wrapping sum and leaves
+    memory unchanged. Verification binds this refutation to that file's `holds` statement. -/
 def addContract : MethodContract (CIL.W64 × CIL.W64) where
   args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
   pre _ _ := True

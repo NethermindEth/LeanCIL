@@ -61,63 +61,57 @@ foreach (var (owner, name, selector, proofName) in contracts)
     Console.WriteLine($"PASS universal {name} contract refuted for incorrect compiled CIL at the runtime witness");
 }
 
-// The contract each positive proof states, and the input on which the mutant returns another value.
-void VerifyVariant(string name, string selector, string proofName, string wrongAssembly, string wrong)
+// The named contract each positive example proves as `holds`, and a refutation of it at the input on which the
+// mutant returns another value.
+static (string Contract, string Proof) Refutation(string name)
 {
     const string maximum = "18446744073709551615";
-    var (input, witness, args, arguments, violation) = name switch
+    var (contract, witness, arguments, violation, permitted) = name switch
     {
-        "Choose" => ("Bool × CIL.W64 × CIL.W64", $"(true, {maximum}, 0)",
-            "[.scalar (.i32 (if input.1 then 1 else 0)), .scalar (.i64 input.2.1), .scalar (.i64 input.2.2)]",
-            $"[.scalar (.i32 1), .scalar (.i64 {maximum}), .scalar (.i64 0)]", "-, out, rfl, -, wrong"),
-        "Identity64" => ("CIL.W64", maximum, "[.scalar (.i64 input)]", $"[.scalar (.i64 {maximum})]",
-            "-, out, rfl, -, wrong"),
-        _ => ("CIL.W64", maximum, "[.scalar (.i64 input)]", $"[.scalar (.i64 {maximum})]", "-, out, rfl, wrong, -")
+        "Choose" => ("chooseContract", $"(true, {maximum}, 0)",
+            $"[.scalar (.i32 1), .scalar (.i64 {maximum}), .scalar (.i64 0)]", "-, out, rfl, -, wrong", "trivial"),
+        "Identity64" => ("identityContract", maximum, $"[.scalar (.i64 {maximum})]", "-, out, rfl, -, wrong",
+            "trivial"),
+        _ => ("structContract", maximum, $"[.scalar (.i64 {maximum})]", "-, out, rfl, wrong, -",
+            "Memory.empty_wellFormed")
     };
-    var (pre, post) = name == "Struct"
-        ? ("pre _ memory := memory.WellFormed",
-            "values = [.scalar (.i64 input)] ∧ MemoryBelow initial.nextIdentity initial final")
-        : ("pre _ _ := True", name == "Choose"
-            ? "final = initial ∧ values = [.scalar (.i64 (if input.1 then input.2.1 else input.2.2))]"
-            : "final = initial ∧ values = [.scalar (.i64 input)]");
-    var permitted = name == "Struct" ? "Memory.empty_wellFormed" : "trivial";
-    var declaration = $$"""
-        /-- Result and memory guarantees of the shipped implementation. -/
-        def contract : MethodContract ({{input}}) where
-          args input := {{args}}
-          {{pre}}
-          footprint _ := []
-          post input initial final values := {{post}}
-        """;
-    var holds = name switch
-    {
-        "Choose" => """
-            theorem correctness : contract.Holds Extracted.program 0 := by
-              rintro ⟨flag, left, right⟩ memory -
-              exact MethodContract.Holds.intro memory _
-                (ExampleProof.correctness memory flag left right) (Confined.refl _ _) ⟨rfl, rfl⟩
-            """,
-        "Identity64" => """
-            theorem correctness : contract.Holds Extracted.program 0 := by
-              intro value memory _
-              exact MethodContract.Holds.intro memory _
-                (ExampleProof.correctness memory value) (Confined.refl _ _) ⟨rfl, rfl⟩
-            """,
-        _ => """
-            theorem correctness : contract.Holds Extracted.program 0 := by
-              intro value memory formed
-              obtain ⟨fuel, final, ran, framed⟩ := ExampleProof.framed memory value formed
-              exact MethodContract.Holds.intro final _ ⟨fuel, ran⟩ framed ⟨rfl, framed.nil_memoryBelow⟩
-            """
-    };
-    var refutation = $$"""
+    return (contract, $$"""
         /-- The mutant returns a different value at the runtime witness. -/
-        theorem correctness : contract.Refuted Extracted.program 0 :=
+        theorem correctness : {{contract}}.Refuted Extracted.program 0 :=
           .of_return (input := {{witness}}) (initial := Memory.empty) {{permitted}}
             (rfl : invoke Extracted.program 64 0 {{arguments}} Memory.empty = .ok _)
             (by rintro ⟨{{violation}}⟩; revert wrong; decide)
-        """;
-    verification.VerifyContractVariant(assembly, "Examples", selector, Path.Combine(root, name),
-        wrongAssembly, selector, wrong, declaration, holds, refutation,
-        example: At($"Examples/Proofs/{proofName}.lean"), imports: "import CIL.Safety.MemoryBelow");
+        """);
 }
+
+void VerifyVariant(string name, string selector, string proofName, string wrongAssembly, string wrong)
+{
+    var (contract, refutation) = Refutation(name);
+    verification.VerifyExampleRefutations(assembly, "Examples", selector, At($"Examples/Proofs/{proofName}.lean"),
+        contract, Path.Combine(root, name), [new(wrongAssembly, selector, wrong, refutation)]);
+}
+
+// Narrowing Choose's contract to empty memory leaves its proof valid but changes the statement it proves, so the
+// unchanged refutation, which refutes the shipped contract, no longer matches it and is rejected.
+const string chooseSelector = "Arithmetic::Choose(bool,ulong,ulong)";
+const string everyMemory = "  pre _ _ := True\n";
+var chooseExample = At("Examples/Proofs/Choose.lean");
+var chooseSource = File.ReadAllText(chooseExample).ReplaceLineEndings("\n");
+if (chooseSource.Split(everyMemory).Length != 2)
+    throw new InvalidDataException("Ambiguous contract mutation: " + everyMemory);
+var narrowedOutput = Path.Combine(root, "NarrowedChoose");
+Directory.CreateDirectory(narrowedOutput);
+var narrowedExample = Path.Combine(narrowedOutput, "Choose.lean");
+File.WriteAllText(narrowedExample, chooseSource.Replace(everyMemory, "  pre _ memory := memory = Memory.empty\n"));
+var narrowed = verification.ExampleStatement(assembly, "Examples", chooseSelector, narrowedExample, narrowedOutput);
+var staleOutput = Path.Combine(root, "WrongChooseNarrowed");
+Directory.CreateDirectory(staleOutput);
+var (chooseContract, chooseRefutation) = Refutation("Choose");
+var stale = new Program.ContractCounterexample(Path.Combine(root, "WrongChoose", "Examples.dll"), chooseSelector,
+    staleOutput, chooseRefutation);
+var rejected = false;
+try { verification.VerifyExampleRefutation(chooseExample, chooseContract, stale, "Examples", narrowed); }
+catch (Program.StatementMismatchException) { rejected = true; }
+if (!rejected || File.Exists(Path.Combine(staleOutput, "verified.json")))
+    throw new InvalidOperationException("A refutation of the shipped Choose contract matched a narrowed contract.");
+Console.WriteLine("PASS a changed positive contract rejects the refutation of the contract it replaced");

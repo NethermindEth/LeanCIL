@@ -72,8 +72,9 @@ Verified: ExampleProof.correctness
                 CIL.Safety.Memory.empty) =
             Except.ok [CIL.Safety.Value.scalar (CIL.Value.i64 result)] ∧
           BitVec.toNat result = (BitVec.toNat x + BitVec.toNat y) % 2 ^ 64
-  Lean messages (1):
-    Examples/Proofs/Add.lean:15:0: info: 'ExampleProof.correctness' depends on axioms: [propext, Quot.sound]
+  Lean messages (2):
+    Examples/Proofs/Add.lean:16:0: info: 'ExampleProof.correctness' depends on axioms: [propext, Quot.sound]
+    Examples/Proofs/Add.lean:34:0: info: 'ExampleProof.holds' depends on axioms: [propext, Quot.sound]
 ```
 
 `Binding:` lists the facts this run trusts about the assembly image. With the assembly digests,
@@ -104,8 +105,9 @@ leancil list Examples/Assembly/bin/Examples.dll
 leancil check artifacts/Add
 ```
 
-`Examples/Proofs/Add.lean` derives execution from the generated program for all inputs.
-`Examples/Proofs/WrongAdd.lean` proves the addition contract `Refuted` for a subtracting
+`Examples/Proofs/Add.lean` derives execution from the generated program for all inputs. Its
+`holds` theorem states the same result as `addContract` for every caller memory, which the method
+leaves unchanged. `Examples/Proofs/WrongAdd.lean` proves that contract `Refuted` for a subtracting
 implementation: at inputs `(0, 1)` it returns `2^64 - 1`, not `1`.
 
 ## Break the implementation

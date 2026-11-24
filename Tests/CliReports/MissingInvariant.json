@@ -66,6 +66,13 @@
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.correctness' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]"
+    },
+    {
+      "file": "<proof>",
+      "line": 62,
+      "column": 0,
+      "severity": "info",
+      "text": "'ExampleProof.holds' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]"
     }
   ],
   "goals": null,

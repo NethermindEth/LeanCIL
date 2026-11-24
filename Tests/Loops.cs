@@ -72,9 +72,10 @@ foreach (var variant in new[] { "Nops", "Reordered", "Stuttering" })
     if (variant == "Stuttering")
     {
         const string countdown = "Loops::Countdown(uint)";
-        VerifyLoopVariants(countdown, contract, "CountdownContract", "0",
+        VerifyLoopVariants(countdown, contract, "CountdownContract", "countdownContract",
             new(dll, countdown, output, File.ReadAllText(At("Tests/LoopVariants/CountdownStuttering.lean.in"))),
-            new(assembly, "Loops::WrongCountdown(uint)", Path.Combine(root, "WrongContract"), WrongResult(1)));
+            new(assembly, "Loops::WrongCountdown(uint)", Path.Combine(root, "WrongContract"),
+                WrongResult("countdownContract", 1)));
     }
     else
     {
@@ -266,10 +267,10 @@ var overcount = CountVariant("CountCallsOvercount", (caller, _) =>
     caller.Body.Instructions.Single(i => i.OpCode == OpCodes.Ldc_I4_1).OpCode = OpCodes.Ldc_I4_2);
 if (Invoke(overcount, "CountCalls", 3) != 6)
     throw new InvalidOperationException("The overcounting fixture did not change the result");
-VerifyLoopVariants(CountCalls, At("Examples/Proofs/CountCalls.lean"), "CountCallsContract", "input",
+VerifyLoopVariants(CountCalls, At("Examples/Proofs/CountCalls.lean"), "CountCallsContract", "countCallsContract",
     new(discarded, CountCalls, Path.Combine(root, "CountCallsDiscarded"),
         File.ReadAllText(At("Tests/LoopVariants/CountCallsDiscarded.lean.in"))),
-    new(overcount, CountCalls, Path.Combine(root, "CountCallsOvercount"), WrongResult(3)));
+    new(overcount, CountCalls, Path.Combine(root, "CountCallsOvercount"), WrongResult("countCallsContract", 3)));
 Console.WriteLine("PASS counting contract refuted for CountCallsOvercount at 3, where it returns 6");
 
 // On the correct build, the rule itself must refuse a nondecreasing measure and an invariant
@@ -449,12 +450,12 @@ int[] RejectedLines(string dll, string proof, string name, bool existingArtifact
     return Regex.Matches(failure, @"Proof\.lean:(\d+):\d+: error").Select(m => int.Parse(m.Groups[1].Value)).Distinct().ToArray();
 }
 
-static string WrongResult(uint witness) => $$"""
+static string WrongResult(string contract, uint witness) => $$"""
     /-- This input returns a value that contradicts the positive loop contract. -/
-    theorem correctness : contract.Refuted Extracted.program 0 :=
+    theorem correctness : {{contract}}.Refuted Extracted.program 0 :=
       .of_return (input := {{witness}}) (initial := Memory.empty) rfl
         (rfl : invoke Extracted.program 256 0 [.scalar (.i32 {{witness}})] Memory.empty = .ok _)
-        (by rintro ⟨-, out, rfl, wrong⟩; revert wrong; dsimp only [contract]; decide)
+        (by rintro ⟨-, out, rfl, wrong⟩; revert wrong; dsimp only [{{contract}}]; decide)
     """;
 
 void Prove(string dll, string selector, string name, string source)
@@ -831,27 +832,10 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
     Console.WriteLine("PASS rejection: " + mutation);
 }
 
-void VerifyLoopVariants(string selector, string example, string positive, string result,
-    params ContractCounterexample[] counterexamples)
-{
-    verification.VerifyContractVariants(assembly, "Examples", selector, Path.Combine(root, positive), $$"""
-        /-- The loop's universal result from empty memory. -/
-        def contract : MethodContract W32 where
-          args input := [.scalar (.i32 input)]
-          pre _ memory := memory = Memory.empty
-          footprint _ := []
-          post input _ _ values := values = [.scalar (.i32 {{result}})]
-        """, """
-        /-- The universal invocation theorem supplies a framed return from empty memory. -/
-        theorem correctness : contract.Holds Extracted.program 0 := by
-          rintro value _ rfl
-          obtain ⟨fuel, final, values, ran, result⟩ := ExampleProof.correctness _ _ ⟨value, rfl, rfl⟩
-          exact ⟨fuel, (final, values), ran, by constructor <;> simp [Memory.empty], values, rfl, result⟩
-        """, counterexamples, example: example, imports: """
-        import CIL.Safety.LoopScaffold
-        import CIL.Safety.SegmentContract
-        """);
-}
+void VerifyLoopVariants(string selector, string example, string positive, string contractName,
+    params ContractCounterexample[] counterexamples) =>
+    verification.VerifyExampleRefutations(assembly, "Examples", selector, example, contractName,
+        Path.Combine(root, positive), counterexamples, imports: "import CIL.Safety.SegmentContract");
 
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);
 delegate uint CopyUntilZeroDelegate(ReadOnlySpan<uint> values, ref uint output);

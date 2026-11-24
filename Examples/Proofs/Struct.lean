@@ -55,4 +55,20 @@ theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFor
   exact ⟨fuel, final, ran, preserved.nil_memoryBelow⟩
 
 #print axioms correctness
+
+/-- From well-formed caller memory, the input word is returned and all earlier storage is kept. -/
+def structContract : MethodContract CIL.W64 where
+  args input := [.scalar (.i64 input)]
+  pre _ memory := memory.WellFormed
+  footprint _ := []
+  post input initial final values :=
+    values = [.scalar (.i64 input)] ∧ MemoryBelow initial.nextIdentity initial final
+
+/-- Every well-formed caller memory meets `structContract`, with no caller storage written. -/
+theorem holds : structContract.Holds Extracted.program 0 := by
+  intro value memory formed
+  obtain ⟨fuel, final, ran, confined⟩ := framed memory value formed
+  exact MethodContract.Holds.intro final _ ⟨fuel, ran⟩ confined ⟨rfl, confined.nil_memoryBelow⟩
+
+#print axioms holds
 end ExampleProof

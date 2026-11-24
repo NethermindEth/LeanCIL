@@ -21,9 +21,20 @@ the reference-array length contract requires a live array to return its length w
 unchanged and a null array to raise `NullReferenceException`. A compiled variant returns zero
 on null. Weakening the live-array clause also changes the statement and invalidates that pairing.
 
+`Add`, `Choose`, `GenericIdentity`, `Struct`, `Countdown` and `CountCalls` each name their
+contract (`addContract`, `chooseContract`, `identityContract`, `structContract`,
+`countdownContract`, `countCallsContract`) and prove its `Holds` as `holds`, alongside the
+`correctness` theorem described below. Each refutation of a mutant states that contract's
+`Refuted`: `WrongAdd.lean` restates `addContract`, and the suites build each other refutation
+from the definition in the example file. Verification accepts a refutation only when the kernel
+accepts it at the counterexample predicate of the example's `holds` statement. A contract
+changed in the example therefore rejects a refutation of the contract it replaced; the
+`contracts` suite checks this by narrowing `chooseContract` to empty memory.
+
 ## Independent examples
 
-- `Add`: universal modular arithmetic correctness in the specified empty initial memory.
+- `Add`: universal modular arithmetic correctness in the specified empty initial memory, and
+  `addContract`: the wrapping sum for every caller memory, which is left unchanged.
 - `AddModel`: carries a theorem about a pure Lean model to the compiled `Add` through one theorem
   that the method returns the model's result, without re-proving the model theorem.
 - `DecodedAdd`: the `Add` contract for the program `Extraction.decodedProgram?` reads from the
@@ -81,7 +92,7 @@ on null. Weakening the live-array clause also changes the statement and invalida
 - `PastEnd`: a permitted end sentinel whose dereference is rejected as outside the allocation, for
   every fuel budget.
 - `Escape`: a reference to an expired local is rejected on return, for every fuel budget.
-- `WrongAdd`: a verified refutation of the addition contract at inputs `(0, 1)`.
+- `WrongAdd`: a verified refutation of `addContract` from `Add.lean` at inputs `(0, 1)`.
 - A separate `Examples.Hardware` assembly, built from the file-based library
   `Examples/Hardware/Hardware.cs`, tests runtime capability extraction.
 - A Cecil-generated independent fixture tests extraction-bound static RVA bytes.

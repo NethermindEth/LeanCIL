@@ -1,5 +1,4 @@
 import Extracted
-import CIL.Safety.MethodContract
 
 /-!
 Carries a theorem proved about a pure Lean model over to the compiled `Arithmetic.Add`.
@@ -38,21 +37,4 @@ theorem correctness (x y : W64) (memory : CIL.Safety.Memory) :
 #print axioms model_comm
 #print axioms refines
 #print axioms correctness
-
-open CIL.Safety
-
-def addContract : MethodContract (CIL.W64 × CIL.W64) where
-  args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
-  pre _ _ := True
-  footprint _ := []
-  post input initial final values :=
-    final = initial ∧ values = [.scalar (.i64 (input.1 + input.2))]
-
-/-- Addition returns the wrapping sum and preserves every caller memory. -/
-theorem holds : addContract.Holds Extracted.program 0 := by
-  rintro ⟨x, y⟩ memory -
-  exact MethodContract.Holds.intro memory [.scalar (.i64 (x + y))]
-    ⟨4, rfl⟩ (Confined.refl _ _) ⟨rfl, rfl⟩
-
-#print axioms holds
 end ExampleProof

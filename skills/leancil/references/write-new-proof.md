@@ -234,7 +234,8 @@ and the [examples index](https://github.com/NethermindEth/LeanCIL/blob/main/docs
 Report a property that does not hold as a result. Show the user the failing input, or prove the
 counterexample as its own theorem:
 [WrongAdd](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/WrongAdd.lean)
-proves a counterexample to the addition contract for a subtracting implementation. State a refutation
+proves a counterexample to `addContract`, the contract `Add.lean` proves, for a subtracting
+implementation. State a refutation
 as `MethodContract.Refuted` (or `OutcomeContract.Refuted`, `OutcomeContract.RefutedCLR`), never as
 `¬ Holds`: `MethodContract.Refuted.of_fault` takes a located definite fault on an input meeting
 the precondition, `.of_return` a wrong return and `.of_diverges` exhaustion at every fuel; an

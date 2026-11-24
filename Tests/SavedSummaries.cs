@@ -64,32 +64,16 @@ partial class Program
             "Kernel replay of both saved return regions and the reversed branch");
         Console.WriteLine("PASS reversing the branch reuses both return regions and refutes the original result");
 
-        VerifyContractVariant(assembly, "Examples", entry, Path.Combine(directory, "OriginalContract"), changed,
-            entry, Path.Combine(directory, "WrongContract"), """
-            /-- Choose returns the requested argument and preserves every caller memory. -/
-            def choose : MethodContract (Bool × W64 × W64) W64 where
-              args := fun (flag, x, y) =>
-                [.scalar (.i32 (if flag then 1 else 0)), .scalar (.i64 x), .scalar (.i64 y)]
-              results word := [.scalar (.i64 word)]
-              pre _ _ := True
-              footprint _ := []
-              post := fun (flag, x, y) initial final result =>
-                final = initial ∧ result = (if flag then x else y)
-            """, """
-            /-- Both input choices satisfy the original compiled entry's contract. -/
-            theorem correctness : choose.Holds Extracted.program 0 := by
-              rintro ⟨flag, x, y⟩ memory _
-              obtain ⟨fuel, ran⟩ := ExampleProof.correctness memory flag x y
-              exact MethodContract.Holds.intro memory (if flag then x else y) ⟨fuel, ran⟩
-                (Confined.refl [] memory) ⟨rfl, rfl⟩
-            """, """
+        VerifyExampleRefutations(assembly, "Examples", entry, At("Examples/Proofs/Choose.lean"), "chooseContract",
+            Path.Combine(directory, "OriginalContract"),
+            [new(changed, entry, Path.Combine(directory, "WrongContract"), """
             /-- The changed condition selects 22 on an input requiring 11. -/
-            theorem correctness : choose.Refuted Extracted.program 0 := by
-              apply MethodContract.Refuted.of_return (input := (true, 11, 22)) (initial := Memory.empty)
-                (fuel := 4) (final := Memory.empty) (values := [.scalar (.i64 22)]) trivial rfl
-              rintro ⟨_, result, encoded, _, rfl⟩
-              exact (by decide : ¬ ([CIL.Safety.Value.scalar (.i64 22)] = [.scalar (.i64 11)])) encoded
-            """, example: At("Examples/Proofs/Choose.lean"));
+            theorem correctness : chooseContract.Refuted Extracted.program 0 :=
+              .of_return (input := (true, 11, 22)) (initial := Memory.empty) trivial
+                (rfl : invoke Extracted.program 4 0 [.scalar (.i32 1), .scalar (.i64 11), .scalar (.i64 22)]
+                  Memory.empty = .ok _)
+                (by rintro ⟨-, out, rfl, -, wrong⟩; revert wrong; decide)
+            """)]);
     }
 
     void CheckSavedLoop(string directory, string assembly)
@@ -117,28 +101,15 @@ partial class Program
             "Kernel replay of the saved loop, its callee and the changed accumulator");
         Console.WriteLine("PASS the changed entry reuses the compiled CountCalls invariant and termination proof");
 
-        VerifyContractVariant(assembly, "Examples", entry, Path.Combine(directory, "OriginalContract"), changed,
-            entry, Path.Combine(directory, "WrongContract"), """
-            /-- CountCalls returns its input from empty memory. -/
-            def count : MethodContract W32 where
-              args input := [.scalar (.i32 input)]
-              pre _ memory := memory = Memory.empty
-              footprint _ := []
-              post input _ _ values := values = [.scalar (.i32 input)]
-            """, """
-            /-- The original loop returns the number of calls for every input. -/
-            theorem correctness : count.Holds Extracted.program 0 := by
-              rintro value _ rfl
-              obtain ⟨fuel, final, values, ran, result⟩ := ExampleProof.correctness _ _ ⟨value, rfl, rfl⟩
-              exact ⟨fuel, (final, values), ran, by constructor <;> simp [Memory.empty], values, rfl, result⟩
-            """, """
+        VerifyExampleRefutations(assembly, "Examples", entry, At("Examples/Proofs/CountCalls.lean"),
+            "countCallsContract", Path.Combine(directory, "OriginalContract"),
+            [new(changed, entry, Path.Combine(directory, "WrongContract"), """
             /-- The changed initializer returns one for zero calls. -/
-            theorem correctness : count.Refuted Extracted.program 0 := by
-              apply MethodContract.Refuted.of_return (input := 0) (initial := Memory.empty)
-                (fuel := 12) (values := [.scalar (.i32 1)]) rfl rfl
-              rintro ⟨_, values, rfl, wrong⟩
-              exact (by decide : ¬ ([CIL.Safety.Value.scalar (.i32 1)] = [.scalar (.i32 0)])) wrong
-            """, example: At("Examples/Proofs/CountCalls.lean"));
+            theorem correctness : countCallsContract.Refuted Extracted.program 0 :=
+              .of_return (input := 0) (initial := Memory.empty) rfl
+                (rfl : invoke Extracted.program 12 0 [.scalar (.i32 0)] Memory.empty = .ok _)
+                (by rintro ⟨-, out, rfl, wrong⟩; revert wrong; dsimp only [countCallsContract]; decide)
+            """)]);
     }
 
     void CheckSavedSummary(string directory, string assembly, string entry, string summarySource,

@@ -1,4 +1,5 @@
 import Extracted
+import CIL.Safety.MethodContract
 
 open CIL
 namespace ExampleProof
@@ -13,4 +14,22 @@ theorem correctness (x y : W64) :
   rfl
 
 #print axioms correctness
+
+open CIL.Safety
+
+/-- Addition returns the wrapping sum of every pair of words and leaves memory unchanged. -/
+def addContract : MethodContract (W64 × W64) where
+  args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+  pre _ _ := True
+  footprint _ := []
+  post input initial final values :=
+    final = initial ∧ values = [.scalar (.i64 (input.1 + input.2))]
+
+/-- Every caller memory meets `addContract`; `WrongAdd.lean` refutes this statement. -/
+theorem holds : addContract.Holds Extracted.program 0 := by
+  rintro ⟨x, y⟩ memory -
+  exact MethodContract.Holds.intro memory [.scalar (.i64 (x + y))]
+    ⟨4, rfl⟩ (Confined.refl _ _) ⟨rfl, rfl⟩
+
+#print axioms holds
 end ExampleProof

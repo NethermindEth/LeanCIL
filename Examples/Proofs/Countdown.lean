@@ -46,4 +46,19 @@ theorem correctness : CIL.Safety.Ensures Extracted.program 0
         omega
 
 #print axioms correctness
+
+/-- From empty memory, every count returns zero. -/
+def countdownContract : MethodContract W32 where
+  args input := [.scalar (.i32 input)]
+  pre _ memory := memory = Memory.empty
+  footprint _ := []
+  post _ _ _ values := values = [.scalar (.i32 0)]
+
+/-- `correctness` as `countdownContract`, which also states that no caller storage changes. -/
+theorem holds : countdownContract.Holds Extracted.program 0 := by
+  rintro value _ rfl
+  obtain ⟨fuel, final, values, ran, result⟩ := correctness _ _ ⟨value, rfl, rfl⟩
+  exact ⟨fuel, (final, values), ran, by constructor <;> simp [Memory.empty], values, rfl, result⟩
+
+#print axioms holds
 end ExampleProof

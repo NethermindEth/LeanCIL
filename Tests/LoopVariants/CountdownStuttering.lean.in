@@ -2,7 +2,7 @@ bind_entry entry (value : W32) := Extracted.method0
   with [.scalar (.i32 value)] from Memory.empty allocating Memory.empty_wellFormed
 
 /-- Subtracting zero leaves the remaining count one on every visit to the guard. -/
-theorem correctness : contract.Refuted Extracted.program 0 := by
+theorem correctness : countdownContract.Refuted Extracted.program 0 := by
   apply MethodContract.Refuted.of_diverges (input := 1) (initial := Memory.empty) rfl
   obtain ⟨home, entered, enter⟩ := entry.checked 1
   obtain ⟨started, stored, facts, -⟩ := (enter.frame []).store 0 (.i32 1) rfl
@@ -25,10 +25,11 @@ theorem correctness : contract.Refuted Extracted.program 0 := by
   intro fuel
   dsimp only [atGuard, frame, entry.frame]
   cil_checked_steps [known.load 0, wrote]
-  change run Extracted.program (fuel + 1) 0 6 (contract.args 1) frame [.scalar (.i32 1)] current =
-    run Extracted.program fuel 0 7 (contract.args 1) frame [] updated
-  have last : step Extracted.method0 (.stloc 0) 6 (contract.args 1) frame [.scalar (.i32 1)]
-      current = .ok (.next 7 [] frame updated) := by
+  change run Extracted.program (fuel + 1) 0 6 (countdownContract.args 1) frame [.scalar (.i32 1)]
+      current =
+    run Extracted.program fuel 0 7 (countdownContract.args 1) frame [] updated
+  have last : step Extracted.method0 (.stloc 0) 6 (countdownContract.args 1) frame
+      [.scalar (.i32 1)] current = .ok (.next 7 [] frame updated) := by
     change (do
       let (slot, memory) ← storeLocal current (.bytes .word32 home) (.scalar (.i32 1))
       pure (FrameAction.next 7 [] {frame with locals := [slot]} memory)) = _

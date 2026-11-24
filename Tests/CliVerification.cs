@@ -58,7 +58,7 @@ void Verified(params string[] options)
     if (!stdout.Contains("\u2203 result,") || stdout.Contains("Exists fun") || stdout.Contains("HMod.hMod") ||
         !stdout.Contains($"  Subject: {entry} (method 0) via CIL.Safety.invoke\n") ||
         !stdout.Contains($"  Extraction entry: {entry}\n") || stdout.Contains("  Entry:") ||
-        !stdout.Contains("Add.lean:15:0: info: 'ExampleProof.correctness' depends on axioms"))
+        !stdout.Contains("Add.lean:16:0: info: 'ExampleProof.correctness' depends on axioms"))
         throw new InvalidOperationException(
             "CLI verification did not print the readable statement, subject and messages: " + result.Output);
 
@@ -234,11 +234,11 @@ var rejectedGoals = Execute([.. cli, "verify", output, "--goals"]);
 var rejectedGoalsText = rejectedGoals.Stderr.ReplaceLineEndings("\n");
 if (!rejected.Stderr.ReplaceLineEndings("\n").Contains(GoalsHint) || rejectedGoals.Code != 1 ||
     rejectedGoals.Stdout.Length != 0 || !rejectedGoalsText.Contains("  Stage: proof checking\n") ||
-    rejectedGoalsText.Contains(GoalsHint) || !rejectedGoalsText.Contains("  Goals (1):\n") ||
+    rejectedGoalsText.Contains(GoalsHint) || !rejectedGoalsText.Contains("  Goals (2):\n") ||
     !Regex.IsMatch(rejectedGoalsText, @"^    Examples/Proofs/Add\.lean:\d+:\d+: failing tactic$",
         RegexOptions.Multiline) ||
     !rejectedGoalsText.Contains("      ⊢ Except.map Prod.snd") || rejectedGoalsText.Contains(": info: ") ||
-    !rejectedGoalsText.Contains("  Lean messages (1): artifacts/CliVerification/proof-messages.txt\n") ||
+    !rejectedGoalsText.Contains("  Lean messages (2): artifacts/CliVerification/proof-messages.txt\n") ||
     !File.ReadAllText(Path.Combine(output, "proof-messages.txt")).Contains("depends on axioms"))
     throw new InvalidOperationException("verify --goals did not print the goal of the failing tactic: " +
         rejected.Stderr + rejectedGoals.Output);
@@ -500,8 +500,8 @@ foreach (var (options, cached) in new[]
         !consumerText.Contains("∃ result,") || consumerText.Contains("Exists fun") ||
         consumerText.Contains("Subject: not identified") ||
         !consumerText.Contains($"  Subject: {consumerEntry} (method 0) via CIL.Safety.invoke\n") ||
-        !consumerText.Contains("  Lean messages (1):\n") ||
-        !consumerText.Contains("Add.lean:15:0: info: 'ExampleProof.correctness' depends on axioms"))
+        !consumerText.Contains("  Lean messages (2):\n") ||
+        !consumerText.Contains("Add.lean:16:0: info: 'ExampleProof.correctness' depends on axioms"))
         throw new InvalidOperationException(
             "Consumer verification did not print the readable statement, subject and messages: " + consumer.Output);
 }

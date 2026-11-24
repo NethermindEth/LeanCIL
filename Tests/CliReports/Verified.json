@@ -106,10 +106,17 @@
   "messages": [
     {
       "file": "<proof>",
-      "line": 15,
+      "line": 16,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.correctness' depends on axioms: [propext, Quot.sound]"
+    },
+    {
+      "file": "<proof>",
+      "line": 34,
+      "column": 0,
+      "severity": "info",
+      "text": "'ExampleProof.holds' depends on axioms: [propext, Quot.sound]"
     }
   ],
   "goals": null,
