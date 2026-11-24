@@ -72,6 +72,29 @@ private def acceptsReplacement (pc : Nat) (replacement : Instruction) : Bool :=
   let forged := { package with root := (package.caller, changed) }
   forged.checked Extracted.environment Extracted.assemblies Extracted.platformDefinitions
 
+/-- Read the HResult field selected by the physical CoreLib setter from the raised object. -/
+private def raisedDetails : Option (LocatedFault × ExceptionType × W32) := do
+  let .error state := invokeWithFaultState Extracted.program 64 0 (args 1) initial | none
+  let reference ← state.exceptionObject
+  let memory := state.unwoundMemory
+  let type ← (runtimeTypeOf memory reference).toOption
+  let raised ← runtimeException? type.identity
+  let store ← Runtime.Net11WinX64.Core.SetHResult.definition.code[2]?
+  let .field owner slot _ name false := store.operand | none
+  guard (store.opcode == 0x7D && name == name!"_HResult")
+  let address ← (objectFieldAddress memory (.address reference) owner (objectFieldOffset slot)).toOption
+  let .i32 result ← (loadValue memory (.address address) 4).toOption | none
+  return (state.location, raised, result)
+
+private def expectedRaised : LocatedFault × ExceptionType × W32 :=
+  (⟨0, 6, .thrown expected.1⟩, expected.1,
+  if expected.1 == .argument then 0x80070057 else 0x80131502)
+
+/-- Both constructors complete their writes before the caller raises the actual object. -/
+theorem raisedObject :
+    raisedDetails = some expectedRaised := by cil_kernel_rfl
+#print axioms raisedObject
+
 /-- Starting from the loader's empty storage, the bound overload returns or throws as specified.
     Appending any implementation at a declared slot preserves both outcomes. -/
 theorem correctness :
@@ -80,9 +103,10 @@ theorem correctness :
     entry.initialMemory = .ok initial ∧
     acceptsReplacement expected.2 .nop = false ∧ acceptsReplacement expected.2 (Extracted.method0.code[2]?.getD .nop) = false ∧
     acceptsReplacement 6 (.throw (some expected.1)) = false ∧
+    raisedDetails = some expectedRaised ∧
     ∀ (value : W32) (tail : Program), invoke (Extracted.program ++ tail) 64 0 (args value) initial =
       if value = 0 then .ok (initial, args value) else .error ⟨0, 6, .thrown expected.1⟩ :=
   ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl,
-    by cil_kernel_rfl, by cil_kernel_rfl, outcome⟩
+    by cil_kernel_rfl, by cil_kernel_rfl, raisedObject, outcome⟩
 #print axioms correctness
 end ExceptionConstructorProof

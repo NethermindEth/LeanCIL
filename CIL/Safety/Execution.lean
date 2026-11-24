@@ -955,58 +955,111 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       let (memory, values) ← instruction op stack m
       return .next (pc + 1) values frame memory
 
-/-- The interpreter over the methods `lookup` gives. Every executed instruction goes through the
-    checked dispatcher. Fuel has
-    the same recursive call structure as the original interpreter. Constructor
+/-- Memory supplied to the failing operation, including writes from completed instructions.
+An explicit stack throw also carries the reference of the object that was raised. -/
+structure FaultState where
+  location : LocatedFault
+  memory : Memory
+  /-- Storage after exiting all frames entered by this invocation. -/
+  unwoundMemory : Memory
+  exceptionObject : Option Reference
+
+/-- Expire the storage of the caller a fault has just left. -/
+private def FaultState.unwind (frame : Frame) (fault : FaultState) : FaultState :=
+  { fault with unwoundMemory := leaveFrame frame fault.unwoundMemory }
+
+/-- Only a successful classification of an explicit stack throw identifies a raised object. -/
+private def thrownReference : CIL.Instruction → List Value → ExecutionFault → Option Reference
+  | .throw none, .object (.address reference) :: _, .thrown _ => some reference
+  | _, _, _ => none
+
+/-- Apply frame cleanup when retaining a fault state. The ordinary result records the location. -/
+private def propagateFault (onUnwind : Option (Frame → ε → ε)) (frame : Frame)
+    (result : Except ε α) : Except ε α :=
+  match onUnwind with
+  | none => result
+  | some expire => result.mapError (expire frame)
+
+/-- Execute the methods supplied by `lookup`. The reporter receives the failure location,
+    memory at the fault, memory after unwinding and any explicitly thrown object. Constructor
     storage belongs to its caller, so expiration of the constructor's private
     frame does not destroy the value being constructed. Static instructions use
     extraction-bound field identities and readonly allocation storage. -/
-def runWith (lookup : Nat → Option CIL.Method) : Nat → Nat → Nat → List Value → Frame →
-    List Value → Memory → Except LocatedFault (Memory × List Value)
-  | 0, method, pc, _, _, _, _ => .error ⟨method, pc, .fuelExhausted⟩
+def runReporting {ε : Type} (report : LocatedFault → Memory → Memory → Option Reference → ε)
+    (onUnwind : Option (Frame → ε → ε)) (lookup : Nat → Option CIL.Method) :
+    Nat → Nat → Nat → List Value → Frame →
+    List Value → Memory → Except ε (Memory × List Value)
+  | 0, method, pc, _, frame, _, memory =>
+    .error (report ⟨method, pc, .fuelExhausted⟩ memory (leaveFrame frame memory) none)
   | fuel + 1, method, pc, args, frame, stack, memory => do
-    let some body := lookup method | .error ⟨method, pc, .invalidState⟩
-    let some op := body.code[pc]? | .error ⟨method, pc, .invalidState⟩
+    let some body := lookup method |
+      .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none)
+    let some op := body.code[pc]? |
+      .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none)
     let action ← (step body op pc args frame stack memory).mapError
-      fun fault => ⟨method, pc, fault⟩
+      fun fault => report ⟨method, pc, fault⟩ memory (leaveFrame frame memory) (thrownReference op stack fault)
     match action with
-    | .next target stack frame memory => runWith lookup fuel method target args frame stack memory
+    | .next target stack frame memory => runReporting report onUnwind lookup fuel method target args frame stack memory
     | .call callee arguments rest memory =>
-      let some child := lookup callee | .error ⟨method, pc, .invalidState⟩
+      let some child := lookup callee |
+        .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none)
       let (childFrame, memory) ← (enterFrame child arguments memory).mapError
-        fun fault => ⟨method, pc, fault⟩
-      let (memory, result) ← runWith lookup fuel callee 0 arguments childFrame [] memory
-      runWith lookup fuel method (pc + 1) args frame (result ++ rest) memory
+        fun fault => report ⟨method, pc, fault⟩ memory (leaveFrame frame memory) none
+      let (memory, result) ← propagateFault onUnwind frame
+        (runReporting report onUnwind lookup fuel callee 0 arguments childFrame [] memory)
+      runReporting report onUnwind lookup fuel method (pc + 1) args frame (result ++ rest) memory
     | .tailCall callee arguments memory =>
-      let some child := lookup callee | .error ⟨method, pc, .invalidState⟩
-      if child.returnsValue != body.returnsValue then .error ⟨method, pc, .invalidState⟩ else
+      let some child := lookup callee |
+        .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none)
+      if child.returnsValue != body.returnsValue then
+        .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none) else
         let memory := leaveFrame frame memory
         let arguments ← (arguments.mapM (checkedValue memory)).mapError
-          fun fault => ⟨method, pc, fault⟩
+          fun fault => report ⟨method, pc, fault⟩ memory memory none
         let (childFrame, memory) ← (enterFrame child arguments memory).mapError
-          fun fault => ⟨method, pc, fault⟩
-        runWith lookup fuel callee 0 arguments childFrame [] memory
+          fun fault => report ⟨method, pc, fault⟩ memory memory none
+        runReporting report onUnwind lookup fuel callee 0 arguments childFrame [] memory
     | .construct callee arguments rest frame temporary kind memory =>
-      let some child := lookup callee | .error ⟨method, pc, .invalidState⟩
+      let some child := lookup callee |
+        .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none)
       let (childFrame, memory) ← (enterFrame child arguments memory).mapError
-        fun fault => ⟨method, pc, fault⟩
-      let (memory, result) ← runWith lookup fuel callee 0 arguments childFrame [] memory
-      if !result.isEmpty then .error ⟨method, pc, .invalidState⟩ else
+        fun fault => report ⟨method, pc, fault⟩ memory (leaveFrame frame memory) none
+      let (memory, result) ← propagateFault onUnwind frame
+        (runReporting report onUnwind lookup fuel callee 0 arguments childFrame [] memory)
+      if !result.isEmpty then
+        .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none) else
         let value ← (loadLocal memory (.bytes kind temporary)).mapError
-          fun fault => ⟨method, pc, fault⟩
-        runWith lookup fuel method (pc + 1) args frame (value :: rest) memory
+          fun fault => report ⟨method, pc, fault⟩ memory (leaveFrame frame memory) none
+        runReporting report onUnwind lookup fuel method (pc + 1) args frame (value :: rest) memory
     | .returned result memory =>
       let memory := leaveFrame frame memory
-      let result ← (result.mapM (checkedValue memory)).mapError fun fault => ⟨method, pc, fault⟩
+      let result ← (result.mapM (checkedValue memory)).mapError
+        fun fault => report ⟨method, pc, fault⟩ memory memory none
       return (memory, result)
 
 /-- Calls the method `lookup` gives at `method` with checked `args` in a fresh frame. -/
-def invokeWith (lookup : Nat → Option CIL.Method) (fuel method : Nat) (args : List Value)
-    (m : Memory) : Except LocatedFault (Memory × List Value) := do
-  let some body := lookup method | .error ⟨method, 0, .invalidState⟩
-  let args ← (args.mapM (checkedValue m)).mapError fun fault => ⟨method, 0, fault⟩
-  let (frame, memory) ← (enterFrame body args m).mapError fun fault => ⟨method, 0, fault⟩
-  runWith lookup fuel method 0 args frame [] memory
+def invokeReporting {ε : Type} (report : LocatedFault → Memory → Memory → Option Reference → ε)
+    (onUnwind : Option (Frame → ε → ε)) (lookup : Nat → Option CIL.Method)
+    (fuel method : Nat) (args : List Value)
+    (m : Memory) : Except ε (Memory × List Value) := do
+  let some body := lookup method | .error (report ⟨method, 0, .invalidState⟩ m m none)
+  let args ← (args.mapM (checkedValue m)).mapError fun fault => report ⟨method, 0, fault⟩ m m none
+  let (frame, memory) ← (enterFrame body args m).mapError fun fault => report ⟨method, 0, fault⟩ m m none
+  runReporting report onUnwind lookup fuel method 0 args frame [] memory
+
+/-- Execute with the public located-fault observation. -/
+def runWith (lookup : Nat → Option CIL.Method) :=
+  runReporting (fun location _ _ _ => location) none lookup
+
+/-- Enter with the public located-fault observation. -/
+def invokeWith (lookup : Nat → Option CIL.Method) :=
+  invokeReporting (fun location _ _ _ => location) none lookup
+
+/-- Enter the same checked program and retain the failure state needed by handlers. -/
+def invokeWithFaultState (program : CIL.Program) :=
+  invokeReporting FaultState.mk
+    (some FaultState.unwind)
+    (program[·]?)
 
 /-- The interpreter over `program`, reading each method by its index in the list. A proof that
     evaluates it rewrites by `run_eq_runWith` to read an index of the program instead. -/
@@ -1018,6 +1071,59 @@ def run (program : CIL.Program) : Nat → Nat → Nat → List Value → Frame �
 def invoke (program : CIL.Program) (fuel method : Nat) (args : List Value) (m : Memory) :
     Except LocatedFault (Memory × List Value) :=
   invokeWith (program[·]?) fuel method args m
+
+private theorem errorMap_bind (f : α → β) (x : Except α γ) (k : γ → Except α δ) :
+    (x >>= k).mapError f = (x.mapError f >>= fun a => (k a).mapError f) := by
+  cases x <;> rfl
+
+private theorem errorMap_comp (f : β → γ) (g : α → β) (x : Except α δ) :
+    (x.mapError g).mapError f = x.mapError (fun a => f (g a)) := by cases x <;> rfl
+
+private theorem errorMap_ite (f : α → β) (p : Prop) [Decidable p] (x y : Except α γ) :
+    (if p then x else y).mapError f = if p then x.mapError f else y.mapError f := by
+  split <;> rfl
+
+/-- Changing only the fault observation preserves the instruction trace and the return value. -/
+theorem runReporting_project (project : α → β)
+    (report : LocatedFault → Memory → Memory → Option Reference → α) (expire : Frame → α → α)
+    (preserves : ∀ frame fault, project (expire frame fault) = project fault)
+    (lookup : Nat → Option CIL.Method)
+    (fuel method pc : Nat) (args : List Value) (frame : Frame) (stack : List Value) (memory : Memory) :
+    (runReporting report (some expire) lookup fuel method pc args frame stack memory).mapError project =
+      runReporting (fun loc state unwound object => project (report loc state unwound object))
+        none lookup fuel method pc args frame stack memory := by
+  induction fuel generalizing method pc args frame stack memory with
+  | zero => rfl
+  | succ fuel ih =>
+    simp only [runReporting]
+    split
+    · split
+      · simp only [errorMap_bind, errorMap_comp]
+        congr 1
+        funext action
+        cases action <;> simp only [propagateFault, errorMap_bind, errorMap_comp, preserves, ih]
+        all_goals repeat' split
+        all_goals try simp only [propagateFault, errorMap_bind, errorMap_comp, errorMap_ite, preserves, ih]
+        all_goals try rfl
+      · rfl
+    · rfl
+#print axioms runReporting_project
+
+/-- Projecting a fault state to its location recovers ordinary invocation for every program. -/
+theorem invokeWithFaultState_location (program : CIL.Program) (fuel method : Nat)
+    (args : List Value) (memory : Memory) :
+    (invokeWithFaultState program fuel method args memory).mapError FaultState.location =
+      invoke program fuel method args memory := by
+  unfold invokeWithFaultState invoke invokeWith invokeReporting
+  split
+  · simp only [errorMap_bind, errorMap_comp]
+    congr 1
+    funext arguments
+    congr 1
+    funext entered
+    exact runReporting_project FaultState.location FaultState.mk FaultState.unwind (fun _ _ => rfl) ..
+  · rfl
+#print axioms invokeWithFaultState_location
 
 /-- A checked execution with a decidable result can be compared by its fault or return value. -/
 instance {α : Type} [DecidableEq α] : DecidableEq (Except LocatedFault α)

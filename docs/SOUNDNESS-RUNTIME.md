@@ -170,8 +170,8 @@ checked layout, and a struct the layouts do not hold, a by-ref-like struct or `S
 no shape, so its `newarr` is unsupported. Enum payloads start at zero
 even when the enum declares no zero member. Fresh non-null
 identities survive frame return, including for empty arrays. Payloads start zeroed and writable.
-Negative lengths and native counts above `Int32.MaxValue` raise `OverflowException`.
-Counts from `0x7fffffc8` through `Int32.MaxValue` raise `OutOfMemoryException` before allocation.
+Negative lengths and native counts above `0x7fffffff` raise `OverflowException`.
+Counts from `0x7fffffc8` through `0x7fffffff` raise `OutOfMemoryException` before allocation.
 For valid lengths, ordinary execution assumes global heap availability. GC and object headers
 remain outside the model. [CoreCLR array allocation](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/gchelpers.cpp)
 
@@ -525,8 +525,8 @@ length is its size over the slot width. Its elements are references held in
 `Memory.slots`, as class-typed fields are, and fresh elements are null. With an explicit heap budget, the array consumes eight bytes per element.
 This accounting excludes the CoreCLR header and length word. A short budget produces
 `allocationFailure`. The length decodes as
-`newarr` decodes it for value arrays: negative lengths and native counts above `Int32.MaxValue` raise
-`OverflowException`. A count from `0x7fffffc8` through `Int32.MaxValue` raises
+`newarr` decodes it for value arrays: negative lengths and native counts above `0x7fffffff` raise
+`OverflowException`. A count from `0x7fffffc8` through `0x7fffffff` raises
 `OutOfMemoryException` before the budget check.
 
 `ldlen`, `ldelem.ref` and `stelem.ref` on such an array (the object arms of `elementInstruction`)

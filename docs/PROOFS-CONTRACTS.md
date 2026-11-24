@@ -1050,6 +1050,12 @@ overflow for signed minimum divided by negative one, including its remainder ins
 arithmetic operands, invalid bounds, memory faults, unsupported instructions, invalid state and fuel
 exhaustion have no name in this mode. The mode does not change `Raises` or `.thrown`.
 `OutcomeContract.Holds.clr` lifts a thrown-outcome proof (`Holds`) to `HoldsCLR`.
+`Safety.invokeWithFaultState` preserves writes from completed instructions when a call faults.
+Its error records the location and memory at the failing operation. After unwinding, `unwoundMemory`
+retains heap and caller storage and expires local allocations of the exited frames. An explicit object
+throw also retains the raised reference. `invokeWithFaultState_location` proves that projecting the error to its
+location recovers `Safety.invoke` for every program and fuel bound.
+
 For the compiled `Throws.Percent(uint)`, the default proof selects the .NET 11 Windows x64
 entry from `Extracted.translation_valid`. The public program contains the decoded caller and
 the runtime constructor bodies. The loader starts with empty caller storage.

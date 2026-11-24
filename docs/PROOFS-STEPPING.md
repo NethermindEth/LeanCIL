@@ -224,7 +224,7 @@ induction over a list program, specialize the induction principle to its method 
 import CIL.Safety.Execution
 
 variable (program : CIL.Program)
-#check CIL.Safety.runWith.induct (lookup := fun i => program[i]?)
+#check CIL.Safety.runReporting.induct (lookup := fun i => program[i]?)
 ```
 
 At a fetched `.ret`, narrow returns included, the tactic leaves the equation between the computed

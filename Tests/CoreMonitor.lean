@@ -194,4 +194,34 @@ theorem acquired (rejection acquire : Method) (fuel : Nat) (entered before after
   rw [clearedFlag, acquireCall rejection acquire (fuel + 4) entered childFrame setup, child]
   exact writeReturnedFlag rejection acquire fuel before after live written
 #print axioms acquired
+/-- Call a two-argument method, leaving the supplied continuation in its caller. -/
+private def monitorCaller (target : Nat) (continuation : List Instruction) : Method :=
+  let signature : MethodRef := ⟨monitor, name!"Enter", false, 0, .void, original.parameters, []⟩
+  { returnsValue := false, locals := [],
+    code := [.ldc_i4 8, .localloc, .pop, .ldarg 0, .ldarg 1, .call signature {}] ++ continuation,
+    links := [(5, .direct target)] }
+
+/-- Liveness of allocations owned by the protected callers, in allocation order. -/
+private def localLiveness (state : Safety.Memory) : List Bool := (List.range state.nextIdentity).filterMap fun id => do
+  let allocation ← state.allocations id
+  let .frame _ := allocation.kind | none
+  return allocation.live
+
+/-- Inspect the caller-owned lockTaken byte when the protected call stack faults. -/
+private def flagAtFault (acquire : Method) : Option (LocatedFault × BitVec 8 × List Bool × List Bool) := do
+  let done : Method := { returnsValue := false, locals := [], code := [.ret] }
+  let body := program done acquire ++ [monitorCaller 0 [.ldnull, .throw], monitorCaller 3 [.ret]]
+  let .error state := invokeWithFaultState body 32 4 args { memory 0 with stackLimit := 16 } | none
+  return (state.location, (state.unwoundMemory.cells 0 0).bits,
+    localLiveness state.memory, localLiveness state.unwoundMemory)
+
+/-- A later fault carries the completed monitor write back across the protected caller.
+    A fault inside acquisition carries the original clear byte. -/
+theorem protectedFlag :
+    flagAtFault { returnsValue := false, locals := [], code := [.ret] } =
+      some (⟨3, 7, .thrown .nullReference⟩, 1, [true, true], [false, false]) ∧
+    flagAtFault { returnsValue := false, locals := [], code := [.ldnull, .throw] } =
+      some (⟨2, 1, .thrown .nullReference⟩, 0, [true, true], [false, false]) := by
+  exact ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
+#print axioms protectedFlag
 end Tests.CoreMonitor

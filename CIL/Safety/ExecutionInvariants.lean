@@ -809,7 +809,7 @@ theorem invokeWith_spanHome (lookup : Nat → Option CIL.Method) (fuel method : 
     {args : List Value} {m : Memory} {slot : Nat} (forged : Value.spanHome slot ∈ args) :
     ∃ fault, invokeWith lookup fuel method args m = .error ⟨method, 0, fault⟩ := by
   obtain ⟨fault, refused⟩ := mapM_error_of_mem (apply := checkedValue m) rfl forged
-  unfold invokeWith
+  unfold invokeWith invokeReporting
   cases lookup method with
   | none => exact ⟨.invalidState, rfl⟩
   | some body =>

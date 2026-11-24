@@ -35,6 +35,8 @@ var cases = new List<(string Name, string Source, bool Accepted, bool Emitted)>(
 // Every extraction must elaborate before checking whether its wrapper or exact statement is accepted.
 void Audit(string name, string source, bool accepted, bool emitted = true)
 {
+    if (name != "valid" && source == baseline)
+        throw new InvalidOperationException($"Mutation {name} left the emitted certificate unchanged.");
     cases.Add((name, prefix.RemainingSource(source), accepted, accepted && emitted));
 }
 
@@ -42,9 +44,9 @@ Audit("valid", baseline, true);
 // Definitionally equal, so elaboration accepts it, but not the statement the extractor emits.
 Audit("wrapped-statement", baseline.Replace(
     "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
-    "platformDefinitions methodEvidence imports program := by",
+    "platformDefinitions methodEvidence imports program managedDeclarations := by",
     "theorem translation_valid : id (Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
-    "platformDefinitions methodEvidence imports program) := by"), true, emitted: false);
+    "platformDefinitions methodEvidence imports program managedDeclarations) := by"), true, emitted: false);
 Audit("missing-certificate", declaration.Replace(baseline, ""), false);
 Audit("unrelated-true", declaration.Replace(baseline, "theorem translation_valid : True := True.intro"), false);
 Audit("definition-instead-of-theorem", baseline.Replace("theorem translation_valid", "def translation_valid"), false);
