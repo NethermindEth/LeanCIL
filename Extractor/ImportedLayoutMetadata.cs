@@ -2,9 +2,26 @@ using Mono.Cecil;
 
 namespace Nethermind.LeanCIL;
 
+/// <summary>The original #Strings bytes of one nominal layout declaration level.</summary>
+internal sealed record ContractLayoutLevel(byte[] Namespace, byte[] Name)
+{
+    internal static ContractLayoutLevel[] Read(TypeDefinition definition)
+    {
+        var metadata = PinnedAssemblies.Active!.IdentityMetadata(definition.Module);
+        var type = TypeIdentity.Of(definition, metadata);
+        return [.. type.Enclosing.Append(new(type.Namespace, type.Name))
+            .Select(level => new ContractLayoutLevel(level.Namespace.Bytes.ToArray(), level.Name.Bytes.ToArray()))];
+    }
+
+    internal static string Lean(ContractLayoutLevel[] levels) =>
+        "[" + string.Join(", ", levels.Select(level =>
+            new TypeLevel(MetadataName.FromBytes(level.Namespace), MetadataName.FromBytes(level.Name)).ToLean())) + "]";
+}
+
 internal sealed record ContractLayoutField(string Name, ContractType Type, string Storage, int? Offset);
 internal sealed record ContractLayout(string Identity, string Scope, string Name, bool IsValueType,
-    ContractType BaseType, bool Explicit, bool Auto, int Packing, int DeclaredSize, ContractLayoutField[] Fields);
+    ContractType BaseType, bool Explicit, bool Auto, int Packing, int DeclaredSize, ContractLayoutField[] Fields,
+    ContractLayoutLevel[] Declaration);
 
 internal static class ImportedLayoutMetadata
 {
@@ -22,7 +39,9 @@ internal static class ImportedLayoutMetadata
     {
         if (layouts.Any(layout => layout is null || string.IsNullOrWhiteSpace(layout.Name) ||
                 string.IsNullOrWhiteSpace(layout.Scope) || layout.Identity != layout.Scope + "::" + layout.Name ||
-                !layout.IsValueType || layout.Fields is null || layout.BaseType is null) ||
+                !layout.IsValueType || layout.Fields is null || layout.BaseType is null ||
+                layout.Declaration is not { Length: > 0 } ||
+                layout.Declaration.Any(level => level?.Namespace is null || level.Name is null)) ||
             layouts.Select(layout => layout.Identity).Distinct(StringComparer.Ordinal).Count() != layouts.Length)
             throw new InvalidDataException("Invalid or duplicate imported layout metadata.");
         foreach (ContractLayout layout in layouts)
@@ -91,7 +110,7 @@ internal static class ImportedLayoutMetadata
         }).ToArray();
         layouts.Add(new(type, new(identity, selected.Assembly.Name.FullName, type.FullName, type.IsValueType,
             ContractType.Read(type.BaseType), type.IsExplicitLayout, type.IsAutoLayout,
-            type.PackingSize, type.ClassSize, fields)));
+            type.PackingSize, type.ClassSize, fields, ContractLayoutLevel.Read(type))));
         active.Remove(type);
         included.Add(type);
     }
@@ -127,7 +146,8 @@ internal static class ImportedLayoutMetadata
             var kind = $"explicit := {LeanText.Bool(layout.Explicit)}, auto := {LeanText.Bool(layout.Auto)}";
             var size = $"packing := {layout.Packing}, declaredSize := {layout.DeclaredSize}";
             var fields = string.Join(", ", layout.Fields.Select(Field));
-            return $$"""{ identity := {{identity}}, {{kind}}, {{size}}, fields := [{{fields}}] }""";
+            var key = $"identity := {identity}, declaration := {ContractLayoutLevel.Lean(layout.Declaration)}";
+            return $$"""{ {{key}}, {{kind}}, {{size}}, fields := [{{fields}}] }""";
         });
         return $"[{string.Join(", ", rows)}]";
     }

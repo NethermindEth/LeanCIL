@@ -621,8 +621,10 @@ do not verify Cecil or remove runtime assumptions. See [typed imports](TYPED-IMP
 
 The extractor selects imported layout definitions and assigns layout indices using the assembly,
 namespace and simple name of each enclosing type and the type itself. Generic arguments are part
-of the lookup. Lean layout rows still use the scoped display name. Extraction rejects ambiguous
-display names before emitting those rows.
+of the lookup. For a nominal aggregate operand, Lean checks the layout index against the program's
+raw layout table and checks each namespace and simple name against the resolved metadata columns.
+For constructed generic types it checks the row index and scoped spelling. Extraction rejects
+ambiguous display names before emitting the table.
 
 An imported aggregate local sizes caller frame storage from the same pinned metadata that byref
 contracts already trust; it adds a consumer and no trusted source. `ImportedLocalLayoutsBound`

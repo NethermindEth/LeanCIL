@@ -442,7 +442,8 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   BodyDecodes pins platform item.assembly item.body item.original item.arguments item.signature
     ((ImportSlotIndex.ofList imports).forLinks all.length method.links) /\
   MethodEnvironmentValid rawLayouts layouts method ∧
-  DeclaredValid item.closed method ∧ item.links = method.links
+  DeclaredValid item.closed method ∧
+  item.body.layoutDeclarations = layoutDeclarations rawLayouts ∧ item.links = method.links
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (pins : List AssemblyPin) (platform : PlatformTable) (all : List MethodEvidence)
@@ -450,13 +451,13 @@ instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (item : MethodEvidence) (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧
-    _))
+    _ ∧ _))
 
 /-- The record supplies exactly the executable links checked for its method. -/
 theorem MethodEvidenceValid.links_eq {rawLayouts layouts pins platform all imports item method}
     (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :
     item.links = method.links := by
-  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, links⟩ := valid
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, links⟩ := valid
   exact links
 #print axioms MethodEvidenceValid.links_eq
 

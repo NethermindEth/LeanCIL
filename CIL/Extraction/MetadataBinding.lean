@@ -33,7 +33,8 @@ def MetadataEnv.frame (env : MetadataEnv) (arity ownerArity : Nat) :
     Except MetadataError Frame := do
   let index ← env.slice 0 0
   let corlib ← index.corlibIdentity
-  .ok { corlib, anchor := corlib.getD [], arity, ownerArity }
+  .ok { corlib, anchor := corlib.getD [], arity, ownerArity,
+        layoutDeclarations := env.layoutDeclarations }
 
 /-- The type of a signature blob read in the slice at `position`. -/
 def MetadataEnv.resolveBlob (env : MetadataEnv) (position token blobOffset : Nat) :

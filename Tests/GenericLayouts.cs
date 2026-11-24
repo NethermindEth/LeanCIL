@@ -129,6 +129,46 @@ using (var pinned = new PinnedMetadata(extractor, shadowImage))
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution");
 var evidence = new GeneratedEvidence(root);
 var rejected = new RejectedEvidence(root);
+var dottedPacket = Path.Combine(root, "DottedPacket.dll");
+using (var source = ModuleDefinition.ReadModule(assembly))
+{
+    var packet = source.GetType("Examples.Packet");
+    packet.Name = packet.FullName;
+    packet.Namespace = "";
+    source.Write(dottedPacket);
+}
+foreach (var (label, image, otherSpace, otherName) in new[]
+{
+    ("QualifiedPacket", assembly, "", "Examples.Packet"), ("DottedPacket", dottedPacket, "Examples", "Packet")
+})
+{
+    var output = Path.Combine(root, label);
+    Run(["dotnet", ExtractorPath, "extract", image, "Arithmetic::Struct(ulong)", output]);
+    var path = Path.Combine(output, "Extracted.lean");
+    File.AppendAllText(path, $$"""
+
+        namespace Extracted
+        open CIL CIL.Extraction
+        /-- The token carried by the first initobj instruction in this method. -/
+        private def initobjToken : Option Nat := do
+          let instruction := method0Body.bytes.drop 14
+          guard (instruction.take 2 == [0xfe, 0x15])
+          return (← readLittle 4 (instruction.drop 2)).1
+        /-- A layout with identical display spelling and different namespace and simple name columns. -/
+        private def swappedLayouts := rawLayouts.map fun row =>
+          { row with declaration := [⟨name!"{{otherSpace}}", name!"{{otherName}}"⟩] }
+        /-- The verifier rejects the swapped columns at the physical initobj operand. -/
+        theorem swapped_declaration_rejected :
+            (match checkBody { method0Body with layoutDeclarations := layoutDeclarations swappedLayouts }
+                method0Original method0TypeArgumentsRaw with
+             | .error (.metadata (.operandMismatch token)) => some token
+             | _ => none) = initobjToken ∧ initobjToken.isSome = true := by
+          constructor <;> cil_kernel_rfl
+        #print axioms swapped_declaration_rejected
+        end Extracted
+        """);
+    evidence.Add(path, "PASS initobj binds the namespace and simple name in " + label, "swapped_declaration_rejected");
+}
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.GenericLayouts")!;
 foreach (var (name, signature) in new[]
 {

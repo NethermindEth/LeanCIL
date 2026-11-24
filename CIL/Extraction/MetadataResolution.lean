@@ -144,6 +144,8 @@ structure MetadataEnv where
   platform : PlatformTable
   /-- Exact value-layout identities published by the selected import slots. -/
   publishedLayouts : Array (List Nat) := #[]
+  /-- Available when resolving a body against its program layout table. -/
+  layoutDeclarations : Option (Array (String × List TypeLevel)) := none
 
 /-- Build all assembly lookups once, keeping the first occurrence of each identity. -/
 def MetadataEnv.ofSlices (slices : List MetadataIndex) (pinned : AssemblyPrefixes := {})
@@ -1245,6 +1247,25 @@ structure Frame where
   ownerArity : Nat
   /-- A member declaration numbers each owner's variables from zero in its own signature. -/
   rawIndices : Bool := false
+  /-- Standalone signature checks have no layout table. Certified bodies always supply it. -/
+  layoutDeclarations : Option (Array (String × List TypeLevel)) := none
+
+/-- Each namespace and name in the resolved nesting chain has its own metadata column. -/
+def declarationMatches : List TypeLevel → List (List Nat) → Bool
+  | [], [] => true
+  | level :: rest, space :: name :: parts =>
+    MetadataName.ofBytes? space == some level.typeNamespace &&
+      MetadataName.ofBytes? name == some level.name && declarationMatches rest parts
+  | _, _ => false
+
+/-- A body operand selects its scoped layout at the stated index. A nominal type must match
+    every name column, and a constructed generic instance must select an instance layout. -/
+def Frame.layoutMatches (frame : Frame) (index : Nat) (identity : String)
+    (parts : List (List Nat)) : Bool :=
+  match frame.layoutDeclarations with
+  | none => true
+  | some rows => (rows[index]?).any fun row =>
+    row.1 == identity && declarationMatches row.2 parts
 
 
 /-- A class, interface or external type that may be a class. -/
@@ -1337,9 +1358,9 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
     | .named named, .object scope name =>
       named.scope == bytesOf scope && named.name == bytesOf name && objectNamed named &&
         (!named.fixedStorage || named.name == systemStringName)
-    | .named named, .aggregate identity _ =>
+    | .named named, .aggregate identity index =>
       bytesOf identity == named.scope ++ [58, 58] ++ named.name && valueLike named.kind &&
-        !named.fixedStorage
+        !named.fixedStorage && frame.layoutMatches index identity named.parts
     | .named named, .enum identity underlying =>
       bytesOf identity == named.scope ++ [58, 58] ++ named.name &&
         match named.kind with
@@ -1356,8 +1377,9 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
     | .byref element, .byref inner => typeAdmits frame fuel element inner
     | .pointer element, .pointer inner => typeAdmits frame fuel element inner
     | .szarray element, .array inner => typeAdmits frame fuel element inner
-    | .genericInst head arguments, .aggregate identity _ =>
-      valueLike head.kind && aggregateValueArgs fuel arguments &&
+    | .genericInst head arguments, .aggregate identity index =>
+      frame.layoutMatches index identity [] && valueLike head.kind &&
+        aggregateValueArgs fuel arguments &&
         (if head.pinned || (head.parts == [systemNamespace, valueTuplePairName] &&
             head.scope == bytesOf runtimeScope) ||
             arguments.toList.any (fun | .primitive _ => false | _ => true) then

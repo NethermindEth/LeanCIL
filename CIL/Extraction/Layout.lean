@@ -156,7 +156,14 @@ structure RawLayout where
   interfaces : List String := []
   /-- Closed sequential generic layouts additionally prove their original field substitutions. -/
   generic : Option GenericLayout := none
+  /-- Physical namespace and simple name at each enclosing level of a nominal layout.
+      A constructed generic instance has no nominal declaration of its own. -/
+  declaration : List TypeLevel := []
   deriving DecidableEq, Repr
+
+/-- The scoped identity and nominal name columns at each index in the program's layout table. -/
+def layoutDeclarations (rows : List RawLayout) : Array (String × List TypeLevel) :=
+  (rows.map fun row => (row.identity, row.declaration)).toArray
 
 /-- A struct's field offsets and size, with the alignment it imposes when nested. -/
 structure ComputedLayout where

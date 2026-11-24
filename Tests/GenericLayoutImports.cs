@@ -238,6 +238,12 @@ string InterfaceDigest(JsonObject contract)
 
 foreach ((string name, Action<JsonObject> mutate) in new (string, Action<JsonObject>)[]
 {
+    ("DottedDeclaration", contract =>
+    {
+        var level = contract["declaration"]![0]!;
+        level["namespace"] = "";
+        level["name"] = Convert.ToBase64String("TypedFixture.Pair"u8);
+    }),
     ("Packing", contract => contract["packing"] = 1),
     ("Size", contract => contract["declaredSize"] = 16),
     ("NestedScope", contract => contract["fields"]![0]!["type"]!["scope"] = "Other, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null")

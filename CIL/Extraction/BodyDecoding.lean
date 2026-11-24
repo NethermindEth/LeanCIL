@@ -247,6 +247,8 @@ structure BodyEvidence where
   platform : PlatformTable := {}
   /-- The direct import links and published layout names bound by the translation certificate. -/
   imports : BodyImports := {}
+  /-- Relevant declaration columns in the same index order as the certified program layouts. -/
+  layoutDeclarations : Array (String × List TypeLevel) := #[]
   /-- The type arguments of a generic instance, method arguments first, as the types its
       signature names; empty for a method that is not an instance. -/
   instantiation : List InstanceArgument := []
@@ -691,7 +693,8 @@ def decodeCatchFinally (env : MetadataEnv) (arity ownerArity : Nat) (body : Body
 /-- The metadata environment and imported layouts used to check the body's own tokens. -/
 def BodyEvidence.environment (body : BodyEvidence) : Except MetadataError MetadataEnv := do
   let env ← body.metadata.environmentWith body.identities body.tables body.pinned body.platform
-  return { env with publishedLayouts := body.imports.layouts }
+  return { env with publishedLayouts := body.imports.layouts,
+                    layoutDeclarations := some body.layoutDeclarations }
 
 /-- The method's definition, its locals and its body, each checked against the metadata the
     body carries: the decoded body, when everything agrees with the method instantiated at

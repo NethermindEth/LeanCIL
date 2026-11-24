@@ -148,6 +148,12 @@ private def raw (owner : TypeExpr) (opcode index : Nat) (flagged parameterless :
         [⟨0, receiver, .none⟩, ⟨1, 0x17, .none⟩, ⟨2, stfld, access⟩, ⟨7, 0x2A, .none⟩]
       else [⟨0, receiver, .none⟩, ⟨1, opcode, access⟩, ⟨6, 0x2A, .none⟩] }
 
+/-- `Ext.Point` as CoreCLR lays it out: `X` at 0, `Y` at 4. -/
+private def rawLayouts : List RawLayout :=
+  [{ identity := extScope ++ "::Ext.Point", explicit := false, packing := 0, declaredSize := 0,
+     declaration := [⟨name!"Ext", name!"Point"⟩],
+     fields := [{ type := .signed32 }, { type := .signed32 }] }]
+
 /-- The bytes and token table of `raw`, over the metadata of its world. -/
 private def body (owner : TypeExpr) (opcode index : Nat) (flagged parameterless := false) :
     BodyEvidence :=
@@ -157,8 +163,11 @@ private def body (owner : TypeExpr) (opcode index : Nat) (flagged parameterless 
   let bytes :=
     if opcode == stfld then [8 * 4 + 2, receiver, 0x17, stfld] ++ token ++ [0x2A]
     else [7 * 4 + 2, receiver, opcode] ++ token ++ [0x2A]
-  evidenceOf bytes [(world.2.2, .field owner index int32 name!"Y" flagged)] { own := world.1 }
-    (raw owner opcode index flagged parameterless) (pointPlatform (owner == pointClass))
+  let classOwner := owner == pointClass
+  let method := raw owner opcode index flagged parameterless
+  let result := evidenceOf bytes [(world.2.2, .field owner index int32 name!"Y" flagged)]
+    { own := world.1 } method (pointPlatform classOwner)
+  { result with layoutDeclarations := if classOwner then #[] else layoutDeclarations rawLayouts }
 
 /-- Whether decoding the body fails on exactly the refusal of its `Y` token. -/
 private def refusedAtY (owner : TypeExpr) (opcode index : Nat) (parameterless := false) : Bool :=
@@ -209,10 +218,6 @@ private def evidence (owner : TypeExpr) (opcode index : Nat) (flagged := false) 
     assembly := pin,
     signature := (spelled? (body owner opcode index flagged).names.signature).getD "" }
 
-/-- `Ext.Point` as CoreCLR lays it out: `X` at 0, `Y` at 4. -/
-private def rawLayouts : List RawLayout :=
-  [{ identity := extScope ++ "::Ext.Point", explicit := false, packing := 0, declaredSize := 0,
-     fields := [{ type := .signed32 }, { type := .signed32 }] }]
 private def layouts : Array ComputedLayout :=
   #[⟨{ size := 8, fields := [{ offset := 0, width := 4 }, { offset := 4, width := 4 }] }, 4⟩]
 

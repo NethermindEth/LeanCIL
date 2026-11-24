@@ -207,7 +207,9 @@ internal sealed class LayoutEvidence
             var interfaces = layouts.IsImported(type) ? "" : $"interfaces := [{string.Join(", ",
                 metadata.Interfaces.Select(implementation => IdentityText.Quote(InterfaceIdentity(
                     GenericStructs.Substitute(implementation.InterfaceType, type as GenericInstanceType)))))}], ";
-            var attributes = $"{genericEvidence}{kind}{auto}{marker}{interfaces}";
+            var declaration = type is GenericInstanceType ? "" :
+                $"declaration := {ContractLayoutLevel.Lean(ContractLayoutLevel.Read(metadata))}, ";
+            var attributes = $"{declaration}{genericEvidence}{kind}{auto}{marker}{interfaces}";
             var size = $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}";
             var fieldList = string.Join(", ", fields);
             var identity = rowIdentities[index];

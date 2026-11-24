@@ -722,7 +722,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $$"""def method{{number}}Body : Extraction.BodyEvidence := { bytes := method{{number}}Bytes,""",
             $$"""tokens := { operands := {{table}} }, metadata := method{{number}}Metadata,""",
             $"""identities := {identities}, tables := method{number}Tables, names := method{number}Names,""",
-            $$"""pinned := pinnedIndex, platform := {{platform}} }""");
+            "pinned := pinnedIndex, layoutDeclarations := Extraction.layoutDeclarations rawLayouts,",
+            $$"""platform := {{platform}} }""");
         return ($"""def method{number}Bytes : List Nat := {data}""", slices, definition,
             identified, $"""method{number}_tables_valid""");
     }
