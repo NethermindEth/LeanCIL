@@ -10,6 +10,7 @@
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
+#:include KernelComparisons.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -71,35 +72,36 @@ string LeanValue(object value) => value switch
 };
 
 // Each group proves its comparisons at the default limits and preserves the remaining conjunction.
-static string BoundaryProof(List<string> claims)
+static string BoundaryProof(List<(string Left, string Right)> claims)
 {
     const int comparisonsPerGroup = 16;
     const string conjunction = " \u2227\n";
-    var groups = claims.SkipLast(1).Chunk(comparisonsPerGroup).ToArray();
+    static string Equation((string Left, string Right) claim) => $"{claim.Left} =\n  {claim.Right}";
+    string Comparison(int index) => Projection("results", claims.Count, index);
+    var groups = Enumerable.Range(0, claims.Count - 1).Chunk(comparisonsPerGroup).ToArray();
     var declarations = groups.Select((group, index) =>
     {
-        var witnesses = string.Join(", ", Enumerable.Repeat("rfl", group.Length).Append("rest"));
-        var tuple = $"\u27e8{witnesses}\u27e9";
+        var statement = string.Join(conjunction, group.Select(position => Equation(claims[position])).Append("tail"));
+        var tuple = $"\u27e8{string.Join(", ", group.Select(Comparison).Append("rest"))}\u27e9";
         return $$"""
             /-- These boundary comparisons hold for any proved continuation. -/
             private theorem boundary{{index}} {tail : Prop} (rest : tail) :
-            {{string.Join(conjunction, group.Append("tail"))}} := {{tuple}}
+            {{statement}} :=
+              {{tuple}}
             #print axioms boundary{{index}}
             """;
     });
-    var names = groups.Select((_, index) => $"boundary{index}").Append("lastBoundary");
+    var names = groups.Select((_, index) => $"boundary{index}").Append(Comparison(claims.Count - 1));
     var witness = $"{string.Join(" (", names)}{new string(')', groups.Length)}";
     return $"""
         import Extracted
         import CIL.Safety.Execution
         namespace ExampleProof
+        {ComparisonResults(claims)}
         {string.Join("\n\n", declarations)}
-        /-- The final input gives the runtime result. -/
-        private theorem lastBoundary : {claims[^1]} := rfl
-        #print axioms lastBoundary
         /-- Each compiled call returns the value obtained from the runtime. -/
         theorem correctness :
-        {string.Join(conjunction, claims)} := {witness}
+        {string.Join(conjunction, claims.Select(Equation))} := {witness}
         #print axioms correctness
         end ExampleProof
 
@@ -126,7 +128,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
             [0, 1, 2, 1UL << 31, 1UL << 63, ulong.MaxValue];
         counts = rotations ? [-1, 0, 65] : [0];
     }
-    var claims = new List<string>();
+    var claims = new List<(string Left, string Right)>();
     var narrow = method.Name.StartsWith("PrimitiveNarrow", StringComparison.Ordinal);
     if (narrow) values = [0, 1, 2, 127, 128, 255, 256, 32767, 32768, 65535, 65536, uint.MaxValue];
     if (narrow && rotations)
@@ -142,11 +144,10 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         object[] inputs = rotations ? [value, count] : [value];
         var expected = method.Invoke(null, inputs)!;
         var fuel = narrow ? 96 : method.Name.StartsWith("PrimitiveCounts", StringComparison.Ordinal) ? 32 : 8;
-        claims.Add($"""
+        claims.Add(($"""
             (CIL.Safety.invoke Extracted.program {fuel} 0
-              [{string.Join(", ", inputs.Select(LeanValue))}] CIL.Safety.Memory.empty).map Prod.snd =
-              .ok [{LeanValue(expected)}]
-            """);
+              [{string.Join(", ", inputs.Select(LeanValue))}] CIL.Safety.Memory.empty).map Prod.snd
+            """, $".ok [{LeanValue(expected)}]"));
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, BoundaryProof(claims));

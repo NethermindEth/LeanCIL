@@ -8,6 +8,7 @@
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
+#:include KernelComparisons.cs
 
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -61,30 +62,6 @@ var methods = new (string Name, Func<ulong, ulong, string> Result)[]
     ("Local", (q, r) => $".scalar (.i64 {unchecked(q - r)})"),
     ("Pair", (q, r) => $".scalar (.aggregate {Bytes(q, r)})")
 };
-// A balanced tree retains every claim without a linear-depth proof term.
-string Balanced(IReadOnlyList<string> entries, Func<string, string, string> join)
-{
-    string Build(int start, int count)
-    {
-        if (count == 1) return entries[start];
-        var half = count / 2;
-        return join(Build(start, half), Build(start + half, count - half));
-    }
-    return Build(0, entries.Count);
-}
-// The proof of entry `index` of `count` from `pairs`, an equation of the tuples `Balanced` builds.
-static string Projection(string pairs, int count, int index)
-{
-    var (start, term) = (0, pairs);
-    while (count > 1)
-    {
-        var half = count / 2;
-        var first = index < start + half;
-        term = $"(Prod.mk.inj {term}).{(first ? 1 : 2)}";
-        (start, count) = first ? (start, half) : (start + half, count - half);
-    }
-    return term;
-}
 // A failed attempt to prove the quotient contract also needs a checked counterexample for the compiled method.
 GeneratedVerification WrongQuotientRefutation(string method, string selector, int bits, int[] inputs, string expected)
 {
@@ -290,25 +267,20 @@ var operands = new Dictionary<Type, object[]>
     [typeof(nint)] = new object[] { nint.MinValue, (nint)(-7), (nint)(-1), (nint)0, (nint)1, (nint)3, nint.MaxValue },
     [typeof(nuint)] = new object[] { (nuint)0, (nuint)1, (nuint)3, (nuint)(1UL << 63), nuint.MaxValue }
 };
-// One kernel evaluation checks every comparison, so the program's definitions unfold once per
-// fixture; each case projects its own equation and `correctness` keeps its statement.
+// Each case projects its equation from one kernel evaluation and `correctness` keeps its statement.
 string BoundaryProof(IReadOnlyList<(string Left, string Right)> claims)
 {
-    string Tuple(IEnumerable<string> sides) => Balanced([.. sides], (left, right) => $"({left}, {right})");
+    var statement = Balanced([.. claims.Select(claim => $"{claim.Left} = {claim.Right}")],
+        (left, right) => $"({left} ∧ {right})");
     string[] cases = [.. claims.Select((_, index) => $"case{index}")];
     var projections = claims.Select((claim, index) =>
         $"theorem case{index} : {claim.Left} = {claim.Right} := {Projection("results", claims.Count, index)}");
-    var statement = Balanced([.. claims.Select(claim => $"{claim.Left} = {claim.Right}")],
-        (left, right) => $"({left} ∧ {right})");
     return $$"""
         import Extracted
         import Tests.Support
         namespace ExampleProof
         def memory : CIL.Safety.Memory := { Tests.caller with cells := fun _ _ => .mk 93 false }
-        /-- Each compiled call returns the result or raises the fault observed at runtime. -/
-        private theorem results :
-        {{Tuple(claims.Select(claim => claim.Left))}} =
-        {{Tuple(claims.Select(claim => claim.Right))}} := by cil_kernel_rfl
+        {{ComparisonResults(claims)}}
         {{string.Join("\n", projections)}}
         #print axioms [{{string.Join(", ", cases)}}]
         theorem correctness :
