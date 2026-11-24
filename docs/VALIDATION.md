@@ -71,10 +71,10 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `imports` | implementation-bound contract imports and conditional caller verification |
 | `closures` | summaries at relocated indices, contract reuse for identical executable bodies, and rejection of decoded links to different method tokens |
 | `exceptionlint` | diagnostic XML exception drift without proof claims |
-| `contracts` | universal checked contracts, caller memory preservation and incorrect implementations |
+| `contracts` | universal branch, generic identity and struct contracts, caller memory preservation and matching counterexamples |
 | `evidence` | independent extraction certificates, malformed evidence rejection, the metadata decoder's method names against Cecil's and framework argument guards |
 | `dispatch` | constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage |
-| `loops` | cyclic control-flow validation, universal termination, negative contracts and class/word-array composition |
+| `loops` | cyclic control flow, universal termination, divergence and wrong-return refutations of the same contracts, and class/word-array composition |
 | `outlines-control` | generated outlines for control flow, arithmetic and value types, completed proofs and rejection checks |
 | `outlines-objects` | generated outlines for objects and reference arrays, completed proofs and rejection checks |
 | `outlines-buffers` | generated outlines for word arrays, spans and array-valued fields, completed proofs and rejection checks |

@@ -17,19 +17,19 @@ bind_entry entry (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFormed
 /-- The compiled struct stores and helper call return every input word.
     All caller allocation metadata, bytes, initialization and permissions survive;
     only fresh frame-owned storage may be allocated, written and expired. -/
-theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFormed) :
+theorem framed (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFormed) :
     ∃ fuel result, invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory =
-      .ok (result, [.scalar (.i64 x)]) ∧ MemoryBelow memory.nextIdentity memory result := by
+      .ok (result, [.scalar (.i64 x)]) ∧ Confined [] memory result := by
   obtain ⟨reference, entered, enter⟩ := entry.checked memory x wellFormed
   have frame := enter.frame
   have homes := (frame []).homes
   have slot : [LocalSlot.bytes (.aggregate 12) reference][0]? = _ := rfl
-  obtain ⟨zeroed, zeroStep, zeroSnapshots, zeroFormed, zeroBelow, zeroReady, zeroForm, -⟩ :=
+  obtain ⟨zeroed, zeroStep, zeroSnapshots, zeroFormed, zeroBelow, zeroReady, zeroForm, zeroWrite⟩ :=
     (frame []).snapshots.zero_aggregate homes (frame []).wellFormed slot enter.numeric0.writable
   obtain ⟨payload, storePayload, payloadSnapshots, payloadFormed, payloadBelow, payloadReady,
-    payloadForm, payloadValues, -⟩ := zeroSnapshots.store_field homes zeroFormed slot rfl zeroReady
+    payloadForm, payloadValues, payloadWrite⟩ := zeroSnapshots.store_field homes zeroFormed slot rfl zeroReady
       Extracted.layout0_valid (by decide) rfl rfl (fieldIndex := 0) rfl (.i64 x) rfl
-  obtain ⟨tagged, storeTag, tagSnapshots, tagFormed, tagBelow, -, tagForm, tagValues, -⟩ :=
+  obtain ⟨tagged, storeTag, tagSnapshots, tagFormed, tagBelow, -, tagForm, tagValues, tagWrite⟩ :=
     payloadSnapshots.store_field homes payloadFormed slot rfl payloadReady
       Extracted.layout0_valid (by decide) rfl payloadValues (fieldIndex := 1) rfl (.i32 3) rfl
   have loaded := tagSnapshots.load_field tagFormed slot rfl Extracted.layout0_valid rfl tagValues
@@ -37,11 +37,22 @@ theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFor
   rw [exists_comm]
   simp only [exists_and_right]
   refine ⟨leaveFrame (entry.frame memory reference) tagged,
-    ?_, MemoryBelow.frame_round_trip enter.setup (zeroBelow.trans (payloadBelow.trans tagBelow))⟩
-  cil_checked_steps [enter.setup, zeroStep, storePayload, storeTag, loaded, localAddress,
-    entry.frame,
-    access_reference_valid _ _ _ _ _ enter.numeric0.writable, zeroForm, payloadForm, tagForm,
-    numericOfWidth]
+    ?_, Confined.frame_round_trip enter.setup (zeroBelow.trans (payloadBelow.trans tagBelow)) ?_⟩
+  · cil_checked_steps [enter.setup, zeroStep, storePayload, storeTag, loaded, localAddress,
+      entry.frame,
+      access_reference_valid _ _ _ _ _ enter.numeric0.writable, zeroForm, payloadForm, tagForm,
+      numericOfWidth]
+  · rw [write_nextIdentity tagWrite, write_nextIdentity payloadWrite, write_nextIdentity zeroWrite]
+    exact Nat.le_refl _
+
+#print axioms framed
+
+/-- The return value and preservation of all previously allocated storage. -/
+theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFormed) :
+    ∃ fuel result, invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory =
+      .ok (result, [.scalar (.i64 x)]) ∧ MemoryBelow memory.nextIdentity memory result := by
+  obtain ⟨fuel, final, ran, preserved⟩ := framed memory x wellFormed
+  exact ⟨fuel, final, ran, preserved.nil_memoryBelow⟩
 
 #print axioms correctness
 end ExampleProof

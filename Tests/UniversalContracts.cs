@@ -7,10 +7,9 @@
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
-#:include ../scripts/BatchVerification.cs
+#:include ContractVariants.cs
 
 using System.Reflection;
-using System.Text.Json;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -24,13 +23,7 @@ var contracts = new[]
     ("GenericMethods", "Identity64", "GenericMethods::Identity64(ulong)", "GenericIdentity"),
     ("Arithmetic", "Struct", "Arithmetic::Struct(ulong)", "Struct")
 };
-var positives = new GeneratedQueue(verification, assembly);
-foreach (var (_, name, selector, proofName) in contracts)
-    positives.Add(new(selector, At($"Examples/Proofs/{proofName}.lean"), Path.Combine(root, name)),
-        () => Console.WriteLine($"PASS universal {name}: arbitrary inputs and caller memory with preservation"));
-positives.Flush();
-
-foreach (var (owner, name, selector, _) in contracts)
+foreach (var (owner, name, selector, proofName) in contracts)
 {
     var wrong = Path.Combine(root, "Wrong" + name);
     Directory.CreateDirectory(wrong);
@@ -64,21 +57,12 @@ foreach (var (owner, name, selector, _) in contracts)
     if ((ulong)runtime.Invoke(null, inputs)! == ulong.MaxValue)
         throw new InvalidOperationException("Mutation did not change the result: " + name);
 
-    // Extraction must succeed: the contract is refuted for supported, incorrect CIL by a verified counterexample.
-    Run(Extract("extract", dll, "Examples", selector, wrong));
-    var refutation = Path.Combine(wrong, "Refutation.lean");
-    File.WriteAllText(refutation, Refutation(name));
-    var refuted = verification.Verify(dll, "Examples", selector, refutation, wrong, theorem: "ExampleProof.refuted",
-        existingArtifacts: true).refutation;
-    var entry = JsonDocument.Parse(File.ReadAllText(Path.Combine(wrong, "identity.json"))).RootElement
-        .GetProperty("entry").GetString();
-    if (refuted?.method.signature != entry)
-        throw new InvalidOperationException("Incorrect implementation has no verified refutation: " + name);
+    VerifyVariant(name, selector, proofName, dll, wrong);
     Console.WriteLine($"PASS universal {name} contract refuted for incorrect compiled CIL at the runtime witness");
 }
 
 // The contract each positive proof states, and the input on which the mutant returns another value.
-static string Refutation(string name)
+void VerifyVariant(string name, string selector, string proofName, string wrongAssembly, string wrong)
 {
     const string maximum = "18446744073709551615";
     var (input, witness, args, arguments, violation) = name switch
@@ -97,25 +81,43 @@ static string Refutation(string name)
             ? "final = initial ∧ values = [.scalar (.i64 (if input.1 then input.2.1 else input.2.2))]"
             : "final = initial ∧ values = [.scalar (.i64 input)]");
     var permitted = name == "Struct" ? "Memory.empty_wellFormed" : "trivial";
-    return $$"""
-        import Extracted
-        import CIL.Safety.MethodContract
-        import CIL.Safety.MemoryBelow
-        open CIL.Safety
-        namespace ExampleProof
-        /-- The statement the universal proof of `{{name}}` makes, as a contract. -/
+    var declaration = $$"""
+        /-- Result and memory guarantees of the shipped implementation. -/
         def contract : MethodContract ({{input}}) where
           args input := {{args}}
           {{pre}}
           footprint _ := []
           post input initial final values := {{post}}
-        /-- The mutant returns another value at the runtime witness. -/
-        theorem refuted : contract.Refuted Extracted.program 0 :=
+        """;
+    var holds = name switch
+    {
+        "Choose" => """
+            theorem correctness : contract.Holds Extracted.program 0 := by
+              rintro ⟨flag, left, right⟩ memory -
+              exact MethodContract.Holds.intro memory _
+                (ExampleProof.correctness memory flag left right) (Confined.refl _ _) ⟨rfl, rfl⟩
+            """,
+        "Identity64" => """
+            theorem correctness : contract.Holds Extracted.program 0 := by
+              intro value memory _
+              exact MethodContract.Holds.intro memory _
+                (ExampleProof.correctness memory value) (Confined.refl _ _) ⟨rfl, rfl⟩
+            """,
+        _ => """
+            theorem correctness : contract.Holds Extracted.program 0 := by
+              intro value memory formed
+              obtain ⟨fuel, final, ran, framed⟩ := ExampleProof.framed memory value formed
+              exact MethodContract.Holds.intro final _ ⟨fuel, ran⟩ framed ⟨rfl, framed.nil_memoryBelow⟩
+            """
+    };
+    var refutation = $$"""
+        /-- The mutant returns a different value at the runtime witness. -/
+        theorem correctness : contract.Refuted Extracted.program 0 :=
           .of_return (input := {{witness}}) (initial := Memory.empty) {{permitted}}
             (rfl : invoke Extracted.program 64 0 {{arguments}} Memory.empty = .ok _)
             (by rintro ⟨{{violation}}⟩; revert wrong; decide)
-        #print axioms refuted
-        end ExampleProof
-
         """;
+    verification.VerifyContractVariant(assembly, "Examples", selector, Path.Combine(root, name),
+        wrongAssembly, selector, wrong, declaration, holds, refutation,
+        example: At($"Examples/Proofs/{proofName}.lean"), imports: "import CIL.Safety.MemoryBelow");
 }

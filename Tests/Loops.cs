@@ -14,7 +14,6 @@
 using System.Reflection;
 using System.Buffers.Binary;
 using System.Reflection.PortableExecutable;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -72,9 +71,10 @@ foreach (var variant in new[] { "Nops", "Reordered", "Stuttering" })
     }
     if (variant == "Stuttering")
     {
-        VerifyNondecreasing(assembly, "Loops::Countdown(uint)", contract,
-            Path.Combine(root, "CountdownContract"), dll, output, "0",
-            "Tests/LoopVariants/CountdownStuttering.lean.in");
+        const string countdown = "Loops::Countdown(uint)";
+        VerifyLoopVariants(countdown, contract, "CountdownContract", "0",
+            new(dll, countdown, output, File.ReadAllText(At("Tests/LoopVariants/CountdownStuttering.lean.in"))),
+            new(assembly, "Loops::WrongCountdown(uint)", Path.Combine(root, "WrongContract"), WrongResult(1)));
     }
     else
     {
@@ -262,14 +262,14 @@ Console.WriteLine("PASS unchanged loop proof after reimplementing the helper and
 // Discarding the helper result keeps the guard true. Counting twice returns the wrong value.
 var discarded = CountVariant("CountCallsDiscarded", (caller, _) => caller.Body.Instructions.Single(i =>
     i.OpCode == OpCodes.Stloc_0 && i.Previous.OpCode == OpCodes.Call).OpCode = OpCodes.Pop);
-VerifyNondecreasing(assembly, CountCalls, At("Examples/Proofs/CountCalls.lean"),
-    Path.Combine(root, "CountCallsContract"), discarded, Path.Combine(root, "CountCallsDiscarded"),
-    "input", "Tests/LoopVariants/CountCallsDiscarded.lean.in");
 var overcount = CountVariant("CountCallsOvercount", (caller, _) =>
     caller.Body.Instructions.Single(i => i.OpCode == OpCodes.Ldc_I4_1).OpCode = OpCodes.Ldc_I4_2);
 if (Invoke(overcount, "CountCalls", 3) != 6)
     throw new InvalidOperationException("The overcounting fixture did not change the result");
-Refute(overcount, CountCalls, "CountCallsOvercount", "input", 3, existingArtifacts: true);
+VerifyLoopVariants(CountCalls, At("Examples/Proofs/CountCalls.lean"), "CountCallsContract", "input",
+    new(discarded, CountCalls, Path.Combine(root, "CountCallsDiscarded"),
+        File.ReadAllText(At("Tests/LoopVariants/CountCallsDiscarded.lean.in"))),
+    new(overcount, CountCalls, Path.Combine(root, "CountCallsOvercount"), WrongResult(3)));
 Console.WriteLine("PASS counting contract refuted for CountCallsOvercount at 3, where it returns 6");
 
 // On the correct build, the rule itself must refuse a nondecreasing measure and an invariant
@@ -449,39 +449,13 @@ int[] RejectedLines(string dll, string proof, string name, bool existingArtifact
     return Regex.Matches(failure, @"Proof\.lean:(\d+):\d+: error").Select(m => int.Parse(m.Groups[1].Value)).Distinct().ToArray();
 }
 
-// The result `selector` returns from empty memory for every `uint`, refuted where `dll` returns another value.
-void Refute(string dll, string selector, string name, string result, uint witness, bool existingArtifacts)
-{
-    var output = Path.Combine(root, name);
-    Directory.CreateDirectory(output);
-    var proof = Path.Combine(output, "Refutation.lean");
-    File.WriteAllText(proof, $$"""
-        import Extracted
-        import CIL.Safety.MethodContract
-        open CIL.Safety
-        namespace ExampleProof
-        /-- The result a correct build returns for every word from empty caller memory. -/
-        def contract : MethodContract CIL.W32 where
-          args input := [.scalar (.i32 input)]
-          pre _ memory := memory = Memory.empty
-          footprint _ := []
-          post input _ _ values := values = [.scalar (.i32 ({{result}}))]
-        /-- The incorrect build returns another value at `{{witness}}`. -/
-        theorem refuted : contract.Refuted Extracted.program 0 :=
-          .of_return (input := {{witness}}) (initial := Memory.empty) rfl
-            (rfl : invoke Extracted.program 256 0 [.scalar (.i32 {{witness}})] Memory.empty = .ok _)
-            (by rintro ⟨-, out, rfl, wrong⟩; revert wrong; dsimp only [contract]; decide)
-        #print axioms refuted
-        end ExampleProof
-
-        """);
-    var refutation = verification.Verify(dll, "Examples", selector, proof, output, theorem: "ExampleProof.refuted",
-        existingArtifacts: existingArtifacts).refutation;
-    var entry = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "identity.json"))).RootElement
-        .GetProperty("entry").GetString();
-    if (refutation?.method.signature != entry)
-        throw new InvalidOperationException($"{name} has no verified refutation of its method");
-}
+static string WrongResult(uint witness) => $$"""
+    /-- This input returns a value that contradicts the positive loop contract. -/
+    theorem correctness : contract.Refuted Extracted.program 0 :=
+      .of_return (input := {{witness}}) (initial := Memory.empty) rfl
+        (rfl : invoke Extracted.program 256 0 [.scalar (.i32 {{witness}})] Memory.empty = .ok _)
+        (by rintro ⟨-, out, rfl, wrong⟩; revert wrong; dsimp only [contract]; decide)
+    """;
 
 void Prove(string dll, string selector, string name, string source)
 {
@@ -527,10 +501,6 @@ var feature = Execute(Extract("extract", assembly, "Examples", "Loops::FeatureCo
 if (feature.Code == 0 || !feature.Output.Contains("Unsupported instruction"))
     throw new InvalidOperationException("Feature loop failed to reject reachable array: " + feature.Output);
 Console.WriteLine("PASS fixed feature selection inside a loop");
-
-// WrongCountdown stops at one, so the countdown contract is refuted where it returns 1.
-Refute(assembly, "Loops::WrongCountdown(uint)", "WrongContract", "0", 1, existingArtifacts: false);
-Console.WriteLine("PASS countdown contract refuted for the incorrect loop at 1");
 
 var constantMeasure = File.ReadAllText(contract).Replace("(fun s => s.values.toNat)", "(fun _ => 0)",
     StringComparison.Ordinal);
@@ -861,10 +831,10 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
     Console.WriteLine("PASS rejection: " + mutation);
 }
 
-void VerifyNondecreasing(string assembly, string selector, string example, string positive, string wrongAssembly,
-    string output, string result, string witness)
+void VerifyLoopVariants(string selector, string example, string positive, string result,
+    params ContractCounterexample[] counterexamples)
 {
-    verification.VerifyContractVariant(assembly, "Examples", selector, positive, wrongAssembly, selector, output, $$"""
+    verification.VerifyContractVariants(assembly, "Examples", selector, Path.Combine(root, positive), $$"""
         /-- The loop's universal result from empty memory. -/
         def contract : MethodContract W32 where
           args input := [.scalar (.i32 input)]
@@ -877,7 +847,7 @@ void VerifyNondecreasing(string assembly, string selector, string example, strin
           rintro value _ rfl
           obtain ⟨fuel, final, values, ran, result⟩ := ExampleProof.correctness _ _ ⟨value, rfl, rfl⟩
           exact ⟨fuel, (final, values), ran, by constructor <;> simp [Memory.empty], values, rfl, result⟩
-        """, File.ReadAllText(At(witness)), example: example, imports: """
+        """, counterexamples, example: example, imports: """
         import CIL.Safety.LoopScaffold
         import CIL.Safety.SegmentContract
         """);

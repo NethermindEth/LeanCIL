@@ -2,10 +2,19 @@ using System.Text.Json;
 
 partial class Program
 {
+    sealed record ContractCounterexample(string Assembly, string Selector, string Output, string Proof);
+
     /// <summary>Checks one contract against the positive entry and a witness against the wrong entry.</summary>
     void VerifyContractVariant(string assembly, string identity, string selector, string positiveOutput,
         string wrongAssembly, string wrongSelector, string wrongOutput, string contract, string positive,
-        string counterexample, string profile = "scalar", string? example = null, string imports = "")
+        string counterexample, string profile = "scalar", string? example = null, string imports = "") =>
+        VerifyContractVariants(assembly, identity, selector, positiveOutput, contract, positive,
+            [new(wrongAssembly, wrongSelector, wrongOutput, counterexample)], profile, example, imports);
+
+    /// <summary>Every witness is checked against the same kernel-audited positive statement.</summary>
+    void VerifyContractVariants(string assembly, string identity, string selector, string positiveOutput,
+        string contract, string positive, ContractCounterexample[] counterexamples, string profile = "scalar",
+        string? example = null, string imports = "")
     {
         string Proof(string output, string theorem, string source)
         {
@@ -39,8 +48,12 @@ partial class Program
         var original = Verify(assembly, identity, selector, Proof(positiveOutput, positive, source), positiveOutput,
             profile, theorem: theorem, statement: new(Term: true));
         var expected = original.statementIdentity!.term!.Value.GetRawText();
-        var wrongProof = Proof(wrongOutput, counterexample, "import Extracted");
-        VerifyRefutation(wrongAssembly, identity, wrongSelector, wrongProof, wrongOutput, profile, theorem, expected);
+        foreach (var variant in counterexamples)
+        {
+            var proof = Proof(variant.Output, variant.Proof, "import Extracted");
+            VerifyRefutation(variant.Assembly, identity, variant.Selector, proof, variant.Output, profile,
+                theorem, expected);
+        }
     }
 
     /// <summary>The counterexample refutes the verified contract and names the entry in this extraction.</summary>
