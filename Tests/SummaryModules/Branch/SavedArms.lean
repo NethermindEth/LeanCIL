@@ -19,10 +19,11 @@ def returnsWord (flag : Bool) (x y result : W64) : SegmentContract where
 theorem checked (left flag : Bool) (x y : W64) :
     DecodedSegmentSummary Reference.program Reference.methodEvidence Reference.profile
       Reference.environment 0 (if left then 4 else 2) Reference.assembly0
-      Reference.method0Original.token [] (.ldarg (if left then 1 else 2)) [.ret]
+      Reference.method0Original.token [] (.ldarg (if left then 1 else 2)) [.ret] []
       (returnsWord flag x y (if left then x else y)) := by
   refine ⟨DecodedAt.of_translation Reference.translation_valid ⟨0, by decide⟩
-    Reference.program_method0, ⟨Reference.method0, Reference.program_method0, ?_⟩, ?_⟩
+    Reference.program_method0, ⟨Reference.method0, Reference.program_method0, ?_⟩, fun _ => ?_,
+    .of_sites [0] (by decide) (by decide) rfl⟩
   · cases left <;> rfl
   · rintro args ⟨frame, stack, memory⟩ ⟨rfl, rfl, owned⟩
     refine ⟨.returns memory [.scalar (.i64 (if left then x else y))], ⟨2, ?_⟩,

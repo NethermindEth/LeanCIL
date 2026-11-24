@@ -76,6 +76,7 @@ import CIL.Safety.ConstructContract
 import CIL.Safety.ConstructSetup
 import CIL.Safety.DecodedSegment
 import CIL.Safety.DecodedSummary
+import CIL.Safety.ModelledCalls
 import CIL.Safety.Equations
 import CIL.Safety.Execution
 import CIL.Safety.ExecutionTrace

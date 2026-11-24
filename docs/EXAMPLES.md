@@ -60,7 +60,8 @@ on null. Weakening the live-array clause also changes the statement and invalida
 - `VectorSummary`: `DivisionIntrinsics.UnsafeLowNext` returns its input plus one for every
   `ulong`, proved once by stepping `UnsafeLow`, whose `Vector128.CreateScalarUnsafe` and
   `GetElement` calls run through their runtime models, and once from a `DecodedSummary` of
-  `UnsafeLow` that the call applies without stepping its body.
+  `UnsafeLow` that the call applies without stepping its body. The summary's type lists both
+  runtime models, and the caller discharges them from the extraction's model facts.
 - `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the
   modular additive inverse for every input, including the signed minimum.
 - `NarrowIntegers`: signed/unsigned casts, character values, calls and an eight-byte struct

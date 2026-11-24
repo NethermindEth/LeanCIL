@@ -96,14 +96,14 @@ var weakened = Changed(Changed(Changed(countCalls, "  post x _ _ v := v = x - 1"
         "  post x _ _ v := x ≠ 0 → v.toNat < x.toNat"),
     "refine MethodContract.Holds.intro m _ ?_ (Confined.refl _ m) rfl",
     "refine MethodContract.Holds.intro m (x - 1) ?_ (Confined.refl _ m) measure_falls"), """
-        cil_loop_call summary.holds x at decrementSite
+        cil_loop_call (summary.holds (.nil _)) x at decrementSite
         -- The frame of the memory before the call is stale once `calledFrame` holds.
         clear frame
         cil_loop_recurse recurse (x - 1, count + 1)
         case invariant =>
           show count + 1 + (x - 1) = value
     """, """
-        cil_loop_call keeping summary.holds x at decrementSite
+        cil_loop_call keeping (summary.holds (.nil _)) x at decrementSite
         -- The frame of the memory before the call is stale once `calledFrame` holds.
         clear frame
         cil_loop_recurse recurse (output, count + 1)
@@ -315,7 +315,8 @@ static string SummaryProof(int calls)
         lines.Add(call == 1 ? $"  cil_contract_steps [firstStore, localAddress, {frame}.form_home 0]"
             : $"  cil_contract_steps [localAddress, {frame}.form_home 0]");
         lines.Add("  apply WP.exists_execution");
-        lines.Add($"  apply WP.local_call {frame} summary.holds (reference, {Value(call - 1)}) (by rfl) (by rfl)");
+        lines.Add($"  apply WP.local_call {frame} (summary.holds (.nil _)) (reference, {Value(call - 1)}) " +
+            "(by rfl) (by rfl)");
         lines.Add($"    (by cil_checked_step [localAddress, {frame}.form_home 0]) permitted{call} 0 .word64 " +
             "reference");
         lines.Add($"    rfl rfl (fun _ => .i64 ({Value(call)})) (fun _ => ({Value(call)}).toNat) (fun _ => rfl)");
@@ -395,9 +396,10 @@ static string MutateProof(int calls) => $$"""
     theorem mutate_summary : ∃ record, Extracted.methodEvidence[mutate]? = some record ∧
         DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
           Extracted.environment mutate record.assembly record.original.token record.arguments
-          mutateContract :=
+          [] mutateContract :=
       ⟨_, rfl, .of_decoded bodies_decode rfl ⟨_, Extracted.method1_body_validated⟩
-        Extracted.method1_specialization_validated.1 mutate_holds⟩
+        Extracted.method1_specialization_validated.1 mutate_holds
+        (.of_sites [mutate] (by decide) (by decide) rfl)⟩
     #print axioms mutate_summary
 
     /-- The caller returns `x` plus two per call and keeps all memory below its entry, applying

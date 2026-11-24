@@ -56,10 +56,6 @@ theorem Method.relocate_relocate (f g : Nat → Nat) (body : Method) :
 
 #print axioms Method.relocate_relocate
 
-/-- The method indices the link table of `body` enters, in table order. -/
-def Method.callees (body : Method) : List Nat :=
-  body.links.flatMap fun entry => entry.2.callees
-
 /-- A renaming that fixes every method a body's links enter leaves the body unchanged. -/
 theorem Method.relocate_of_fixes {f : Nat → Nat} {body : Method}
     (fixes : ∀ callee ∈ body.callees, f callee = callee) : body.relocate f = body := by
@@ -512,6 +508,53 @@ theorem RelocatesInto.of_decoded {profile : FeatureProfile} {environment : Layou
 
 #print axioms RelocatesInto.of_decoded
 
+/-- Relocation renames links only, so each instruction is a modelled site exactly when it was. -/
+theorem _root_.CIL.Method.modelledSiteAt_relocate (f : Nat → Nat) (body : Method) (pc : Nat)
+    (op : Instruction) : (body.relocate f).modelledSiteAt pc op = body.modelledSiteAt pc op := by
+  unfold Method.modelledSiteAt
+  rw [Method.linkAt_relocate]
+  rcases body.linkAt pc with _ | _ <;> rfl
+
+#print axioms CIL.Method.modelledSiteAt_relocate
+
+/-- Relocation renames links only, so a body has the same modelled sites. -/
+theorem _root_.CIL.Method.modelledSites_relocate (f : Nat → Nat) (body : Method) :
+    (body.relocate f).modelledSites = body.modelledSites := by
+  simp only [Method.modelledSites, Method.modelledSiteAt_relocate]
+  rfl
+
+#print axioms CIL.Method.modelledSites_relocate
+
+/-- A closed library's listing carries to the program it relocates into, from the relocated
+    root: every method reached there is the relocation of one the library's root reaches. -/
+theorem ModelsListed.relocate {lib target : CIL.Program} {f : Nat → Nat} {root : Nat}
+    {models : List ModelledCall} (listed : ModelsListed lib root models) (closed : Closed lib)
+    (relocates : RelocatesInto lib target f) (inside : root < lib.length) :
+    ModelsListed target (f root) models := by
+  have back : ∀ reached, Reaches target (f root) reached →
+      ∃ original, original < lib.length ∧ reached = f original ∧ Reaches lib root original := by
+    intro reached path
+    induction path with
+    | refl => exact ⟨root, inside, rfl, .refl⟩
+    | link _ present named caller =>
+      obtain ⟨original, below, rfl, path⟩ := caller
+      rw [relocates original below] at present
+      cases present
+      rw [Method.callees_relocate, List.mem_map] at named
+      obtain ⟨callee, entered, rfl⟩ := named
+      have found : lib[original]? = some lib[original] := List.getElem?_eq_getElem below
+      obtain ⟨entry, member, linked⟩ := List.mem_flatMap.mp entered
+      exact ⟨callee, closed original _ found entry member callee linked, rfl,
+        .link path found entered⟩
+  intro reached body path present site member
+  obtain ⟨original, below, rfl, origin⟩ := back reached path
+  rw [relocates original below] at present
+  cases present
+  rw [Method.modelledSites_relocate] at member
+  exact listed original _ origin (List.getElem?_eq_getElem below) site member
+
+#print axioms ModelsListed.relocate
+
 /-- A summary proved over a closed library is a summary of the method `f` places in `target`,
     bound to `target`'s record there, given that record names the same pinned method at the same
     type arguments. The bytes of that record need not be the library's: `relocates` already
@@ -522,8 +565,9 @@ theorem DecodedSummary.relocate {Input Output : Type} {contract : MethodContract
     {lib target : CIL.Program} {libEvidence targetEvidence : List MethodEvidence}
     {profile : FeatureProfile} {environment : LayoutEnvironment} {f : Nat → Nat}
     {index token : Nat} {pin : AssemblyPin} {arguments : List TypeExpr}
+    {models : List ModelledCall}
     (summary : DecodedSummary lib libEvidence profile environment index pin token arguments
-      contract)
+      models contract)
     (closed : Closed lib) (relocates : RelocatesInto lib target f)
     (targetDecoded : decodedProgram? profile environment targetEvidence = some target)
     (record : ∀ item, libEvidence[index]? = some item → ∃ moved,
@@ -531,14 +575,22 @@ theorem DecodedSummary.relocate {Input Output : Type} {contract : MethodContract
         moved.original = item.original ∧ moved.arguments = item.arguments ∧
         moved.closed = item.closed ∧ moved.BodyBound) :
     DecodedSummary target targetEvidence profile environment (f index) pin token arguments
-      contract := by
+      models contract := by
+  have inside : index < lib.length := by
+    obtain ⟨_, _, _, _, _, _, _, _, present, _⟩ := summary.bound
+    exact (List.getElem?_eq_some_iff.mp present).1
   obtain ⟨item, recorded, assembly, sameToken, sameArguments, instantiated, -⟩ := summary.bound
   obtain ⟨moved, placed, movedAssembly, movedOriginal, movedArguments, movedClosed, movedBody⟩ :=
     record item recorded
   rw [← movedAssembly.trans assembly, ← movedArguments.trans sameArguments,
     ← sameToken, ← movedOriginal]
-  apply DecodedSummary.of_decoded targetDecoded placed movedBody _ (summary.holds.relocate closed relocates)
-  simpa only [movedOriginal, movedArguments, sameArguments, movedClosed] using instantiated
+  have movedInstantiated :
+      instantiateMethod environment.rawLayouts moved.original moved.arguments =
+        some moved.closed := by
+    simpa only [movedOriginal, movedArguments, sameArguments, movedClosed] using instantiated
+  exact ⟨fun resolved => (summary.holds resolved).relocate closed relocates,
+    DecodedAt.of_decoded targetDecoded placed movedBody movedInstantiated,
+    summary.listed.relocate closed relocates inside⟩
 
 #print axioms DecodedSummary.relocate
 

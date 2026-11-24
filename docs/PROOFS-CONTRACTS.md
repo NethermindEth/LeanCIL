@@ -514,8 +514,11 @@ A contract whose precondition implies well-formed memory and a valid static worl
 ### Bind a contract to a decoded method
 
 `CIL.Safety.DecodedSummary` ties a contract to the method it was proved for.
-`DecodedSummary program evidence profile environment index pin token arguments contract` holds
-when `contract.Holds program index` and record `index` of `evidence` is the method with
+`DecodedSummary program evidence profile environment index pin token arguments models contract`
+holds when `contract.Holds program index` follows from `ModelsResolve environment models`,
+`models` lists every runtime model the method and the methods it reaches call (see
+[runtime models a summary relies on](#runtime-models-a-summary-relies-on)), and record `index` of
+`evidence` is the method with
 metadata token `token` of the assembly pinned by `pin`, closed at type arguments `arguments`,
 whose pinned body bytes decode to the method present at that index of `program`. The record's
 feature certificate validates that method's reachability mask and decoded instructions. Its
@@ -538,7 +541,8 @@ For example, the compiled `Bump` updates a live account's balance and raises
 | `DecodedOutcomeSummary.of_translation` | Binds normal returns and named exceptions using the same method lookup |
 | `DecodedOutcomeSummary.reprofile` | Preserves those outcomes at an agreeing profile when the same evidence decodes to the reprofiled program |
 | `DecodedSummary.of_decoded` | Builds the summary of an index from the decoded program, the record found there, its `BodyDecodes` evidence, its instantiation and `Holds` |
-| `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call or `cil_loop_call` at a call in a loop |
+| `DecodedSummary.holds` | The contract, given `ModelsResolve environment models`, for `cil_contract_steps` at the call or `cil_loop_call` at a call in a loop |
+| `DecodedSummary.listed` | The `ModelsListed` fact that `models` covers every modelled call the method can run |
 | `DecodedSummary.reprofile` | Reuses the contract and method identity at an agreeing profile once the same evidence decodes to the reprofiled program |
 | `DecodedSummary.site` | At a live direct managed call, identifies the summary's MethodDef token and type arguments. |
 | `DecodedAt.direct_site` | For a declaring type with an explicit assembly scope, identifies the callee's pin, MethodDef token and type arguments using the assembly pin of the linked program entry. Apply it to the `bound` field of a method or outcome summary. |
@@ -546,8 +550,8 @@ For example, the compiled `Bump` updates a live account's balance and raises
 | `BodyDecodes.callManagedTarget` | Resolves the caller's operand through its checked metadata to a MethodDef token and slice position. The caller's MemberRef and the target MethodDef can have different token values. |
 
 For an extracted method, `DecodedSummary.of_translation` takes `Extracted.translation_valid`, the
-record index, the method lookup and the contract proof. The certificate supplies the body decode
-and the feature mask used by the summary.
+record index, the method lookup, the contract proof and the `ModelsListed` fact. The certificate
+supplies the body decode and the feature mask used by the summary.
 
 A separate Lean module can import a compiled `DecodedSummary` and apply `reprofile` to an
 independently extracted program. Compile the producer's extraction and summary, then put both
@@ -575,9 +579,46 @@ constructor per record, so its cost is linear in the methods of the extraction
 ([scaling](performance/InstructionLookups.md)).
 A summary whose bound names another token, or whose record's bytes decode to another method, does
 not type-check, and `site` at a call that names another token proves `False` from the summary.
+
+### Runtime models a summary relies on
+
 A call that runs through a runtime model, such as `Vector128.CreateScalarUnsafe` or `GetElement`,
-has no link and enters no method of the program, so a callee that makes such calls decodes and is
-summarized like any other body.
+has no link and enters no method of the program: the checked interpreter runs the model
+`runtimeModel` gives its method. A contract proved by stepping such a call holds only on a runtime
+that implements the method as that model ([runtime models](SOUNDNESS-RUNTIME.md)). The `models`
+argument of a summary lists these calls, so the summary's type states which models its proof uses.
+
+A `ModelledCall` is an opcode (`call` or `newobj`), the method reference the instruction names,
+and the `RuntimeModel` run in its place. `Method.modelledSites body` lists the `(opcode, method)`
+of each `call` or `newobj` of `body` at a pc with no link, in code order.
+
+| Name | Use |
+| --- | --- |
+| `ModelsListed program root models` | Each modelled site of `root` and of every method its links reach names a call in `models` |
+| `ModelsListed.of_sites indices member closed sites` | Proves the listing from `indices` that contain `root` and every callee of their links, and whose sites, in order, are those of `models`; discharge it with `(by decide) (by decide) rfl` |
+| `ModelsListed.mono` | Keeps the listing for a list that contains every call of the listed one |
+| `ModelsResolve environment models` | The runtime table gives each listed call its listed model; decidable |
+| `ModelsResolve.nil` | The premise of a summary whose method calls no runtime model |
+| `ModelsResolve.cons` | Adds one call, from its `runtimeModel` fact |
+| `ModelsListed.call`, `ModelsListed.newobj` | Given `ModelsResolve`, the model the table gives an unlinked site of a reached method is one `models` lists |
+
+A summary whose method reaches no modelled call takes `[]` for `models`, and a caller applies it
+as `summary.holds (.nil _)`. A summary of a callee with vector calls lists each call with its
+model, in the order of its sites. The summary of `UnsafeLow` in the `VectorSummary` example lists:
+
+```lean
+open CIL.Extraction CIL.Safety in
+example : List ModelledCall :=
+  [⟨.call, createScalarUnsafeMethod, .intrinsic (.vector .createScalarUnsafe64) 1⟩,
+    ⟨.call, getElement128Method, .intrinsic (.vector (.extract64 128)) 2⟩]
+```
+
+A caller supplies the premise from the facts an extraction generates for the modelled call at
+pc `p` of method `n`, `.cons Extracted.method{n}_model{p} (.cons ... (.nil _))`, and applies
+`summary.holds resolved`. A summary that omits a call its method makes cannot be built, since
+`ModelsListed` fails at that site.
+`#print axioms` of a summary or of its use lists no extra axiom: the models appear in the
+statement and in the premise of `holds`, which the table discharges.
 
 ### Pass byref arguments with ValidCall
 
@@ -1313,7 +1354,8 @@ summary proved there binds wherever those methods appear:
   indices `f` gives, to the relocated library methods. A map may send two library methods to
   one index when both decode to the method there: a call into either runs the method both denote.
 - `DecodedSummary.relocate` carries a summary over `lib` to the method `f` places in the target,
-  bound to the target's record there when it names the same pinned method and type arguments.
+  bound to the target's record there when it names the same pinned method and type arguments. Its
+  `models` list is unchanged, since relocation changes only links.
 
 ## Reuse framework contracts
 

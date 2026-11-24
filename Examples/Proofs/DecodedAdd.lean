@@ -38,9 +38,10 @@ theorem arithmetic_region (left right : W64) :
     Safety.DecodedSegmentSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment 0 2 Extracted.methodEvidence[0].assembly
       Extracted.methodEvidence[0].original.token Extracted.methodEvidence[0].arguments
-      .add [] (arithmeticStep left right) := by
+      .add [] [] (arithmeticStep left right) := by
   refine ⟨Safety.DecodedAt.of_translation Extracted.translation_valid ⟨0, by decide⟩
-    Extracted.program_method0, ⟨_, Extracted.program_method0, rfl⟩, ?_⟩
+    Extracted.program_method0, ⟨_, Extracted.program_method0, rfl⟩, fun _ => ?_,
+    .of_sites [0] (by decide) (by decide) rfl⟩
   rintro args ⟨frame, stack, memory⟩ permitted
   change stack = _ at permitted
   subst stack

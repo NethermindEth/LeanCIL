@@ -114,17 +114,18 @@ theorem first_record : records[0]? = some addTwoRecord := by cil_kernel_rfl
 /-- The summary of `AddTwo`, proved once over its closure. -/
 theorem closure_summary :
     DecodedSummary closure.1 records Extracted.profile Extracted.environment 0
-      addTwoRecord.assembly addTwoRecord.original.token addTwoRecord.arguments addTwoContract :=
+      addTwoRecord.assembly addTwoRecord.original.token addTwoRecord.arguments []
+      addTwoContract :=
   .of_decoded closure_decodes first_record ⟨_, Extracted.method1_body_validated⟩
     Extracted.method1_specialization_validated.1
-    closure_holds
+    closure_holds (.of_sites [0, 1, 2] (by decide +kernel) (by decide +kernel) rfl)
 #print axioms closure_summary
 
 /-- The summary of the closure is a summary of `AddTwo` in the extraction. -/
 theorem summary_here :
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment (here 0) addTwoRecord.assembly addTwoRecord.original.token
-      addTwoRecord.arguments addTwoContract :=
+      addTwoRecord.arguments [] addTwoContract :=
   closure_summary.relocate (Program.closure_closed closure_found)
     (Program.closure_relocates closure_found).1 bodies_decode fun item found => by
       obtain rfl := Option.some.inj (first_record.symm.trans found)
@@ -138,7 +139,8 @@ theorem summary_here :
 theorem correctness (memory : Safety.Memory) (x : W64) :
     ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory =
       .ok (memory, [.scalar (.i64 (x + 2))]) := by
-  have held : addTwoContract.Holds Extracted.program addTwo := here_first ▸ summary_here.holds
+  have held : addTwoContract.Holds Extracted.program addTwo :=
+    here_first ▸ summary_here.holds (.nil _)
   refine (WP.exact_iff (execution := Execution fun fuel =>
     invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory)).mp ?_
   cil_contract_steps [held, addTwoContract] with final value added
@@ -189,7 +191,7 @@ theorem elsewhere_relocates : RelocatesInto closure.1 elsewhereProgram elsewhere
 theorem summary_elsewhere :
     DecodedSummary elsewhereProgram elsewhereEvidence Extracted.profile Extracted.environment
       (elsewhere 0) addTwoRecord.assembly addTwoRecord.original.token addTwoRecord.arguments
-      addTwoContract :=
+      [] addTwoContract :=
   closure_summary.relocate (Program.closure_closed closure_found) elsewhere_relocates
     elsewhere_decodes fun item found => by
       obtain rfl := Option.some.inj (first_record.symm.trans found)
@@ -202,7 +204,7 @@ theorem summary_elsewhere :
 theorem correctness_elsewhere (memory : Safety.Memory) (x : W64) :
     ∃ fuel, invoke elsewhereProgram fuel 1 [.scalar (.i64 x)] memory =
       .ok (memory, [.scalar (.i64 (x + 2))]) := by
-  have held : addTwoContract.Holds elsewhereProgram 3 := summary_elsewhere.holds
+  have held : addTwoContract.Holds elsewhereProgram 3 := summary_elsewhere.holds (.nil _)
   refine (WP.exact_iff (execution := Execution fun fuel =>
     invoke elsewhereProgram fuel 1 [.scalar (.i64 x)] memory)).mp ?_
   cil_contract_steps [held, addTwoContract] with final value added

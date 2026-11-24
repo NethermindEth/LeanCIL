@@ -16,8 +16,8 @@ private def addStack (left right : W64) : SegmentContract :=
 /-- Stepping the add on the decoded body proves its framed continuation for every incoming frame. -/
 theorem add_region (left right : W64) :
     DecodedSegmentSummary [addMethod] [addItem] testProfile testEnvironment 0 2 pin
-      addItem.original.token [] .add [] (addStack left right) := by
-  refine ⟨decoded_summary.bound, ⟨addMethod, rfl, rfl⟩, ?_⟩
+      addItem.original.token [] .add [] [] (addStack left right) := by
+  refine ⟨decoded_summary.bound, ⟨addMethod, rfl, rfl⟩, fun _ => ?_, decoded_summary.listed⟩
   rintro args ⟨frame, stack, memory⟩ permitted
   change stack = _ at permitted
   subst stack
@@ -59,9 +59,9 @@ private abbrev suffix (method pc : Nat) := inStarts [(0, 2)] method pc = true
 /-- The changed prefix needs no new proof of the add's stack result or memory confinement. -/
 theorem reuse_after_changed_loads (left right : W64) :
     DecodedSegmentSummary [swappedMethod] [swappedItem] testProfile testEnvironment 0 2 pin
-      addItem.original.token [] .add [] (addStack left right) := by
-  apply (add_region left right).congr_region (region := suffix) swapped_bound
-    (RegionClosed.of_check (by decide +kernel))
+      addItem.original.token [] .add [] [] (addStack left right) := by
+  apply (add_region left right).congr_region (region := suffix) (.nil _) swapped_bound
+    (.of_sites [0] (by decide) (by decide) rfl) (RegionClosed.of_check (by decide +kernel))
   · exact AgreesOn.set (program := [addMethod]) (index := 0) rfl swappedMethod.code fun _ inside =>
       code_agrees_of_drop (lower := 2) rfl (by simpa [suffix, inStarts] using inside)
   · intro i _
@@ -75,7 +75,7 @@ theorem reuse_after_changed_loads (left right : W64) :
 /-- Substitution of the instruction inside the region invalidates its placement. -/
 theorem wrong_instruction_refused (left right : W64) :
     ¬ DecodedSegmentSummary [swappedMethod] [swappedItem] testProfile testEnvironment 0 2 pin
-      addItem.original.token [] .sub [] (addStack left right) := by
+      addItem.original.token [] .sub [] [] (addStack left right) := by
   intro summary
   obtain ⟨body, present, placed⟩ := summary.placed
   cases present
@@ -107,8 +107,8 @@ private def loadRight (left right : W64) : SegmentContract :=
 /-- The decoded load at pc 1 meets the arithmetic region's stack precondition at pc 2. -/
 private theorem load_region (left right : W64) :
     DecodedSegmentSummary [addMethod] [addItem] testProfile testEnvironment 0 1 pin
-      addItem.original.token [] (.ldarg 1) [] (loadRight left right) := by
-  refine ⟨decoded_summary.bound, ⟨addMethod, rfl, rfl⟩, ?_⟩
+      addItem.original.token [] (.ldarg 1) [] [] (loadRight left right) := by
+  refine ⟨decoded_summary.bound, ⟨addMethod, rfl, rfl⟩, fun _ => ?_, decoded_summary.listed⟩
   rintro args ⟨frame, stack, memory⟩ ⟨rfl, rfl⟩
   let after : SegmentState := ⟨frame, [.scalar (.i64 right), .scalar (.i64 left)], memory⟩
   refine ⟨.reaches 2 after, ⟨1, by decide, SegmentRun.reaches ?_⟩, Confined.refl _ _,
@@ -122,16 +122,16 @@ private theorem load_region (left right : W64) :
     left operand at pc 3, with the incoming frame and memory. -/
 theorem load_then_add (left right : W64) :
     DecodedSegmentSummary [addMethod] [addItem] testProfile testEnvironment 0 1 pin
-      addItem.original.token [] (.ldarg 1) [.add]
+      addItem.original.token [] (.ldarg 1) [.add] []
       (.continuing 3 (loadRight left right).pre
         (fun _ before final => final = { before with stack := [.scalar (.i64 (left + right))] })
         (fun _ _ => [])) := by
   have joined := (load_region left right).then (footprint := fun _ _ => [])
     (add_region left right) (by intro args before after _ same; subst after; rfl)
       (by intros; exact ⟨fun _ h => h, fun _ h => h⟩)
-  refine ⟨joined.bound, joined.placed, ?_⟩
+  refine ⟨joined.bound, joined.placed, fun resolved => ?_, joined.listed⟩
   intro args before permitted
-  obtain ⟨exit, ran, framed, post⟩ := joined.holds args before permitted
+  obtain ⟨exit, ran, framed, post⟩ := joined.holds resolved args before permitted
   refine ⟨exit, ran, framed, ?_⟩
   cases exit with
   | reaches pc final =>

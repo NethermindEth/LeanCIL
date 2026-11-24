@@ -98,18 +98,20 @@ theorem bodies_decode :
 theorem increment_summary : ∃ record, Extracted.methodEvidence[increment]? = some record ∧
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment increment record.assembly record.original.token record.arguments
-      incrementContract :=
+      [] incrementContract :=
   ⟨_, rfl, .of_translation Extracted.translation_valid ⟨increment, by decide⟩
-    (method := Extracted.method2) rfl increment_holds⟩
+    (method := Extracted.method2) rfl increment_holds
+    (.of_sites [increment] (by decide) (by decide) rfl)⟩
 #print axioms increment_summary
 
 /-- The contract of `Mutate`, bound to its record and the bytes it decodes from. -/
 theorem mutate_summary : ∃ record, Extracted.methodEvidence[mutate]? = some record ∧
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment mutate record.assembly record.original.token record.arguments
-      mutateContract :=
+      [] mutateContract :=
   ⟨_, rfl, .of_translation Extracted.translation_valid ⟨mutate, by decide⟩
-    (method := Extracted.method1) rfl mutate_holds⟩
+    (method := Extracted.method1) rfl mutate_holds
+    (.of_sites [mutate] (by decide) (by decide) rfl)⟩
 #print axioms mutate_summary
 
 /-- The caller returns `x + 3` and keeps all memory below its entry, applying each callee's
@@ -122,7 +124,7 @@ theorem correctness (memory : Safety.Memory) (x : W64) (wellFormed : memory.Well
   obtain ⟨mutateRecord, -, mutateSummary⟩ := mutate_summary
   obtain ⟨reference, entered, enter⟩ := entry.checked memory x wellFormed
   apply WP.enter (by rfl) (by rfl) enter.setup
-  cil_contract_steps [incrementSummary.holds, incrementContract, entry.frame]
+  cil_contract_steps [incrementSummary.holds (.nil _), incrementContract, entry.frame]
     with middle value incremented
   obtain ⟨rfl, rfl⟩ := incremented.post
   obtain ⟨stored, store, frame, -⟩ := (enter.frame []).store 0 (.i64 (x + 1)) rfl
@@ -131,7 +133,7 @@ theorem correctness (memory : Safety.Memory) (x : W64) (wellFormed : memory.Well
       frame.snapshots.read_word64 (index := 0) rfl rfl⟩
   cil_contract_steps [store, localAddress, frame.form_home 0]
   apply WP.exists_execution
-  apply WP.local_call frame mutateSummary.holds (reference, x + 1) (by rfl) (by rfl)
+  apply WP.local_call frame (mutateSummary.holds (.nil _)) (reference, x + 1) (by rfl) (by rfl)
     (by cil_checked_step [localAddress, frame.form_home 0]) permitted 0 .word64 reference rfl rfl
     (fun _ => .i64 (x + 3)) (fun _ => (x + 3).toNat) (fun _ => rfl)
     (fun _ _ post => by rw [← show x + 1 + 2 = x + 3 by bv_omega]; exact post)

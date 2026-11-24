@@ -54,16 +54,18 @@ theorem bodies_decode :
 theorem identity_summary : ∃ record, Extracted.methodEvidence[identity]? = some record ∧
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment identity record.assembly record.original.token record.arguments
-      identityContract :=
+      [] identityContract :=
   ⟨_, rfl, .of_decoded bodies_decode rfl ⟨_, Extracted.method1_body_validated⟩
-    Extracted.method1_specialization_validated.1 identity_holds⟩
+    Extracted.method1_specialization_validated.1 identity_holds
+    (.of_sites [identity] (by decide) (by decide) rfl)⟩
 #print axioms identity_summary
 
 /-- The call of the caller names the metadata token and type arguments of any summary of the
     index its link enters. -/
 theorem calls_name_summary {pin : AssemblyPin} {token : Nat} {arguments : List TypeExpr}
+    {models : List ModelledCall}
     (summary : DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
-      Extracted.environment identity pin token arguments identityContract) :
+      Extracted.environment identity pin token arguments models identityContract) :
     ∃ site,
       (lowerConstrainedRaw Extracted.method0DispatchTypes Extracted.method0Closed).code[1]?.map
         RawInstruction.operand = some (.call site) ∧
@@ -81,7 +83,7 @@ theorem correctness (memory : Safety.Memory) (x : W64) :
   obtain ⟨record, -, summary⟩ := identity_summary
   refine (WP.exact_iff (execution := Execution fun fuel =>
     invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory)).mp ?_
-  cil_contract_steps [summary.holds, identityContract] with middle value firstCall
+  cil_contract_steps [summary.holds (.nil _), identityContract] with middle value firstCall
   obtain ⟨rfl, rfl⟩ := firstCall.post
   rfl
 #print axioms correctness

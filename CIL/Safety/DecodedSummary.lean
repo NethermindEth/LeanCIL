@@ -1,5 +1,6 @@
 import CIL.Extraction.DecodedMethod
 import CIL.Safety.OutcomeContract
+import CIL.Safety.ModelledCalls
 
 /-!
 # Contracts bound to decoded methods
@@ -11,6 +12,9 @@ type arguments, and the body bytes, links and certified reachability mask used t
 program's mask and call-binding checks to identify the program the summary ranges over. At a call
 site, `DecodedSummary.site` identifies the callee's token and type arguments. For a declaring type
 with an explicit scope, `DecodedAt.direct_site` also identifies the callee's assembly pin.
+A summary also lists the runtime models its method and the methods it reaches run
+(`ModelsListed`), and its contract holds given that the runtime table gives each listed call its
+listed model (`ModelsResolve`), so the summary's statement names each runtime model it relies on.
 -/
 
 namespace CIL.Safety
@@ -161,65 +165,76 @@ theorem DecodedAt.of_translation {program : CIL.Program} {evidence : List Method
     assembly, metadata token and type arguments and ties it to the bytes it decodes from.
     `MethodContract.Certified` names only an index, which another extraction can give another
     body; an `ImportSlot` names a method with no body. A caller holding `bound` knows which
-    metadata method and which bytes the contract was proved for. -/
+    metadata method and which bytes the contract was proved for. `models` names every runtime
+    model the method and the methods it reaches run, and `holds` takes as its premise that the
+    runtime table gives each its listed model, so each reuse states the models it relies on. -/
 structure DecodedSummary {Input Output : Type} (program : CIL.Program)
     (evidence : List MethodEvidence) (profile : FeatureProfile) (environment : LayoutEnvironment)
     (index : Nat) (pin : AssemblyPin) (token : Nat) (arguments : List TypeExpr)
-    (contract : MethodContract Input Output) : Prop where
-  /-- The contract of the method at `index`. -/
-  holds : contract.Holds program index
+    (models : List ModelledCall) (contract : MethodContract Input Output) : Prop where
+  /-- The contract of the method at `index`, where each listed call runs its listed model. -/
+  holds : ModelsResolve environment models → contract.Holds program index
   /-- The identity and bytes of the method at `index`. -/
   bound : DecodedAt program evidence profile environment index pin token arguments
+  /-- Every runtime model the method at `index` and the methods it reaches run is listed. -/
+  listed : ModelsListed program index models
 
 /-- A contract proved for an index of the decoded program is a summary of the record there. -/
 theorem DecodedSummary.of_decoded {Input Output : Type} {contract : MethodContract Input Output}
     {program : CIL.Program} {evidence : List MethodEvidence} {profile : FeatureProfile}
     {environment : LayoutEnvironment} {index : Nat} {item : MethodEvidence}
-    {imports : List ImportSlot} (decoded : decodedProgram? profile environment evidence imports =
-      some program)
+    {imports : List ImportSlot} {models : List ModelledCall}
+    (decoded : decodedProgram? profile environment evidence imports = some program)
     (found : evidence[index]? = some item) (body : item.BodyBound)
     (instantiated :
       instantiateMethod environment.rawLayouts item.original item.arguments = some item.closed)
-    (holds : contract.Holds program index) :
+    (holds : contract.Holds program index) (listed : ModelsListed program index models) :
     DecodedSummary program evidence profile environment index item.assembly item.original.token
-      item.arguments contract :=
-  ⟨holds, DecodedAt.of_decoded decoded found body instantiated⟩
+      item.arguments models contract :=
+  ⟨fun _ => holds, DecodedAt.of_decoded decoded found body instantiated, listed⟩
 
 #print axioms DecodedSummary.of_decoded
 
 /-- A contract proved over a validated translation is a summary of its method's pinned record. -/
 theorem DecodedSummary.of_translation {Input Output : Type} {contract : MethodContract Input Output}
     {program : CIL.Program} {evidence : List MethodEvidence} {rawLayouts layouts pins platform imports}
+    {models : List ModelledCall}
     (valid : TranslationValid rawLayouts layouts pins platform evidence imports program)
     (index : Fin evidence.length) {method : Method} (present : program[index.val]? = some method)
-    (holds : contract.Holds program index) :
+    (holds : contract.Holds program index) (listed : ModelsListed program index models) :
     DecodedSummary program evidence method.profile method.environment index evidence[index].assembly
-      evidence[index].original.token evidence[index].arguments contract :=
-  ⟨holds, DecodedAt.of_translation valid index present⟩
+      evidence[index].original.token evidence[index].arguments models contract :=
+  ⟨fun _ => holds, DecodedAt.of_translation valid index present, listed⟩
 
 #print axioms DecodedSummary.of_translation
 
-/-- A method's normal returns and named exceptions, proved for its pinned decoded body. -/
+/-- A method's normal returns and named exceptions, proved for its pinned decoded body, with
+    the runtime models it relies on listed as in `DecodedSummary`. -/
 structure DecodedOutcomeSummary {Input Output : Type} (program : CIL.Program)
     (evidence : List MethodEvidence) (profile : FeatureProfile) (environment : LayoutEnvironment)
     (index : Nat) (pin : AssemblyPin) (token : Nat) (arguments : List TypeExpr)
-    (contract : OutcomeContract Input Output) : Prop where
-  /-- Each permitted input returns with the contract's frame and postcondition or raises
-      the exception specified for that input and initial memory. -/
-  holds : contract.Holds program index
+    (models : List ModelledCall) (contract : OutcomeContract Input Output) : Prop where
+  /-- Where each listed call runs its listed model, each permitted input returns with the
+      contract's frame and postcondition or raises the exception specified for that input and
+      initial memory. -/
+  holds : ModelsResolve environment models → contract.Holds program index
   /-- The pinned bytes, metadata and checked reachability mask of the method. -/
   bound : DecodedAt program evidence profile environment index pin token arguments
+  /-- Every runtime model the method at `index` and the methods it reaches run is listed. -/
+  listed : ModelsListed program index models
 
 /-- The translation certificate binds an outcome proof to its method's decoded record. -/
 theorem DecodedOutcomeSummary.of_translation {Input Output : Type}
     {contract : OutcomeContract Input Output} {program : CIL.Program}
     {evidence : List MethodEvidence}
-    {rawLayouts layouts pins platform imports} (valid : TranslationValid rawLayouts layouts pins platform evidence
-      imports program) (index : Fin evidence.length) {method : Method}
-    (present : program[index.val]? = some method) (holds : contract.Holds program index) :
+    {rawLayouts layouts pins platform imports} {models : List ModelledCall}
+    (valid : TranslationValid rawLayouts layouts pins platform evidence imports program)
+    (index : Fin evidence.length) {method : Method} (present : program[index.val]? = some method)
+    (holds : contract.Holds program index) (listed : ModelsListed program index models) :
     DecodedOutcomeSummary program evidence method.profile method.environment index
-      evidence[index].assembly evidence[index].original.token evidence[index].arguments contract :=
-  ⟨holds, DecodedAt.of_translation valid index present⟩
+      evidence[index].assembly evidence[index].original.token evidence[index].arguments models
+      contract :=
+  ⟨fun _ => holds, DecodedAt.of_translation valid index present, listed⟩
 
 #print axioms DecodedOutcomeSummary.of_translation
 
@@ -228,9 +243,9 @@ theorem DecodedOutcomeSummary.of_translation {Input Output : Type}
 theorem DecodedSummary.site {Input Output : Type} {contract : MethodContract Input Output}
     {program : CIL.Program} {evidence : List MethodEvidence} {profile : FeatureProfile}
     {environment : LayoutEnvironment} {index token : Nat} {pin : AssemblyPin}
-    {arguments : List TypeExpr}
+    {arguments : List TypeExpr} {models : List ModelledCall}
     (summary : DecodedSummary program evidence profile environment index pin token arguments
-      contract)
+      models contract)
     {imports : List ImportSlot} {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod}
     {reachable : List Bool} {caller : CIL.Method}
     {pc siteToken : Nat} {method : MethodRef} {prefixes : CallPrefixes}

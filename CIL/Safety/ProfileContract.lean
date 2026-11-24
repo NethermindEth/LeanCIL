@@ -35,6 +35,14 @@ theorem MethodContract.Holds.reprofile {Input Output : Type} {c : MethodContract
   rw [invoke_uniform_reprofile_fun program p q uniform agreement]
   exact holds
 
+/-- Reprofiling keeps each method's links and modelled calls, so a listing carries over. -/
+theorem ModelsListed.reprofile {program : CIL.Program} {root : Nat} {models : List ModelledCall}
+    {profile : CIL.FeatureProfile} (listed : ModelsListed program root models) :
+    ModelsListed (CIL.reprofile program profile) root models :=
+  listed.map (fun _ => rfl) (fun _ => rfl)
+
+#print axioms ModelsListed.reprofile
+
 open CIL.Extraction in
 /-- Decoding the same evidence at a second profile preserves the method's pinned identity. -/
 theorem DecodedAt.reprofile {program : CIL.Program} {evidence : List MethodEvidence}
@@ -56,16 +64,17 @@ open CIL.Extraction in
 theorem DecodedSummary.reprofile {Input Output : Type} {contract : MethodContract Input Output}
     {program : CIL.Program} {evidence : List MethodEvidence} {source target : CIL.FeatureProfile}
     {environment : LayoutEnvironment} {index token : Nat} {pin : AssemblyPin}
-    {arguments : List TypeExpr} {imports : List CIL.ImportSlot}
+    {arguments : List TypeExpr} {imports : List CIL.ImportSlot} {models : List ModelledCall}
     (summary : DecodedSummary program evidence source environment index pin token arguments
-      contract)
+      models contract)
     (uniform : ∀ body ∈ program, body.profile = source)
     (agreement : program.ProfileAgreement source target)
     (decoded : decodedProgram? target environment evidence imports =
       some (CIL.reprofile program target)) :
     DecodedSummary (CIL.reprofile program target) evidence target environment index pin token
-      arguments contract :=
-  ⟨summary.holds.reprofile source uniform agreement, summary.bound.reprofile decoded⟩
+      arguments models contract :=
+  ⟨fun resolved => (summary.holds resolved).reprofile source uniform agreement,
+    summary.bound.reprofile decoded, summary.listed.reprofile⟩
 
 #print axioms DecodedSummary.reprofile
 
@@ -99,15 +108,16 @@ theorem DecodedOutcomeSummary.reprofile {Input Output : Type}
     {contract : OutcomeContract Input Output}
     {program : CIL.Program} {evidence : List MethodEvidence} {source target : FeatureProfile}
     {environment : LayoutEnvironment} {index token : Nat} {pin : AssemblyPin}
-    {arguments : List TypeExpr} {imports : List ImportSlot}
+    {arguments : List TypeExpr} {imports : List ImportSlot} {models : List ModelledCall}
     (summary : DecodedOutcomeSummary program evidence source environment index pin token arguments
-      contract) (uniform : ∀ body ∈ program, body.profile = source)
+      models contract) (uniform : ∀ body ∈ program, body.profile = source)
     (agreement : program.ProfileAgreement source target)
     (decoded : decodedProgram? target environment evidence imports =
       some (CIL.reprofile program target)) :
     DecodedOutcomeSummary (CIL.reprofile program target) evidence target environment index pin token
-      arguments contract :=
-  ⟨summary.holds.reprofile source uniform agreement, summary.bound.reprofile decoded⟩
+      arguments models contract :=
+  ⟨fun resolved => (summary.holds resolved).reprofile source uniform agreement,
+    summary.bound.reprofile decoded, summary.listed.reprofile⟩
 
 #print axioms DecodedOutcomeSummary.reprofile
 

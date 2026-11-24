@@ -13,10 +13,11 @@ private abbrev suffix (method pc : Nat) := inStarts [(0, 2)] method pc = true
 theorem reused (left flag : Bool) (x y : W64) :
     DecodedSegmentSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment 0 (if left then 4 else 2) Extracted.assembly0
-      Extracted.method0Original.token [] (.ldarg (if left then 1 else 2)) [.ret]
+      Extracted.method0Original.token [] (.ldarg (if left then 1 else 2)) [.ret] []
       (returnsWord flag x y (if left then x else y)) := by
-  apply (SavedArms.checked left flag x y).congr_region (region := suffix)
+  apply (SavedArms.checked left flag x y).congr_region (region := suffix) (.nil _)
     (DecodedAt.of_translation Extracted.translation_valid ⟨0, by decide⟩ Extracted.program_method0)
+    (.of_sites [0] (by decide) (by decide) rfl)
     (RegionClosed.of_check (by decide +kernel))
   · exact AgreesOn.set (program := Reference.program) (index := 0) Reference.program_method0
       Extracted.method0.code fun _ inside =>
@@ -42,10 +43,10 @@ theorem composed (flag : Bool) (x y : W64) : (branchContract flag x y).Holds Ext
     intro pc
     by_cases left : pc = 4
     · subst pc
-      exact (reused true flag x y).holds
+      exact (reused true flag x y).holds (.nil _)
     by_cases right : pc = 2
     · subst pc
-      exact (reused false flag x y).holds
+      exact (reused false flag x y).holds (.nil _)
     simpa [next, left, right] using SegmentContract.unreachable_holds Extracted.program 0 pc
   apply SegmentContract.branch_seq (pc := 1) (target := 4) (op := .brfalse 4)
     (branchContract flag x y).pre (fun _ _ => flag = false) (fun _ _ => [])

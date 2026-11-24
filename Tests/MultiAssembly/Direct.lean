@@ -27,10 +27,10 @@ def stepContract : MethodContract W64 W64 where
 /-- The compiled definition of Step is the second method, from the pinned reference. -/
 theorem step_summary :
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
-      Extracted.environment 1 Extracted.assembly1 Extracted.method1Original.token []
+      Extracted.environment 1 Extracted.assembly1 Extracted.method1Original.token [] []
       stepContract := by
   apply DecodedSummary.of_translation Extracted.translation_valid ⟨1, by decide⟩
-    Extracted.program_method1
+    Extracted.program_method1 (listed := .of_sites [1] (by decide) (by decide) rfl)
   intro x memory _
   exact MethodContract.Holds.intro memory (x * 3 + 1) ⟨8, rfl⟩ (Confined.refl _ _) ⟨rfl, rfl⟩
 
@@ -82,9 +82,9 @@ theorem switched_link_pin_refused :
 #print axioms switched_link_pin_refused
 
 /-- The identical token in the calling assembly cannot certify the summary of the library call. -/
-theorem app_pin_refused :
+theorem app_pin_refused (models : List ModelledCall) :
     ¬ DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
-      Extracted.environment 1 Extracted.assembly0 Extracted.method0Original.token []
+      Extracted.environment 1 Extracted.assembly0 Extracted.method0Original.token [] models
       stepContract := by
   intro summary
   exact (by decide : Extracted.assembly0.identity ≠ Extracted.assembly1.identity)
@@ -96,7 +96,7 @@ theorem app_pin_refused :
 theorem direct_uses_summary (x : W64) (memory : Safety.Memory) :
     WP (Execution (fun fuel => invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory))
       (fun (final, values) => final = memory ∧ values = [.scalar (.i64 (x * 3 + 1 + 1))]) := by
-  cil_contract_steps [step_summary.holds, stepContract] with after value result
+  cil_contract_steps [step_summary.holds (.nil _), stepContract] with after value result
   obtain ⟨rfl, rfl⟩ := result.post
   exact ⟨rfl, rfl⟩
 

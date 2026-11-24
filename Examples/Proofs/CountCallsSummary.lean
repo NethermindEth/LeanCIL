@@ -136,16 +136,18 @@ theorem bodies_decode :
 theorem decrement_summary : ∃ record, Extracted.methodEvidence[decrement]? = some record ∧
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment decrement record.assembly record.original.token record.arguments
-      decrementContract :=
+      [] decrementContract :=
   ⟨_, rfl, .of_decoded bodies_decode rfl ⟨_, Extracted.method1_body_validated⟩
-    Extracted.method1_specialization_validated.1 decrement_holds⟩
+    Extracted.method1_specialization_validated.1 decrement_holds
+    (.of_sites [decrement] (by decide) (by decide) rfl)⟩
 #print axioms decrement_summary
 
 /-- Every summary of the index the loop's call enters is for the method that call names:
     `Decrement`'s metadata token, with no type arguments. -/
 theorem decrement_named {pin : AssemblyPin} {token : Nat} {arguments : List TypeExpr}
+    {models : List ModelledCall}
     (summary : DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
-      Extracted.environment decrement pin token arguments decrementContract) :
+      Extracted.environment decrement pin token arguments models decrementContract) :
     token = Extracted.method1Original.token ∧ arguments = [] :=
   summary.site Extracted.method0_calls_validated decrementSite.call rfl rfl rfl rfl
     decrementSite.link
@@ -153,9 +155,10 @@ theorem decrement_named {pin : AssemblyPin} {token : Nat} {arguments : List Type
 
 /-- A summary of the loop's callee index bound to `CountCalls`' own token is refuted at the
     call. -/
-theorem caller_token_refused {pin : AssemblyPin}
+theorem caller_token_refused {pin : AssemblyPin} {models : List ModelledCall}
     (summary : DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
-      Extracted.environment decrement pin Extracted.method0Original.token [] decrementContract) :
+      Extracted.environment decrement pin Extracted.method0Original.token [] models
+      decrementContract) :
     False :=
   absurd (decrement_named summary).1 (by decide)
 #print axioms caller_token_refused
@@ -163,7 +166,7 @@ theorem caller_token_refused {pin : AssemblyPin}
 /-- From every loop test, the loop returns its input, applying `summary` at each call. -/
 theorem terminates {pin : AssemblyPin} {token : Nat} {arguments : List TypeExpr}
     (summary : DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
-      Extracted.environment decrement pin token arguments decrementContract)
+      Extracted.environment decrement pin token arguments [] decrementContract)
     (args : List CIL.Safety.Value) (value : W32) {remaining counted : Reference}
     (state : State remaining counted) (valid : invariant value state) :
     LoopTerminates Extracted.program countCalls args
@@ -179,7 +182,7 @@ theorem terminates {pin : AssemblyPin} {token : Nat} {arguments : List TypeExpr}
     cil_loop_finish
   · cil_loop_advance
     -- The callee may change only its empty footprint, so both locals survive the call.
-    cil_loop_call summary.holds x at decrementSite
+    cil_loop_call (summary.holds (.nil _)) x at decrementSite
     -- The frame of the memory before the call is stale once `calledFrame` holds.
     clear frame
     cil_loop_recurse recurse (x - 1, count + 1)

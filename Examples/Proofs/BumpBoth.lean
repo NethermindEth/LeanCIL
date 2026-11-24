@@ -133,9 +133,9 @@ theorem bump_outcome : bumpOutcome.Holds Extracted.program bump := by
 theorem bump_summary : ∃ record, Extracted.methodEvidence[bump]? = some record ∧
     DecodedOutcomeSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment bump record.assembly record.original.token record.arguments
-      bumpOutcome :=
+      [] bumpOutcome :=
   ⟨_, rfl, .of_translation Extracted.translation_valid ⟨bump, by decide⟩
-    (method := Extracted.method1) rfl bump_outcome⟩
+    (method := Extracted.method1) rfl bump_outcome (.of_sites [bump] (by decide) (by decide) rfl)⟩
 
 #print axioms bump_summary
 end ExampleProof

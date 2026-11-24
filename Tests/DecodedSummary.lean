@@ -156,21 +156,22 @@ theorem add_holds_alone : addContract.Holds [addMethod] 0 := by
 
 /-- The adder's contract, bound to its record at index 1. -/
 theorem addSummary : DecodedSummary program evidence testProfile testEnvironment 1 pin
-    tokens.main [] addContract :=
-  ⟨add_holds, addItem, rfl, rfl, rfl, rfl, by cil_kernel_rfl, add_body_bound, addMethod, rfl,
-    add_body_decodes, by decide +kernel⟩
+    tokens.main [] [] addContract :=
+  ⟨fun _ => add_holds, ⟨addItem, rfl, rfl, rfl, rfl, by cil_kernel_rfl, add_body_bound, addMethod,
+    rfl, add_body_decodes, by decide +kernel⟩, .of_sites [1] (by decide) (by decide) rfl⟩
 #print axioms addSummary
 
 /-- A summary of the decoded one-record program is bound to the adder's identity. -/
 theorem decoded_summary : DecodedSummary [addMethod] [addItem] testProfile testEnvironment 0 pin
-    tokens.main [] addContract :=
-  .of_decoded (index := 0) adder_program_decodes rfl add_body_bound (by cil_kernel_rfl) add_holds_alone
+    tokens.main [] [] addContract :=
+  .of_decoded (index := 0) adder_program_decodes rfl add_body_bound (by cil_kernel_rfl)
+    add_holds_alone (.of_sites [0] (by decide) (by decide) rfl)
 #print axioms decoded_summary
 
 /-- The scalar adder's summary also certifies the same body and contract under x86-64-v3. -/
 theorem add_summary_x64 :
     DecodedSummary (reprofile [addMethod] Tests.ProfileContract.avx2Profile) [addItem]
-      Tests.ProfileContract.avx2Profile testEnvironment 0 pin tokens.main [] addContract :=
+      Tests.ProfileContract.avx2Profile testEnvironment 0 pin tokens.main [] [] addContract :=
   decoded_summary.reprofile (by decide +kernel)
     (Program.ProfileAgreement.of_flags _ _ _ (by decide +kernel))
     (imports := []) (by cil_kernel_rfl)
@@ -179,12 +180,13 @@ theorem add_summary_x64 :
 /-- Reusing the scalar outcome proof under x86-64-v3 retains the adder's pinned body. -/
 theorem add_outcome_x64 :
     DecodedOutcomeSummary (reprofile [addMethod] Tests.ProfileContract.avx2Profile) [addItem]
-      Tests.ProfileContract.avx2Profile testEnvironment 0 pin tokens.main []
+      Tests.ProfileContract.avx2Profile testEnvironment 0 pin tokens.main [] []
       { addContract with raises := fun _ _ => none } := by
   let outcome : OutcomeContract (W64 × W64) W64 :=
     { addContract with raises := fun _ _ => none }
   have source : DecodedOutcomeSummary [addMethod] [addItem] testProfile testEnvironment 0
-      pin tokens.main [] outcome := ⟨add_holds_alone.outcomes, decoded_summary.bound⟩
+      pin tokens.main [] [] outcome :=
+    ⟨fun _ => add_holds_alone.outcomes, decoded_summary.bound, decoded_summary.listed⟩
   exact source.reprofile (by decide +kernel)
     (Program.ProfileAgreement.of_flags _ _ _ (by decide +kernel))
     (imports := []) (by cil_kernel_rfl)
@@ -198,17 +200,17 @@ theorem caller_calls_valid :
 #print axioms caller_calls_valid
 
 /-- Every summary of the index the caller's call enters is for the method its site names. -/
-theorem summary_names_site {token : Nat} {arguments : List TypeExpr}
+theorem summary_names_site {token : Nat} {arguments : List TypeExpr} {models : List ModelledCall}
     (summary : DecodedSummary program evidence testProfile testEnvironment 1 pin token arguments
-      addContract) : token = tokens.main ∧ arguments = [] :=
+      models addContract) : token = tokens.main ∧ arguments = [] :=
   summary.site caller_calls_valid (pc := 2) rfl rfl rfl rfl rfl rfl
 #print axioms summary_names_site
 
 /-- A summary of the index the caller's call enters, bound to another token, is refuted at that
     call. -/
-theorem other_token_refused
+theorem other_token_refused {models : List ModelledCall}
     (summary : DecodedSummary program evidence testProfile testEnvironment 1 pin
-      (tokens.main + 1) [] addContract) : False := by
+      (tokens.main + 1) [] models addContract) : False := by
   have named := (summary_names_site summary).1
   omega
 #print axioms other_token_refused
@@ -218,9 +220,40 @@ theorem caller_returns (memory : Safety.Memory) (left right : W64) :
     WP (Execution (fun fuel => invoke program fuel 0
         [.scalar (.i64 left), .scalar (.i64 right)] memory))
       (fun (final, values) => final = memory ∧ values = [.scalar (.i64 (left + right))]) := by
-  cil_contract_steps [addSummary.holds, addContract] with after sum added
+  cil_contract_steps [addSummary.holds (.nil _), addContract] with after sum added
   obtain ⟨rfl, rfl⟩ := added.post
   exact ⟨rfl, rfl⟩
 #print axioms caller_returns
+
+/-- `UnsafeLow`'s body: its two vector calls have no link and run their runtime models. -/
+def lowMethod : Method :=
+  { addMethod with links := [], code := [.ldarg 0, .call createScalarUnsafeMethod {},
+    .ldc_i4 0, .call getElement128Method {}, .ret] }
+
+/-- The vector calls of `lowMethod` and the intrinsics the runtime table runs for them. -/
+def lowModels : List ModelledCall :=
+  [⟨.call, createScalarUnsafeMethod, .intrinsic (.vector .createScalarUnsafe64) 1⟩,
+    ⟨.call, getElement128Method, .intrinsic (.vector (.extract64 128)) 2⟩]
+
+/-- The listing names both vector calls, and the runtime table gives each its listed model. -/
+theorem low_models : ModelsListed [lowMethod] 0 lowModels ∧
+    ModelsResolve lowMethod.environment lowModels :=
+  ⟨.of_sites [0] (by decide) (by decide) rfl, by decide +kernel⟩
+#print axioms low_models
+
+/-- No summary of `lowMethod` can leave out its `CreateScalarUnsafe` call, so its statement
+    cannot hide the runtime behaviour its contract relies on. -/
+theorem low_unlisted_refused {Input Output : Type} {evidence : List MethodEvidence}
+    {profile : FeatureProfile} {environment : LayoutEnvironment} {pin : AssemblyPin}
+    {token : Nat} {arguments : List TypeExpr} {contract : MethodContract Input Output}
+    (models : List ModelledCall)
+    (omitted : ∀ call ∈ models, call.method ≠ createScalarUnsafeMethod) :
+    ¬ DecodedSummary [lowMethod] evidence profile environment 0 pin token arguments models
+      contract := by
+  intro summary
+  obtain ⟨call, member, -, named⟩ := summary.listed 0 lowMethod .refl rfl
+    (.call, createScalarUnsafeMethod) (Method.mem_modelledSites (pc := 1) rfl rfl rfl)
+  exact omitted call member named
+#print axioms low_unlisted_refused
 
 end Tests.DecodedSummary

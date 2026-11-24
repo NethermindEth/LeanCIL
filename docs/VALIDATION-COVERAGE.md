@@ -885,10 +885,13 @@ that bounds `Decrement`'s result without stating it, at the invariant, and with 
 for the caller's own token, at the site check.
 VectorSummary proves `DivisionIntrinsics.UnsafeLowNext` twice: by stepping `UnsafeLow`, whose
 `Vector128.CreateScalarUnsafe` and `GetElement` calls run through their runtime models, and from a
-`DecodedSummary` of it. `Tests/SummaryCalls.cs` refuses that summary for a record of `UnsafeLow`
+`DecodedSummary` of it that lists both calls with their models and takes their resolution in the
+runtime table as the premise of its contract. `Tests/SummaryCalls.cs` refuses that summary for a
+record of `UnsafeLow`
 whose original is forged to read the other lane, so that it claims a body other than its pinned
 bytes.
-`Tests/DecodedSummary.lean` refutes a summary bound to another token than the call names.
+`Tests/DecodedSummary.lean` refutes a summary bound to another token than the call names, and a
+summary of a body with a `Vector128.CreateScalarUnsafe` call whose models omit that call.
 `Tests/ProgramClosures.cs` proves the contract of a method whose two callees have the same body
 once in its extraction, carries it to the method's closure and binds it there as a
 `DecodedSummary`. It carries that summary back to the extraction, to a program that holds the

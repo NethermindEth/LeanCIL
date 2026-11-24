@@ -11,6 +11,8 @@ reads that lane back with `GetElement`, two calls the extraction runs through th
 models. `correctness_stepped` steps the caller and `UnsafeLow` instruction by instruction.
 `correctness` proves the same statement from a `DecodedSummary` of `UnsafeLow`: its contract,
 bound to the record whose pinned bytes decode to it, applied at the call without stepping its body.
+The summary's statement lists the two runtime models `UnsafeLow` relies on (`lowModels`), and
+`correctness` applies its contract only after checking that the runtime table gives both.
 -/
 
 namespace ExampleProof
@@ -40,6 +42,12 @@ theorem low_holds : lowContract.Holds Extracted.program low := by
   cil_checked_steps
 #print axioms low_holds
 
+/-- The vector calls of `UnsafeLow` and the intrinsics the runtime table runs for them. Its
+    summary relies on the runtime implementing each method as its intrinsic. -/
+def lowModels : List ModelledCall :=
+  [⟨.call, createScalarUnsafeMethod, .intrinsic (.vector .createScalarUnsafe64) 1⟩,
+    ⟨.call, getElement128Method, .intrinsic (.vector (.extract64 128)) 2⟩]
+
 /-- Every record's pinned bytes decode to the method at its index of the extraction. -/
 theorem bodies_decode :
     decodedProgram? Extracted.profile Extracted.environment Extracted.methodEvidence =
@@ -51,24 +59,27 @@ theorem bodies_decode :
           Extracted.method1_decoded) .nil))
 #print axioms bodies_decode
 
-/-- The contract, bound to the record of `UnsafeLow` and the bytes it decodes from. -/
+/-- The contract, bound to the record of `UnsafeLow` and the bytes it decodes from, listing
+    the runtime models of its vector calls. -/
 theorem low_summary : ∃ record, Extracted.methodEvidence[low]? = some record ∧
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment low record.assembly record.original.token record.arguments
-      lowContract :=
+      lowModels lowContract :=
   ⟨_, rfl, .of_translation Extracted.translation_valid ⟨low, by decide⟩
-    (method := Extracted.method1) rfl low_holds⟩
+    (method := Extracted.method1) rfl low_holds (.of_sites [low] (by decide) (by decide) rfl)⟩
 #print axioms low_summary
 
 /-- The caller returns its argument plus one and keeps the caller memory, applying the summary
-    at the call. -/
+    at the call once the runtime table gives each of its listed models. -/
 theorem correctness (memory : Safety.Memory) (x : W64) :
     ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory =
       .ok (memory, [.scalar (.i64 (x + 1))]) := by
   obtain ⟨record, -, summary⟩ := low_summary
+  have resolved : ModelsResolve Extracted.environment lowModels :=
+    .cons Extracted.method1_model1 (.cons Extracted.method1_model3 (.nil _))
   refine (WP.exact_iff (execution := Execution fun fuel =>
     invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory)).mp ?_
-  cil_contract_steps [summary.holds, lowContract] with middle value lowered
+  cil_contract_steps [summary.holds resolved, lowContract] with middle value lowered
   obtain ⟨rfl, rfl⟩ := lowered.post
   rfl
 #print axioms correctness

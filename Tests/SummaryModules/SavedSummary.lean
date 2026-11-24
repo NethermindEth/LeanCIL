@@ -13,11 +13,15 @@ def contract : MethodContract (W64 × W64) W64 where
   footprint _ := []
   post input before after value := after = before ∧ value = input.1 + input.2
 
+/-- The entry calls no runtime-modelled method, so its summary relies on no runtime model. -/
+def models : List ModelledCall := []
+
 /-- The saved proof binds the addition contract to its definition and body in the scalar image. -/
 theorem checked :
     DecodedSummary Reference.program Reference.methodEvidence Reference.profile Reference.environment
-      0 Reference.assembly0 Reference.method0Original.token [] contract := by
-  apply DecodedSummary.of_translation Reference.translation_valid ⟨0, by decide⟩ Reference.program_method0
+      0 Reference.assembly0 Reference.method0Original.token [] models contract := by
+  apply DecodedSummary.of_translation Reference.translation_valid ⟨0, by decide⟩
+    Reference.program_method0 (listed := .of_sites [0] (by decide) (by decide) rfl)
   rintro ⟨left, right⟩ memory -
   apply MethodContract.Holds.intro (c := contract) (input := (left, right)) memory
     (left + right) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩

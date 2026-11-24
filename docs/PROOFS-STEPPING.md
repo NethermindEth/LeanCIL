@@ -480,10 +480,13 @@ change between visits. `Diverges.of_reaches` carries this result from a reachabl
 back to method entry so `MethodContract.Refuted.of_diverges` can use it.
 
 `DecodedSegmentSummary` binds a nonempty instruction sequence to its starting position and
-certified method record. Its `holds` field gives the segment contract with its original frame,
-stack, footprint and exits. Use `DecodedSegmentSummary.congr_region` with a checked binding for
-the destination, agreement on the closed region and a proof that every permitted continuation
-lies inside it. A consumer can reuse compiled summaries of both arms when a conditional branch
+certified method record. Like a `DecodedSummary`, it lists the runtime models its containing
+method and the methods that method reaches call
+([runtime models a summary relies on](PROOFS-CONTRACTS.md#runtime-models-a-summary-relies-on)).
+Its `holds` field gives the segment contract, with its original frame, stack, footprint and
+exits, once those models resolve. Use `DecodedSegmentSummary.congr_region` with the source's
+`ModelsResolve` premise, a checked binding and `ModelsListed` fact for the destination,
+agreement on the closed region and a proof that every permitted continuation lies inside it. A consumer can reuse compiled summaries of both arms when a conditional branch
 changes before them. Apply `SegmentContract.branch_seq` to the new branch's step equation and
 the two destination contracts. Reversing `brtrue` to `brfalse` selects the opposite result while
 each load-and-return region preserves the same caller memory. The agreement includes method metadata,
