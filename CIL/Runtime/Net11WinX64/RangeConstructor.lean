@@ -1,11 +1,13 @@
 import CIL.Extraction.ManagedPackage
 import CIL.Runtime.Net11WinX64.ActualValueCtor
 import CIL.Runtime.Net11WinX64.InnerMethods
+import CIL.Runtime.Net11WinX64.MessageCtor
 
 /-! Managed execution of the bound exception constructors in the .NET 11.0.0 Windows x64 runtime:
 the two range constructors, the ArgumentException constructors with a parameter name and with an
-inner exception, and the InvalidOperationException constructor with an inner exception. A resource
-getter reached only by a null message is declared in the slot after the executable methods. -/
+inner exception, and the InvalidOperationException constructors with a message and with an inner
+exception. A resource getter reached only by a null message is declared in the slot after the
+executable methods. -/
 
 namespace CIL.Runtime.Net11WinX64
 open CIL.Extraction Core
@@ -157,6 +159,40 @@ private def invalidOperationInnerDependencies : List MetadataSlice := [{
     corlib := 0,
     links := [⟨1, 100670309, 2, 33554816⟩] }]
 
+/-- Forwarders and MethodDef for the InvalidOperationException constructor with only a
+message. -/
+private def invalidOperationMessageDependencies : List MetadataSlice := [{
+    assembly := facadeAssembly,
+    rows := [(587202561, (fixedBytes 20 0x0B00000000000000000000000100040000000000)),
+      (654311720, (fixedBytes 14 0x0000200000000000010003000500)),
+      (654311851, (fixedBytes 14 0x0000200000000000020003000500))],
+    strings := [(0, (fixedBytes 1 0x00)),
+      (1, (fixedBytes 26 0x496E76616C69644F7065726174696F6E457863657074696F6E00)),
+      (2, (fixedBytes 7 0x4F626A65637400)),
+      (3, (fixedBytes 7 0x53797374656D00)),
+      (4, (fixedBytes 23 0x53797374656D2E507269766174652E436F72654C696200))],
+    blobs := [(1, (fixedBytes 9 0x087CEC85D7BEA7798E))],
+    userStrings := [],
+    corlib := 1,
+    links := [] }, {
+    assembly := CoreLib.assembly,
+    rows := [(33554594, (fixedBytes 18 0x0120100003000000040000000000FE021C07)),
+      (33554816, (fixedBytes 18 0x012010000200000004000000A4078205631B)),
+      (33554817, (fixedBytes 18 0x01211000FFFFFFFF04000000A4078205671B)),
+      (33554921, (fixedBytes 18 0x01201000050000000400000040022F067826)),
+      (100670308, (fixedBytes 20 0x00000000000086180100000001000000DE310000)),
+      (704643390, (fixedBytes 12 0x00001800E6020000FFFFFFFF)),
+      (704643391, (fixedBytes 12 0x0000010006030000FFFFFFFF))],
+    strings := [(1, (fixedBytes 6 0x2E63746F7200)),
+      (2, (fixedBytes 26 0x496E76616C69644F7065726174696F6E457863657074696F6E00)),
+      (3, (fixedBytes 7 0x4F626A65637400)),
+      (4, (fixedBytes 7 0x53797374656D00)),
+      (5, (fixedBytes 16 0x53797374656D457863657074696F6E00))],
+    blobs := [(1, (fixedBytes 5 0x042001010E))],
+    userStrings := [],
+    corlib := 0,
+    links := [⟨1, 100670308, 2, 33554816⟩] }]
+
 /-- Forwarders and MethodDef for the ArgumentException constructor with a message and a
 parameter name. -/
 private def argumentNameDependencies : List MetadataSlice := [{
@@ -214,6 +250,12 @@ private def argumentInnerMethods : List (BodyEvidence × RawMethod) := [
 private def invalidOperationInnerMethods : List (BodyEvidence × RawMethod) :=
   ({ InvalidOperationInnerCtor.body with names := InvalidOperationInnerCtor.names },
     InvalidOperationInnerCtor.definition) :: argumentInnerMethods.tail
+
+/-- Executable definitions reached by the InvalidOperationException overload with only a non-null
+message. -/
+private def invalidOperationMessageMethods : List (BodyEvidence × RawMethod) :=
+  ({ InvalidOperationMessageCtor.body with names := InvalidOperationMessageCtor.names },
+    InvalidOperationMessageCtor.definition) :: coreBytes.drop 2
 
 /-- Admit a managed call or allocation only if the raw site selects its unique physical target. -/
 def linked (table : List SpecializedMethod) (raw : RawInstruction) : Option Link := do
@@ -362,6 +404,9 @@ private def boundOverloads : List (ExceptionType × List TypeExpr × BoundOverlo
     (.argument, [message, message], ⟨argumentNameDependencies, coreBytes.tail, none, []⟩),
     (.argument, [message, message, innerParameter],
       ⟨argumentInnerDependencies, argumentInnerMethods, none, []⟩),
+    (.invalidOperation, [message],
+      ⟨invalidOperationMessageDependencies, invalidOperationMessageMethods,
+        some invalidOperationResource, [loadString]⟩),
     (.invalidOperation, [message, innerParameter],
       ⟨invalidOperationInnerDependencies, invalidOperationInnerMethods,
         some invalidOperationResource, [loadString, loadNull]⟩)]

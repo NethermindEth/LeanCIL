@@ -27,6 +27,9 @@ public static class Throws
     public static uint Inner(uint value) => value == 0 ? value :
         throw new InvalidOperationException("invalid value", (Exception?)null);
 
+    public static uint Message(uint value) => value == 0 ? value :
+        throw new InvalidOperationException("invalid value");
+
     public static uint NamedArgument(uint value) => value == 0 ? value :
         throw new ArgumentException("invalid value", nameof(value));
 

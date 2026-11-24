@@ -37,6 +37,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     ("Quotient", "Throws::Quotient(uint,uint)", [[7, 2], [7, 0], [0, 0], [uint.MaxValue, 1]]),
     ("Percent", "Throws::Percent(uint)", [[0], [100], [101], [uint.MaxValue]]),
     ("Inner", "Throws::Inner(uint)", [[0], [1]]),
+    ("Message", "Throws::Message(uint)", [[0], [1]]),
     ("NamedArgument", "Throws::NamedArgument(uint)", [[0], [1]]),
     ("ArgumentInner", "Throws::ArgumentInner(uint)", [[0], [1]]),
     ("ActualValue", "Throws::ActualValue(uint)", [[0], [1]])
@@ -47,7 +48,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var extracted = Path.Combine(folder, "Extracted.lean");
     var source = File.ReadAllText(extracted);
     var entry = throwMethods.Single(candidate => candidate.Name == name);
-    var boundConstructor = name is "Percent" or "ActualValue" or "ArgumentInner" or "Inner" or
+    var boundConstructor = name is "Percent" or "ActualValue" or "ArgumentInner" or "Inner" or "Message" or
         "NamedArgument";
     var method = name is "Null" or "Quotient" ? 1 : 0;
     var owner = method == 0 ? entry : ((MethodReference)entry.Body.Instructions
@@ -184,7 +185,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         queue.Add(new(selector, proof, Path.Combine(root, name + "-Translated"), Assembly: image), () =>
             Console.WriteLine($"PASS {name}: the same boundary proof checks with translated exception literals"));
 
-        if (name is "ActualValue" or "ArgumentInner" or "Inner" or "NamedArgument")
+        if (name is "ActualValue" or "ArgumentInner" or "Inner" or "Message" or "NamedArgument")
         {
             foreach (var (suffix, path) in new[] { ("", assembly), ("-Translated", image) })
                 queue.Add(new(selector, At("Tests/ExceptionConstructor/Proof.lean"),

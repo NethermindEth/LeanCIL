@@ -30,6 +30,7 @@ internal static class ManagedConstructorPackage
             (ExceptionType.Argument, [MetadataType.String, MetadataType.String]) => [],
             (ExceptionType.Argument, [MetadataType.String, MetadataType.String, MetadataType.Class])
                 when innerException => [],
+            (ExceptionType.InvalidOperation, [MetadataType.String]) => [Code.Ldstr],
             (ExceptionType.InvalidOperation, [MetadataType.String, MetadataType.Class])
                 when innerException => [Code.Ldstr, Code.Ldnull],
             _ => null

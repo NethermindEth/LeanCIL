@@ -30,6 +30,8 @@ private def expected? : Option Shape :=
     some ⟨.argument, 0x80070057, 4, 6, 7, message⟩
   | "System.UInt32 Examples.Throws::Inner(System.UInt32)" =>
     some ⟨.invalidOperation, 0x80131509, 3, 5, 6, message⟩
+  | "System.UInt32 Examples.Throws::Message(System.UInt32)" =>
+    some ⟨.invalidOperation, 0x80131509, 2, 4, 5, .ldnull⟩
   | "System.UInt32 Examples.Throws::NamedArgument(System.UInt32)" =>
     some ⟨.argument, 0x80070057, 3, 5, 6, .ldnull⟩
   | _ => none

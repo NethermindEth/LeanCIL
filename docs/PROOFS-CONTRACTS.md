@@ -1071,14 +1071,14 @@ from its loader-prepared memory. An unavailable runtime definition supplies no c
 [Percent](../Examples/Proofs/Percent.lean)
 
 The same entry model supports the three-argument range and argument constructors, the
-`ArgumentException` constructor with a parameter name and the `InvalidOperationException`
-constructor with an inner exception.
+`ArgumentException` constructor with a parameter name and both `InvalidOperationException`
+constructors that take a message.
 For `Throws.ActualValue(uint)`, zero returns unchanged and every nonzero value raises
 `ArgumentOutOfRangeException` at the stack throw. `Throws.ArgumentInner(uint)` and
 `Throws.NamedArgument(uint)` return zero for zero and raise `ArgumentException` for every nonzero
-input. `Throws.Inner(uint)` returns zero for zero and raises
-`InvalidOperationException` for every nonzero input and every implementation of its declared
-resource getter. The four fixtures use the original 64-fuel bound. A `Percent` variant that calls
+input. `Throws.Inner(uint)` and `Throws.Message(uint)` return zero for zero and raise
+`InvalidOperationException` for every nonzero input and every implementation of their declared
+resource getter. The five fixtures use the original 64-fuel bound. A `Percent` variant that calls
 `ArgumentException(string, string)` instead raises that object, which refutes the range contract
 at entry.
 
