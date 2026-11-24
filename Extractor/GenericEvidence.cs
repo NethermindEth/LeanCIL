@@ -149,7 +149,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         if (EnumTypes.IsEnum(type))
         {
             var underlying = type.Resolve().Fields.Single(field => !field.IsStatic).FieldType;
-            return $".enum {Quote(LayoutEvidence.Identity(type))} ({Nested(underlying)})";
+            return $".enum {EnumTypes.Identity(type).ToLean()} ({Nested(underlying)})";
         }
         if (ObjectTypes.Reference(type)) return ObjectType(type);
         return Aggregate(localOnly: true) ?? $".atom {Scope(type)} {Quote(type.FullName)}";

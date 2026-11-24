@@ -9,6 +9,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
+#:include EnumFixtures.cs
 #:include BulkCallEvidence.cs
 #:include RejectedEvidence.cs
 
@@ -175,7 +176,7 @@ foreach (var (type, storage, width) in new[]
     ("AllocationTag", "unsigned8", 1)
 })
 {
-    var identity = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples." + type);
+    var identity = ExampleEnumIdentity(type);
     allocations.Add((type == "AllocationTag" ? "AllocateUnnamedZero" : "Allocate" + type,
         $"enumeration {identity} .{storage}", width));
 }
@@ -256,12 +257,12 @@ foreach (var (name, element, width) in allocations)
     if (name == "AllocateSigned8")
     {
         // The token names the enum and its underlying type; its storage is resolved from them.
-        var identity = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples.Signed8");
+        var identity = ExampleEnumIdentity("Signed8");
         const string underlying = ".atom Extraction.runtimeScope \"System.SByte\"";
         var target = $".type (.enum {identity} ({underlying}))";
         foreach (var (mutation, replacement) in new[]
         {
-            ("identity", target.Replace("Examples.Signed8", "Examples.Unsigned8", StringComparison.Ordinal)),
+            ("identity", target.Replace(identity, ExampleEnumIdentity("Unsigned8"), StringComparison.Ordinal)),
             ("underlying", target.Replace("System.SByte", "System.Byte", StringComparison.Ordinal)),
             ("width", target.Replace("System.SByte", "System.Int16", StringComparison.Ordinal)),
             ("primitive", $".type ({underlying})")
@@ -313,7 +314,7 @@ foreach (var (name, element, width) in allocations)
         throw new Exception("Runtime allocation mismatch: " + name);
     evidence.Add(proof, "PASS runtime, certificate and heap array return: " + name);
 }
-var fillEnum = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples.AllocationTag");
+var fillEnum = ExampleEnumIdentity("AllocationTag");
 var fills = new (string Name, string Signature, string Element, int Width, bool Counted)[]
 {
     ("FillIntegers", "System.Int32[],System.Int32", "signed32", 4, false),

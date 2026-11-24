@@ -91,7 +91,7 @@ internal static class ManagedPointers
         }
         if (EnumTypes.IsEnum(type))
         {
-            var identity = IdentityText.Quote(LayoutEvidence.Identity(type));
+            var identity = EnumTypes.Identity(type).ToLean();
             return $".enum {identity} ({TypeEvidence(EnumTypes.Storage(type))})";
         }
         return $".atom {GenericEvidence.Scope(type)} {IdentityText.Quote(type.FullName)}";

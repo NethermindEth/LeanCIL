@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import CIL.Extraction.Features
 import CIL.Extraction.DecodedMethod
 import CIL.Safety.StepComposition
@@ -337,8 +338,8 @@ theorem bulk_call_elements :
 
 /-- The signed backing and nominal identity survive both array fill overloads. -/
 theorem bulk_enum_models :
-    let element := TypeExpr.enum "Fixture::Tag" (.atom runtime "System.SByte")
-    let storage := ArrayElement.enumeration "Fixture::Tag" .signed8
+    let element := TypeExpr.enum (Tests.enumIdentity "Tag") (.atom runtime "System.SByte")
+    let storage := ArrayElement.enumeration (Tests.enumIdentity "Tag") .signed8
     let operations : List MemoryOp := [.spanFill 1 true, .spanFill 1 false, .spanCopy 1 false,
       .spanCopy 1 true, .spanCopy 1 false, .spanCopy 1 true, .arrayFill storage false,
       .arrayFill storage true]

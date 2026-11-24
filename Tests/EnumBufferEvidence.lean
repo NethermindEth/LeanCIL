@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import CIL.Extraction.Scalars
 
 /-! Enum buffers keep exact metadata identity through storage, calls and control-flow joins. -/
@@ -7,7 +8,7 @@ open CIL CIL.Extraction
 
 /-- Two same-width enums deliberately differ only in their metadata name. -/
 private def element (name : String) : TypeExpr :=
-  .enum ("Fixture::" ++ name) (.atom runtimeScope "System.SByte")
+  .enum (Tests.enumIdentity name) (.atom runtimeScope "System.SByte")
 
 /-- A writable enum span over the supplied element type. -/
 private def span (name : String) : TypeExpr :=
@@ -27,14 +28,14 @@ theorem enum_storage_checked :
      ("System.Int32", .signed32), ("System.UInt32", .unsigned32),
      ("System.Int64", .signed64), ("System.UInt64", .unsigned64)].all
       (fun (name, storage) =>
-        arrayElementType (.enum "Fixture::Choice" (.atom runtimeScope name)) ==
-          some (.enumeration "Fixture::Choice" storage)) = true := by decide +kernel
+        arrayElementType (.enum (Tests.enumIdentity "Choice") (.atom runtimeScope name)) ==
+          some (.enumeration (Tests.enumIdentity "Choice") storage)) = true := by decide +kernel
 #print axioms enum_storage_checked
 
 /-- An Int32 enum widens to a word, while an enum over an Int32 byref has no scalar kind. -/
 theorem enumScalarNeedsInteger :
     let int32 := TypeExpr.atom runtimeScope "System.Int32"
-    (scalarType (.enum "E" (.byref int32)), scalarType (.enum "E" int32)) =
+    (scalarType (.enum (Tests.enumIdentity "E") (.byref int32)), scalarType (.enum (Tests.enumIdentity "E") int32)) =
       (.other, .word32) := by decide +kernel
 #print axioms enumScalarNeedsInteger
 

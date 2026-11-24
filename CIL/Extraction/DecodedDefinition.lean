@@ -110,8 +110,6 @@ deriving instance ToExpr for SnapshotShape
 deriving instance ToExpr for TransferKind
 deriving instance ToExpr for ExceptionType
 deriving instance ToExpr for NumericKind
-deriving instance ToExpr for MetadataName
-deriving instance ToExpr for TypeLevel
 /-- Use the proof author's class literal when its namespace and name columns round-trip.
     Ambiguous or non-UTF-8 rows retain the complete physical column list. -/
 instance : ToExpr ClassName where

@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import CIL.Extraction.Translation
 
 /-! Regression checks for indexed homes, opaque locals and static-load evidence. -/
@@ -84,7 +85,7 @@ theorem first_static_wins :
 
 /-- A scalar static load with matching enum identities and a descriptor of the given width. -/
 private def enumLoad (name : String) (width : Nat) (scalar : Option Bool := some false) : Bool :=
-  let field := { loaded with type := .enum "E" (.atom runtimeScope name) }
+  let field := { loaded with type := .enum (Tests.enumIdentity "E") (.atom runtimeScope name) }
   let operand := RawOperand.field field.owner field.index field.type field.name true
   let site := { descriptor with field, bytes := List.replicate width 0, scalar }
   methodShapeInstructions { raw with code := [{ load with operand }] }

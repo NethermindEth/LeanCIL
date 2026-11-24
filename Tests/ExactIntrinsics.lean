@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import Lean
 import CIL.Extraction.DecodedMethod
 import CIL.SIMD.UnspecifiedLanes
@@ -545,13 +546,13 @@ theorem init_vector_admission :
 
 /-- An enum-span copy reads its own direct home and clears the reference flag on the value. -/
 theorem enum_span_copy :
-    let element := TypeExpr.enum "Signed8" (.atom runtimeScope "System.SByte")
+    let element := TypeExpr.enum (Tests.enumIdentity "Signed8") (.atom runtimeScope "System.SByte")
     let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1") element
     let load := RawInstruction.mk 0 2 .none
     let copy := RawInstruction.mk 1 0x71 (.type span)
     let input := { raw call0 with parameters := [.byref span], code := [load, copy] }
     let emitted := body [.ldarg 0, .ldobj span]
-    let kind := ScalarKind.enumSpan (.enumeration "Signed8" .signed8) true
+    let kind := ScalarKind.enumSpan (.enumeration (Tests.enumIdentity "Signed8") .signed8) true
     ObjectOperandsValid input [true, true] emitted ∧
       scalarTransfer input copy [kind true] = some [kind false] ∧
       scalarTransfer input copy [kind false] = none ∧

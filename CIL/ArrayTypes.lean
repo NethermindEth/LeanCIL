@@ -1,4 +1,4 @@
-import Std
+import CIL.Identity
 
 /-! # Reference-free array element types shared by extraction and checked storage -/
 
@@ -26,7 +26,7 @@ def EnumStorage.signed : EnumStorage → Bool
 inductive ArrayElement where
   | signed8 | unsigned8 | signed16 | unsigned16 | signed32 | unsigned32
   | signed64 | unsigned64 | nativeInt | nativeUInt | boolean | character
-  | enumeration (identity : String) (storage : EnumStorage)
+  | enumeration (identity : TypeIdentity) (storage : EnumStorage)
   | aggregate (identity : String) (size : Nat)
   | vector (identity : String) (size : Nat)
   deriving DecidableEq, Repr

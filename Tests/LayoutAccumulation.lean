@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import CIL.Extraction.Layout
 import CIL.Extraction.TypeStorage
 import CIL.Extraction.ValueDecoding
@@ -292,10 +293,10 @@ def vectorOfWords : TypeExpr :=
 
 /-- `S::Wrap1<E>` for an enum `E` over `underlying`, stored with the one field `kind`. -/
 def enumWrap (underlying : TypeExpr) (kind : FieldType) : RawLayout := {
-  identity := "S::Wrap1`1<E>", explicit := false, packing := 0, declaredSize := 0,
+  identity := "S::Wrap1`1<Fixture, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::E>", explicit := false, packing := 0, declaredSize := 0,
   declaration := [⟨name!"", name!"Wrap1`1"⟩],
   generic := some {
-    owner := .constructor "S" "Wrap1`1", arity := 1, arguments := [.enum "E" underlying],
+    owner := .constructor "S" "Wrap1`1", arity := 1, arguments := [.enum (Tests.enumIdentity "E") underlying],
     fields := [.parameter 0], constraints := [(0, [])] },
   fields := [⟨kind, none⟩] }
 
@@ -304,7 +305,7 @@ def enumWrap (underlying : TypeExpr) (kind : FieldType) : RawLayout := {
 theorem enumArgumentNeedsIntegerUnderlying :
     let int32 := TypeExpr.atom runtimeScope "System.Int32"
     let integer := enumWrap int32 .signed32
-    let nested := enumWrap (.enum "Inner" int32) .signed32
+    let nested := enumWrap (.enum (Tests.enumIdentity "Inner") int32) .signed32
     let aggregate := enumWrap (.aggregate leaf.identity 0) (.aggregate 0)
     let computed : Array ComputedLayout := #[.mk (.mk 4 [.mk 0 4 false]) 4]
     [genericLayoutValid (.ofList [integer]) integer,

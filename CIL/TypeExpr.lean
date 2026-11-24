@@ -78,24 +78,39 @@ where
 
 instance : Coe String ClassName := ⟨ClassName.ofText⟩
 
+/-- Decode a metadata name for checked Cecil signature spelling. -/
+private def columnText? (column : MetadataName) : Option String := do
+  let bytes ← radixDigits? byteBase (column.code.log2 / 8 + 1) column.code []
+  spelled? bytes
+
 /-- The signature spelling used by the metadata checker, which omits nested namespaces. -/
 def ClassName.signatureName? (name : ClassName) : Option String := do
   let first :: nested := name.levels | none
-  let space ← spell first.typeNamespace
-  let simple ← spell first.name
-  let suffix ← nested.mapM fun level => spell level.name
+  let space ← columnText? first.typeNamespace
+  let simple ← columnText? first.name
+  let suffix ← nested.mapM fun level => columnText? level.name
   return "/".intercalate ((if space.isEmpty then simple else space ++ "." ++ simple) :: suffix)
-where
-  spell (column : MetadataName) : Option String := do
-    let bytes ← radixDigits? byteBase (column.code.log2 / 8 + 1) column.code []
-    spelled? bytes
+
+/-- Cecil assembly scope reconstructed from the typed Assembly row for signature consumers. -/
+def assemblyScope? (assembly : AssemblyName) : Option String := do
+  let name ← columnText? assembly.name
+  let culture ← columnText? assembly.culture
+  let hasComma := fun (s : String) => s.toByteArray.data.any (fun byte => byte.toNat == 44)
+  guard (!name.isEmpty && !hasComma name && !hasComma culture && culture != "neutral")
+  let text := if culture.isEmpty then "neutral" else culture
+  return name ++ ", Version=" ++ assembly.version.display ++ ", Culture=" ++ text ++
+    ", PublicKeyToken=" ++ publicKeyTokenText assembly.publicKeyToken
+
+/-- The name part of a typed enum identity as spelled by a method signature. -/
+def enumSignatureName? (identity : TypeIdentity) : Option String :=
+  ClassName.signatureName? ⟨identity.levels⟩
 
 /-- Scoped metadata types shared by extraction and typed import slots. -/
 inductive TypeExpr where
   | void
   | atom (scope name : String)
   | aggregate (identity : String) (index : Nat)
-  | enum (identity : String) (underlying : TypeExpr)
+  | enum (identity : TypeIdentity) (underlying : TypeExpr)
   | parameter (index : Nat)
   | byref (element : TypeExpr)
   | pointer (element : TypeExpr)
@@ -214,7 +229,8 @@ def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
   | .aggregate identity index, rest =>
     keyBytes "aggregate" :: keyBytes identity :: keyBytes (toString index) :: rest
   | .enum identity underlying, rest =>
-    keyBytes "enum" :: keyBytes identity :: typeKeyInto underlying rest
+    keyBytes "enum" :: keyBytes (toString identity.assembly.name.code) ::
+      ClassName.keyInto ⟨identity.levels⟩ (typeKeyInto underlying rest)
   | .parameter index, rest => keyBytes "parameter" :: keyBytes (toString index) :: rest
   | .ownerParameter index, rest => keyBytes "ownerParameter" :: keyBytes (toString index) :: rest
   | .byref element, rest => keyBytes "byref" :: typeKeyInto element rest

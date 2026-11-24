@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import CIL.Extraction.DecodedMethod
 import CIL.Safety.StepComposition
 import Tests.Support
@@ -115,7 +116,7 @@ private def vector (width : String) : TypeExpr :=
 theorem integerTransfers :
     resolves {} (.atom runtimeScope "System.UInt64") (.scalar 8 false) 8 &&
     resolves {} (.atom runtimeScope "System.Int16") (.scalar 2 true) 2 &&
-    resolves {} (.enum "Fixture::Flag" (.atom runtimeScope "System.SByte")) (.scalar 1 true) 1 &&
+    resolves {} (.enum (Tests.enumIdentity "Flag") (.atom runtimeScope "System.SByte")) (.scalar 1 true) 1 &&
     resolves {} (vector "128") (.snapshot .vector128) 16 &&
     resolves {} (vector "256") (.snapshot .vector256) 32 &&
     resolves {} (vector "512") (.snapshot .vector512) 64 := by decide +kernel

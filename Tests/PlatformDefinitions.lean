@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import Tests.MetadataWorld
 
 /-!
@@ -280,9 +281,12 @@ theorem aggregate_argument_keeps_scope (head argument : NamedType) (corlib : Opt
 
 /-! ## An external enum -/
 
+/-- The scope bytes from the enum assembly row. -/
+private def enumScope := bytesOf "E, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+
 /-- The platform enum `Number` of `E` over `int`. -/
 private def numberPlatform : PlatformTable := platform_table%
-  [{ scope := bytesOf "E", parts := [[], bytesOf "Number"], kind := .enumType 8 }]
+  [{ scope := enumScope, parts := [[], bytesOf "Number"], kind := .enumType 8 }]
 
 /-- Whether the type `spelled` of `E` with the name parts of `Number`, resolved outside the
     carried slices, is admitted under `platform` as an enum over the runtime's type `name`. -/
@@ -290,8 +294,8 @@ private def admitsNumber (platform : PlatformTable) (name : String) (spelled := 
   let frame : Frame :=
     { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
   let env := MetadataEnv.ofSlices [] (platform := platform)
-  match env.externalNamed 0 (bytesOf "E") (bytesOf spelled) [[], bytesOf "Number"] none with
-  | .ok named => frame.admits (.named named) (.enum ("E::" ++ spelled) (.atom runtimeScope name))
+  match env.externalNamed 0 enumScope (bytesOf spelled) [[], bytesOf "Number"] none with
+  | .ok named => frame.admits (.named named) (.enum (Tests.enumIdentity spelled (Tests.enumAssembly name!"E")) (.atom runtimeScope name))
   | .error _ => false
 
 /-- A platform enum cannot use aggregate storage at any layout index. -/

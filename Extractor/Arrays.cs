@@ -56,7 +56,7 @@ internal static class Arrays
     static Element EnumStorage(TypeReference type)
     {
         var underlying = Primitive(EnumTypes.Storage(type))!;
-        var identity = IdentityText.Quote(LayoutEvidence.Identity(type));
+        var identity = EnumTypes.Identity(type).ToLean();
         return underlying with { Lean = $"enumeration {identity} .{underlying.Lean}", Compound = true };
     }
 

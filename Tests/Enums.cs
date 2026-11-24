@@ -177,7 +177,51 @@ foreach (var mutation in mutations)
 }
 
 queue.Flush();
+VerifyEnumParameters(verification, assembly, root);
 
 Console.WriteLine($"PASS {cases} enum runtime comparisons and {mutations.Length} malformed metadata rejections");
 Run(["dotnet", "run", "--file", "Tests/EnumBuffers.cs"], streamOutput: true, progress: "Enum buffer checks");
 Run(["dotnet", "run", "--file", "Tests/EnumMetadata.cs"], streamOutput: true, progress: "Enum metadata checks");
+
+static void VerifyEnumParameters(Program verification, string assembly, string root)
+{
+    var image = Path.Combine(root, "EnumParameters.dll");
+    using var module = ModuleDefinition.ReadModule(assembly);
+    var owner = module.GetType("Examples.Enums");
+    var enumBase = module.Types.First(type => type.IsEnum).BaseType;
+    var flags = Mono.Cecil.MethodAttributes.Public | Mono.Cecil.MethodAttributes.Static;
+    var caller = new MethodDefinition("ReadBothEnums", flags, module.TypeSystem.Int32);
+    owner.Methods.Add(caller);
+    var il = caller.Body.GetILProcessor();
+    il.Emit(OpCodes.Ldc_I4_0);
+    foreach (var digit in new[] { 1, 2 })
+    {
+        var type = new TypeDefinition(digit == 1 ? "Rows" : "", digit == 1 ? "Choice" : "Rows.Choice",
+            Mono.Cecil.TypeAttributes.Public | Mono.Cecil.TypeAttributes.Sealed, enumBase);
+        module.Types.Add(type);
+        type.Fields.Add(new FieldDefinition("value__", Mono.Cecil.FieldAttributes.Public | Mono.Cecil.FieldAttributes.SpecialName |
+            Mono.Cecil.FieldAttributes.RTSpecialName, module.TypeSystem.Int32));
+        var member = new MethodDefinition("EnumDigit", flags, module.TypeSystem.Int32);
+        member.Parameters.Add(new ParameterDefinition(type));
+        owner.Methods.Add(member);
+        var body = member.Body.GetILProcessor();
+        body.Emit(OpCodes.Ldc_I4, digit);
+        body.Emit(OpCodes.Ret);
+        il.Emit(OpCodes.Ldc_I4_S, (sbyte)10);
+        il.Emit(OpCodes.Mul);
+        il.Emit(OpCodes.Ldc_I4_0);
+        il.Emit(OpCodes.Call, member);
+        il.Emit(OpCodes.Add);
+    }
+    il.Emit(OpCodes.Ret);
+    module.Write(image);
+    var runtime = Assembly.Load(File.ReadAllBytes(image)).GetType("Examples.Enums", true)!;
+    var parameters = runtime.GetMethods().Where(method => method.Name == "EnumDigit")
+        .Select(method => method.GetParameters()[0].ParameterType).ToArray();
+    if (parameters.Length != 2 || parameters[0] == parameters[1] || parameters.Any(type => !type.IsEnum) ||
+        !Equals(runtime.GetMethod("ReadBothEnums")!.Invoke(null, null), 12))
+        throw new InvalidOperationException("CLR enum overloads must select different declarations and return 12.");
+    verification.Verify(image, "Examples", "Enums::ReadBothEnums()", At("Tests/Enums/Parameters.lean"),
+        Path.Combine(root, "EnumParameters"));
+    Console.WriteLine("PASS CLR and checked overloads for two enum declarations named Rows.Choice");
+}

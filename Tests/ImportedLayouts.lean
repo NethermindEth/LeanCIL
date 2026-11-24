@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import CIL.Extraction.Translation
 import CIL.Extraction.ImportLayouts
 import CIL.Extraction.LayoutProjection
@@ -51,7 +52,7 @@ theorem rejection_4 : ¬ LayoutProjectionValid artifactRaw artifactComputed publ
 
 /-- Matching published and actual rows cannot certify four bytes for an enum over an enum. -/
 theorem nestedEnumCatalogRejected :
-    let underlying := TypeExpr.enum "Inner" (.atom runtimeScope "System.Int32")
+    let underlying := TypeExpr.enum (Tests.enumIdentity "Inner") (.atom runtimeScope "System.Int32")
     let rows := [Tests.LayoutAccumulation.enumWrap underlying .signed32]
     let imported := ImportLayoutCatalog.mk rows rows #[privateLayout]
     Not (imported.Valid .scalar) := by decide +kernel

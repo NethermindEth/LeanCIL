@@ -13,19 +13,18 @@ internal static class EnumTypes
     {
         readonly MetadataScope? previous = activeScope;
         internal readonly Dictionary<(TypeReference Reference, Type Descriptor), object> Descriptors = [];
-        readonly Dictionary<ModuleDefinition, Dictionary<string, int>> typeCounts = [];
+        readonly Dictionary<ModuleDefinition, ILookup<string, TypeDefinition>> namedTypes = [];
 
         internal MetadataScope() => activeScope = this;
 
-        internal int Count(TypeDefinition type)
+        internal IEnumerable<TypeDefinition> Namesakes(TypeDefinition type)
         {
-            if (!typeCounts.TryGetValue(type.Module, out var counts))
+            if (!namedTypes.TryGetValue(type.Module, out var names))
             {
-                counts = type.Module.GetTypes().CountBy(candidate => candidate.FullName, StringComparer.Ordinal)
-                    .ToDictionary(StringComparer.Ordinal);
-                typeCounts.Add(type.Module, counts);
+                names = type.Module.GetTypes().ToLookup(candidate => candidate.FullName, StringComparer.Ordinal);
+                namedTypes.Add(type.Module, names);
             }
-            return counts.GetValueOrDefault(type.FullName);
+            return names[type.FullName];
         }
 
         public void Dispose() => activeScope = previous;
@@ -46,10 +45,32 @@ internal static class EnumTypes
     internal static bool IsEnum(TypeReference type) => type is not TypeSpecification &&
         PinnedAssemblies.Declares(type, type.Module) && type.Resolve() is { IsEnum: true };
 
+    /// <summary>The enum's declaring rows and defining assembly from its pinned image.</summary>
+    internal static TypeIdentity Identity(TypeReference reference) => Cached(reference, type =>
+    {
+        var definition = type.Resolve();
+        var pins = PinnedAssemblies.Active ?? throw new InvalidOperationException("Enum identity requires a pinned image.");
+        return TypeIdentity.Of(definition, pins.IdentityMetadata(definition.Module));
+    });
+
     internal static TypeReference Storage(TypeReference reference)
     {
         if (!IsEnum(reference)) return reference;
         return Cached(reference, ValidateStorage);
+    }
+
+    // Cecil's display name selects candidates. Only the physical declaring rows identify the enum.
+    static bool UniqueDefinition(TypeDefinition type)
+    {
+        var candidates = activeScope?.Namesakes(type) ??
+            type.Module.GetTypes().Where(other => other.FullName == type.FullName);
+        bool found = false;
+        foreach (var other in candidates)
+        {
+            if (ReferenceEquals(other, type)) found = true;
+            else if (other.MetadataToken.RID == 0 || Identity(other) == Identity(type)) return false;
+        }
+        return found;
     }
 
     static TypeReference ValidateStorage(TypeReference reference)
@@ -63,7 +84,7 @@ internal static class EnumTypes
             type.Module != reference.Module || type.Methods.Count != 0 ||
             fields.Length != 1 || fields[0].Name != "value__" ||
             !fields[0].IsSpecialName || !fields[0].IsRuntimeSpecialName ||
-            (activeScope?.Count(type) ?? type.Module.GetTypes().Count(t => t.FullName == type.FullName)) != 1)
+            !UniqueDefinition(type))
             throw new InvalidDataException($"Unsupported enum metadata: {reference.FullName}");
         var storage = fields[0].FieldType;
         if (storage is TypeSpecification ||
@@ -73,7 +94,8 @@ internal static class EnumTypes
             throw new InvalidDataException($"Unsupported enum underlying type: {reference.FullName}");
         RuntimeModels.ValidateTypeIdentity(storage, type.Module);
         foreach (var field in type.Fields.Where(f => f.IsStatic))
-            if (!field.IsLiteral || !field.HasConstant || field.FieldType.FullName != type.FullName ||
+            if (!field.IsLiteral || !field.HasConstant || field.FieldType is TypeSpecification ||
+                field.FieldType.Resolve() != type ||
                 field.FieldType.Scope != type.Module)
                 throw new InvalidDataException($"Unsupported enum constant: {field.FullName}");
         return storage;

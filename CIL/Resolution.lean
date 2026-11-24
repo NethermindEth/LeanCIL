@@ -72,7 +72,7 @@ theorem declaredNarrow_primitive (layouts : List RawLayout) (type : PrimitiveTyp
 
 /-- An enum narrows as its underlying primitive when `typeStorage` admits that primitive as an
     enum's underlying type, and not at all otherwise. -/
-theorem declaredNarrow_enum (layouts : List RawLayout) (identity : String)
+theorem declaredNarrow_enum (layouts : List RawLayout) (identity : TypeIdentity)
     (type : PrimitiveType) :
     declaredNarrow layouts (.enum identity type.typeExpr) =
       if type.enumUnderlying then type.narrow else none := by
@@ -175,7 +175,7 @@ theorem declaredNarrow_of_not_candidate (layouts : List RawLayout) (type : TypeE
 #print axioms declaredNarrow_of_not_candidate
 
 /-- An enum cannot introduce narrowing when its underlying storage does not narrow. -/
-theorem declaredNarrow_enum_of_none (layouts : List RawLayout) (identity : String)
+theorem declaredNarrow_enum_of_none (layouts : List RawLayout) (identity : TypeIdentity)
     (type : TypeExpr) (narrow : declaredNarrow layouts type = none) :
     declaredNarrow layouts (.enum identity type) = none := by
   cases type <;> try rfl
@@ -612,7 +612,7 @@ def PrimitiveType.enumStorage : PrimitiveType → Option EnumStorage
   | .boolean | .char | .single | .double | .intPtr | .uintPtr => none
 
 /-- The shape of an array of the enum `identity` over the primitive. -/
-def PrimitiveType.enumElementShape (identity : String) (type : PrimitiveType) : ElementShape :=
+def PrimitiveType.enumElementShape (identity : TypeIdentity) (type : PrimitiveType) : ElementShape :=
   match type.enumStorage with
   | some storage => .value (.enumeration identity storage)
   | none => .unsupported ElementShape.unsupportedType
@@ -626,7 +626,7 @@ theorem Method.elementShape_primitive (body : Method) (type : PrimitiveType) :
 
 /-- An array of an enum over a primitive holds the enum's storage where `typeStorage` admits
     the primitive as an enum's underlying type, whatever the layouts. -/
-theorem Method.elementShape_enum (body : Method) (identity : String) (type : PrimitiveType) :
+theorem Method.elementShape_enum (body : Method) (identity : TypeIdentity) (type : PrimitiveType) :
     body.elementShape (.enum identity type.typeExpr) = type.enumElementShape identity := by
   cases type <;> rfl
 

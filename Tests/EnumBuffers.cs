@@ -9,10 +9,10 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
+#:include EnumFixtures.cs
 #:include RejectedEvidence.cs
 
 using System.Reflection;
-using System.Text.Json;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -60,13 +60,12 @@ if (!Equals(runtime.GetMethod("FillClear")!.Invoke(null, [values]), seven) ||
     throw new InvalidOperationException("Enum runtime Fill/Clear mismatch");
 
 string Element(string name, string storage) =>
-    $".enumeration {JsonSerializer.Serialize(metadata.Assembly.Name.FullName + "::Examples.EnumBuffers/" + name)} " +
-    $".{storage}";
+    $".enumeration {ExampleEnumIdentity(name, "EnumBuffers")} .{storage}";
 var narrow = Element("Small", "signed8");
 var wide = Element("Large", "unsigned64");
 var array = $".array ⟨.address ⟨0, 0⟩, 3, ({narrow})⟩";
 var queue = new GeneratedQueue(verification, assembly);
-Run(["lake", "env", "lean", At("Tests/EnumBufferEvidence.lean")], cwd: FixturePackage());
+BuildLeanTestLibraries("Checking enum buffer evidence", "Tests.EnumBufferEvidence");
 foreach (var (name, arguments, result, width) in new[]
 {
     ("Roundtrip", $"[{array}, .scalar (.i32 1), .scalar (.i32 4294967295)]", 4294967295UL, 1),
@@ -120,7 +119,7 @@ foreach (var (name, obligation) in new[]
     var start = baseline.IndexOf(marker, StringComparison.Ordinal);
     var end = baseline.IndexOf('\n', start);
     var original = baseline[start..end];
-    var changed = original.Replace("EnumBuffers/Small", "EnumBuffers/OtherSmall", StringComparison.Ordinal);
+    var changed = original.Replace("name := name!\"Small\"", "name := name!\"OtherSmall\"", StringComparison.Ordinal);
     if (changed == original) throw new InvalidOperationException("Missing enum stack identity: " + name);
     var path = Path.Combine(root, name + "-wrong-enum.lean");
     File.WriteAllText(path, NarrowEvidence(baseline[..start] + changed + baseline[end..], obligation));

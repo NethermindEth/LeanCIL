@@ -966,6 +966,12 @@ deriving instance Repr for AssemblyName
 deriving instance Repr for TypeLevel
 deriving instance Repr for TypeIdentity
 
+deriving instance Lean.ToExpr for MetadataName
+deriving instance Lean.ToExpr for Version
+deriving instance Lean.ToExpr for AssemblyName
+deriving instance Lean.ToExpr for TypeLevel
+deriving instance Lean.ToExpr for TypeIdentity
+
 /-- Dotted version numbers, such as `11.0.0.0`. -/
 def Version.display (version : Version) : String :=
   s!"{version.major}.{version.minor}.{version.build}.{version.revision}"

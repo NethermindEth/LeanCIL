@@ -512,7 +512,7 @@ private def scalarTypeBytes : TypeExpr → Option (List UInt8)
   | .object _ name | .constructor _ name | .objectConstructor _ name => signatureBytes <$> name.signatureName?
   | type@(.aggregate ..) => signatureBytes <$> spanElementName type
   -- Enum names cannot contain generic owner arguments.
-  | .enum identity _ => (splitBytes (signatureBytes identity) [58, 58])[1]?
+  | .enum identity _ => signatureBytes <$> enumSignatureName? identity
   | .parameter index => some (signatureBytes ("!!" ++ toString index))
   | .functionPointer .. | .signatureParameter .. | .modified .. | .ownerParameter _ => none
   -- `&` and `*`.
@@ -616,7 +616,7 @@ private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
       if ((splitBytes signature [32])[0]?.getD []).reverse.head? == some 38 then .reference
       else .other
     | .enum identity _ =>
-      let name := (splitBytes (signatureBytes identity) [58, 58])[1]?.getD []
+      let name := (enumSignatureName? identity).map signatureBytes |>.getD []
       if !name.isEmpty && (name ++ [32]).isPrefixOf signature then scalarType site.returnType
       else .other
     | .apply .. =>

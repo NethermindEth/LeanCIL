@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import CIL.Extraction.DecodedMethod
 import CIL.Extraction.BitModels
 import CIL.Safety.StepComposition
@@ -113,7 +114,7 @@ theorem marshal_resolutions :
 /-- Narrow signed integers and enums keep their sign. Boolean and Char use unsigned storage. -/
 theorem marshal_scalar_storage :
     resolves {} (fixtures (.atom runtimeScope "System.Int16") int32Type 2 4 (.scalar 2 true)) ∧
-    resolves {} (fixtures (.enum "Fixture::Kind" (.atom runtimeScope "System.SByte"))
+    resolves {} (fixtures (.enum (Tests.enumIdentity "Kind") (.atom runtimeScope "System.SByte"))
       int32Type 1 4 (.scalar 1 true)) ∧
     resolves {} (fixtures booleanType int32Type 1 4 (.scalar 1 false)) ∧
     resolves {} (fixtures (.atom runtimeScope "System.Char") int32Type 2 4 (.scalar 2 false)) := by

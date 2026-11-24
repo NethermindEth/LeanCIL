@@ -290,7 +290,11 @@ void ReturnResolutionCosts(bool stepOnly = false)
             {
                 var depth = dimension == "enum-layouts" ? 1 : size;
                 var underlying = dimension == "depth" ? type : ".array (.aggregate \"Point\" 0)";
-                var heads = string.Concat(Enumerable.Repeat(".enum \"Nested\" (", depth));
+                source.AppendLine("""
+                    private def nestedEnum : TypeIdentity :=
+                      { assembly := runtimeAssembly, typeNamespace := name!"", name := name!"Nested" }
+                    """);
+                var heads = string.Concat(Enumerable.Repeat(".enum nestedEnum (", depth));
                 type = $"""{heads}{underlying}{new string(')', depth)}""";
                 expected = "none";
             }
@@ -2087,7 +2091,8 @@ void PlatformTableCosts()
             let frame : Frame :=
               { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
             return frame.admits (.named head)
-              (.enum (runtimeScope ++ "::Number") (.atom runtimeScope "System.Int32"))).toOption = some true)
+              (.enum { assembly := runtimeAssembly, typeNamespace := name!"", name := name!"Number" }
+                (.atom runtimeScope "System.Int32"))).toOption = some true)
         #kernel_cost "platform pair {{size}}"
           ((env{{size}}.platformField 0
             { owner := .genericInst (named "System.ValueTuple`2" {{Parts("System", "ValueTuple`2")}})

@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import CIL.Extraction.Features
 import Tests.Support.ModelOperands
 
@@ -232,7 +233,7 @@ theorem reference_content_boundary :
     query (.atom runtimeScope "System.Boolean") = some 0 ∧
     query (.atom runtimeScope "System.Char") = some 0 ∧
     query (.atom runtimeScope "System.UIntPtr") = some 0 ∧
-    query (.enum "enum" integer) = some 0 ∧
+    query (.enum (Tests.enumIdentity "enum") integer) = some 0 ∧
     query (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector256`1")
       integer) = some 0 ∧
     query (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector512`1")

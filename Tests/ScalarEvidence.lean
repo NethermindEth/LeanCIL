@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import CIL.Extraction.Translation
 import CIL.Safety.Frames
 import Tests.BodyEncoding
@@ -971,7 +972,7 @@ private def block (opcode : Nat) (emitted : Instruction) (prefixes : List RawIns
 private def unaligned (alignment : Int) : RawInstruction := i 65042 (.integer alignment)
 private def sbyteType : TypeExpr := .atom runtime "System.SByte"
 private def aggregateType : TypeExpr := .aggregate "S" 0
-private def enumType : TypeExpr := .enum "E" (.atom runtime "System.Int16")
+private def enumType : TypeExpr := .enum (Tests.enumIdentity "E") (.atom runtime "System.Int16")
 private def vectorType : TypeExpr :=
   .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1") intType
 /-- An `ldobj` (113) or `stobj` (129) of `type`, pushing the kind the scalar check gives it. -/
@@ -1242,11 +1243,11 @@ example : storesInto (primitive "System.Int32") .word64 = false := by decide
 example : storesInto (primitive "System.Int32") .native = false := by decide
 example : storesInto (primitive "System.Int64") .word32 = false := by decide
 example : storesInto (primitive "System.IntPtr") .word32 = false := by decide
-example : storesInto (.enum "E" (primitive "System.Int64")) .word32 = false := by decide
+example : storesInto (.enum (Tests.enumIdentity "E") (primitive "System.Int64")) .word32 = false := by decide
 example : storesInto (primitive "System.Int32") .word32 = true := by decide
 example : storesInto (primitive "System.Boolean") .word32 = true := by decide
 example : storesInto (primitive "System.Char") .word32 = true := by decide
-example : storesInto (.enum "E" (primitive "System.Int16")) .word32 = true := by decide
+example : storesInto (.enum (Tests.enumIdentity "E") (primitive "System.Int16")) .word32 = true := by decide
 example : storesInto (primitive "System.Int64") .native = true := by decide
 example : storesInto (primitive "System.IntPtr") .word64 = true := by decide
 -- A field typed as an array of a class holds the array's reference, stored as an object or null;
@@ -1287,7 +1288,7 @@ example : scalarEmissionMatches none none (i 125 samplesField) [.object, .object
 /-- `Scope.Pair`, a struct at layout 0, with fields of each kind the step resolves: an integer,
     an enum, a vector, a nested struct and a generic struct instance. -/
 private def pairType : TypeExpr := .aggregate "Scope::Scope.Pair" 0
-private def modeType : TypeExpr := .enum "Scope::Scope.Mode" intType
+private def modeType : TypeExpr := .enum (Tests.enumIdentity "Scope.Mode" (Tests.enumAssembly name!"Scope")) intType
 private def laneType : TypeExpr :=
   .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1") word
 private def innerType : TypeExpr := .aggregate "Scope::Scope.Inner" 1

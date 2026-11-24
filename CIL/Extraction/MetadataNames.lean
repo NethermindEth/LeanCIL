@@ -140,7 +140,10 @@ def namedType : TypeExpr → Option (List Char × List Char)
   | .atom scope name => leaf (metadataChars scope) (metadataChars name)
   | .constructor scope name | .objectConstructor scope name => do
     leaf (metadataChars scope) (metadataChars (← plainSpelling? name))
-  | .aggregate identity _ | .enum identity _ => do
+  | .enum identity _ => do
+    leaf (metadataChars (← assemblyScope? identity.assembly))
+      (metadataChars (← plainSpelling? ⟨identity.levels⟩))
+  | .aggregate identity _ => do
     let (scope, name) ← splitIdentity [] (metadataChars identity)
     leaf scope name
   | _ => none
@@ -151,7 +154,9 @@ theorem namedType_eq_original (type : TypeExpr) : namedType type =
     | .atom scope name => leaf scope.toList name.toList
     | .constructor scope name | .objectConstructor scope name => do
       leaf scope.toList (← plainSpelling? name).toList
-    | .aggregate identity _ | .enum identity _ => do
+    | .enum identity _ => do
+      leaf (← assemblyScope? identity.assembly).toList (← plainSpelling? ⟨identity.levels⟩).toList
+    | .aggregate identity _ => do
       let (scope, name) ← splitIdentity [] identity.toList
       leaf scope name
     | _ => none := by
@@ -232,6 +237,8 @@ private def both : Option Bool → Option Bool → Option Bool
 def sameRuntimeType : TypeExpr → TypeExpr → Option Bool
   | .pointer x, .pointer y | .byref x, .byref y | .array x, .array y => sameRuntimeType x y
   | .apply f x, .apply g y => both (sameRuntimeType f g) (sameRuntimeType x y)
+  | .enum a x, .enum b y =>
+    if a.levels != b.levels then some false else if a == b then sameRuntimeType x y else none
   | .constructor s a, .constructor t b | .objectConstructor s a, .objectConstructor t b =>
     if a != b then some false else if s == t then some true else none
   | .constructor .., .objectConstructor .. | .objectConstructor .., .constructor .. => some false
@@ -262,7 +269,8 @@ def TypeExpr.explicitHeadScope : TypeExpr → Option String
 
 /-- The assembly of the declaring type, including a scope embedded in an aggregate or enum name. -/
 def TypeExpr.headScope : TypeExpr → Option String
-  | .aggregate identity _ | .enum identity _ => flatOwnerScope? identity
+  | .enum identity _ => assemblyScope? identity.assembly
+  | .aggregate identity _ => flatOwnerScope? identity
   | .apply head _ => head.headScope
   | type => type.explicitHeadScope
 

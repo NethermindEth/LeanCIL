@@ -1389,7 +1389,8 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
       bytesOf identity == named.scope ++ [58, 58] ++ named.name && valueLike named.kind &&
         !named.fixedStorage && frame.layoutMatches index identity named none
     | .named named, .enum identity underlying =>
-      bytesOf identity == named.scope ++ [58, 58] ++ named.name &&
+      ((assemblyScope? identity.assembly).map bytesOf == some named.scope &&
+        declarationMatches identity.levels named.parts) &&
         match named.kind with
         | .enumType code =>
           (named.pinned || partsName named.parts == some named.name) && !named.fixedStorage &&
@@ -1493,7 +1494,7 @@ def Frame.admitsHeld (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : B
 /-- An admitted platform enum has the name and integer storage of its scoped definition. -/
 theorem typeAdmits_external_enum {env : MetadataEnv} {token : Nat} {scope name : List Nat}
     {parts : List (List Nat)} {hint : Option Bool} {frame : Frame} {fuel : Nat}
-    {named : NamedType} {identity : String} {underlying : TypeExpr}
+    {named : NamedType} {identity : TypeIdentity} {underlying : TypeExpr}
     (resolved : env.externalNamed token scope name parts hint = .ok named)
     (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity underlying) = true) :
     partsName named.parts = some named.name ∧

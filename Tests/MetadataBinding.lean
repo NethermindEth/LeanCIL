@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import Tests.MetadataWorld
 
 /-!
@@ -966,7 +967,7 @@ theorem instantiates_owners_with_only_carried_classes_as_objects :
 theorem binds_closed_enum_argument :
     (receiverIdentity "Object" false false false true
       (argument := .named (.platform runtimeScopeBytes [systemNamespace, bytesOf "DayOfWeek"]))
-      (claimed := .enum (runtimeScope ++ "::System.DayOfWeek") int32)
+      (claimed := .enum (Tests.enumIdentity "System.DayOfWeek" runtimeAssembly) int32)
       (platform := platform_table%
         [runtimeType "Object" .objectRoot, runtimeType "DayOfWeek" (.enumType 8)])).isOk =
       true := by decide +kernel
@@ -1289,9 +1290,16 @@ example :
 /-- `System.Int32` of the primitive assembly. -/
 private def int32Atom : TypeExpr := .atom "C" "System.Int32"
 
+/-- The tested enum declaration supplies its actual scope and both TypeDef name columns. -/
+private def enumRow (kind : Extraction.TypeKind) (pinned := false) : NamedType :=
+  { scope := bytesOf "L, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+    name := bytesOf "E", parts := [[], bytesOf "E"], kind, pinned }
+
+/-- The physical type proposed for this enum row. -/
+private def enumE : TypeIdentity := Tests.enumIdentity "E" (Tests.enumAssembly name!"L")
 /-- The resolved platform enum `L::E` has 32-bit signed storage. -/
 private def platformEnum : NamedType :=
-  { namedIn "L" "E" (.enumType 8) with parts := [[], bytesOf "E"] }
+  enumRow (.enumType 8)
 
 /-- `L.G<int>`, with `L.G` of the given kind and pinning. -/
 private def instanceOf (kind : Extraction.TypeKind) (pinned := false) : ResolvedType :=
@@ -1436,8 +1444,8 @@ private def acceptedPairings : List (ResolvedType × TypeExpr) := [
   (.named (namedIn "L" "N" .valueType), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external (some true))), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external none)), .aggregate "L::N" 0),
-  (.named (namedIn "L" "E" (.enumType 8) true), .enum "L::E" int32Atom),
-  (.named platformEnum, .enum "L::E" int32Atom),
+  (.named (enumRow (.enumType 8) true), .enum enumE int32Atom),
+  (.named platformEnum, .enum enumE int32Atom),
   -- Generic parameters: the method's first, then the owner's.
   (.mvar 0, .parameter 0), (.var 0, .parameter 1),
   -- Element types, element by element.
@@ -1471,7 +1479,7 @@ private def refusedPairings : List (ResolvedType × TypeExpr) := [
   (.primitive 8, .void), (.primitive 1, .atom "C" "System.Void"),
   (.primitive 8, .atom "D" "System.Int32"), (.primitive 8, .atom "C" "System.UInt32"),
   (.primitive 0x0E, .object "C" "System.Object"), (.primitive 0x1C, .object "C" "System.Object"),
-  (.primitive 8, .object "C" "System.Int32"), (.primitive 8, .enum "C::System.Int32" int32Atom),
+  (.primitive 8, .object "C" "System.Int32"), (.primitive 8, .enum (Tests.enumIdentity "System.Int32" (Tests.enumAssembly name!"C")) int32Atom),
   -- Named types.
   (.named (namedIn "L" "N" .valueType), .atom "L" "M"),
   (.named (namedIn "L" "N" .valueType), .atom "K" "N"),
@@ -1486,11 +1494,11 @@ private def refusedPairings : List (ResolvedType × TypeExpr) := [
   (.named (namedIn "L" "N" .classType), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external (some false))), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" .valueType), .aggregate "L::M" 0),
-  (.named (namedIn "L" "E" (.enumType 8) true), .enum "L::E" (.atom "C" "System.Int64")),
-  (.named platformEnum, .enum "L::E" (.atom "C" "System.Byte")),
-  (.named (namedIn "L" "E" (.external none)), .enum "L::E" int32Atom),
-  (.named (namedIn "L" "E" .classType), .enum "L::E" int32Atom),
-  (.named (namedIn "L" "E" (.external (some false))), .enum "L::E" int32Atom),
+  (.named (enumRow (.enumType 8) true), .enum enumE (.atom "C" "System.Int64")),
+  (.named platformEnum, .enum enumE (.atom "C" "System.Byte")),
+  (.named (enumRow (.external none)), .enum enumE int32Atom),
+  (.named (enumRow .classType), .enum enumE int32Atom),
+  (.named (enumRow (.external (some false))), .enum enumE int32Atom),
   (.named (namedIn "L" "N" .valueType), .constructor "L" "N"),
   (.named (namedIn "L" "N" .valueType), .parameter 0),
   -- Generic parameters.

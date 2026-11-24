@@ -708,7 +708,9 @@ raw-pointer dispatch.
 
 ## Integer enums
 
-Same-assembly non-generic enums retain identity but execute with their validated integer storage.
+Same-assembly non-generic enums execute with their validated integer storage. Signatures and
+array elements retain the defining assembly and the namespace and simple name of each declaring row.
+Two declarations can therefore have the same printed name and select different overloads.
 All underlying bit patterns are admitted, including those without a named constant. Narrow
 extension/truncation follows the underlying type. Boxing, reflection, enum instance methods and
 external enum dependencies are excluded; equal byte widths do not authorize replacing one enum

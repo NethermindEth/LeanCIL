@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import CIL.Extraction.DecodedMethod
 import CIL.Safety.StepComposition
 import Tests.Support.RawDecoding
@@ -87,7 +88,7 @@ private def resolves (env : LayoutEnvironment) (element : TypeExpr) (width : Nat
 /-- Primitive, enum, vector and aggregate elements retain their own storage widths. -/
 theorem elementWidths :
     resolves {} int32 4 ∧
-    resolves {} (.enum "Fixture::Small" (.atom runtimeScope "System.Byte")) 1 ∧
+    resolves {} (.enum (Tests.enumIdentity "Small") (.atom runtimeScope "System.Byte")) 1 ∧
     resolves {} (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
       int32) 16 ∧ resolves (environment 1) aggregate 4 ∧
     resolves (environment 3) aggregate 12 := by
@@ -99,7 +100,7 @@ theorem elementWidths :
 theorem unsupportedElements :
     ([TypeExpr.void, .object runtimeScope "System.String", .byref int32, .array int32,
       .atom runtimeScope "System.Double", .atom "Fixture" "System.Int32",
-      .enum "Fixture::Bad" (.atom runtimeScope "System.Boolean"),
+      .enum (Tests.enumIdentity "Bad") (.atom runtimeScope "System.Boolean"),
       .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
         (.atom runtimeScope "System.Single"), .aggregate "Other::Words" 0,
       .aggregate "Fixture::Words" 1].all fun type =>
