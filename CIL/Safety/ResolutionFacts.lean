@@ -29,7 +29,9 @@ simprocs `reduceFieldShape` and `reduceValueShape` read a method's shape of an o
 fact.
 
 `cil_runtime_models` declares the runtime model of each modelled call site of a method, read
-from the operand alone, so stepping such a call rewrites with one fact per site.
+from the operand alone, so stepping such a call rewrites with one fact per site. A lookup the
+elaborator reduces to neither `some` nor `none` fails the command unless it stops at a parameter
+of the method, so no modelled site lacks its fact.
 -/
 
 namespace CIL.Safety.ResolutionFacts
@@ -696,7 +698,51 @@ private def declareTypeIdentity (body : Body) (ops : Array Expr) (pc : Nat)
   addSimpTheorem simpSet (body.name.appendAfter s!"_typeIdentity{pc}") (post := false)
     (inv := false) .global (eval_prio default)
 
-/-- Each modelled call or constructor has a lookup fact for its opcode, method and environment. -/
+/-- The subterm the elaborator's reduction of `term` stops at, `fuel` deep: the first of a
+    recursor's major premise, a matcher's discriminants, a projected structure or, under any other
+    head, a data argument that reduces to no constructor. -/
+private partial def blockingTerm (term : Expr) (fuel : Nat := 64) : MetaM Expr := do
+  let term ← withDefault <| whnf term
+  if fuel == 0 then return term
+  let candidates ← match term with
+    | .proj _ _ projected => pure #[projected]
+    | _ => do
+      let arguments := term.getAppArgs
+      let .const head _ := term.getAppFn | return term
+      if let some matcher ← getMatcherInfo? head then
+        pure (arguments.extract matcher.getFirstDiscrPos
+          (matcher.getFirstDiscrPos + matcher.numDiscrs))
+      else if let .recInfo recursor ← getConstInfo head then
+        pure (arguments[recursor.getMajorIdx]?.toArray)
+      else pure arguments
+  for candidate in candidates do
+    let reduced ← withDefault <| whnf candidate
+    if reduced.isLit || reduced.isLambda || reduced.isSort || reduced.isForall then continue
+    if (← isConstructorApp reduced) || (← isProof reduced) || (← isType reduced) then continue
+    return ← blockingTerm reduced (fuel - 1)
+  return term
+
+/-- Fails unless the lookup `read` at `pc` of `method` reduces in the kernel to `none` or stops at
+    a parameter of `method`, whose instances decide the model; a call whose lookup the elaborator
+    cannot reduce would otherwise get no fact for stepping. -/
+private def checkUnmodelled (method : Name) (pc : Nat) (read : Expr) : MetaM Unit := do
+  let resolved ← try ofExceptKernelException (Kernel.whnf (← getEnv) (← getLCtx) read)
+    catch error => throwError m!"cil_runtime_models: the kernel cannot reduce the runtime model \
+      lookup at pc {pc} of {method}:{indentD error.toMessageData}"
+  if resolved.isAppOf ``Option.none then return
+  let blocking ← blockingTerm read
+  if resolved.isAppOf ``Option.some then
+    throwError "cil_runtime_models: the kernel resolves the call at pc {pc} of {method} to a \
+      runtime model, but the elaborator's reduction of{indentExpr read}\n\
+      stops at{indentExpr blocking}"
+  if blocking.isFVar then return
+  throwError "cil_runtime_models: neither the elaborator nor the kernel decides the runtime model \
+    of the call at pc {pc} of {method}; the lookup{indentExpr read}\nstops at{indentExpr blocking}"
+
+/-- Each modelled call or constructor has a lookup fact for its opcode, method and environment.
+    A call whose lookup reduces to `none` has no model and gets no fact, as does one whose lookup
+    stops at a parameter of the method; any other lookup the elaborator cannot reduce to a model
+    is an error naming the method, the pc and the term the reduction stops at. -/
 syntax "cil_runtime_models " ident : command
 
 elab_rules : command
@@ -722,7 +768,9 @@ elab_rules : command
         let read := mkApp3 (mkConst ``CIL.Extraction.runtimeModel) environment
           (mkConst opcode) target
         let resolved ← withDefault <| whnf read
-        let_expr Option.some _ model := resolved | continue
+        let_expr Option.some _ model := resolved
+          | unless resolved.isAppOf ``Option.none do checkUnmodelled name pc read
+            continue
         let model ← withDefault <| reduce model
         -- A constant is written as the numeral `ldc.i4` pushes, so a test of it simplifies alike.
         let model ← match_expr model with

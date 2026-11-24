@@ -284,12 +284,15 @@ or readonly reference.
   `body.linkAt pc = link`, in the same pass as its equation, so only the arm of the link's kind is
   simplified. A `.call` with no link runs its method's runtime model; `cil_runtime_models body`
   states `body_model{pc} : runtimeModel body.environment .call method = some model` at each such
-  pc of a named body, and the `reduceRuntimeModel` simproc evaluates the lookup for a literal or
-  template body, or for any environment when the method reference is closed. With both facts the stepper rewrites by `step_call_model`, and a directly linked
-  `.call` by `step_call_direct`, so the kernel checks one equation whose right side no longer
-  reads the link and a linked call never mentions the model; `step_call_eq` remains for a call
-  whose link no fact decides. `cil_checked_steps` steps a call without a link on in the same
-  method. For a resolved intrinsic, `step_call_intrinsic` rewrites the decoded call to
+  pc of a named body, and fails, naming the pc and the term the reduction stops at, when the
+  elaborator reduces a pc's lookup to neither `some` nor `none` and the lookup does not stop at a
+  parameter of the body. The `reduceRuntimeModel` simproc evaluates the lookup for a literal or
+  template body, or for any environment when the method reference is closed. With both facts the
+  stepper rewrites by `step_call_model`, and a directly linked `.call` by `step_call_direct`, so
+  the kernel checks one equation whose right side no longer reads the link and a linked call never
+  mentions the model; `step_call_eq` remains for a call whose link no fact decides.
+  `cil_checked_steps` steps a call without a link on in the same method. For a resolved
+  intrinsic, `step_call_intrinsic` rewrites the decoded call to
   `intrinsicCall`. It checks availability in the method's profile and the operands the
   intrinsic observes. The stepper applies supplied evaluation facts to symbolic operands. For a checked call to `Unsafe.SkipInit<T>`, the
   stepper uses the caller's address-formation fact to pop the byref argument and preserve memory.

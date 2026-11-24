@@ -29,6 +29,7 @@ method names, reads struct layouts across suffix blocks shared by an environment
 the simplifier reads a literal body without facts.
 
 Pins the runtime model facts: `cil_runtime_models` declares none for a call no model stands for,
+fails at a call whose lookup the elaborator cannot reduce unless the lookup stops at a parameter,
 and the simplifier reads a literal body's model lookup without a fact.
 -/
 
@@ -1078,6 +1079,46 @@ example :
     runtimeModel ({ locals := [], returnsValue := false, code := [] } : CIL.Method).environment
       .call unmodelledMethod = none := by
   simp only [CIL.Safety.reduceRuntimeModel]
+
+-- A lookup the elaborator cannot reduce fails the command unless the kernel finds no model, so no
+-- call is left without the fact stepping rewrites it with.
+/-- The modelled type getter behind a definition the elaborator does not unfold. -/
+@[irreducible] def hiddenGetter : MethodRef := getTypeFromHandle.method
+/-- A body whose only call is a modelled getter the elaborator cannot read. -/
+def hiddenGetterCaller : CIL.Method :=
+  { locals := [], returnsValue := false, code := [.call hiddenGetter {}, .ret] }
+cil_instruction_equations hiddenGetterCaller
+/--
+error: cil_runtime_models: the kernel resolves the call at pc 0 of
+Tests.ResolutionFacts.hiddenGetterCaller to a runtime model, but the elaborator's reduction of
+  runtimeModel hiddenGetterCaller.environment CallOpcode.call hiddenGetter
+stops at
+  hiddenGetter
+-/
+#guard_msgs (whitespace := lax) in cil_runtime_models hiddenGetterCaller
+/-- The modelled type getter behind a constant no reduction unfolds. -/
+opaque opaqueMethod : MethodRef := getTypeFromHandle.method
+/-- A body whose only call targets a method no reduction reads. -/
+def opaqueCaller : CIL.Method :=
+  { locals := [], returnsValue := false, code := [.call opaqueMethod {}, .ret] }
+cil_instruction_equations opaqueCaller
+/--
+error: cil_runtime_models: neither the elaborator nor the kernel decides the runtime model of the
+call at pc 0 of Tests.ResolutionFacts.opaqueCaller; the lookup
+  runtimeModel opaqueCaller.environment CallOpcode.call opaqueMethod
+stops at
+  opaqueMethod
+-/
+#guard_msgs (whitespace := lax) in cil_runtime_models opaqueCaller
+
+-- A call whose target is a parameter has its model decided by each instance, so it gets no fact.
+/-- A body whose call target is a parameter. -/
+def parameterCaller (target : MethodRef) : CIL.Method :=
+  { locals := [], returnsValue := false, code := [.call target {}, .ret] }
+cil_instruction_equations parameterCaller
+cil_runtime_models parameterCaller
+/-- error: Unknown identifier `parameterCaller_model0` -/
+#guard_msgs in #check parameterCaller_model0
 
 /-- A decided comparison, an unresolved forwarding scope, and an unmodelled getter. -/
 def comparedTypes : CIL.Method :=
