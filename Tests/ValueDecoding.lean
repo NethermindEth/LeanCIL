@@ -45,6 +45,7 @@ private def spanLayout (name : String) : RawLayout :=
   { identity := (genericOwnerIdentity owner [int32]).getD ""
     explicit := false, packing := 0, declaredSize := 0, byRefLike := true
     fields := [⟨.signed32, none⟩]
+    declaration := (ClassName.ofText name).levels
     generic := some ⟨owner, 1, [int32], [.parameter 0], [(0, [])]⟩ }
 
 /-- The span reset fixture has a valid four-byte layout row and decodes to `initobj`. -/

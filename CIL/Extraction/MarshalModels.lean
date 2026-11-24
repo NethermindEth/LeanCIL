@@ -50,7 +50,7 @@ private def Member.signature (member : Member) (source target : TypeExpr) (writa
 /-- Whether the declaration has a writable span as its first parameter. -/
 private def writableInput (parameters : List TypeExpr) : Bool :=
   match parameters with
-  | .apply (.constructor _ "System.Span`1") _ :: _ => true
+  | .apply (.constructor _ name) _ :: _ => name == "System.Span`1"
   | _ => false
 
 /-- The closed operation, including the element widths and signedness from the layouts. -/

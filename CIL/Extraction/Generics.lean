@@ -497,9 +497,8 @@ def callOperandMatches (site : CallSite) : Instruction → Bool
 
 /-- Split a scoped declaring type from its ordered generic arguments. -/
 def managedOwner : TypeExpr → Option (String × List TypeExpr)
-  | .atom scope name | .constructor scope name | .objectConstructor scope name =>
-    some (scope ++ "::" ++ name, [])
-  | .object scope name => do return (scope ++ "::" ++ (← name.signatureName?), [])
+  | .atom scope name => some (scope ++ "::" ++ name, [])
+  | .object scope name | .constructor scope name | .objectConstructor scope name => do return (scope ++ "::" ++ (← name.signatureName?), [])
   | .aggregate identity _ => some (identity, [])
   | .apply owner argument => do
     let (identity, arguments) ← managedOwner owner

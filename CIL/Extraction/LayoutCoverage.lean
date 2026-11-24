@@ -46,9 +46,8 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
       fun index => .size pc index
   | 0x28, .call site =>
     match site.declaringType, site.typeArguments with
-    | .apply (.constructor scope owner) (.aggregate identity index), [] =>
-      let spanOwner := scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"]
-      if !spanOwner && site.name == "get_Empty" &&
+    | .apply head@(.constructor ..) (.aggregate identity index), [] =>
+      if !head.isSpanHead && site.name == "get_Empty" &&
           typeStorage layouts (.aggregate identity index) != some (.field (.aggregate index)) then
         none else return []
     | _, _ => return []

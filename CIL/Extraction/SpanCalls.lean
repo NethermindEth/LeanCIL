@@ -20,6 +20,7 @@ def spanElementName (type : TypeExpr) : Option String := do
   if let some (_, name) := namedType type then
     return String.ofList name
   let .apply (.constructor _ name) (.atom _ element) := type | none
-  if (integerVectorWidth type).isSome then some (name ++ "<" ++ element ++ ">") else none
+  if (integerVectorWidth type).isSome then return (← name.signatureName?) ++ "<" ++ element ++ ">"
+  else none
 
 end CIL.Extraction

@@ -43,7 +43,7 @@ def runtimeAssembly : AssemblyName :=
   { name := name!"System.Runtime", version := ⟨11, 0, 0, 0⟩, culture := name!"",
     publicKeyToken := some 0xb03f5f7f11d50a3a }
 
-/-- The physical namespace and simple name of each enclosing class and the class itself. -/
+/-- The physical namespace and simple name of each declaring type, outermost first. -/
 structure ClassName where
   levels : List TypeLevel
   deriving DecidableEq, Repr
@@ -108,10 +108,10 @@ inductive TypeExpr where
   | signatureParameter (head tail : TypeExpr)
   /-- The generic definition of a value type, by its exact scope and name; an `apply` chain over
       it is a value type instance. -/
-  | constructor (scope name : String)
+  | constructor (scope : String) (name : ClassName)
   /-- The generic definition of a class, interface or delegate, by its exact scope and name; an
       `apply` chain over it is a reference type instance. -/
-  | objectConstructor (scope name : String)
+  | objectConstructor (scope : String) (name : ClassName)
   | apply (constructor argument : TypeExpr)
   /-- A class on the checked heap, by its exact scope and name: a class of a pinned assembly or
       `System.String`, or, as the type a class instance field holds, any class or interface,
@@ -198,6 +198,11 @@ theorem runtimeScope_spells_runtimeAssembly :
 
 #print axioms runtimeScope_spells_runtimeAssembly
 
+/-- The namespace and simple name of every declaration level contribute to its type key. -/
+private def ClassName.keyInto (name : ClassName) (rest : List (List UInt8)) : List (List UInt8) :=
+  name.levels.foldr (fun level tail =>
+    keyBytes (toString level.typeNamespace.code) :: keyBytes (toString level.name.code) :: tail) rest
+
 /-- Constructor-delimited type buckets retain scopes and aggregate positions. Lookups through
     these keys still compare full identities, in case two encodings were to share a bucket. -/
 def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
@@ -222,14 +227,12 @@ def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
   | .signatureParameter head tail, rest =>
     keyBytes "signatureParameter" :: typeKeyInto head (typeKeyInto tail rest)
   | .constructor scope name, rest =>
-    keyBytes "constructor" :: keyBytes scope :: keyBytes name :: rest
+    keyBytes "constructor" :: keyBytes scope :: name.keyInto rest
   | .objectConstructor scope name, rest =>
-    keyBytes "objectConstructor" :: keyBytes scope :: keyBytes name :: rest
+    keyBytes "objectConstructor" :: keyBytes scope :: name.keyInto rest
   | .apply constructor argument, rest =>
     keyBytes "apply" :: typeKeyInto constructor (typeKeyInto argument rest)
   | .object scope name, rest =>
-    keyBytes "object" :: keyBytes scope :: name.levels.foldr (fun level tail =>
-      keyBytes (toString level.typeNamespace.code) :: keyBytes (toString level.name.code) :: tail)
-      rest
+    keyBytes "object" :: keyBytes scope :: name.keyInto rest
 
 end CIL.Extraction

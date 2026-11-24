@@ -487,7 +487,7 @@ def closeLayoutType (layouts : List RawLayout) : TypeExpr → TypeExpr :=
   closeLayoutTypeWith (.ofList layouts)
 
 /-- Closing layout indices inside a runtime span preserves its constructor. -/
-theorem closeLayoutType_span (layouts : List RawLayout) (scope name : String) (element : TypeExpr)
+theorem closeLayoutType_span (layouts : List RawLayout) (scope : String) (name : ClassName) (element : TypeExpr)
     (span : (TypeExpr.constructor scope name).isSpanHead = true) :
     closeLayoutType layouts (.apply (.constructor scope name) element) =
       .apply (.constructor scope name) (closeLayoutType layouts element) := by
@@ -515,7 +515,8 @@ private def genericFieldType (table : LayoutTable) (type : TypeExpr) : Option Fi
 /-- Closed generic identities retain the scope and ordering of every supported argument. -/
 def genericOwnerIdentity (owner : TypeExpr) (arguments : List TypeExpr) : Option String := do
       let (scope, name) ← match owner with
-        | .constructor scope name | .objectConstructor scope name => some (scope, name)
+        | .constructor scope name | .objectConstructor scope name =>
+          Prod.mk scope <$> name.signatureName?
         | _ => none
       let names ← arguments.mapM fun argument => match argument with
         | .atom scope name => some (scope ++ "::" ++ name)
@@ -523,7 +524,8 @@ def genericOwnerIdentity (owner : TypeExpr) (arguments : List TypeExpr) : Option
           some identity
         | .apply (.constructor scope name) (.atom elementScope element)
         | .apply (.objectConstructor scope name) (.atom elementScope element) =>
-          some (scope ++ "::" ++ name ++ "<" ++ elementScope ++ "::" ++ element ++ ">")
+          do return scope ++ "::" ++ (← name.signatureName?) ++
+            "<" ++ elementScope ++ "::" ++ element ++ ">"
         | _ => none
       return scope ++ "::" ++ name ++ "<" ++ String.intercalate "," names ++ ">"
 
@@ -585,13 +587,19 @@ def genericConstraintValid (layouts : List RawLayout) (argument : TypeExpr)
     (flags : Nat) (types : List String) : Bool :=
   genericConstraintValidWith (.ofList layouts) argument flags types
 
+/-- A generic layout is owned by the value-type definition at these physical columns. -/
+def GenericLayout.declares (generic : GenericLayout) (levels : List TypeLevel) : Bool :=
+  match generic.owner with
+  | .constructor _ name => name.levels == levels
+  | _ => false
+
 /-- Generic layouts cannot replace their argument ordering or original field storage, and only
     a struct's generic definition owns one, since a class instance is a reference. -/
 def genericLayoutValid (table : LayoutTable) (layout : RawLayout) : Bool :=
   match layout.generic with
   | none => true
   | some generic =>
-    generic.owner matches .constructor .. &&
+    generic.declares layout.declaration &&
     genericOwnerIdentity generic.owner generic.arguments == some layout.identity &&
       !layout.explicit && !layout.auto && generic.arity > 0 &&
       generic.arguments.length == generic.arity &&

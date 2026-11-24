@@ -208,7 +208,7 @@ internal sealed class LayoutEvidence
             if (GenericStructs.Is(type) && type is GenericInstanceType closed)
             {
                 var serializer = new GenericEvidence(null, this);
-                var owner = $".constructor {IdentityText.Quote(Scope(type))} {IdentityText.Quote(metadata.FullName)}";
+                var owner = $".constructor {IdentityText.Quote(Scope(type))} {GenericEvidence.ClassName(metadata)}";
                 var arguments = string.Join(", ", closed.GenericArguments.Select(serializer.Type));
                 var parameters = $"arity := {metadata.GenericParameters.Count}, arguments := [{arguments}]";
                 var openFields = string.Join(", ", metadata.Fields.Where(field => !field.IsStatic)

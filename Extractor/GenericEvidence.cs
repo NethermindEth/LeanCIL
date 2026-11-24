@@ -55,7 +55,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     internal static string ObjectType(TypeReference type) => $".object {Scope(type)} {ClassName(type)}";
 
     // Signature element types synthesized by Cecil have no row. The checker compares their platform columns.
-    static string ClassName(TypeReference type)
+    internal static string ClassName(TypeReference type)
     {
         var levels = type.MetadataToken.RID != 0 && PinnedAssemblies.Active is { } pins
             ? TypeLevel.Levels(type, pins.IdentityMetadata(type.Module))
@@ -141,7 +141,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         if (type is GenericInstanceType generic)
         {
             if (!preserveGeneric && GenericStructs.Is(type) && Aggregate() is { } aggregate) return aggregate;
-            var result = $"{Head(generic)} {Scope(generic.ElementType)} {Quote(generic.ElementType.FullName)}";
+            var result = $"{Head(generic)} {Scope(generic.ElementType)} {ClassName(generic.ElementType)}";
             foreach (var argument in generic.GenericArguments) result = $".apply ({result}) ({Nested(argument)})";
             return result;
         }
@@ -949,7 +949,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             ? $", genericParameters := {List(method.GenericParameters.Select(parameter =>
                 DeclaredParameterConstraint(parameter, method.GenericParameters.Count)))}" : "";
         var specialization = owner is null ? "" :
-            $", owner := {Head(owner)} {Scope(owner.ElementType)} {Quote(owner.ElementType.FullName)}, " +
+            $", owner := {Head(owner)} {Scope(owner.ElementType)} {ClassName(owner.ElementType)}, " +
             $"ownerArguments := {List(owner.GenericArguments.Select(Type))}";
         return
         $"{{ token := {method.MetadataToken.ToUInt32()}, name := {Quote(method.Name)}, " +

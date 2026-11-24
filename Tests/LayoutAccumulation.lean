@@ -146,6 +146,7 @@ def wrapType (number : Nat) : TypeExpr :=
 /-- `Wrap{number}<Leaf>` with the given original field type, stored as the layout at `child`. -/
 def wrap (number : Nat) (field : TypeExpr) (child : Nat) : RawLayout := {
   identity := s!"S::Wrap{number}`1<Leaf>", explicit := false, packing := 0, declaredSize := 0,
+  declaration := (ClassName.ofText s!"Wrap{number}`1").levels,
   generic := some {
     owner := .constructor "S" s!"Wrap{number}`1", arity := 1, arguments := [.aggregate "Leaf" 0],
     fields := [field], constraints := [(0, [])] },
@@ -176,6 +177,20 @@ theorem wrongOwner :
       { wrap 2 wrapsFirst 1 with generic := (wrap 3 wrapsFirst 1).generic })
       genericLayouts .scalar := by decide +kernel
 #print axioms wrongOwner
+
+/-- The same closed identity and field layout require the namespace and name of the pinned row. -/
+theorem genericOwnerColumns :
+    let base := wrap 1 (.parameter 0) 0
+    let layout := { base with
+      identity := "S::Rows.Wrap1`1<Leaf>"
+      declaration := [⟨name!"Rows", name!"Wrap1`1"⟩] }
+    let check := fun (name : ClassName) =>
+      let raw := { layout with generic := layout.generic.map fun generic =>
+        { generic with owner := .constructor "S" name } }
+      genericLayoutValid (.ofList [leaf, raw]) raw
+    check "Rows.Wrap1`1" = true ∧ check ⟨[⟨name!"", name!"Rows.Wrap1`1"⟩]⟩ = false := by
+  decide +kernel
+#print axioms genericOwnerColumns
 
 /-- A field naming a generic owner that no layout has is rejected: the owner lookup finds
     nothing. -/
@@ -278,6 +293,7 @@ def vectorOfWords : TypeExpr :=
 /-- `S::Wrap1<E>` for an enum `E` over `underlying`, stored with the one field `kind`. -/
 def enumWrap (underlying : TypeExpr) (kind : FieldType) : RawLayout := {
   identity := "S::Wrap1`1<E>", explicit := false, packing := 0, declaredSize := 0,
+  declaration := [⟨name!"", name!"Wrap1`1"⟩],
   generic := some {
     owner := .constructor "S" "Wrap1`1", arity := 1, arguments := [.enum "E" underlying],
     fields := [.parameter 0], constraints := [(0, [])] },

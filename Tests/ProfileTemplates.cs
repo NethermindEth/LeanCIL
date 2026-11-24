@@ -246,12 +246,15 @@ void RejectLean(string name, string text, string path, string diagnostic = "Not 
     Console.WriteLine("PASS rejection: " + name);
 }
 
+const string BindingMismatch = "cil_kernel_rfl: the kernel does not accept the two sides as equal";
 var widePath = extractions[2] + Path.PathSeparator + sharedPath;
 var wideBinding = File.ReadAllText(Path.Combine(shared, "TemplateBindings2.lean"));
-RejectLean("WrongFlag", wideBinding.Replace("true true 1", "false false 1", StringComparison.Ordinal), widePath);
-RejectLean("WrongCallee", wideBinding.Replace("true true 1", "true true 0", StringComparison.Ordinal), widePath);
+RejectLean("WrongFlag", wideBinding.Replace("true true 1", "false false 1", StringComparison.Ordinal),
+    widePath, BindingMismatch);
+RejectLean("WrongCallee", wideBinding.Replace("true true 1", "true true 0", StringComparison.Ordinal),
+    widePath, BindingMismatch);
 RejectLean("WrongProfile", wideBinding.Replace("Extracted.profile", "FeatureProfile.scalar",
-    StringComparison.Ordinal), widePath);
+    StringComparison.Ordinal), widePath, BindingMismatch);
 RejectLean("WrongEquation", """
 import Templates
 example (profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) (callee : Nat) :
@@ -406,12 +409,12 @@ if (descriptors == changedField) throw new InvalidOperationException("Missing st
 File.WriteAllText(Path.Combine(changedStatic, "Templates.lean"),
     $"""{staticTemplate[..siteStart]}{changedField}{staticTemplate[codeStart..]}""");
 Compile(changedStatic, "Templates", changedStatic + Path.PathSeparator + library);
-RejectLean("ChangedStaticIdentity", staticBinding, changedStatic + Path.PathSeparator + staticPath);
+RejectLean("ChangedStaticIdentity", staticBinding, changedStatic + Path.PathSeparator + staticPath, BindingMismatch);
 var missingStatic = Path.Combine(directory, "MissingStatic");
 Directory.CreateDirectory(missingStatic);
 File.WriteAllText(Path.Combine(missingStatic, "Templates.lean"),
     $"""{staticTemplate[..siteStart]}staticSites := [],{"\n"}{staticTemplate[codeStart..]}""");
 Compile(missingStatic, "Templates", missingStatic + Path.PathSeparator + library);
-RejectLean("MissingStaticMetadata", staticBinding, missingStatic + Path.PathSeparator + staticPath);
+RejectLean("MissingStaticMetadata", staticBinding, missingStatic + Path.PathSeparator + staticPath, BindingMismatch);
 Console.WriteLine("PASS deterministic static metadata, exact profile bindings " +
     "and changed/missing descriptor rejection");

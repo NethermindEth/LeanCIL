@@ -627,6 +627,11 @@ For a constructed type, Lean also checks the constructor's name columns and the 
 against the resolved signature. Each nested argument retains its assembly scope and name columns or
 its primitive element code. Extraction rejects ambiguous display names before emitting the table.
 
+For a generic signature without a layout index, the checker reads the definition's namespace and
+simple name at each nesting level. A call on a constructed class or value type must match those
+columns, the assembly scope and the ordered type arguments at its MemberRef. An indexed generic
+layout must also name its own physical declaration as its value-type constructor.
+
 An imported aggregate local sizes caller frame storage from the same pinned metadata that byref
 contracts already trust; it adds a consumer and no trusted source. `ImportedLocalLayoutsBound`
 requires every caller layout entry whose identity a slot publishes to equal that slot's selected

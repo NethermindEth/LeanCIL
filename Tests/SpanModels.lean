@@ -113,7 +113,7 @@ private def spelling : TypeExpr → String
   | .array (.ownerParameter 0) => "!0[]"
   | .byref (.ownerParameter 0) => "!0&"
   | .modified true _ name (.byref (.ownerParameter 0)) => s!"!0& modreq({name})"
-  | .apply (.constructor _ owner) (.ownerParameter 0) => s!"{owner}<!0>"
+  | .apply (.constructor _ owner) (.ownerParameter 0) => s!"{owner.signatureName?.getD "?"}<!0>"
   | .atom _ name => name
   | _ => "?"
 

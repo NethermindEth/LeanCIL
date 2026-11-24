@@ -25,9 +25,18 @@ def SpanMember.name : SpanMember → MetadataName
   | .readOnly | .array => name!"op_Implicit"
   | .empty => name!"get_Empty"
 
+/-- Signature spelling of the two runtime span definitions. -/
+private def spanName (writable : Bool) : String :=
+  if writable then "System.Span`1" else "System.ReadOnlySpan`1"
+
 /-- The generic definition that declares members of a writable or read-only span. -/
 def spanHead (writable : Bool) : TypeExpr :=
-  .constructor runtimeScope (if writable then "System.Span`1" else "System.ReadOnlySpan`1")
+  .constructor runtimeScope (spanName writable)
+
+/-- The runtime signature spelling of a checked span constructor. -/
+def spanOwnerName? (head : TypeExpr) : Option String :=
+  if head == spanHead true then some (spanName true)
+  else if head == spanHead false then some (spanName false) else none
 
 /-- The accessor signature for an element. Open readonly returns carry the required modifier;
     the closed operand carries Cecil's scoped spelling of that return. -/
@@ -56,7 +65,8 @@ private def SpanMember.operand (member : SpanMember) (writable : Bool) : ModelOp
     | .array | .readOnly => "op_Implicit"
   let declared := member.signature writable true (.ownerParameter 0)
   .external (fun _ => declared) memberName fun method => do
-    let .apply (.constructor _ owner) element := method.owner | none
+    let .apply head element := method.owner | none
+    let owner ← spanOwnerName? head
     let name ← spanElementName element
     let reference := if writable then "!0&" else
       "!0& modreq(System.Runtime.InteropServices.InAttribute)"

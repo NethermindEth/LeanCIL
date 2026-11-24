@@ -85,7 +85,7 @@ internal static class ManagedPointers
             return $".aggregate {IdentityText.Quote(LayoutEvidence.Identity(type))} 0";
         if (type is GenericInstanceType generic && MetadataValidation.IntegerVectorWidth(type) is not null)
         {
-            var name = IdentityText.Quote(generic.ElementType.FullName);
+            var name = GenericEvidence.ClassName(generic.ElementType);
             var element = TypeEvidence(generic.GenericArguments[0]);
             return $".apply (.constructor {GenericEvidence.Scope(generic.ElementType)} {name}) ({element})";
         }

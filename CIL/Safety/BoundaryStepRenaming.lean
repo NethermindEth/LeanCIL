@@ -629,37 +629,35 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
   obtain ⟨family, listed, member⟩ := List.mem_flatten.mp member
   simp only [modelFamilies, List.mem_cons, List.not_mem_nil] at listed
   repeat' rcases listed with rfl | listed
-  all_goals first
-    | contradiction
-    | obtain rfl := List.mem_singleton.mp member
-      exact ModelEntry.exact_yields.mpr objectConstructor_stepRenamed
-    | obtain rfl := List.mem_singleton.mp member
-      exact staticSpanEntry_yields memory_stepRenamed
-    | exact runtimeTypeEntries_yields (property := CIL.RuntimeModel.StepRenamed)
-        typeFromHandle_stepRenamed typeEquality_stepRenamed entry member
-    | exact platformEntries_yields feature_stepRenamed constant_stepRenamed entry member
-    | exact referenceContentEntries_yields constant_stepRenamed entry member
-    | exact guardEntries_yields memory_stepRenamed entry member
-    | exact hardwareEntries_yields intrinsic_stepRenamed entry member
-    | exact vectorHelperEntries_yields intrinsic_stepRenamed memory_stepRenamed entry member
-    | exact vectorEntries_yields intrinsic_stepRenamed entry member
-    | exact integerMathEntries_yields intrinsic_stepRenamed entry member
-    | exact wideArithmeticEntries_yields intrinsic_stepRenamed memory_stepRenamed entry member
-    | exact binaryEntries_yields memory_stepRenamed entry member
-    | exact bitEntries_yields intrinsic_stepRenamed entry member
-    | exact unsafeEntries_yields constant_stepRenamed referenceCompare_stepRenamed
-        skipInit_stepRenamed entry member
-    | exact unsafeTransferEntries_yields memory_stepRenamed typedTransfer_stepRenamed entry member
-    | exact marshalEntries_yields memory_stepRenamed entry member
-    | exact unsafeReferenceEntries_yields memory_stepRenamed entry member
-    | exact unsafeReinterpretEntries_yields memory_stepRenamed entry member
-    | exact unsafeOffsetEntries_yields (property := CIL.RuntimeModel.StepRenamed)
-        memory_stepRenamed referenceSubtract_stepRenamed entry member
-    | exact unsafeBlockEntries_yields memory_stepRenamed entry member
-    | exact spanEntries_yields memory_stepRenamed entry member
-    | exact asSpanEntries_yields memory_stepRenamed entry member
-    | exact spanBulkEntries_yields memory_stepRenamed entry member
-    | exact spanConstructorEntries_yields memory_stepRenamed spanInPlace_stepRenamed entry member
+  · obtain rfl := List.mem_singleton.mp member
+    exact ModelEntry.exact_yields.mpr objectConstructor_stepRenamed
+  · exact runtimeTypeEntries_yields (property := CIL.RuntimeModel.StepRenamed)
+      typeFromHandle_stepRenamed typeEquality_stepRenamed entry member
+  · exact vectorEntries_yields intrinsic_stepRenamed entry member
+  · exact vectorHelperEntries_yields intrinsic_stepRenamed memory_stepRenamed entry member
+  · exact hardwareEntries_yields intrinsic_stepRenamed entry member
+  · exact integerMathEntries_yields intrinsic_stepRenamed entry member
+  · exact wideArithmeticEntries_yields intrinsic_stepRenamed memory_stepRenamed entry member
+  · exact binaryEntries_yields memory_stepRenamed entry member
+  · exact bitEntries_yields intrinsic_stepRenamed entry member
+  · exact unsafeEntries_yields constant_stepRenamed referenceCompare_stepRenamed
+      skipInit_stepRenamed entry member
+  · exact platformEntries_yields feature_stepRenamed constant_stepRenamed entry member
+  · exact referenceContentEntries_yields constant_stepRenamed entry member
+  · exact guardEntries_yields memory_stepRenamed entry member
+  · exact marshalEntries_yields memory_stepRenamed entry member
+  · exact unsafeReinterpretEntries_yields memory_stepRenamed entry member
+  · exact unsafeReferenceEntries_yields memory_stepRenamed entry member
+  · exact unsafeOffsetEntries_yields (property := CIL.RuntimeModel.StepRenamed)
+      memory_stepRenamed referenceSubtract_stepRenamed entry member
+  · exact unsafeTransferEntries_yields memory_stepRenamed typedTransfer_stepRenamed entry member
+  · exact unsafeBlockEntries_yields memory_stepRenamed entry member
+  · exact spanEntries_yields memory_stepRenamed entry member
+  · exact asSpanEntries_yields memory_stepRenamed entry member
+  · obtain rfl := List.mem_singleton.mp member
+    exact staticSpanEntry_yields memory_stepRenamed
+  · exact spanBulkEntries_yields memory_stepRenamed entry member
+  · exact spanConstructorEntries_yields memory_stepRenamed spanInPlace_stepRenamed entry member
 
 #print axioms runtimeModel_stepRenamed
 

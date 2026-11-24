@@ -22,6 +22,8 @@ Directory.CreateDirectory(root);
 var extractor = Assembly.LoadFrom(ExtractorPath);
 if (!LayoutVisits() || args.Contains("--layout-visits-only", StringComparer.Ordinal)) return;
 
+VerifyGenericOwners(assembly, root);
+
 bool LayoutVisits()
 {
     const BindingFlags members = BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
@@ -60,6 +62,51 @@ bool LayoutVisits()
     }
     if (!passed) Environment.ExitCode = 1;
     return passed;
+}
+
+static void VerifyGenericOwners(string assembly, string root)
+{
+    var image = Path.Combine(root, "GenericOwners.dll");
+    using var module = ModuleDefinition.ReadModule(assembly);
+    var host = module.GetType("Examples.GenericLayouts");
+    var caller = new MethodDefinition("ReadOwners", Mono.Cecil.MethodAttributes.Public |
+        Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
+    host.Methods.Add(caller);
+    var il = caller.Body.GetILProcessor();
+    il.Emit(OpCodes.Ldc_I4_0);
+    int digit = 0;
+    foreach (bool valueType in new[] { false, true })
+    foreach (bool dotted in new[] { false, true })
+    {
+        var name = valueType ? "GenericValue`1" : "GenericClass`1";
+        var flags = Mono.Cecil.TypeAttributes.Public;
+        if (valueType) flags |= Mono.Cecil.TypeAttributes.Sealed | Mono.Cecil.TypeAttributes.SequentialLayout;
+        var baseType = valueType ? module.GetType("Examples.GenericPair`1").BaseType : module.TypeSystem.Object;
+        var definition = new TypeDefinition(dotted ? "" : "Rows", dotted ? "Rows." + name : name, flags, baseType);
+        module.Types.Add(definition);
+        definition.GenericParameters.Add(new GenericParameter("T", definition));
+        var method = new MethodDefinition("Digit", Mono.Cecil.MethodAttributes.Public |
+            Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
+        definition.Methods.Add(method);
+        var body = method.Body.GetILProcessor();
+        body.Emit(OpCodes.Ldc_I4, ++digit);
+        body.Emit(OpCodes.Ret);
+        var closed = new GenericInstanceType(definition);
+        closed.GenericArguments.Add(module.TypeSystem.Int32);
+        il.Emit(OpCodes.Ldc_I4_S, (sbyte)10);
+        il.Emit(OpCodes.Mul);
+        il.Emit(OpCodes.Call, new MethodReference("Digit", module.TypeSystem.Int32, closed) { HasThis = false });
+        il.Emit(OpCodes.Add);
+    }
+    il.Emit(OpCodes.Ret);
+    module.Write(image);
+    var runtime = Assembly.Load(File.ReadAllBytes(image));
+    var result = runtime.GetType("Examples.GenericLayouts", true)!.GetMethod("ReadOwners")!.Invoke(null, null);
+    if (!Equals(result, 1234)) throw new InvalidOperationException($"CLR generic calls returned {result}");
+    using var verification = new Program();
+    verification.Verify(image, "Examples", "GenericLayouts::ReadOwners()", At("Tests/GenericLayouts/Owners.lean"),
+        Path.Combine(root, "GenericOwners"));
+    Console.WriteLine("PASS CLR and checked MemberRefs for four physical generic declarations");
 }
 
 // Identities are read from metadata rows, so the same-named definition is written into an image.

@@ -64,7 +64,7 @@ def ordinaryTypeName (space name : String) : Bool :=
 
 /-- A top-level TypeDef or AssemblyRef-scoped TypeRef with its physical assembly identity. -/
 private def constraintTypeParts (image : PreparedImage) (token : Nat) :
-    Except AuditError (String × String) := do
+    Except AuditError (String × ClassName) := do
   let cell := image.layout.cell image.view token
   let space ← image.layout.stringAt image.view (← cell typeNamespaceColumn)
   let name ← image.layout.stringAt image.view (← cell typeNameColumn)
@@ -83,19 +83,20 @@ private def constraintTypeParts (image : PreparedImage) (token : Nat) :
       unless coded % 4 == 2 do throw .uncoveredConstraint
       referenceIdentity image (← checkedTokenOf Table.assemblyRef (coded / 4) .rowOverflow)
     | _ => throw .uncoveredConstraint
-  let fullName := if namespaceText.isEmpty then nameText else namespaceText ++ "." ++ nameText
-  return (scope, fullName)
+  let some declaration := ClassName.ofParts? [space, name] | throw (.constraintMismatch token)
+  return (scope, declaration)
 
 /-- The scoped identity of a closed constraint type. -/
 private def constraintTypeName (image : PreparedImage) (token : Nat) :
     Except AuditError String := do
   let (scope, name) ← constraintTypeParts image token
-  return scope ++ "::" ++ name
+  let some text := name.signatureName? | throw (.constraintMismatch token)
+  return scope ++ "::" ++ text
 
 /-- A reference-type constructor in a constraint. The outer application requires an interface.
     Each nested application checks its own defining TypeDef, including any forwarders. -/
 private def constraintHead (images : List PreparedImage) (image : PreparedImage)
-    (head arity : Nat) (requireInterface : Bool) : Except AuditError (String × String) := do
+    (head arity : Nat) (requireInterface : Bool) : Except AuditError (String × ClassName) := do
   unless tableOf head == Table.typeDef || tableOf head == Table.typeRef do throw .uncoveredConstraint
   let (scope, name) ← constraintTypeParts image head
   let (defining, row) ← if tableOf head == Table.typeDef then pure (image, head % 2^24)
@@ -122,13 +123,13 @@ private def hasMethodParameter : Nat → SigType → Bool
 /-- Read applications from the physical signature, using the same scope, kind, arity and argument
     order checks for open declarations and for the closed identities of concrete witnesses. -/
 private def readApplication (images : List PreparedImage) (image : PreparedImage)
-    (leaf : SigType → Except AuditError α) (apply : String → String → List α → α) :
+    (leaf : SigType → Except AuditError α) (apply : String → ClassName → List α → Except AuditError α) :
     Nat → SigType → Bool → Except AuditError α
   | fuel + 1, .genericInst false head args, outer => do
     let arguments := args.toList
     let (scope, name) ← constraintHead images image head arguments.length outer
     let values ← arguments.mapM fun arg => readApplication images image leaf apply fuel arg false
-    return apply scope name values
+    apply scope name values
   | _, type, false => leaf type
   | _, _, true => throw .uncoveredConstraint
 
@@ -153,7 +154,9 @@ private def constraintIdentity (images : List PreparedImage) (image : PreparedIm
         return name
       | _ => throw .uncoveredConstraint
     readApplication images image leaf
-      (fun scope name args => scope ++ "::" ++ name ++ "<" ++ String.intercalate "," args ++ ">")
+      (fun scope name args => do
+        let some text := name.signatureName? | throw (.constraintMismatch token)
+        return scope ++ "::" ++ text ++ "<" ++ String.intercalate "," args ++ ">")
       blob.length spec true
   | .modified true modifier (.named false base) =>
     let name := (← constraintTypeName image modifier) ++ "!" ++ (← constraintTypeName image base)
@@ -177,7 +180,7 @@ private def openMethodConstraint? (images : List PreparedImage) (image : Prepare
     | .primitive code => do primitiveElement (← primitiveScope image) code
     | _ => throw .uncoveredConstraint
   return some (← readApplication images image leaf
-    (fun scope name args => args.foldl TypeExpr.apply (.objectConstructor scope name))
+    (fun scope name args => pure (args.foldl TypeExpr.apply (.objectConstructor scope name)))
     blob.length spec true)
 
 /-- Flags and every constraint of one physical GenericParam, in metadata order within each
@@ -249,15 +252,14 @@ def methodDeclaringType (image : PreparedImage) (method : Nat) : Except AuditErr
   let some row := owner | throw (.constraintMismatch method)
   return StrictBinding.tokenOf Table.typeDef row
 
-/-- The unique top-level value type of this scoped name, with its physical generic arity. -/
-def valueLayoutOwner (image : PreparedImage) (identity : String) (fullName : List Char) :
+/-- The value type selected by the physical declaration columns, with its generic arity. -/
+def valueLayoutOwner (image : PreparedImage) (name : ClassName) :
     Except AuditError (Nat × Nat) := do
-  let (reversedName, rest) := fullName.reverse.span (· != '.')
-  let name := bytesOf (String.ofList reversedName.reverse)
-  let space := bytesOf (String.ofList (rest.drop 1).reverse)
-  let some row ← enumDefinition? image 0 [space, name] | throw .uncoveredConstraint
-  unless (← constraintTypeName image (StrictBinding.tokenOf Table.typeDef row)) == identity do
-    throw (.constraintMismatch (StrictBinding.tokenOf Table.typeDef row))
+  if name.levels.isEmpty then throw .uncoveredConstraint
+  let some columns := name.levels.mapM fun level => do
+    pure [← level.typeNamespace.bytes?, ← level.name.bytes?]
+    | throw .uncoveredConstraint
+  let some row ← enumDefinition? image 0 columns.flatten | throw .uncoveredConstraint
   let (kind, arity) ← physicalTypeShape image row
   unless kind == .valueType do throw .uncoveredConstraint
   return (row, arity)
@@ -267,7 +269,7 @@ def valueLayoutOwner (image : PreparedImage) (identity : String) (fullName : Lis
 private def layoutTypeArguments (image : PreparedImage) (token : Nat) (layout : RawLayout) :
     Except AuditError (Option (List String)) := do
   let some generic := layout.generic | return none
-  unless generic.owner matches .constructor .. do throw (.constraintMismatch token)
+  unless generic.declares layout.declaration do throw (.constraintMismatch token)
   unless genericOwnerIdentity generic.owner generic.arguments == some layout.identity &&
       generic.arity > 0 && generic.arguments.length == generic.arity do
     throw (.constraintMismatch token)
@@ -285,10 +287,14 @@ private def layoutTypeArguments (image : PreparedImage) (token : Nat) (layout : 
 def layoutInterfaces (images : List PreparedImage) (layout : RawLayout) :
     Except AuditError Unit := do
   let ownerType := (layout.generic.map (·.owner)).getD (.aggregate layout.identity 0)
-  let some (scope, name) := namedType ownerType | throw .uncoveredConstraint
-  let some image := images.find? (·.identity == String.ofList scope) | throw .uncoveredConstraint
-  let ownerName := String.ofList scope ++ "::" ++ String.ofList name
-  let (owner, arity) ← valueLayoutOwner image ownerName name
+  let some scope := ownerType.headScope | throw .uncoveredConstraint
+  let some image := images.find? (·.identity == scope) | throw .uncoveredConstraint
+  let name : ClassName := ⟨layout.declaration⟩
+  if layout.generic.isNone then
+    if layout.genericArguments.isSome then throw .uncoveredConstraint
+    let some spelling := name.signatureName? | throw .uncoveredConstraint
+    unless scope ++ "::" ++ spelling == layout.identity do throw (.layoutMismatch layout.identity)
+  let (owner, arity) ← valueLayoutOwner image name
   let token := StrictBinding.tokenOf Table.typeDef owner
   unless arity == (layout.generic.map (·.arity)).getD 0 do throw (.constraintMismatch token)
   let arguments ← layoutTypeArguments image token layout

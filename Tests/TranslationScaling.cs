@@ -255,7 +255,8 @@ void CheckLayoutTableScaling(string extraction)
         var generic = Table("Generic", count, index => index == 0
             ? "  { identity := \"Leaf\", explicit := false, packing := 0, declaredSize := 0, " +
                 "fields := [⟨.unsigned64, none⟩] }"
-            : $"  {{ identity := \"S::Wrap{index}`1<Leaf>\", generic := some {{ owner := .constructor \"S\" " +
+            : $"  {{ identity := \"S::Wrap{index}`1<Leaf>\", declaration := [⟨name!\"\", name!\"Wrap{index}`1\"⟩], " +
+                "generic := some { owner := .constructor \"S\" " +
                 $"\"Wrap{index}`1\", arity := 1, arguments := [.aggregate \"Leaf\" 0], fields := [" +
                 (index == 1 ? ".parameter 0" : $".apply (.constructor \"S\" \"Wrap{index - 1}`1\") (.parameter 0)") +
                 $"], constraints := [(0, [])] }}, explicit := false, packing := 0, declaredSize := 0, " +

@@ -508,8 +508,8 @@ private def joinBytes (separator : List UInt8) : List (List UInt8) → List UInt
     method type parameter, `&` and `*` suffixes, and `<...>` for generic arguments. -/
 private def scalarTypeBytes : TypeExpr → Option (List UInt8)
   | .void => some (signatureBytes "System.Void")
-  | .atom _ name | .constructor _ name | .objectConstructor _ name => some (signatureBytes name)
-  | .object _ name => signatureBytes <$> name.signatureName?
+  | .atom _ name => some (signatureBytes name)
+  | .object _ name | .constructor _ name | .objectConstructor _ name => signatureBytes <$> name.signatureName?
   | type@(.aggregate ..) => signatureBytes <$> spanElementName type
   -- Enum names cannot contain generic owner arguments.
   | .enum identity _ => (splitBytes (signatureBytes identity) [58, 58])[1]?

@@ -38,7 +38,7 @@ def arrayElementType (type : TypeExpr) (aggregateWidth : Nat := 0) : Option Arra
   | .aggregate identity _ => some (.aggregate identity aggregateWidth)
   | type@(.apply (.constructor _ name) (.atom _ element)) => do
     let width ← integerVectorWidth type
-    return .vector (name ++ "<" ++ element ++ ">") width
+    return .vector ((← name.signatureName?) ++ "<" ++ element ++ ">") width
   | .enum identity (.atom scope name) => do
     if scope != runtimeScope then none else pure ()
     let storage ← match name with
@@ -66,9 +66,8 @@ def spanElementWidth (type : TypeExpr) (aggregateWidth : Nat := 0) : Option Nat 
 /-- Exact span metadata, including element width and write capability. -/
 def spanStorage (type : TypeExpr) (aggregateWidth : Nat := 0) : Option StorageType :=
   match type with
-  | .apply (.constructor scope name) elementType => do
-    if scope != runtimeScope ||
-        name ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none else
+  | .apply head@(.constructor _ name) elementType => do
+    if !head.isSpanHead then none else
     let width ← spanElementWidth elementType aggregateWidth
     return .span width (name == "System.Span`1")
   | _ => none

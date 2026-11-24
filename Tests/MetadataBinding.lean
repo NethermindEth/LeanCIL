@@ -1295,7 +1295,8 @@ private def platformEnum : NamedType :=
 
 /-- `L.G<int>`, with `L.G` of the given kind and pinning. -/
 private def instanceOf (kind : Extraction.TypeKind) (pinned := false) : ResolvedType :=
-  .genericInst (namedIn "L" "G`1" kind pinned) (.cons (.primitive 8) .nil)
+  .genericInst { namedIn "L" "G`1" kind pinned with parts := [[], bytesOf "G`1"] }
+    (.cons (.primitive 8) .nil)
 
 /-- A generic application with `count` method-parameter arguments. -/
 private def application : Nat → TypeExpr
@@ -1304,7 +1305,7 @@ private def application : Nat → TypeExpr
 
 /-- A resolved generic instance of the same arity. -/
 private def instanceArguments (count : Nat) : ResolvedType :=
-  .genericInst (namedIn "L" "G" .valueType)
+  .genericInst { namedIn "L" "G" .valueType with parts := [[], bytesOf "G"] }
     (ResolvedList.ofList ((List.range count).map ResolvedType.mvar))
 
 /-- Splitting a whole application visits each argument once. -/

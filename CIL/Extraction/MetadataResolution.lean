@@ -1438,10 +1438,10 @@ def appliedAdmits (frame : Frame) : Nat → NamedType → ResolvedList → TypeE
     argumentsAdmit frame fuel arguments (fun
       | .constructor scope name =>
         head.kind.reference? == some false && bytesOf scope == head.scope &&
-          bytesOf name == head.name
+          declarationMatches name.levels head.parts
       | .objectConstructor scope name =>
         head.kind.reference? == some true && bytesOf scope == head.scope &&
-          bytesOf name == head.name
+          declarationMatches name.levels head.parts
       | _ => false) expr
 
 /-- The last decoded argument matches the outermost application. Each match consumes one

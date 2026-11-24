@@ -340,7 +340,7 @@ internal static partial class TemplateEmitter
             var instance = $"{options.Namespace}.method{templateIndex} {string.Join(' ', arguments)}";
             Line("/-- This extracted method is exactly the instantiated shared template. -/");
             Line($"@[cil_code] theorem method{index}_template : Extracted.program[{index}]? =");
-            Line($"    some ({instance}) := rfl");
+            Line($"    some ({instance}) := by cil_kernel_rfl");
             Line($"#print axioms method{index}_template");
         }
         Line("end TemplateBindings");

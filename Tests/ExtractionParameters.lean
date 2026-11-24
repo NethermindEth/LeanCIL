@@ -131,7 +131,7 @@ private theorem nativeDispatchStorage_span {context : NativeDispatchContext} {ty
 #print axioms nativeDispatchStorage_span
 
 /-- A generic instance's storage is span storage exactly for a span type. -/
-private theorem typeStorage_apply_span {layouts : List RawLayout} {scope name : String}
+private theorem typeStorage_apply_span {layouts : List RawLayout} {scope : String} {name : ClassName}
     {element : TypeExpr} {storage : StorageType}
     (stored : typeStorage layouts (.apply (.constructor scope name) element) = some storage) :
     spanStored storage = spanLocal (.apply (.constructor scope name) element) := by

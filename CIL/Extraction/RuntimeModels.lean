@@ -144,9 +144,10 @@ private def proveEntryMembership : TacticM Unit := do
 /-- Every entry of the runtime table is one of `modelEntries`. -/
 theorem runtimeModels_entries : ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2,
     entry ∈ modelEntries := by
-  simp only [runtimeModels, SearchTree.toList, List.forall_mem_append, List.forall_mem_cons,
+  simp (config := { zeta := false, beta := false, iota := false, proj := false }) only
+    [runtimeModels, SearchTree.toList, List.forall_mem_append, List.forall_mem_cons,
     List.not_mem_nil, false_implies, implies_true, and_true, true_and]
-  repeat' first | apply And.intro | exact True.intro
+  repeat' first | (guard_target =ₛ True; exact True.intro) | (change _ ∧ _; constructor)
   run_tac proveEntryMembership
 
 #print axioms runtimeModels_entries

@@ -129,10 +129,17 @@ theorem flatOwnerScope?_prefix {identity scope : String}
 #print axioms flatOwnerScope?_prefix
 
 
+/-- A class name usable by metadata operations that accept only a plain, unambiguous spelling. -/
+private def plainSpelling? (name : ClassName) : Option String := do
+  let text ← name.signatureName?
+  guard (ClassName.ofText text == name)
+  return text
+
 /-- A named type as its referencing scope and full name. -/
 def namedType : TypeExpr → Option (List Char × List Char)
-  | .atom scope name | .constructor scope name | .objectConstructor scope name =>
-    leaf (metadataChars scope) (metadataChars name)
+  | .atom scope name => leaf (metadataChars scope) (metadataChars name)
+  | .constructor scope name | .objectConstructor scope name => do
+    leaf (metadataChars scope) (metadataChars (← plainSpelling? name))
   | .aggregate identity _ | .enum identity _ => do
     let (scope, name) ← splitIdentity [] (metadataChars identity)
     leaf scope name
@@ -141,8 +148,9 @@ def namedType : TypeExpr → Option (List Char × List Char)
 /-- The fast metadata decoder retains the original named-type rule, including Unicode. -/
 theorem namedType_eq_original (type : TypeExpr) : namedType type =
     match type with
-    | .atom scope name | .constructor scope name | .objectConstructor scope name =>
-      leaf scope.toList name.toList
+    | .atom scope name => leaf scope.toList name.toList
+    | .constructor scope name | .objectConstructor scope name => do
+      leaf scope.toList (← plainSpelling? name).toList
     | .aggregate identity _ | .enum identity _ => do
       let (scope, name) ← splitIdentity [] identity.toList
       leaf scope name
@@ -153,7 +161,10 @@ theorem namedType_eq_original (type : TypeExpr) : namedType type =
 
 /-- A named type's plain full name; an atom's or generic definition's scope is left undecoded. -/
 def plainTypeName : TypeExpr → Option (List Char)
-  | .atom _ name | .constructor _ name | .objectConstructor _ name =>
+  | .constructor _ name | .objectConstructor _ name => do
+    let chars := metadataChars (← plainSpelling? name)
+    if plainName chars then some chars else none
+  | .atom _ name =>
     let name := metadataChars name
     if plainName name then some name else none
   | type => Prod.snd <$> namedType type
@@ -221,6 +232,9 @@ private def both : Option Bool → Option Bool → Option Bool
 def sameRuntimeType : TypeExpr → TypeExpr → Option Bool
   | .pointer x, .pointer y | .byref x, .byref y | .array x, .array y => sameRuntimeType x y
   | .apply f x, .apply g y => both (sameRuntimeType f g) (sameRuntimeType x y)
+  | .constructor s a, .constructor t b | .objectConstructor s a, .objectConstructor t b =>
+    if a != b then some false else if s == t then some true else none
+  | .constructor .., .objectConstructor .. | .objectConstructor .., .constructor .. => some false
   | a, b =>
     -- `void` is serialized without its scope, so equal spellings do not establish identity.
     if a == b then (if a == .void then none else some true) else

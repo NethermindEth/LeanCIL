@@ -27,7 +27,8 @@ private def Source.signature (source : Source) (element : TypeExpr) : OpenSignat
 /-- The target names the closed owner and the parameter types of its open declaration. -/
 private def Source.operand (source : Source) : ModelOperand :=
   .external (fun _ => source.signature (.ownerParameter 0)) ".ctor" fun method => do
-    let .apply (.constructor _ owner) element := method.owner | none
+    let .apply head element := method.owner | none
+    let owner ← spanOwnerName? head
     let name ← spanElementName element
     let parameters := match source with
       | .array => "!0[]" | .range => "!0[],System.Int32,System.Int32"

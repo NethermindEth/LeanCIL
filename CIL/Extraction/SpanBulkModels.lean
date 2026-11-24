@@ -36,7 +36,8 @@ private def BulkMember.operand (member : BulkMember) : ModelOperand :=
       some s!"{runtimeScope}::System.Void System.Array::Fill({parameters})"
   | _ =>
     .external (fun _ => member.signature (.ownerParameter 0)) name fun method => do
-      let .apply (.constructor _ owner) element := method.owner | none
+      let .apply head element := method.owner | none
+      let owner ← spanOwnerName? head
       let elementName ← spanElementName element
       let result := if member matches .copy true then "System.Boolean" else "System.Void"
       let parameters := match member with
