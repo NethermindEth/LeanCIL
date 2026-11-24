@@ -491,7 +491,8 @@ changes before them. Apply `SegmentContract.branch_seq` to the new branch's step
 the two destination contracts. Reversing `brtrue` to `brfalse` selects the opposite result while
 each load-and-return region preserves the same caller memory. The agreement includes method metadata,
 links and every instruction the region can execute. Use `DecodedSegmentSummary.then` for
-adjacent regions when the first reaches the second's precondition. Supply a footprint covering
+adjacent regions of one method, which share its `models` list, when the first reaches the
+second's precondition. Supply a footprint covering
 both regions' writes. The result binds their concatenated instructions and relates the initial
 and final states through the state at the join.
 

@@ -527,8 +527,9 @@ decoder. Relocation requires this evidence for the destination record.
 `MethodContract.Certified` names only an index, which another extraction can fill with another
 body. A summary also names the metadata method and the bytes.
 
-`DecodedOutcomeSummary` binds an `OutcomeContract` to the same evidence. Its `holds` field
-supplies the normal result and memory footprint or the named exception for each permitted input.
+`DecodedOutcomeSummary` binds an `OutcomeContract` to the same evidence and lists runtime models
+the same way. Given `ModelsResolve environment models`, its `holds` field supplies the normal
+result and memory footprint or the named exception for each permitted input.
 For example, the compiled `Bump` updates a live account's balance and raises
 `NullReferenceException` on a null account. Both outcomes use one pinned method body.
 
@@ -607,6 +608,8 @@ as `summary.holds (.nil _)`. A summary of a callee with vector calls lists each 
 model, in the order of its sites. The summary of `UnsafeLow` in the `VectorSummary` example lists:
 
 ```lean
+import CIL
+
 open CIL.Extraction CIL.Safety in
 example : List ModelledCall :=
   [⟨.call, createScalarUnsafeMethod, .intrinsic (.vector .createScalarUnsafe64) 1⟩,
