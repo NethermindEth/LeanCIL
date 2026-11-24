@@ -1,5 +1,6 @@
 import Lean
 import CIL.Extraction.DecodedMethod
+import CIL.KernelReduction
 import CIL.SymbolicExecution
 
 /-!
@@ -22,10 +23,6 @@ in the declared signature. The kernel checks `name_decoder_eq` and every fact.
 namespace CIL.Extraction.DecodedDefinition
 
 open Lean Meta Elab Command
-
-/-- The weak head normal form of a closed term, as the kernel reduces it. -/
-def kernelWhnf (term : Expr) : MetaM Expr := do
-  ofExceptKernelException (Kernel.whnf (← getEnv) (← getLCtx) term)
 
 /-- The natural number a closed `Nat` term reduces to. -/
 partial def natValue (term : Expr) : MetaM Nat := do

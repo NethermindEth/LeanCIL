@@ -2,6 +2,7 @@ import CIL.Resolution
 import CIL.InstructionEquations
 import CIL.Extraction.Generics
 import CIL.Extraction.RuntimeModels
+import CIL.KernelReduction
 
 /-!
 # Return, argument, static site and array element metadata facts
@@ -726,7 +727,7 @@ private partial def blockingTerm (term : Expr) (fuel : Nat := 64) : MetaM Expr :
     a parameter of `method`, whose instances decide the model; a call whose lookup the elaborator
     cannot reduce would otherwise get no fact for stepping. -/
 private def checkUnmodelled (method : Name) (pc : Nat) (read : Expr) : MetaM Unit := do
-  let resolved ← try ofExceptKernelException (Kernel.whnf (← getEnv) (← getLCtx) read)
+  let resolved ← try kernelWhnf read
     catch error => throwError m!"cil_runtime_models: the kernel cannot reduce the runtime model \
       lookup at pc {pc} of {method}:{indentD error.toMessageData}"
   if resolved.isAppOf ``Option.none then return
