@@ -422,6 +422,7 @@ def declareStaticFacts (body : Body) (simpSet : SimpExtension) : TermElabM Unit 
     as written when it is a literal or a named constant and evaluated otherwise; `none` when a
     part reduces to no constructor or a string mentions a free variable. -/
 partial def constructorForm? (value : Expr) : MetaM (Option Expr) := withDefault do
+  if value.isAppOf ``CIL.Extraction.ClassName.ofText then return some value
   let type ← whnf (← inferType value)
   if type.isConstOf ``String then
     let value := value.consumeMData
@@ -485,8 +486,7 @@ def elementProof? (method type : Expr) (reads : LayoutReads) :
       pure ((primitive? (← whnf underlying)).map fun primitive =>
         mkApp3 (mkConst ``CIL.Method.elementShape_enum) method identity (mkConst primitive))
     | (``CIL.Extraction.TypeExpr.object, #[scope, name]) => do
-      let .lit (.strVal text) ← whnf name | pure none
-      if text == CIL.ElementShape.rootObjectName then pure none else
+      if ← isDefEq name (mkConst ``CIL.ElementShape.rootObjectName) then pure none else
       let derived ← mkDecideProof
         (mkNot (← mkEq name (mkConst ``CIL.ElementShape.rootObjectName)))
       pure (some (mkApp4 (mkConst ``CIL.Method.elementShape_object) method scope name derived))

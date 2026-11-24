@@ -234,7 +234,7 @@ theorem Owned.store_formed {memory : Memory} {array : Reference}
     `element`, when both are admitted classes. -/
 theorem storableIn_of_lineage {memory : Memory} {target : Reference}
     {allocation : Allocation} {type : RuntimeType} {element : CIL.Extraction.TypeExpr}
-    {scope name elementScope elementName : String}
+    {scope elementScope : String} {name elementName : CIL.Extraction.ClassName}
     (found : liveAllocation memory target.allocation = .ok allocation)
     (kind : allocation.kind = .object type) (identity : type.identity = .object scope name)
     (elementClass : element = .object elementScope elementName)
@@ -249,7 +249,7 @@ theorem storableIn_of_lineage {memory : Memory} {target : Reference}
     array of `element`: the store throws `ArrayTypeMismatchException`. -/
 theorem storableIn_mismatch {memory : Memory} {target : Reference}
     {allocation : Allocation} {type : RuntimeType} {element : CIL.Extraction.TypeExpr}
-    {scope name elementScope elementName : String}
+    {scope elementScope : String} {name elementName : CIL.Extraction.ClassName}
     (found : liveAllocation memory target.allocation = .ok allocation)
     (kind : allocation.kind = .object type) (identity : type.identity = .object scope name)
     (elementClass : element = .object elementScope elementName)
@@ -413,7 +413,8 @@ theorem Live.after_confined {footprint : List (Reference × Nat)} {before after 
 /-- An array is no object with a located field of a class: an array's lineage is its own array
     type, which no class owns a field of. -/
 theorem Live.field_ne {memory : Memory} {array object field : Reference}
-    {element owner : CIL.Extraction.TypeExpr} {length offset : Nat} {scope name : String}
+    {element owner : CIL.Extraction.TypeExpr} {length offset : Nat}
+    {scope : String} {name : CIL.Extraction.ClassName}
     (live : Live memory array element length)
     (located : objectFieldAddress memory (.address object) owner offset = .ok field)
     (ownerClass : owner = .object scope name) :

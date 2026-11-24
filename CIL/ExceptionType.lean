@@ -218,13 +218,15 @@ theorem exceptionOwner?_ownerName (raised : ExceptionType) :
 def runtimeException? (identity : TypeExpr) : Option ExceptionType :=
   match identity with
   | .object scope name =>
-    if scope == coreLibraryScope then exceptionOwner? (.atom runtimeScope name) else none
+    if scope == coreLibraryScope then
+      ExceptionType.all.find? (fun raised => raised.typeIdentity.levels == name.levels)
+    else none
   | other => exceptionOwner? other
 
 /-- A pinned CoreLib class and the platform reference identify the same named exception. -/
 theorem runtimeException?_definingClass (raised : ExceptionType) :
     runtimeException? (.object coreLibraryScope raised.ownerName) = some raised := by
-  simp [runtimeException?, exceptionOwner?_ownerName]
+  cases raised <;> decide +kernel
 
 #print axioms runtimeException?_definingClass
 

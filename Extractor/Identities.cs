@@ -156,7 +156,8 @@ internal sealed record MetadataName
     /// <summary>The number <c>CIL.MetadataName.code</c> holds: the bytes after a leading 1, in base 256.</summary>
     internal BigInteger Code => IdentityText.Code(bytes);
 
-    string? Text => IdentityText.DecodeUtf8(bytes);
+    /// <summary>The UTF-8 text of the physical name, or null for invalid UTF-8.</summary>
+    internal string? Text => IdentityText.DecodeUtf8(bytes);
 
     // MetadataName.literal?: no #Strings entry holds a NUL, so name! refuses one.
     string? Literal => Text is { } text && !text.Contains('\0') ? IdentityText.Quoted(text) : null;

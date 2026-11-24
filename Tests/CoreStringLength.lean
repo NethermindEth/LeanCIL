@@ -59,7 +59,7 @@ private def operand := RawOperand.field owner 0 int32 name!"_stringLength" false
 /-- Original implicit-receiver signature, stack bound, and opcode offsets. -/
 private def original : RawMethod := {
   token := 0x06000a25, owner := coreLibraryScope ++ "::System.String"
-  objectReceiver := true, objectFieldCount := 2, hasThis := true, explicitThis := false
+  receiverClass := some owner, objectFieldCount := 2, hasThis := true, explicitThis := false
   callingConvention := 0, attributes := 0x886, implementation := 0, returnType := int32
   parameters := [], locals := [], initLocals := false, maxStack := 8, genericParameters := []
   code := [⟨0, 2, .none⟩, ⟨1, 123, operand⟩, ⟨6, 42, .none⟩] }
@@ -90,7 +90,7 @@ theorem decoded : Method.ofBody? .scalar {} [] [true, true, true] body original 
 /-- A byref receiver, a missing owner field, and a crossed IL field token each fail. -/
 theorem rejects_inconsistent_evidence :
     (Method.ofBody? .scalar {} [] [true, true, true] body
-      {original with objectReceiver := false} []).isNone = true ∧
+      {original with receiverClass := none} []).isNone = true ∧
     (Method.ofBody? .scalar {} [] [true, true, true] body
       {original with objectFieldCount := 1} []).isNone = true ∧
     (Method.ofBody? .scalar {} [] [true, true, true]

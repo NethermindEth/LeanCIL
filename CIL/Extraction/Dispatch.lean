@@ -329,8 +329,8 @@ def virtualTableValid (types : List DispatchType) (find : TypeExpr → Option Di
     | some (owner, method), some callee =>
       callee.arguments.isEmpty && callee.closed.token == method.token &&
       managedOwner owner == some (callee.closed.owner, []) &&
-      callee.closed.objectReceiver && callee.closed.hasThis && !callee.closed.code.isEmpty &&
-      callee.closed.attributes == method.attributes &&
+      callee.closed.receiverClass == some owner && callee.closed.hasThis &&
+      !callee.closed.code.isEmpty && callee.closed.attributes == method.attributes &&
       callee.closed.returnType == site.returnType &&
       callee.closed.parameters == site.parameterTypes
     | _, _ => false) &&

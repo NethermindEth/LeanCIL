@@ -52,11 +52,33 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     internal string Type(TypeReference type) => Type(type, false);
 
     /// <summary>The type expression naming a class instance type, as field operations carry it.</summary>
-    internal static string ObjectType(TypeReference type) => ObjectType(LayoutEvidence.Scope(type), type.FullName);
+    internal static string ObjectType(TypeReference type) => $".object {Scope(type)} {ClassName(type)}";
 
-    /// <summary>The type expression naming the class <paramref name="name"/> of the assembly
-    /// <paramref name="assembly"/>.</summary>
-    internal static string ObjectType(string assembly, string name) => $".object {Scope(assembly)} {Quote(name)}";
+    // Signature element types synthesized by Cecil have no row. The checker compares their platform columns.
+    static string ClassName(TypeReference type)
+    {
+        var levels = type.MetadataToken.RID != 0 && PinnedAssemblies.Active is { } pins
+            ? TypeLevel.Levels(type, pins.IdentityMetadata(type.Module))
+            : SignatureLevels(type);
+        var names = new List<string>();
+        foreach (var level in levels)
+        {
+            if (level.Namespace.Text is not { } space ||
+                level.Name.Text is not { } simple ||
+                space.Contains('/') || simple.Contains('.') || simple.Contains('/'))
+                return $"⟨{List(levels.Select(row => row.ToLean()))}⟩";
+            names.Add(space.Length == 0 ? simple : space + "." + simple);
+        }
+        return Quote(string.Join("/", names));
+    }
+
+    static System.Collections.Immutable.ImmutableArray<TypeLevel> SignatureLevels(TypeReference type)
+    {
+        var levels = new Stack<TypeLevel>();
+        for (TypeReference? level = type; level is not null; level = level.DeclaringType)
+            levels.Push(new(MetadataName.OfText(level.Namespace), MetadataName.OfText(level.Name)));
+        return [.. levels];
+    }
 
     // The kernel sees an `in` reference as the reference it is; the extractor compares the modifier exactly.
     string Parameter(TypeReference type) => Type(InReferences.Parameter(type));
@@ -444,7 +466,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         });
         var owner = Quote(LayoutEvidence.Identity(method.DeclaringType));
         var classOwner = ObjectReceiver(method);
-        var objectReceiver = Bool(classOwner);
+        var receiverClass = classOwner ? $"some ({ObjectType(method.DeclaringType)})" : "none";
         var objectFields = classOwner ? ObjectTypes.Fields(method.DeclaringType).Length : 0;
         var objectBases = classOwner ? ObjectTypes.BaseList(method.DeclaringType) : "[]";
         var (parameters, returnType) = SignatureTypes(method);
@@ -454,7 +476,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             { token := {{method.MetadataToken.ToUInt32()}}, owner := {{owner}},
             ownerParameters := {{List(ownerConstraints)}},
             ownerArgumentCount := {{MethodSpecialization.OwnerArguments(method).Count}},
-            objectReceiver := {{objectReceiver}}, objectFieldCount := {{objectFields}},
+            receiverClass := {{receiverClass}}, objectFieldCount := {{objectFields}},
             objectBases := {{objectBases}},
             hasThis := {{Bool(method.HasThis)}},
             explicitThis := {{Bool(method.ExplicitThis)}}, callingConvention := {{(byte)method.CallingConvention}},
@@ -739,7 +761,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     {
         var bases = classOwner
             ? ObjectTypes.Bases(original.DeclaringType)
-                .Select(type => $"({Utf8(LayoutEvidence.Scope(type))}, {Utf8(type.FullName)})")
+                .Select(type => $"({Utf8(LayoutEvidence.Scope(type))}, {ClassName(type)})")
             : [];
         return $"{{ owner := {Utf8(LayoutEvidence.Identity(original.DeclaringType))}, bases := {List(bases)}, " +
             $"signature := {Utf8(signature)} }}";
@@ -877,7 +899,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 .Where(implementation => implementation.Resolve() is { } declared &&
                     ConstrainedCalls.Extracted(declared.Module, method.Module))))
             .Concat(hierarchies).Concat(tested)
-            .DistinctBy(LayoutEvidence.Identity).OrderBy(LayoutEvidence.Identity, StringComparer.Ordinal);
+            .DistinctBy(type => Type(type)).OrderBy(LayoutEvidence.Identity, StringComparer.Ordinal)
+            .ThenBy(type => Type(type), StringComparer.Ordinal);
         return List(types.Select(type =>
         {
             var module = type.Resolve().Module;

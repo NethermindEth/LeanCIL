@@ -56,6 +56,7 @@ def numeral (type : Expr) (value : Int) : MetaM Expr := do
     of the value. -/
 partial def literal (named : Expr → Option Expr) (type term : Expr) : MetaM Expr := do
   if let some constant := named term then return constant
+  if term.isAppOf ``ClassName.ofText then return term
   let shape ← whnfD type
   match shape.getAppFnArgs with
   | (``Nat, #[]) => numeral type (← natValue term)
@@ -109,8 +110,24 @@ deriving instance ToExpr for SnapshotShape
 deriving instance ToExpr for TransferKind
 deriving instance ToExpr for ExceptionType
 deriving instance ToExpr for NumericKind
-deriving instance ToExpr for Extraction.TypeExpr
 deriving instance ToExpr for MetadataName
+deriving instance ToExpr for TypeLevel
+/-- Use the proof author's class literal when its namespace and name columns round-trip.
+    Ambiguous or non-UTF-8 rows retain the complete physical column list. -/
+instance : ToExpr ClassName where
+  toTypeExpr := mkConst ``ClassName
+  toExpr name := Id.run do
+    let parts := name.levels.mapM fun level => do
+      let space ← level.typeNamespace.text?
+      let simple ← level.name.text?
+      return if space.isEmpty then simple else space ++ "." ++ simple
+    if let some parts := parts then
+      let text := "/".intercalate parts
+      if ClassName.ofText text == name then
+        return mkApp (mkConst ``ClassName.ofText) (mkStrLit text)
+    return mkApp (mkConst ``ClassName.mk) (toExpr name.levels)
+
+deriving instance ToExpr for Extraction.TypeExpr
 deriving instance ToExpr for Extraction.FieldRef
 deriving instance ToExpr for Extraction.MethodRef
 deriving instance ToExpr for CallPrefixes

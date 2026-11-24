@@ -18,8 +18,10 @@ private def signatureValue (read : Except AuditError α) : Reading α :=
   | .error .uncoveredConstraint => failure
   | .error error => throwThe AuditError error
 
-/-- The unambiguous Cecil spelling of a physical TypeDef and its enclosing declarations. -/
-private def declarationName (image : PreparedImage) : Nat → Nat → Reading String
+/-- The physical namespace and simple name of each enclosing declaration. Interfaces still
+    require unambiguous spelling in the catalog's atom representation. -/
+private def declarationLevels (image : PreparedImage) (isInterface : Bool) :
+    Nat → Nat → Reading (List TypeLevel)
   | 0, row => throwThe AuditError (.typeDefMismatch row .nesting)
   | fuel + 1, row => do
     let cell := image.layout.cellOfRow image.view Table.typeDef row
@@ -29,17 +31,22 @@ private def declarationName (image : PreparedImage) : Nat → Nat → Reading St
     let parent ← if visibilityOf flags < nestedVisibility then pure 0
       else physical (enclosingTypeRow image row flags)
     unless (← physical (enumDefinition? image parent [space, name])) == some row do failure
-    let some simple := spelled? name | failure
-    let some scope := spelled? space | failure
-    guard (ordinaryTypeName scope simple)
-    if parent == 0 then return if scope.isEmpty then simple else scope ++ "." ++ simple
-    guard (scope.isEmpty && (← physical (physicalTypeShape image parent)).2 == 0)
-    return (← declarationName image fuel parent) ++ "/" ++ simple
+    if isInterface then
+      let some simple := spelled? name | failure
+      let some scope := spelled? space | failure
+      guard (ordinaryTypeName scope simple && (parent == 0 || scope.isEmpty))
+    let some simple := MetadataName.ofBytes? name | failure
+    let some namespace_ := MetadataName.ofBytes? space | failure
+    let level := TypeLevel.mk namespace_ simple
+    if parent == 0 then return [level]
+    guard ((← physical (physicalTypeShape image parent)).2 == 0)
+    return (← declarationLevels image isInterface fuel parent) ++ [level]
 
 /-- A uniquely named nongeneric class or interface from the selected image. -/
-private def localName (image : PreparedImage) (row : Nat) (kind : TypeKind) : Reading String := do
+private def localName (image : PreparedImage) (row : Nat) (kind : TypeKind) :
+    Reading ClassName := do
   unless (← physical (physicalTypeShape image row)) == (kind, 0) do failure
-  declarationName image row row
+  return ⟨← declarationLevels image (kind == .interface) row row⟩
 
 /-- A physical class identity used by the slot or its signatures. -/
 private def className (image : PreparedImage) (row : Nat) : Reading TypeExpr := do
@@ -150,7 +157,8 @@ private def interfacesByOwner (image : PreparedImage) (count : Nat) :
 private def interfaceName (image : PreparedImage) (coded : Nat) : Reading TypeExpr := do
   guard (coded % 4 == 0 && coded / 4 > 0)
   let name ← localName image (coded / 4) .interface
-  return .atom image.identity name
+  let some text := name.signatureName? | failure
+  return .atom image.identity text
 
 /-- Local MethodImpl rows bind the implementing MethodDef to its class and the overridden
     MethodDef to its interface. Both signatures describe the same nongeneric instance slot. -/
@@ -179,7 +187,8 @@ private def localOverrides (prepared : List PreparedImage) (image : PreparedImag
     let some direct := interfaces[owner]? | failure
     guard (direct.contains ((interfaceToken % 2^24) * 4))
     let name ← localName image (interfaceToken % 2^24) .interface
-    let slotOwner := TypeExpr.atom image.identity name
+    let some text := name.signatureName? | failure
+    let slotOwner := TypeExpr.atom image.identity text
     let implementation ← classMethod prepared image core (body / 2)
     let declaration ← classMethod prepared image core (slot / 2)
     guard (implementation.genericArity == 0 && declaration.genericArity == 0)

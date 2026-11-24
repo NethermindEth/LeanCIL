@@ -111,7 +111,7 @@ structure RawMethod where
   /-- Closed bodies retain the owner arity after their parameter constraints are discharged. -/
   ownerArgumentCount : Nat := 0
   /-- The declaring type is a class, so `this` is an object reference rather than a byref. -/
-  objectReceiver : Bool := false
+  receiverClass : Option TypeExpr := none
   /-- The instance field count of a class declaring type, its bases' fields included; each field
       takes one model slot. -/
   objectFieldCount : Nat := 0
@@ -120,6 +120,9 @@ structure RawMethod where
   /-- Each reachable static access has a descriptor at its instruction index. -/
   staticFields : List (Nat × StaticFieldSite) := []
   deriving DecidableEq, Repr
+
+/-- Whether this method takes an object reference for its receiver. -/
+def RawMethod.objectReceiver (method : RawMethod) : Bool := method.receiverClass.isSome
 
 /-- The method frame retains the descriptor at each static instruction index in source order. -/
 def RawMethod.staticDescriptors (method : RawMethod) : List (Nat × StaticDescriptor) :=
@@ -494,8 +497,9 @@ def callOperandMatches (site : CallSite) : Instruction → Bool
 
 /-- Split a scoped declaring type from its ordered generic arguments. -/
 def managedOwner : TypeExpr → Option (String × List TypeExpr)
-  | .atom scope name | .constructor scope name | .objectConstructor scope name
-  | .object scope name => some (scope ++ "::" ++ name, [])
+  | .atom scope name | .constructor scope name | .objectConstructor scope name =>
+    some (scope ++ "::" ++ name, [])
+  | .object scope name => do return (scope ++ "::" ++ (← name.signatureName?), [])
   | .aggregate identity _ => some (identity, [])
   | .apply owner argument => do
     let (identity, arguments) ← managedOwner owner
@@ -515,6 +519,7 @@ def managedOwnerMatches (site : CallSite) (owner : String) (ownerCount : Nat) : 
 def calleeMatchesSite (site : CallSite) (token : Nat) (callee : SpecializedMethod) : Bool :=
   managedOwnerMatches site callee.closed.owner callee.closed.ownerArgumentCount &&
   callee.closed.token == token && callee.arguments == site.typeArguments &&
+  callee.closed.receiverClass.all (· == site.declaringType) &&
   callee.closed.parameters.length == site.parameterCount &&
   callee.closed.hasThis == site.hasThis &&
   (callee.closed.returnType != .void) == site.returnsValue &&

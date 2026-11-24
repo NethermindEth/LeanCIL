@@ -114,11 +114,11 @@ def tally : TypeExpr := .object "Test" "Tally"
 def counter : TypeExpr := .object "Test" "Counter"
 def tallyConstructor : RawMethod := { closed with
   token := 2, owner := "Test::Tally", hasThis := true, returnType := .void, parameters := [word],
-  objectReceiver := true, objectFieldCount := 2, objectBases := [counter] }
+  receiverClass := some tally, objectFieldCount := 2, objectBases := [counter] }
 /-- A struct `Test::Pair` and its constructor, taking one `word` after its storage's address. -/
 def pair : TypeExpr := .aggregate "Test::Pair" 16
 def pairConstructor : RawMethod := { tallyConstructor with
-  token := 3, owner := "Test::Pair", objectReceiver := false, objectFieldCount := 0,
+  token := 3, owner := "Test::Pair", receiverClass := none, objectFieldCount := 0,
   objectBases := [] }
 /-- The program's methods: the class constructor at index 0, the struct constructor at 1. -/
 def constructors (index : Nat) : Option SpecializedMethod :=
@@ -175,7 +175,7 @@ theorem forged_constructions_rejected :
 
 /-- A non-virtual instance method of `Tally` taking one word, and a call site of it. -/
 def deposit : RawMethod := { closed with
-  owner := "Test::Tally", hasThis := true, objectReceiver := true, parameters := [word] }
+  owner := "Test::Tally", hasThis := true, receiverClass := some tally, parameters := [word] }
 def depositSite : CallSite := {
   declared := { convention := 0x20, returnType := word, parameters := [word] },
   method := {
@@ -198,7 +198,7 @@ theorem receiver_checked_calls :
       (.callvirt depositSite.method) ∧
     ¬ validateManagedCall [⟨[], deposit, ⟨"Test"⟩⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
       (.callvirt { depositSite.method with parameters := [] }) ∧
-    ¬ validateManagedCall [⟨[], { deposit with objectReceiver := false }, ⟨"Test"⟩⟩] []
+    ¬ validateManagedCall [⟨[], { deposit with receiverClass := none }, ⟨"Test"⟩⟩] []
       ⟨0, 111, .call depositSite⟩ true linkedZero (.callvirt depositSite.method) := by
   decide +kernel
 #print axioms receiver_checked_calls

@@ -1003,13 +1003,11 @@ def flagsAgree (rows : List GenericParamRow) (claimed : List GenericConstraint) 
   rows.length == claimed.length && (rows.zip claimed).all fun (row, constraint) =>
     row.flags == constraint.flags
 
-/-- The names of a method's definition as its metadata spells them: the scoped name of its owner
-    type, `scope::name`, the scope and name of each base class of an object receiver's type, from
-    the nearest, and the signature a proof selects the method by. The extractor states them as
-    strings, which `MethodNames.spelling` and `MethodNames.Selects` read from the bytes. -/
+/-- The owner and signature bytes of a method definition, with the assembly scope and physical
+    namespace and name columns of each base class, nearest first. -/
 structure MethodNames where
   owner : List Nat := []
-  bases : List (List Nat × List Nat) := []
+  bases : List (List Nat × ClassName) := []
   /-- Cecil's full name of the extracted method: the instance's, for a generic instance. -/
   signature : List Nat := []
   deriving DecidableEq, Repr
@@ -1019,7 +1017,7 @@ structure MethodNames where
 def MethodNames.spelling (names : MethodNames) : Option (String × List TypeExpr) := do
   let owner ← spelled? names.owner
   let bases ← names.bases.mapM fun (scope, name) => do
-    pure (TypeExpr.object (← spelled? scope) (← spelled? name))
+    pure (TypeExpr.object (← spelled? scope) name)
   pure (owner, bases)
 
 /-- The names are the owner and base class types the method states. An equation between strings
@@ -1027,11 +1025,11 @@ def MethodNames.spelling (names : MethodNames) : Option (String × List TypeExpr
 abbrev MethodNames.Spell (names : MethodNames) (method : RawMethod) : Prop :=
   names.spelling = some (method.owner, method.objectBases)
 
-/-- Whether each base class name is the bytes of the object type at its position. -/
-def basesSpelled : List (List Nat × List Nat) → List TypeExpr → Bool
+/-- Whether each base class has the recorded assembly scope and physical name columns. -/
+def basesSpelled : List (List Nat × ClassName) → List TypeExpr → Bool
   | [], [] => true
   | (scope, name) :: bases, .object scopeText nameText :: types =>
-    scope == bytesOf scopeText && name == bytesOf nameText && basesSpelled bases types
+    scope == bytesOf scopeText && name == nameText && basesSpelled bases types
   | _, _ => false
 
 /-- Whether the names are the bytes of the owner and base classes the method states. A decision
@@ -1040,10 +1038,10 @@ def basesSpelled : List (List Nat × List Nat) → List TypeExpr → Bool
 def MethodNames.spelledBy (names : MethodNames) (method : RawMethod) : Bool :=
   names.owner == bytesOf method.owner && basesSpelled names.bases method.objectBases
 
-private theorem bases_of_basesSpelled : ∀ (bases : List (List Nat × List Nat))
+private theorem bases_of_basesSpelled : ∀ (bases : List (List Nat × ClassName))
     (types : List TypeExpr), basesSpelled bases types = true →
       bases.mapM (fun entry => (spelled? entry.1).bind fun scope =>
-        (spelled? entry.2).bind fun name => pure (TypeExpr.object scope name)) = some types
+        pure (TypeExpr.object scope entry.2)) = some types
   | [], [], _ => rfl
   | (scope, name) :: bases, .object scopeText nameText :: types, spelled => by
     simp only [basesSpelled, Bool.and_eq_true, beq_iff_eq] at spelled
@@ -1174,7 +1172,10 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
   let receiverMatches :=
     if method.hasThis then
       match owner.kind with
-      | .classType => method.objectReceiver
+      | .classType => match method.receiverClass with
+        | some (.object scope name) =>
+          bytesOf scope == owner.scope && declarationMatches name.levels owner.parts
+        | _ => false
       | .valueType | .enumType _ => !method.objectReceiver
       | .interfaceType | .importedOwner | .external _ => false
     else !method.objectReceiver
@@ -1185,7 +1186,10 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
     let bases ← chain.mapM fun (position, token) => typeDefNamed env position resolveFuel token
     if method.objectFieldCount != (← env.chainFieldCount chain) + own then
       throw (.methodMismatch method.token)
-    .ok { owner := ownerName, bases := bases.map fun base => (base.scope, base.name),
+    let names ← bases.mapM fun base => do
+      let some name := ClassName.ofParts? base.parts | throw (.methodMismatch method.token)
+      pure (base.scope, name)
+    .ok { owner := ownerName, bases := names,
           signature := selected }
   else if method.objectFieldCount != 0 then throw (.methodMismatch method.token)
   else .ok { owner := ownerName, signature := selected }

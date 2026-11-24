@@ -435,7 +435,8 @@ private def receiver (home : EnumHome) (platform : PlatformTable) (objectReceive
     { token := fixture.2, owner := ownIdentity ++ "::Program", hasThis := true,
       explicitThis := false, callingConvention := 0, attributes := 0x86, implementation := 0,
       returnType := .void, parameters := [], locals := [], initLocals := false, maxStack := 8,
-      genericParameters := [], code := [], objectReceiver,
+      genericParameters := [], code := [],
+      receiverClass := if objectReceiver then some (.object ownIdentity "Program") else none,
       objectFieldCount := if objectReceiver then 1 else 0 }
   let env := MetadataEnv.ofSlices [← fixture.1.index] (platform := platform)
   methodIdentityValid env method [] []

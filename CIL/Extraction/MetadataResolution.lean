@@ -1374,7 +1374,7 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
       code != 0x01 && frame.corlib == some (bytesOf scope) &&
         primitiveName code == some (bytesOf name)
     | .primitive 0x0E, .object scope name =>
-      frame.corlib == some (bytesOf scope) && bytesOf name == systemStringName
+      frame.corlib == some (bytesOf scope) && name.levels == [⟨name!"System", name!"String"⟩]
     -- A type that cannot be a value type is never the runtime's primitive with value storage.
     | .named named, .atom scope name =>
       named.scope == bytesOf scope && named.name == bytesOf name && !named.isEnum &&
@@ -1382,7 +1382,8 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
         (!named.fixedStorage || named.kind.reference? ==
           some (named.name == systemStringName || named.name == systemObjectName))
     | .named named, .object scope name =>
-      named.scope == bytesOf scope && named.name == bytesOf name && objectNamed named &&
+      named.scope == bytesOf scope && declarationMatches name.levels named.parts &&
+        objectNamed named &&
         (!named.fixedStorage || named.name == systemStringName)
     | .named named, .aggregate identity index =>
       bytesOf identity == named.scope ++ [58, 58] ++ named.name && valueLike named.kind &&
@@ -1473,7 +1474,7 @@ def Frame.admits (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : Bool 
 def Frame.admitsParameter (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : Bool :=
   match type, expr with
   | .primitive 0x1C, .object scope name =>
-    frame.corlib == some (bytesOf scope) && bytesOf name == systemObjectName
+    frame.corlib == some (bytesOf scope) && name.levels == [⟨name!"System", name!"Object"⟩]
   | _, _ => frame.admits type expr
 
 /-- Whether the extractor's type names the type a class instance field holds: as `admits` does,
@@ -1483,7 +1484,8 @@ def Frame.admitsHeld (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : B
   frame.admitsParameter type expr ||
     match type, expr with
     | .named named, .object scope name =>
-      named.scope == bytesOf scope && named.name == bytesOf name && classLike named.kind &&
+      named.scope == bytesOf scope && declarationMatches name.levels named.parts &&
+        classLike named.kind &&
         (!named.fixedStorage || (named.kind.reference? == some true &&
           (named.name == systemStringName || named.name == systemObjectName)))
     | _, _ => false

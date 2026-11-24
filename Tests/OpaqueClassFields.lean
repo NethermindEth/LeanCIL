@@ -157,7 +157,7 @@ private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction :=
 /-- An instance method of `Fixture` taking a `Fixture`, with `code`. -/
 private def method (code : List RawInstruction) : RawMethod :=
   { token := 0x06000001, owner := pin.identity ++ "::Fixture", hasThis := true,
-    objectReceiver := true, explicitThis := false, callingConvention := 0, attributes := 0,
+    receiverClass := some fixture, explicitThis := false, callingConvention := 0, attributes := 0,
     implementation := 0, returnType := .void, parameters := [fixture], locals := [],
     initLocals := false, maxStack := 2, genericParameters := [], code }
 

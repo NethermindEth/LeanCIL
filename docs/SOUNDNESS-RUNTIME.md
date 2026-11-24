@@ -462,10 +462,10 @@ rejected.
 
 An instance method of an admitted class, virtual or not, is an entry whose receiver `this` is an
 object reference and is not a byref. A theorem about a virtual method is about that body, which
-a `call` (a base call, or a direct call into it) runs exactly. The raw method records the class
-receiver (`objectReceiver`), from which Lean derives the receiver's storage and scalar kind. Lean
-rejects the address of the receiver and of any class-typed local or argument, so no byref can
-stand in for an object receiver.
+a `call` (a base call, or a direct call into it) runs exactly. The raw method records the receiver
+class and its assembly scope (`receiverClass`). Lean checks its namespace and simple name at every
+nesting level against the declaring TypeDef and uses object-reference storage for `this`.
+Lean rejects taking the address of the receiver or of any class-typed local or argument.
 
 An unprefixed `callvirt` names the method in its raw operand. A direct link selects a
 non-virtual method of an admitted class. Lean checks the method reference, the callee's
@@ -480,7 +480,12 @@ See [virtual dispatch](SOUNDNESS-EXECUTION.md#virtual-dispatch) and
 [AnimalLegs](../Examples/Proofs/AnimalLegs.lean).
 
 `castclass` and `isinst` of an admitted class other than `System.Object` test against that
-class. Each keeps a reference whose runtime type, its own class or one of the admitted bases
+class. The operand, allocated class and base classes each retain the namespace and simple name
+of every metadata row in their nesting chain. A class named `Widget` in namespace `Rows` and a
+global class with the simple name `Rows.Widget` therefore give different type-test results.
+In a proof, `.object scope "Rows.Widget"` names the first class. Use
+`.object scope ⟨[⟨name!"", name!"Rows.Widget"⟩]⟩` for the second.
+Each keeps a reference whose runtime type, its own class or one of the admitted bases
 the allocation records, is the class, passes null through, and otherwise gives null (`isinst`)
 or throws `System.InvalidCastException` (`castclass`) (ECMA-335 III.4.3, III.4.6). Those classes
 are the instance's whole lineage below `System.Object`, so the test is exact. For an instance

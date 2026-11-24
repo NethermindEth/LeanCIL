@@ -932,7 +932,8 @@ private def receiverIdentity (baseName : String) (interfaceType hasThis objectRe
       implementation := 0, returnType := .void, parameters := [], locals := [],
       initLocals := false, maxStack := 8, genericParameters := [], code := [],
       ownerParameters := if generic && !omitParameters then [{ flags := 0, types := [] }] else [],
-      objectReceiver := objectReceiver }
+      receiverClass := if objectReceiver then
+        some (.object ownIdentity ⟨[⟨name!"", name!"Program"⟩]⟩) else none }
   let metadata := if omitLink then
       { fixture.1 with links := fixture.1.links.filter (·.kind != linkGenericParams) }
     else fixture.1
@@ -1428,9 +1429,9 @@ private def acceptedPairings : List (ResolvedType × TypeExpr) := [
   (.named (namedIn "L" "N" .valueType), .atom "L" "N"),
   (.named (namedIn "L" "N" .classType), .atom "L" "N"),
   (.named (namedIn "L" "N" (.external none)), .atom "L" "N"),
-  (.named (namedIn "L" "N" .classType true), .object "L" "N"),
-  (.named (namedIn runtimeScope "System.String" (.external (some false))),
-    .object runtimeScope "System.String"),
+  (.named { namedIn "L" "N" .classType true with parts := [[], bytesOf "N"] }, .object "L" "N"),
+  (.named { namedIn runtimeScope "System.String" (.external (some false)) with
+      parts := [bytesOf "System", bytesOf "String"] }, .object runtimeScope "System.String"),
   (.named (namedIn "L" "N" .valueType), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external (some true))), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external none)), .aggregate "L::N" 0),
@@ -1441,7 +1442,8 @@ private def acceptedPairings : List (ResolvedType × TypeExpr) := [
   -- Element types, element by element.
   (.byref (.primitive 8), .byref int32Atom), (.pointer (.primitive 8), .pointer int32Atom),
   (.szarray (.primitive 8), .array int32Atom),
-  (.szarray (.named (namedIn "L" "N" .classType true)), .array (.object "L" "N")),
+  (.szarray (.named { namedIn "L" "N" .classType true with parts := [[], bytesOf "N"] }),
+    .array (.object "L" "N")),
   -- Instances: a value-like one as an aggregate, with its scoped arguments
   -- in declaration order, and any instance as an `apply` chain over a head of its kind.
   (instanceOf .valueType, .aggregate "L::G`1<System.Int32>" 0),
@@ -1693,13 +1695,13 @@ private def nestedOwn (leaf inner : Nat) : MetadataSlice × Nat × Nat :=
     `Lib.Outer/Mid/Inner`. -/
 theorem tells_nested_types_apart_by_their_namespace_columns :
     passes (nestedOwn 3 7).1 nestedLib (nestedOwn 3 7).2.1
-      (.type (.object libScope "Lib.Outer/Leaf")) = true ∧
+      (.type (.object libScope "Lib.Outer/A.Leaf")) = true ∧
     passes (nestedOwn 3 7).1 nestedLib (nestedOwn 3 7).2.2
-      (.type (.object libScope "Lib.Outer/Mid/Inner")) = true ∧
+      (.type (.object libScope "Lib.Outer/A.Mid/Inner")) = true ∧
     rejects (nestedOwn 4 7).1 nestedLib (nestedOwn 4 7).2.1
-      (.type (.object libScope "Lib.Outer/Leaf")) (.operandMismatch (nestedOwn 4 7).2.1) = true ∧
+      (.type (.object libScope "Lib.Outer/A.Leaf")) (.operandMismatch (nestedOwn 4 7).2.1) = true ∧
     rejects (nestedOwn 3 8).1 nestedLib (nestedOwn 3 8).2.2
-      (.type (.object libScope "Lib.Outer/Mid/Inner"))
+      (.type (.object libScope "Lib.Outer/A.Mid/Inner"))
       (.operandMismatch (nestedOwn 3 8).2.2) = true := by decide +kernel
 #print axioms tells_nested_types_apart_by_their_namespace_columns
 

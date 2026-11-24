@@ -1,5 +1,6 @@
 import Std
 import CIL.Identity
+import CIL.Extraction.KernelEquation
 
 /-!
 # Metadata type expressions
@@ -42,6 +43,53 @@ def runtimeAssembly : AssemblyName :=
   { name := name!"System.Runtime", version := ⟨11, 0, 0, 0⟩, culture := name!"",
     publicKeyToken := some 0xb03f5f7f11d50a3a }
 
+/-- The physical namespace and simple name of each enclosing class and the class itself. -/
+structure ClassName where
+  levels : List TypeLevel
+  deriving DecidableEq, Repr
+
+/-- Decode the namespace and name columns from the outermost type row to the class. -/
+def ClassName.ofParts? (parts : List (List Nat)) : Option ClassName :=
+  (fun levels => ⟨levels⟩) <$> readLevels parts
+where
+  readLevels : List (List Nat) → Option (List TypeLevel)
+    | [] => some []
+    | space :: name :: rest => do
+      return ⟨← MetadataName.ofBytes? space, ← MetadataName.ofBytes? name⟩ :: (← readLevels rest)
+    | [_] => none
+
+/-- Conventional class names split at the last namespace dot and at each nesting slash. -/
+def ClassName.ofText (text : String) : ClassName :=
+  ⟨read [] text.toByteArray.data.toList⟩
+where
+  column (bytes : List UInt8) : MetadataName :=
+    ⟨bytes.foldl (fun code byte => code * 256 + byte.toNat) 1⟩
+  level (reversed : List UInt8) : TypeLevel :=
+    let (simple, space) := reversed.span (fun byte => byte.toNat != '.'.toNat)
+    ⟨column (space.drop 1).reverse, column simple.reverse⟩
+  read (reversed : List UInt8) : List UInt8 → List TypeLevel
+    | [] => [level reversed]
+    | byte :: rest => if byte.toNat == '/'.toNat then level reversed :: read [] rest
+      else read (byte :: reversed) rest
+
+/-- info: 'CIL.Extraction.ClassName.ofText' does not depend on any axioms -/
+#guard_msgs in
+#print axioms ClassName.ofText
+
+instance : Coe String ClassName := ⟨ClassName.ofText⟩
+
+/-- The signature spelling used by the metadata checker, which omits nested namespaces. -/
+def ClassName.signatureName? (name : ClassName) : Option String := do
+  let first :: nested := name.levels | none
+  let space ← spell first.typeNamespace
+  let simple ← spell first.name
+  let suffix ← nested.mapM fun level => spell level.name
+  return "/".intercalate ((if space.isEmpty then simple else space ++ "." ++ simple) :: suffix)
+where
+  spell (column : MetadataName) : Option String := do
+    let bytes ← radixDigits? byteBase (column.code.log2 / 8 + 1) column.code []
+    spelled? bytes
+
 /-- Scoped metadata types shared by extraction and typed import slots. -/
 inductive TypeExpr where
   | void
@@ -68,7 +116,7 @@ inductive TypeExpr where
   /-- A class on the checked heap, by its exact scope and name: a class of a pinned assembly or
       `System.String`, or, as the type a class instance field holds, any class or interface,
       whose references the field never reads through. -/
-  | object (scope name : String)
+  | object (scope : String) (name : ClassName)
   /-- A custom modifier of an open member type, with the modifier's assembly and full name. -/
   | modified (required : Bool) (scope name : String) (element : TypeExpr)
   /-- An owner variable (!n) in an open declaration. A method variable (!!n) uses `parameter`. -/
@@ -180,6 +228,8 @@ def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
   | .apply constructor argument, rest =>
     keyBytes "apply" :: typeKeyInto constructor (typeKeyInto argument rest)
   | .object scope name, rest =>
-    keyBytes "object" :: keyBytes scope :: keyBytes name :: rest
+    keyBytes "object" :: keyBytes scope :: name.levels.foldr (fun level tail =>
+      keyBytes (toString level.typeNamespace.code) :: keyBytes (toString level.name.code) :: tail)
+      rest
 
 end CIL.Extraction

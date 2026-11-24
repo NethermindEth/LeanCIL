@@ -58,7 +58,7 @@ private def operand := RawOperand.field owner 13 int32 name!"_HResult" false
 
 private def original : RawMethod := {
   token := 0x06000611, owner := coreLibraryScope ++ "::System.Exception"
-  objectReceiver := true, objectFieldCount := 14, hasThis := true, explicitThis := false
+  receiverClass := some owner, objectFieldCount := 14, hasThis := true, explicitThis := false
   callingConvention := 0, attributes := 0x886, implementation := 0, returnType := .void
   parameters := [int32], locals := [], initLocals := false, maxStack := 8, genericParameters := []
   code := [⟨0, 2, .none⟩, ⟨1, 3, .none⟩, ⟨2, 0x7d, operand⟩, ⟨7, 0x2a, .none⟩] }

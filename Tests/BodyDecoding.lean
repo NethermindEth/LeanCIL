@@ -570,7 +570,7 @@ theorem rejects_names_the_metadata_does_not_give :
     failsWith { evidence tinyBytes with names := { owner := [65] } }
       (.metadata (.methodMismatch tokens.main)) tinyMethod = true ∧
     failsWith { evidence tinyBytes with
-        names := { (evidence tinyBytes).names with bases := [([65], [66])] } }
+        names := { (evidence tinyBytes).names with bases := [([65], "B")] } }
       (.metadata (.methodMismatch tokens.main)) tinyMethod = true := by decide +kernel
 #print axioms rejects_names_the_metadata_does_not_give
 

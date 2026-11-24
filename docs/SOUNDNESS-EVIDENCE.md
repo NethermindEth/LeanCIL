@@ -437,8 +437,8 @@ For local virtual class slots, Lean follows each physical TypeDef parent,
 including abstract intermediates, and checks the MethodDefs and signatures of every descendant.
 For `castclass` and `isinst` with a supported local TypeDef operand, Lean checks the opcode and
 token at the instruction's byte offset in its MethodDef body. The scoped target name and its
-catalog declaration must match that physical TypeDef.
-For a nested declaration it checks each enclosing type and the name at every level.
+catalog declaration must match that physical TypeDef. Lean reads the namespace and simple
+name separately at each level, including each enclosing TypeDef of a nested class.
 A managed-reference signature must match the physical element type and its byref marker.
 It compares the complete declarations of each method's catalog and validates each reachable
 target table against the physical hierarchy. For an explicit implementation of a direct local

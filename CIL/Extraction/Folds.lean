@@ -101,7 +101,10 @@ def exceptionConstructor? (site : CallSite) : Option ExceptionType := do
   let .external signature := site.target | none
   guard (site.parameterTypes ∈ admittedParameters raised)
   let names := site.parameterTypes.map fun type =>
-    match type with | .atom _ name | .object _ name => name | _ => ""
+    match type with
+    | .atom _ name => name
+    | .object .. => "System.String" -- The only class parameter in admittedParameters.
+    | _ => ""
   guard (signature == runtimeScope ++ "::System.Void " ++ raised.ownerName ++ "::.ctor(" ++
     ",".intercalate names ++ ")")
   return raised

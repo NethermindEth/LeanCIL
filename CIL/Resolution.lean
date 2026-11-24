@@ -551,7 +551,7 @@ def byRefLikeElement : String := "By-ref-like array element"
 def unsupportedType : String := "Array element type"
 
 /-- The full name of the root class, whose arrays have no shape. -/
-def rootObjectName : String := "System.Object"
+def rootObjectName : Extraction.ClassName := ⟨[⟨name!"System", name!"Object"⟩]⟩
 
 /-- Why an array of `System.Object` has no shape: its elements may be interface or value-type
     instances, whose covariance the model cannot decide. -/
@@ -633,7 +633,8 @@ theorem Method.elementShape_enum (body : Method) (identity : String) (type : Pri
 #print axioms Method.elementShape_enum
 
 /-- An array of a class other than `System.Object` holds references to its instances. -/
-theorem Method.elementShape_object (body : Method) {scope name : String}
+theorem Method.elementShape_object (body : Method) {scope : String}
+    {name : Extraction.ClassName}
     (derived : name ≠ ElementShape.rootObjectName) :
     body.elementShape (.object scope name) = .reference (.object scope name) := by
   simp [Method.elementShape, LayoutEnvironment.elementShape, derived]
@@ -895,7 +896,7 @@ theorem LayoutEnvironment.fieldShape_class_offset {environment : LayoutEnvironme
 /-- A field of a class owner whose type has a slot resolves to that slot at the model offset of
     its index. -/
 theorem LayoutEnvironment.fieldShape_class {environment : LayoutEnvironment}
-    {field : Extraction.FieldRef} {scope name : String} {slot : ClassSlot}
+    {field : Extraction.FieldRef} {scope : String} {name : Extraction.ClassName} {slot : ClassSlot}
     (owner : field.owner = .object scope name)
     (typed : environment.classSlot field.type = some slot) :
     environment.fieldShape field = .classSlot (objectFieldOffset field.index) slot := by

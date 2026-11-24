@@ -153,13 +153,19 @@ def raw (decoded : DecodedBody) : RawMethod := {
   callingConvention := 0, attributes := 6278,
   implementation := 0, returnType := .void,
   parameters := [.object coreLibraryScope "System.String",.object coreLibraryScope "System.String"],
-  locals := [], objectReceiver := true, objectBases := [.object coreLibraryScope "System.ArgumentException",.object coreLibraryScope "System.SystemException",.object coreLibraryScope "System.Exception"],
+  locals := [], receiverClass := some (.object coreLibraryScope "System.ArgumentOutOfRangeException"),
+  objectBases := [.object coreLibraryScope "System.ArgumentException",
+    .object coreLibraryScope "System.SystemException",
+    .object coreLibraryScope "System.Exception"],
   objectFieldCount := 16, initLocals := decoded.initLocals, maxStack := decoded.maxStack,
   genericParameters := [], code := decoded.code }
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names : MethodNames := {
-  owner := bytesOf (coreLibraryScope ++ "::System.ArgumentOutOfRangeException"), bases := [(bytesOf coreLibraryScope,bytesOf "System.ArgumentException"),(bytesOf coreLibraryScope,bytesOf "System.SystemException"),(bytesOf coreLibraryScope,bytesOf "System.Exception")],
+  owner := bytesOf (coreLibraryScope ++ "::System.ArgumentOutOfRangeException"),
+  bases := [(bytesOf coreLibraryScope, "System.ArgumentException"),
+    (bytesOf coreLibraryScope, "System.SystemException"),
+    (bytesOf coreLibraryScope, "System.Exception")],
   signature := bytesOf "System.Void System.ArgumentOutOfRangeException::.ctor(System.String,System.String)" }
 
 /-- The declared method with its decoded instructions. -/
@@ -283,13 +289,17 @@ def raw (decoded : DecodedBody) : RawMethod := {
   callingConvention := 0, attributes := 6278,
   implementation := 0, returnType := .void,
   parameters := [.object coreLibraryScope "System.String",.object coreLibraryScope "System.String"],
-  locals := [], objectReceiver := true, objectBases := [.object coreLibraryScope "System.SystemException",.object coreLibraryScope "System.Exception"],
+  locals := [], receiverClass := some (.object coreLibraryScope "System.ArgumentException"),
+  objectBases := [.object coreLibraryScope "System.SystemException",
+    .object coreLibraryScope "System.Exception"],
   objectFieldCount := 15, initLocals := decoded.initLocals, maxStack := decoded.maxStack,
   genericParameters := [], code := decoded.code }
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names : MethodNames := {
-  owner := bytesOf (coreLibraryScope ++ "::System.ArgumentException"), bases := [(bytesOf coreLibraryScope,bytesOf "System.SystemException"),(bytesOf coreLibraryScope,bytesOf "System.Exception")],
+  owner := bytesOf (coreLibraryScope ++ "::System.ArgumentException"),
+  bases := [(bytesOf coreLibraryScope, "System.SystemException"),
+    (bytesOf coreLibraryScope, "System.Exception")],
   signature := bytesOf "System.Void System.ArgumentException::.ctor(System.String,System.String)" }
 
 /-- The declared method with its decoded instructions. -/
@@ -407,13 +417,15 @@ def raw (decoded : DecodedBody) : RawMethod := {
   callingConvention := 0, attributes := 6278,
   implementation := 0, returnType := .void,
   parameters := [.object coreLibraryScope "System.String"],
-  locals := [], objectReceiver := true, objectBases := [.object coreLibraryScope "System.Exception"],
+  locals := [], receiverClass := some (.object coreLibraryScope "System.SystemException"),
+  objectBases := [.object coreLibraryScope "System.Exception"],
   objectFieldCount := 14, initLocals := decoded.initLocals, maxStack := decoded.maxStack,
   genericParameters := [], code := decoded.code }
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names : MethodNames := {
-  owner := bytesOf (coreLibraryScope ++ "::System.SystemException"), bases := [(bytesOf coreLibraryScope,bytesOf "System.Exception")],
+  owner := bytesOf (coreLibraryScope ++ "::System.SystemException"),
+  bases := [(bytesOf coreLibraryScope, "System.Exception")],
   signature := bytesOf "System.Void System.SystemException::.ctor(System.String)" }
 
 /-- The declared method with its decoded instructions. -/
@@ -508,7 +520,8 @@ def raw (decoded : DecodedBody) : RawMethod := {
   callingConvention := 0, attributes := 6278,
   implementation := 0, returnType := .void,
   parameters := [.object coreLibraryScope "System.String"],
-  locals := [], objectReceiver := true, objectBases := [],
+  locals := [], receiverClass := some (.object coreLibraryScope "System.Exception"),
+  objectBases := [],
   objectFieldCount := 14, initLocals := decoded.initLocals, maxStack := decoded.maxStack,
   genericParameters := [], code := decoded.code }
 
@@ -610,7 +623,8 @@ def raw (decoded : DecodedBody) : RawMethod := {
   callingConvention := 0, attributes := 6278,
   implementation := 0, returnType := .void,
   parameters := [],
-  locals := [], objectReceiver := true, objectBases := [],
+  locals := [], receiverClass := some (.object coreLibraryScope "System.Exception"),
+  objectBases := [],
   objectFieldCount := 14, initLocals := decoded.initLocals, maxStack := decoded.maxStack,
   genericParameters := [], code := decoded.code }
 
@@ -679,7 +693,8 @@ def raw (decoded : DecodedBody) : RawMethod := {
   callingConvention := 0, attributes := 6278,
   implementation := 0, returnType := .void,
   parameters := [],
-  locals := [], objectReceiver := true, objectBases := [],
+  locals := [], receiverClass := some (.object coreLibraryScope "System.Object"),
+  objectBases := [],
   objectFieldCount := 0, initLocals := decoded.initLocals, maxStack := decoded.maxStack,
   genericParameters := [], code := decoded.code }
 
@@ -759,7 +774,8 @@ def raw (decoded : DecodedBody) : RawMethod := {
   callingConvention := 0, attributes := 2182,
   implementation := 0, returnType := .void,
   parameters := [.atom coreLibraryScope "System.Int32"],
-  locals := [], objectReceiver := true, objectBases := [],
+  locals := [], receiverClass := some (.object coreLibraryScope "System.Exception"),
+  objectBases := [],
   objectFieldCount := 14, initLocals := decoded.initLocals, maxStack := decoded.maxStack,
   genericParameters := [], code := decoded.code }
 

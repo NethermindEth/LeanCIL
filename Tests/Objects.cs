@@ -26,6 +26,8 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Objects");
 Directory.CreateDirectory(root);
 
+VerifyClassIdentity(verification, assembly, root);
+
 // One batch elaborates, replays and audits every proof; a pass is reported only after the whole batch is certified.
 var queue = new GeneratedQueue(verification, assembly);
 foreach (var (proof, entry) in new[]
@@ -555,6 +557,86 @@ Console.WriteLine("PASS objects: identity, presence, scalar and reference field,
     "construction, base class field, class reference array, value-array field, virtual dispatch and type " +
     "test proofs, and named rejection of unmodelled class shapes, field and element accesses, calls, " +
     "dispatch tables and type tests");
+
+// Two TypeDefs in the same module spell Rows.Widget. A single body tests both physical operands.
+static void VerifyClassIdentity(Program verification, string assembly, string root)
+{
+    var output = Path.Combine(root, "ClassIdentity");
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var parent = new TypeDefinition("Rows", "Parent", TypeAttributes.Public, module.TypeSystem.Object);
+        var qualified = new TypeDefinition("Rows", "Widget", TypeAttributes.Public, parent);
+        var dotted = new TypeDefinition("", "Rows.Widget", TypeAttributes.Public, parent);
+        module.Types.Add(parent);
+        module.Types.Add(qualified);
+        module.Types.Add(dotted);
+        var test = new MethodDefinition("Classify", MethodAttributes.Public | MethodAttributes.Static,
+            module.TypeSystem.Int32);
+        test.Parameters.Add(new ParameterDefinition(parent));
+        module.GetType("Examples.Arithmetic").Methods.Add(test);
+        var il = test.Body.GetILProcessor();
+        void EmitTest(TypeDefinition target)
+        {
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Isinst, target);
+            il.Emit(OpCodes.Ldnull);
+            il.Emit(OpCodes.Cgt_Un);
+        }
+        EmitTest(qualified);
+        il.Emit(OpCodes.Ldc_I4_2);
+        il.Emit(OpCodes.Mul);
+        EmitTest(dotted);
+        il.Emit(OpCodes.Add);
+        il.Emit(OpCodes.Ret);
+
+        var rootCtor = new MethodReference(".ctor", module.TypeSystem.Void, module.TypeSystem.Object)
+            { HasThis = true };
+        MethodDefinition Constructor(TypeDefinition owner, MethodReference baseCtor)
+        {
+            var ctor = new MethodDefinition(".ctor", MethodAttributes.Public | MethodAttributes.HideBySig |
+                MethodAttributes.SpecialName | MethodAttributes.RTSpecialName, module.TypeSystem.Void);
+            owner.Methods.Add(ctor);
+            var body = ctor.Body.GetILProcessor();
+            body.Emit(OpCodes.Ldarg_0);
+            body.Emit(OpCodes.Call, baseCtor);
+            body.Emit(OpCodes.Ret);
+            return ctor;
+        }
+        var parentCtor = Constructor(parent, rootCtor);
+        var fresh = new MethodDefinition("ClassifyFresh", MethodAttributes.Public | MethodAttributes.Static,
+            module.TypeSystem.Int32);
+        test.DeclaringType.Methods.Add(fresh);
+        var build = fresh.Body.GetILProcessor();
+        build.Emit(OpCodes.Newobj, Constructor(qualified, parentCtor));
+        build.Emit(OpCodes.Call, test);
+        build.Emit(OpCodes.Ldc_I4_S, (sbyte)10);
+        build.Emit(OpCodes.Mul);
+        build.Emit(OpCodes.Newobj, Constructor(dotted, parentCtor));
+        build.Emit(OpCodes.Call, test);
+        build.Emit(OpCodes.Add);
+        build.Emit(OpCodes.Ret);
+        module.Write(dll);
+    }
+    var image = System.Reflection.Assembly.Load(File.ReadAllBytes(dll));
+    var classify = image.GetType("Examples.Arithmetic", true)!.GetMethod("Classify")!;
+    var candidates = image.GetTypes().Where(type => type.FullName == "Rows.Widget").ToArray();
+    foreach (var (space, expected) in new[] { ("Rows", 2), ("", 1) })
+    {
+        var type = candidates.Single(type => (type.Namespace ?? "") == space);
+        var instance = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(type);
+        if (!Equals(classify.Invoke(null, [instance]), expected))
+            throw new InvalidOperationException($"CLR isinst selected the wrong TypeDef for {type.MetadataToken:x8}");
+    }
+    if (!Equals(classify.DeclaringType!.GetMethod("ClassifyFresh")!.Invoke(null, null), 21))
+        throw new InvalidOperationException("CLR construction did not preserve both class identities");
+    verification.Verify(dll, "Examples", "Arithmetic::Classify(Rows.Parent)",
+        At("Tests/Objects/ClassIdentity.lean"), Path.Combine(output, "Proof"));
+    verification.Verify(dll, "Examples", "Arithmetic::ClassifyFresh()",
+        At("Tests/Objects/AllocatedClassIdentity.lean"), Path.Combine(output, "Fresh"));
+    Console.WriteLine("PASS CLR and certified newobj and isinst for both Rows.Widget declarations");
+}
 
 static partial class DispatchPatterns
 {

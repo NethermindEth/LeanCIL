@@ -384,21 +384,20 @@ theorem unowned_object_returns (memory : CIL.Safety.Memory) (object : Reference)
   cil_checked_side [formed, notOwned]
 #print axioms unowned_object_returns
 
-/-- A method record with no code, owned by `owner`, with the given receiver kind and bases. -/
-private def classMethod (owner : String) (receiver : Bool) (bases : List CIL.Extraction.TypeExpr) :
-    CIL.Extraction.RawMethod :=
-  { token := 0, owner, hasThis := true, explicitThis := false, callingConvention := 0,
-    attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
-    initLocals := false, maxStack := 0, genericParameters := [], code := [],
-    objectReceiver := receiver, objectBases := bases }
+/-- An instance method with the given metadata receiver and base classes. -/
+private def classMethod (receiver : Option CIL.Extraction.TypeExpr)
+    (bases : List CIL.Extraction.TypeExpr) : CIL.Extraction.RawMethod :=
+  { token := 0, owner := "Examples::Examples.Circle", hasThis := true, explicitThis := false,
+    callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+    parameters := [], locals := [], initLocals := false, maxStack := 0, genericParameters := [],
+    code := [], receiverClass := receiver, objectBases := bases }
 
-/-- A class method's owner `scope::name` declares that class with its bases; an owner without
-    exactly one `::`, or a method without an object receiver, declares none. -/
+/-- A checked class declares its physical name and base chain even with a dotted simple name. -/
 theorem declared_class_read :
-    declaredClass (classMethod "Examples::Examples.Circle" true [shape]) = some circle ∧
-    declaredClass (classMethod "Examples.Circle" true []) = none ∧
-    declaredClass (classMethod "Examples::Outer::Circle" true []) = none ∧
-    declaredClass (classMethod "Examples::Examples.Circle" false []) = none := by
+    let dotted := CIL.Extraction.TypeExpr.object "Examples" ⟨[⟨name!"", name!"Examples.Circle"⟩]⟩
+    declaredClass (classMethod (some circle.identity) [shape]) = some circle ∧
+    declaredClass (classMethod (some dotted) [shape]) = some ⟨dotted, [shape]⟩ ∧
+    dotted ≠ circle.identity ∧ declaredClass (classMethod none []) = none := by
   decide +kernel
 #print axioms declared_class_read
 

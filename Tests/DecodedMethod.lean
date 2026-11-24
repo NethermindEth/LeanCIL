@@ -609,7 +609,8 @@ private def instanceAddressSite : CallSite := {
 /-- A parameterless instance method that takes its own address, pops it and returns. -/
 private def instanceAddressRaw : RawMethod :=
   { method 8 false [] [instr 0 0xFE06 (.call instanceAddressSite), instr 6 0x26, instr 7 0x2A]
-    with hasThis := true, attributes := 0x86, objectReceiver := true }
+    with hasThis := true, attributes := 0x86,
+         receiverClass := some instanceAddressSite.method.owner }
 
 /-- The bytes match the instance method, but its address cannot bind to a static signature. -/
 theorem instance_address_program_refused :
