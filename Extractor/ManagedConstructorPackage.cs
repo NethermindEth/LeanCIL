@@ -15,15 +15,21 @@ internal static class ManagedConstructorPackage
         if (!entry.HasBody || entry.HasGenericParameters || entry.DeclaringType.HasGenericParameters ||
             profile.Architecture == "arm64" || profile.NativeWidth != 64 || !profile.LittleEndian) return null;
         var calls = entry.Body.Instructions.Where(site => site.OpCode.FlowControl == FlowControl.Call).Take(2).ToArray();
-        if (calls is not [{ OpCode.Code: Code.Newobj, Previous.OpCode.Code: Code.Ldstr,
+        if (calls is not [{ OpCode.Code: Code.Newobj,
                 Operand: MethodReference ctor } site]) return null;
-        return ctor.Name == ".ctor" && ctor.HasThis && ctor is not GenericInstanceMethod &&
-            Throws.Owner(ctor.DeclaringType) == ExceptionType.ArgumentOutOfRange &&
-            ctor.Parameters.All(parameter =>
-                LayoutEvidence.Scope(parameter.ParameterType) == TypeTests.RuntimeScope) &&
-            ctor.Parameters.Select(parameter => parameter.ParameterType.MetadataType).ToArray() is
-                [MetadataType.String, MetadataType.String] or
-                [MetadataType.String, MetadataType.Object, MetadataType.String] ? site : null;
+        if (ctor.Name != ".ctor" || !ctor.HasThis || ctor is GenericInstanceMethod ||
+            ctor.Parameters.Any(parameter => LayoutEvidence.Scope(parameter.ParameterType) != TypeTests.RuntimeScope))
+            return null;
+        var parameters = ctor.Parameters.Select(parameter => parameter.ParameterType.MetadataType).ToArray();
+        return (Throws.Owner(ctor.DeclaringType), parameters) switch
+        {
+            (ExceptionType.ArgumentOutOfRange, [MetadataType.String, MetadataType.String] or
+                [MetadataType.String, MetadataType.Object, MetadataType.String])
+                when site.Previous?.OpCode.Code == Code.Ldstr => site,
+            (ExceptionType.Argument, [MetadataType.String, MetadataType.String, MetadataType.Class])
+                when ctor.Parameters[2].ParameterType.FullName == "System.Exception" => site,
+            _ => null
+        };
     }
 
     internal static void EmitSource(StringBuilder lean, int assembly) =>

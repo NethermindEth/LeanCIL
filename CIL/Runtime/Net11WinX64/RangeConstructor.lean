@@ -1,5 +1,6 @@
 import CIL.Extraction.ManagedPackage
 import CIL.Runtime.Net11WinX64.ActualValueCtor
+import CIL.Runtime.Net11WinX64.InnerMethods
 
 /-! Managed execution of the two-string range exception constructor in the .NET 11.0.0
 Windows x64 runtime. The resource getter on the null-message branch occupies the first
@@ -74,12 +75,61 @@ def rangeDependencies := rangeMemberDependencies 100666618
 private def actualDependencies := rangeMemberDependencies 100666620
   (fixedBytes 20 0x0000000000008618010000000100000033190000) (fixedBytes 7 0x062003010E1C0E)
 
+/-- Forwarders and MethodDef for the argument constructor carrying an inner exception. -/
+private def argumentInnerDependencies : List MetadataSlice := [{
+    assembly := facadeAssembly,
+    rows := [(587202561, (fixedBytes 20 0x0B00000000000000000000000100050000000000)),
+      (654311460, (fixedBytes 14 0x0000200000000000010004000500)),
+      (654311620, (fixedBytes 14 0x0000200000000000020004000500)),
+      (654311851, (fixedBytes 14 0x0000200000000000030004000500))],
+    strings := [(0, (fixedBytes 1 0x00)),
+      (1, (fixedBytes 18 0x417267756D656E74457863657074696F6E00)),
+      (2, (fixedBytes 10 0x457863657074696F6E00)),
+      (3, (fixedBytes 7 0x4F626A65637400)),
+      (4, (fixedBytes 7 0x53797374656D00)),
+      (5, (fixedBytes 23 0x53797374656D2E507269766174652E436F72654C696200))],
+    blobs := [(1, (fixedBytes 9 0x087CEC85D7BEA7798E))],
+    userStrings := [],
+    corlib := 1,
+    links := [] }, {
+    assembly := CoreLib.assembly,
+    rows := [(33554576, (fixedBytes 18 0x0120100003000000050000008802A802E505)),
+      (33554577, (fixedBytes 18 0x05010000FFFFFFFF000000002402B8021A06)),
+      (33554594, (fixedBytes 18 0x0120100004000000050000000000FE021C07)),
+      (33554673, (fixedBytes 18 0x012010000200000005000000A407B603E00C)),
+      (33554674, (fixedBytes 18 0x01201000FFFFFFFF05000000C403B703EE0C)),
+      (33554921, (fixedBytes 18 0x01201000060000000500000040022F067826)),
+      (100666595, (fixedBytes 20 0x000000000000861801000000010000000D190000)),
+      (704643081, (fixedBytes 12 0x0000180016010000FFFFFFFF)),
+      (704643082, (fixedBytes 12 0x000004006A010000FFFFFFFF)),
+      (704643224, (fixedBytes 12 0x00002200D0010000FFFFFFFF)),
+      (704643225, (fixedBytes 12 0x00000000EE010000FFFFFFFF))],
+    strings := [(1, (fixedBytes 6 0x2E63746F7200)),
+      (2, (fixedBytes 18 0x417267756D656E74457863657074696F6E00)),
+      (3, (fixedBytes 10 0x457863657074696F6E00)),
+      (4, (fixedBytes 7 0x4F626A65637400)),
+      (5, (fixedBytes 7 0x53797374656D00)),
+      (6, (fixedBytes 16 0x53797374656D457863657074696F6E00))],
+    blobs := [(1, (fixedBytes 9 0x082003010E0E128240))],
+    userStrings := [],
+    corlib := 0,
+    links := [⟨1, 100666595, 2, 33554673⟩] }]
+
 /-- Physical bodies reached by the constructor with a non-null message argument. -/
 def coreBytes : List (BodyEvidence × RawMethod) := [
     ({ RangeCtor.body with names := RangeCtor.names }, RangeCtor.definition),
     ({ ArgumentCtor.body with names := ArgumentCtor.names }, ArgumentCtor.definition),
     ({ SystemExceptionCtor.body with names := SystemExceptionCtor.names }, SystemExceptionCtor.definition),
     ({ ExceptionMessageCtor.body with names := ExceptionMessageCtor.names }, ExceptionMessageCtor.definition),
+    ({ ExceptionCtor.body with names := ExceptionCtor.names }, ExceptionCtor.definition),
+    ({ ObjectCtor.body with names := ObjectCtor.names }, ObjectCtor.definition),
+    ({ SetHResult.body with names := SetHResult.names }, SetHResult.definition)]
+
+/-- Executable definitions in the closed three-argument ArgumentException call graph. -/
+private def argumentInnerMethods : List (BodyEvidence × RawMethod) := [
+    ({ ArgumentInnerCtor.body with names := ArgumentInnerCtor.names }, ArgumentInnerCtor.definition),
+    ({ SystemInnerCtor.body with names := SystemInnerCtor.names }, SystemInnerCtor.definition),
+    ({ ExceptionInnerCtor.body with names := ExceptionInnerCtor.names }, ExceptionInnerCtor.definition),
     ({ ExceptionCtor.body with names := ExceptionCtor.names }, ExceptionCtor.definition),
     ({ ObjectCtor.body with names := ObjectCtor.names }, ObjectCtor.definition),
     ({ SetHResult.body with names := SetHResult.names }, SetHResult.definition)]
@@ -217,7 +267,10 @@ def rangeImage? (item : ConstructorSource) (pc : Nat)
   let source := item.original
   let site ← source.code[pc]?
   let .call constructor := site.operand | none
-  let (dependencies, methods) := if constructor.parameterCount == 3 then
+  let owner ← exceptionConstructor? constructor
+  let closedArgument := owner == .argument && constructor.parameterCount == 3
+  let (dependencies, methods) := if closedArgument then (argumentInnerDependencies, argumentInnerMethods)
+    else if constructor.parameterCount == 3 then
       (actualDependencies, ({ ActualValueCtor.body with names := ActualValueCtor.names },
         ActualValueCtor.definition) :: coreBytes.tail)
     else (rangeDependencies, coreBytes)
@@ -227,13 +280,13 @@ def rangeImage? (item : ConstructorSource) (pc : Nat)
   let raw := { source with code := code.code, initLocals := code.initLocals }
   -- Every entry to this newobj must load the message immediately before the allocation.
   let prior ← raw.code[pc - 1]?
-  guard (pc > 0 && prior.opcode == 0x72 && !(branchTargets raw.code).contains pc)
+  guard (pc > 0 && (closedArgument || prior.opcode == 0x72) && !(branchTargets raw.code).contains pc)
   -- This single-entry image supplies only the range constructor at the selected call site.
   guard (raw.code.zipIdx.all fun (site, index) =>
     match site.operand with | .call _ => index == pc | _ => true)
   let runtime := methods.map Prod.snd
   let table : List SpecializedMethod := ⟨[], raw, ⟨original.metadata.own.assembly.identity⟩⟩ ::
-    (runtime.map (⟨[], ·, ⟨coreLibraryScope⟩⟩) ++ [rangeResourceImport])
+    (runtime.map (⟨[], ·, ⟨coreLibraryScope⟩⟩) ++ (if closedArgument then [] else [rangeResourceImport]))
   let boundLinks := links table raw
   let entry ← Method.ofBody? profile environment boundLinks item.reachable body raw []
   let closed ← instantiateMethod environment.rawLayouts raw []
@@ -245,8 +298,9 @@ def rangeImage? (item : ConstructorSource) (pc : Nat)
     featureStates := item.featureStates, layoutUses := item.layoutUses,
     dispatchTypes := item.dispatchTypes, assembly := item.assembly, signature := item.signature }
   let definitions ← methods.mapM (runtimeRow? table body profile environment)
-  let resource ← resourceDeclaration? body environment
-  return ⟨(caller, entry), definitions, [resource]⟩
+  let declarations ← if closedArgument then pure [] else
+    (resourceDeclaration? body environment).map ([·])
+  return ⟨(caller, entry), definitions, declarations⟩
 
 /-- The caller, runtime definitions and declared getter share the same physical pin table. -/
 def packagePins (source : List AssemblyPin) : List AssemblyPin :=

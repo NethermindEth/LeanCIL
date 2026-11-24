@@ -46,7 +46,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var extracted = Path.Combine(folder, "Extracted.lean");
     var source = File.ReadAllText(extracted);
     var entry = throwMethods.Single(candidate => candidate.Name == name);
-    var boundConstructor = name is "Percent" or "ActualValue";
+    var boundConstructor = name is "Percent" or "ActualValue" or "ArgumentInner";
     var method = name is "Null" or "Quotient" ? 1 : 0;
     var owner = method == 0 ? entry : ((MethodReference)entry.Body.Instructions
         .Single(instruction => instruction.OpCode.Code == Code.Call).Operand).Resolve();
@@ -179,11 +179,11 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         queue.Add(new(selector, proof, Path.Combine(root, name + "-Translated"), Assembly: image), () =>
             Console.WriteLine($"PASS {name}: the same boundary proof checks with translated exception literals"));
 
-        if (name == "ActualValue")
+        if (name is "ActualValue" or "ArgumentInner")
         {
             foreach (var (suffix, path) in new[] { ("", assembly), ("-Translated", image) })
-                queue.Add(new(selector, At("Tests/ActualValue/Proof.lean"),
-                    Path.Combine(root, name + "-All" + suffix), Theorem: "ActualValueProof.correctness",
+                queue.Add(new(selector, At("Tests/ExceptionConstructor/Proof.lean"),
+                    Path.Combine(root, name + "-All" + suffix), Theorem: "ExceptionConstructorProof.correctness",
                     Assembly: path), () => Console.WriteLine($"PASS {name}: every input and getter completion{suffix}"));
             continue;
         }
@@ -204,7 +204,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         CheckPercentVariants(translated, translatedMethod, selector);
     }
 
-    if (name is "Null" or "Inner" or "ArgumentInner")
+    if (name is "Null" or "Inner")
     {
         var nullPc = body.IndexOf(body.First(site => site.OpCode.Code == Code.Ldnull));
         var erased = Path.Combine(root, name + "-erased-null.lean");

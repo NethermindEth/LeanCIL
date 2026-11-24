@@ -1064,9 +1064,10 @@ For a variant, `RefutedAtEntryCLR` requires a counterexample on the same target
 from its loader-prepared memory. An unavailable runtime definition supplies no counterexample.
 [Percent](../Examples/Proofs/Percent.lean)
 
-The same entry model supports the three-argument range constructor with an actual value.
+The same entry model supports the three-argument range and argument constructors.
 For `Throws.ActualValue(uint)`, zero returns unchanged and every nonzero value raises
-`ArgumentOutOfRangeException` at the stack throw. Both outcomes use the original 64-fuel bound.
+`ArgumentOutOfRangeException` at the stack throw. `Throws.ArgumentInner(uint)` returns zero for zero and raises
+`ArgumentException` for every nonzero input. Both fixtures use the original 64-fuel bound.
 
 For a wide-integer `Divide` or `Mod` contract, select `some .divideByZero` in
 `raises` when its divisor is zero and prove `HoldsCLR`. Both an explicit throw and the mapped

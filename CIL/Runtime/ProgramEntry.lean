@@ -44,7 +44,9 @@ def TranslationValid.entry {rawLayouts layouts pins platform evidence imports pr
   guard imports.isEmpty
   if target == .net11WinX64 then
     guard (program.all fun method => Runtime.Net11WinX64.supportsProfile method.profile)
-  if !declarations.isEmpty then
+  -- A bundled CoreLib implementation belongs to its selected runtime even when every call is closed.
+  let usesCoreLib := evidence.tail.any fun item => item.assembly.identity == coreLibraryScope
+  if !declarations.isEmpty || usesCoreLib then
     guard (target == .net11WinX64)
     guard (!program.any fun method => method.code.any fun op => op matches .throw (some _))
     let root :: definitions := evidence.zip program | none

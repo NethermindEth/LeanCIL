@@ -120,7 +120,12 @@ def BodyEvidence.bindConstructor? (body : BodyEvidence) (source : RawMethod) (pc
   let method := { external.method with
     owner, hasThis := callee.closed.hasThis, parameters := callee.closed.parameters,
     returnType := callee.closed.returnType }
-  let managed := { external with method, target := .managed definition }
+  -- Primitive MemberRef elements keep the caller's primitive scope. A named class element
+  -- resolves through its TypeRef, including a forwarder to the defining assembly.
+  let parameters := (site.parameters.zip (external.declared.parameters.zip method.parameters)).map
+    fun (resolved, original, bound) =>
+      match resolved with | .primitive _ => original | _ => bound
+  let managed := { external with method, target := .managed definition, declared.parameters := parameters }
   let frame ← (env.frame source.genericParameters.length source.ownerParameters.length).toOption
   let _ ← (checkCallOperand env frame token managed).toOption
   let operands := body.tokens.operands.map fun entry =>
