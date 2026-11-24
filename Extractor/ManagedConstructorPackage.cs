@@ -19,9 +19,11 @@ internal static class ManagedConstructorPackage
                 Operand: MethodReference ctor } site]) return null;
         return ctor.Name == ".ctor" && ctor.HasThis && ctor is not GenericInstanceMethod &&
             Throws.Owner(ctor.DeclaringType) == ExceptionType.ArgumentOutOfRange &&
-            ctor.Parameters.Count == 2 && ctor.Parameters.All(parameter =>
-                parameter.ParameterType.MetadataType == MetadataType.String &&
-                LayoutEvidence.Scope(parameter.ParameterType) == TypeTests.RuntimeScope) ? site : null;
+            ctor.Parameters.All(parameter =>
+                LayoutEvidence.Scope(parameter.ParameterType) == TypeTests.RuntimeScope) &&
+            ctor.Parameters.Select(parameter => parameter.ParameterType.MetadataType).ToArray() is
+                [MetadataType.String, MetadataType.String] or
+                [MetadataType.String, MetadataType.Object, MetadataType.String] ? site : null;
     }
 
     internal static void EmitSource(StringBuilder lean, int assembly) =>

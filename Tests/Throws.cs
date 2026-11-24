@@ -46,12 +46,13 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var extracted = Path.Combine(folder, "Extracted.lean");
     var source = File.ReadAllText(extracted);
     var entry = throwMethods.Single(candidate => candidate.Name == name);
+    var boundConstructor = name is "Percent" or "ActualValue";
     var method = name is "Null" or "Quotient" ? 1 : 0;
     var owner = method == 0 ? entry : ((MethodReference)entry.Body.Instructions
         .Single(instruction => instruction.OpCode.Code == Code.Call).Operand).Resolve();
     var body = owner.Body.Instructions;
     var pc = body.IndexOf(body.Single(instruction => instruction.OpCode.Code == Code.Throw));
-    if (name == "Percent")
+    if (boundConstructor)
     {
         if (!source.Contains("def program : Program := boundPackage.methods", StringComparison.Ordinal) ||
             source.Contains("cil_decoded_method method0", StringComparison.Ordinal))
@@ -117,24 +118,25 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
             outcome = $".error \u27e8{method}, {pc}, .thrown .{label}\u27e9";
         }
         var args = string.Join(", ", input.Select(v => $".scalar (.i32 {v})"));
-        if (name == "Percent")
+        if (boundConstructor)
             return $"(Extracted.translation_valid.invoke .net11WinX64 66 [{args}]).map " +
                 $"(fun loaded => loaded.map (·.map Prod.snd)) = some (.ok ({outcome}))";
         return $"(CIL.Safety.invoke Extracted.program 64 0 [{args}] CIL.Safety.Memory.empty).map Prod.snd = {outcome}";
     }).ToList();
     if (label is null) throw new InvalidOperationException($"No runtime input reached the throw in {name}");
     var nullLoads = body.Select((site, index) => (site, index)).Where(item => item.site.OpCode.Code == Code.Ldnull);
-    var nullEquations = string.Join('\n', nullLoads.Select(item =>
-        $"example : Extracted.method{method}.code[{item.index}]? = some .ldnull := " +
+    var nullEquations = string.Join('\n', nullLoads.Select(item => boundConstructor
+        ? $"example : Extracted.method{method}.code[{item.index}]? = some .ldnull := by cil_kernel_rfl"
+        : $"example : Extracted.method{method}.code[{item.index}]? = some .ldnull := " +
         $"Extracted.method{method}_instruction{item.index}"));
     var raisedInstruction = name == "Null" ? ".throw" : $"(.throw (some .{label}))";
-    var throwSite = name == "Percent"
+    var throwSite = boundConstructor
         ? $"example : (Extracted.program[{method}]? >>= fun m => m.code[{pc}]?) = some .throw := by cil_kernel_rfl"
         : $"example : Extracted.method{method}.code[{pc}]? = some {raisedInstruction} := Extracted.method{method}_instruction{pc}";
     var entryCheck = name switch
     {
         "Null" => "example : (Extracted.translation_valid.entry .portable).map (·.methods) = some Extracted.program := by cil_kernel_rfl",
-        "Inner" or "ActualValue" => "example : (Extracted.translation_valid.entry .net11WinX64).isNone = true := by cil_kernel_rfl",
+        "Inner" => "example : (Extracted.translation_valid.entry .net11WinX64).isNone = true := by cil_kernel_rfl",
         _ => ""
     };
     var proof = Path.Combine(folder, "BoundaryProof.lean");
@@ -147,14 +149,14 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         {{throwSite}}
         theorem correctness :
           {{string.Join(" \u2227\n  ", claims)}} := by
-          repeat' first | apply And.intro | {{(name == "Percent" ? "cil_kernel_rfl" : "rfl")}}
+          repeat' first | apply And.intro | {{(boundConstructor ? "cil_kernel_rfl" : "rfl")}}
         #print axioms correctness
         end ExampleProof
         """);
     queue.Add(new(selector, proof, Path.Combine(root, name + "-Verified")), () =>
         Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons, {label} located at method {method} pc {pc}"));
 
-    if (name != "Percent")
+    if (!boundConstructor)
     {
         // A forged type must fail the feature certificate, independently of the instruction lemma.
         var forgedLabel = label == "invalidOperation" ? "divideByZero" : "invalidOperation";
@@ -164,18 +166,27 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
             "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
     }
-    if (name == "Percent")
+    if (boundConstructor)
     {
         using var translated = ModuleDefinition.ReadModule(assembly);
-        var percent = translated.GetType("Examples.Throws").Methods.Single(candidate => candidate.Name == name);
-        var literals = percent.Body.Instructions.Where(site => site.OpCode.Code == Code.Ldstr).ToArray();
+        var translatedMethod = translated.GetType("Examples.Throws").Methods.Single(candidate => candidate.Name == name);
+        var literals = translatedMethod.Body.Instructions.Where(site => site.OpCode.Code == Code.Ldstr).ToArray();
         if (literals.Length != 2) throw new InvalidOperationException("Expected parameter and message literals");
         literals[0].Operand = "valeur";
         literals[1].Operand = "La valeur dépasse la limite.";
         var image = Path.Combine(folder, "Examples.dll");
         translated.Write(image);
-        queue.Add(new(selector, proof, Path.Combine(root, "Percent-Translated"), Assembly: image), () =>
-            Console.WriteLine("PASS Percent: the same boundary proof checks with translated exception literals"));
+        queue.Add(new(selector, proof, Path.Combine(root, name + "-Translated"), Assembly: image), () =>
+            Console.WriteLine($"PASS {name}: the same boundary proof checks with translated exception literals"));
+
+        if (name == "ActualValue")
+        {
+            foreach (var (suffix, path) in new[] { ("", assembly), ("-Translated", image) })
+                queue.Add(new(selector, At("Tests/ActualValue/Proof.lean"),
+                    Path.Combine(root, name + "-All" + suffix), Theorem: "ActualValueProof.correctness",
+                    Assembly: path), () => Console.WriteLine($"PASS {name}: every input and getter completion{suffix}"));
+            continue;
+        }
 
         var rawProof = CompiledPercentProof(folder);
         foreach (var (suffix, assemblyPath) in new[] { ("", assembly), ("-Translated", image) })
@@ -190,10 +201,10 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
                 theorem: "CompiledPercent.verified");
             Console.WriteLine("PASS Percent: decoded caller and CoreLib exception path at every heap quota" + suffix);
         }
-        CheckPercentVariants(translated, percent, selector);
+        CheckPercentVariants(translated, translatedMethod, selector);
     }
 
-    if (name is "Null" or "Inner" or "ArgumentInner" or "ActualValue")
+    if (name is "Null" or "Inner" or "ArgumentInner")
     {
         var nullPc = body.IndexOf(body.First(site => site.OpCode.Code == Code.Ldnull));
         var erased = Path.Combine(root, name + "-erased-null.lean");

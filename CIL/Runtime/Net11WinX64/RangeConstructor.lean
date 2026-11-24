@@ -1,5 +1,5 @@
 import CIL.Extraction.ManagedPackage
-import CIL.Runtime.Net11WinX64.RangeMethods
+import CIL.Runtime.Net11WinX64.ActualValueCtor
 
 /-! Managed execution of the two-string range exception constructor in the .NET 11.0.0
 Windows x64 runtime. The resource getter on the null-message branch occupies the first
@@ -37,7 +37,8 @@ theorem coreIdentified : AssemblyIdentified coreAssembly coreIdentity := ⟨by c
 #print axioms coreIdentified
 
 /-- Caller-side facade and CoreLib slices for the two-string range constructor. -/
-def rangeDependencies : List MetadataSlice := [{
+private def rangeMemberDependencies (token : Nat) (methodRow signature : List Nat) :
+    List MetadataSlice := [{
       assembly := facadeAssembly,
       rows := [(587202561, (fixedBytes 20 0x0B00000000000000000000000100040000000000)),
         (654311462, (fixedBytes 14 0x0000200000000000010003000500)),
@@ -54,16 +55,24 @@ def rangeDependencies : List MetadataSlice := [{
         (33554673, (fixedBytes 18 0x012010000200000005000000A407B603E00C)),
         (33554675, (fixedBytes 18 0x012010000300000005000000C403B703F80C)),
         (33554676, (fixedBytes 18 0x01201000FFFFFFFF05000000A407B803130D)),
-        (100666618, (fixedBytes 20 0x000000000000861801000000010000002F190000)),
+        (token, methodRow),
         (704643224, (fixedBytes 12 0x00002200D0010000FFFFFFFF)),
         (704643225, (fixedBytes 12 0x00000000EE010000FFFFFFFF))],
       strings := [(1, (fixedBytes 6 0x2E63746F7200)), (2, (fixedBytes 18 0x417267756D656E74457863657074696F6E00)),
         (3, (fixedBytes 28 0x417267756D656E744F75744F6652616E6765457863657074696F6E00)),
         (4, (fixedBytes 7 0x4F626A65637400)), (5, (fixedBytes 7 0x53797374656D00))],
-      blobs := [(1, (fixedBytes 6 0x052002010E0E))],
+      blobs := [(1, signature)],
       userStrings := [],
       corlib := 0,
-      links := [⟨1, 100666618, 2, 33554675⟩]}]
+      links := [⟨1, token, 2, 33554675⟩]}]
+
+/-- Forwarded MethodDef and signature for the two-string overload. -/
+def rangeDependencies := rangeMemberDependencies 100666618
+  (fixedBytes 20 0x000000000000861801000000010000002F190000) (fixedBytes 6 0x052002010E0E)
+
+/-- Forwarded MethodDef and signature for the overload with an actual value. -/
+private def actualDependencies := rangeMemberDependencies 100666620
+  (fixedBytes 20 0x0000000000008618010000000100000033190000) (fixedBytes 7 0x062003010E1C0E)
 
 /-- Physical bodies reached by the constructor with a non-null message argument. -/
 def coreBytes : List (BodyEvidence × RawMethod) := [
@@ -206,8 +215,14 @@ def rangeImage? (item : ConstructorSource) (pc : Nat)
   guard (supportsProfile profile && item.arguments.isEmpty)
   let original := item.body
   let source := item.original
-  let body ← original.bindConstructor? source pc rangeDependencies
-    ⟨[], RangeCtor.definition, ⟨coreLibraryScope⟩⟩
+  let site ← source.code[pc]?
+  let .call constructor := site.operand | none
+  let (dependencies, methods) := if constructor.parameterCount == 3 then
+      (actualDependencies, ({ ActualValueCtor.body with names := ActualValueCtor.names },
+        ActualValueCtor.definition) :: coreBytes.tail)
+    else (rangeDependencies, coreBytes)
+  let (_, callee) ← methods.head?
+  let body ← original.bindConstructor? source pc dependencies ⟨[], callee, ⟨coreLibraryScope⟩⟩
   let code ← (checkBody body source []).toOption
   let raw := { source with code := code.code, initLocals := code.initLocals }
   -- Every entry to this newobj must load the message immediately before the allocation.
@@ -216,7 +231,7 @@ def rangeImage? (item : ConstructorSource) (pc : Nat)
   -- This single-entry image supplies only the range constructor at the selected call site.
   guard (raw.code.zipIdx.all fun (site, index) =>
     match site.operand with | .call _ => index == pc | _ => true)
-  let runtime := coreBytes.map Prod.snd
+  let runtime := methods.map Prod.snd
   let table : List SpecializedMethod := ⟨[], raw, ⟨original.metadata.own.assembly.identity⟩⟩ ::
     (runtime.map (⟨[], ·, ⟨coreLibraryScope⟩⟩) ++ [rangeResourceImport])
   let boundLinks := links table raw
@@ -229,7 +244,7 @@ def rangeImage? (item : ConstructorSource) (pc : Nat)
     scalarStates := scalars, arguments := item.arguments, reachable := item.reachable,
     featureStates := item.featureStates, layoutUses := item.layoutUses,
     dispatchTypes := item.dispatchTypes, assembly := item.assembly, signature := item.signature }
-  let definitions ← coreBytes.mapM (runtimeRow? table body profile environment)
+  let definitions ← methods.mapM (runtimeRow? table body profile environment)
   let resource ← resourceDeclaration? body environment
   return ⟨(caller, entry), definitions, [resource]⟩
 
