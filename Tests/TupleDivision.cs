@@ -62,17 +62,28 @@ var methods = new (string Name, Func<ulong, ulong, string> Result)[]
     ("Pair", (q, r) => $".scalar (.aggregate {Bytes(q, r)})")
 };
 // A balanced tree retains every claim without a linear-depth proof term.
-string Balanced(IReadOnlyList<string> entries, bool proof)
+string Balanced(IReadOnlyList<string> entries, Func<string, string, string> join)
 {
     string Build(int start, int count)
     {
         if (count == 1) return entries[start];
         var half = count / 2;
-        var left = Build(start, half);
-        var right = Build(start + half, count - half);
-        return proof ? $"⟨{left}, {right}⟩" : $"({left} ∧ {right})";
+        return join(Build(start, half), Build(start + half, count - half));
     }
     return Build(0, entries.Count);
+}
+// The proof of entry `index` of `count` from `pairs`, an equation of the tuples `Balanced` builds.
+static string Projection(string pairs, int count, int index)
+{
+    var (start, term) = (0, pairs);
+    while (count > 1)
+    {
+        var half = count / 2;
+        var first = index < start + half;
+        term = $"(Prod.mk.inj {term}).{(first ? 1 : 2)}";
+        (start, count) = first ? (start, half) : (start + half, count - half);
+    }
+    return term;
 }
 // A failed attempt to prove the quotient contract also needs a checked counterexample for the compiled method.
 GeneratedVerification WrongQuotientRefutation(string method, string selector, int bits, int[] inputs, string expected)
@@ -113,7 +124,7 @@ var cases = 0;
 foreach (var (name, result) in methods)
 {
     var method = runtime.GetMethod(name)!;
-    var claims = new List<string>();
+    var claims = new List<(string Left, string Right)>();
     foreach (var lower in lowers)
     foreach (var upper in uppers)
     foreach (var divisor in divisors)
@@ -141,7 +152,8 @@ foreach (var (name, result) in methods)
         }
         var outcome = expected is { } value ? $".ok [{result(value.Quotient, value.Remainder)}]"
             : $".error ⟨0, 3, .arithmetic .{(divisor == 0 ? "divideByZero" : "overflow")}⟩";
-        claims.Add($"(CIL.Safety.invoke Extracted.program 16 0 [.scalar (.i64 {lower}), .scalar (.i64 {upper}), .scalar (.i64 {divisor})] CIL.Safety.Memory.empty).map Prod.snd = {outcome}");
+        claims.Add(($"(CIL.Safety.invoke Extracted.program 16 0 [.scalar (.i64 {lower}), .scalar (.i64 {upper}), " +
+            $".scalar (.i64 {divisor})] CIL.Safety.Memory.empty).map Prod.snd", outcome));
     }
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
@@ -278,21 +290,34 @@ var operands = new Dictionary<Type, object[]>
     [typeof(nint)] = new object[] { nint.MinValue, (nint)(-7), (nint)(-1), (nint)0, (nint)1, (nint)3, nint.MaxValue },
     [typeof(nuint)] = new object[] { (nuint)0, (nuint)1, (nuint)3, (nuint)(1UL << 63), nuint.MaxValue }
 };
-string BoundaryProof(IReadOnlyList<string> claims) => $$"""
-    import Extracted
-    import Tests.Support
-    namespace ExampleProof
-    def memory : CIL.Safety.Memory := { Tests.caller with cells := fun _ _ => .mk 93 false }
-    {{string.Join("\n", claims.Select((claim, index) => $"""
-        theorem case{index} : {claim} := by cil_kernel_rfl
-        #print axioms case{index}
-        """))}}
-    theorem correctness :
-    {{Balanced(claims, false)}} :=
-    {{Balanced(Enumerable.Range(0, claims.Count).Select(index => $"case{index}").ToArray(), true)}}
-    #print axioms correctness
-    end ExampleProof
-    """;
+// One kernel evaluation checks every comparison, so the program's definitions unfold once per
+// fixture; each case projects its own equation and `correctness` keeps its statement.
+string BoundaryProof(IReadOnlyList<(string Left, string Right)> claims)
+{
+    string Tuple(IEnumerable<string> sides) => Balanced([.. sides], (left, right) => $"({left}, {right})");
+    string[] cases = [.. claims.Select((_, index) => $"case{index}")];
+    var projections = claims.Select((claim, index) =>
+        $"theorem case{index} : {claim.Left} = {claim.Right} := {Projection("results", claims.Count, index)}");
+    var statement = Balanced([.. claims.Select(claim => $"{claim.Left} = {claim.Right}")],
+        (left, right) => $"({left} ∧ {right})");
+    return $$"""
+        import Extracted
+        import Tests.Support
+        namespace ExampleProof
+        def memory : CIL.Safety.Memory := { Tests.caller with cells := fun _ _ => .mk 93 false }
+        /-- Each compiled call returns the result or raises the fault observed at runtime. -/
+        private theorem results :
+        {{Tuple(claims.Select(claim => claim.Left))}} =
+        {{Tuple(claims.Select(claim => claim.Right))}} := by cil_kernel_rfl
+        {{string.Join("\n", projections)}}
+        #print axioms [{{string.Join(", ", cases)}}]
+        theorem correctness :
+        {{statement}} :=
+        {{Balanced(cases, (left, right) => $"⟨{left}, {right}⟩")}}
+        #print axioms correctness
+        end ExampleProof
+        """;
+}
 var mathRequests = new List<GeneratedVerification>
 {
     WrongQuotientRefutation("MathWrongQuotient", "TupleDivision::MathWrongQuotient(int,int)", 32,
@@ -300,7 +325,7 @@ var mathRequests = new List<GeneratedVerification>
 };
 var mathCases = 0;
 var faultKinds = new SortedSet<string>(StringComparer.Ordinal);
-void AddBoundary(string name, string selector, List<string> claims)
+void AddBoundary(string name, string selector, List<(string Left, string Right)> claims)
 {
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
@@ -318,7 +343,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
 {
     var type = method.GetParameters()[0].ParameterType;
     var direct = typeof(Math).GetMethod("DivRem", [type, type])!;
-    var claims = new List<string>();
+    var claims = new List<(string Left, string Right)>();
     foreach (var left in operands[type])
     foreach (var right in operands[type])
     {
@@ -338,22 +363,22 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
             var bytes = (byte[])runtimeBytes.MakeGenericMethod(method.ReturnType).Invoke(null, [value])!;
             outcome = $".ok [.scalar (.aggregate [{string.Join(", ", bytes)}])]";
         }
-        claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 {arguments} CIL.Safety.Memory.empty).map Prod.snd = " +
-            outcome);
+        claims.Add(($"(CIL.Safety.invoke Extracted.program 8 0 {arguments} CIL.Safety.Memory.empty).map Prod.snd",
+            outcome));
     }
     AddBoundary(method.Name, $"TupleDivision::{method.Name}({LeanType(type)},{LeanType(type)})", claims);
 }
 // The narrow Remainder field is read back sign-extended, with the wrapped sbyte.MinValue / -1 quotient.
 {
     var method = runtime.GetMethod("MathSByteRemainder")!;
-    var claims = new List<string>();
+    var claims = new List<(string Left, string Right)>();
     foreach (var left in operands[typeof(sbyte)])
     foreach (var right in operands[typeof(sbyte)])
     {
         var (value, fault) = Observe(method, [left, right]);
         var outcome = fault is null ? $".ok [{StackArgument(value!)}]" : $".error ⟨0, 2, .arithmetic .{fault}⟩";
-        claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [{StackArgument(left)}, {StackArgument(right)}] " +
-            $"CIL.Safety.Memory.empty).map Prod.snd = {outcome}");
+        claims.Add(($"(CIL.Safety.invoke Extracted.program 8 0 [{StackArgument(left)}, {StackArgument(right)}] " +
+            "CIL.Safety.Memory.empty).map Prod.snd", outcome));
     }
     AddBoundary("MathSByteRemainder", "TupleDivision::MathSByteRemainder(sbyte,sbyte)", claims);
 }
@@ -361,7 +386,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
 foreach (var (name, type, width) in new[] { ("MathOutInt32", typeof(int), 4), ("MathOutInt64", typeof(long), 8) })
 {
     var method = runtime.GetMethod(name)!;
-    var claims = new List<string>();
+    var claims = new List<(string Left, string Right)>();
     foreach (var left in operands[type])
     foreach (var right in operands[type])
     {
@@ -371,16 +396,16 @@ foreach (var (name, type, width) in new[] { ("MathOutInt32", typeof(int), 4), ("
         var outcome = fault is null
             ? $".ok ([{StackArgument(value!)}], .ok {StackArgument(inputs[2]!)[".scalar ".Length..]})"
             : $".error ⟨0, 3, .arithmetic .{fault}⟩";
-        claims.Add("(CIL.Safety.invoke Extracted.program 8 0 " +
+        claims.Add(("(CIL.Safety.invoke Extracted.program 8 0 " +
             $"[{StackArgument(left)}, {StackArgument(right)}, Tests.reference] memory).map " +
-            $"(fun (final, result) => (result, CIL.Safety.loadValue final (.address ⟨0, 0⟩) {width})) = {outcome}");
+            $"(fun (final, result) => (result, CIL.Safety.loadValue final (.address ⟨0, 0⟩) {width}))", outcome));
     }
     // The division faults before the store, so a null destination still reports DivideByZeroException.
     string NullDestination(int left, int right) => "CIL.Safety.invoke Extracted.program 8 0 " +
         $"[{StackArgument(Convert.ChangeType(left, type))}, {StackArgument(Convert.ChangeType(right, type))}, " +
         ".reference .null] Tests.caller";
-    claims.Add($"{NullDestination(1, 0)} = .error ⟨0, 3, .arithmetic .divideByZero⟩");
-    claims.Add($"{NullDestination(7, 2)} = .error ⟨0, 3, .memory .nullDereference .null 0⟩");
+    claims.Add((NullDestination(1, 0), ".error ⟨0, 3, .arithmetic .divideByZero⟩"));
+    claims.Add((NullDestination(7, 2), ".error ⟨0, 3, .memory .nullDereference .null 0⟩"));
     AddBoundary(name, $"TupleDivision::{name}({LeanType(type)},{LeanType(type)},{LeanType(type)}&)", claims);
 }
 foreach (var required in new[] { "sbyte divideByZero", "int overflow", "long overflow", "nint overflow",
