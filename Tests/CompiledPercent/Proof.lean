@@ -254,7 +254,7 @@ theorem imageFromEmpty (budget : Option Nat) : imageExecution budget := by
     have same : image.methods = executable := by simpa [linkedProgram, found] using generated
     have ready : image.initialMemory budget = .ok initial := by
       simpa [ProgramEntry.initialMemory, inputs, found] using loaded
-    refine ⟨image, initial, found, ready, ?_⟩
+    refine ⟨image, initial, rfl, ready, ?_⟩
     intro value
     rw [ProgramEntry.invoke, ready, same]
     exact congrArg Except.ok (runs value)
