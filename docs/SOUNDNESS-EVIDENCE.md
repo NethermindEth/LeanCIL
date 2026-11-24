@@ -619,6 +619,11 @@ byref aggregate layouts: raw catalog, selected entries, nested reindexing, compu
 uniqueness and signature coverage. Extraction also compares the pinned DLL metadata. These checks
 do not verify Cecil or remove runtime assumptions. See [typed imports](TYPED-IMPORTS.md).
 
+The extractor selects imported layout definitions and assigns layout indices using the assembly,
+namespace and simple name of each enclosing type and the type itself. Generic arguments are part
+of the lookup. Lean layout rows still use the scoped display name. Extraction rejects ambiguous
+display names before emitting those rows.
+
 An imported aggregate local sizes caller frame storage from the same pinned metadata that byref
 contracts already trust; it adds a consumer and no trusted source. `ImportedLocalLayoutsBound`
 requires every caller layout entry whose identity a slot publishes to equal that slot's selected

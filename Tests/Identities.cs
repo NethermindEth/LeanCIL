@@ -35,6 +35,7 @@ if (args.Length == 0 || args.Contains("--emissions-only", StringComparer.Ordinal
 if (args.Contains("--pair-signatures-only", StringComparer.Ordinal))
 {
     CheckPairSignatures();
+    CheckLayoutNames();
     return;
 }
 if (args.Contains("--exception-types-only", StringComparer.Ordinal))
@@ -75,6 +76,7 @@ CheckHeapBounds();
 CheckAssemblyCache();
 CheckFieldReferences();
 CheckPairSignatures();
+CheckLayoutNames();
 var directory = At("artifacts/Identities");
 Directory.CreateDirectory(directory);
 var examplesPath = At("Examples/Assembly/bin/Examples.dll");
@@ -331,6 +333,8 @@ static void CheckPairSignatures()
     if (Layout(control) != 8) throw new InvalidOperationException("Unexpected primitive pair size");
     Refuses("CLASS after VALUETYPE", "value-type signature",
         () => Layout(PairSignatureImage(secondValueType: false)));
+    Refuses("CLASS after cached VALUETYPE", "value-type signature",
+        () => Layout(PairSignatureImage(secondValueType: false), cached: true));
     var named = PairSignatureImage(namedArgument: true);
     Refuses("named Int32 argument", "Unsupported field type", () => Layout(named));
     Refuses("named Int32 after cached primitive layout", "Unsupported field type", () => Layout(named, cached: true));
@@ -341,6 +345,63 @@ static void CheckPairSignatures()
         Refuses($"{form} trailing byte", "trailing", () => Slice(suffix, token));
     }
     if (failures.Count != 0) throw new InvalidOperationException(string.Join(", ", failures));
+}
+
+static void CheckLayoutNames()
+{
+    byte[] Image(bool duplicate)
+    {
+        using var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Examples.dll"));
+        var first = module.Types.Single(type => type.FullName == "Examples.Packet");
+        var second = module.Types.Single(type => type.FullName == "Examples.LargePacket");
+        second.Namespace = duplicate ? first.Namespace : "";
+        second.Name = duplicate ? first.Name : first.FullName;
+        var both = new TypeDefinition("Examples", "BothPackets", TypeAttributes.SequentialLayout |
+            TypeAttributes.Sealed, first.BaseType);
+        module.Types.Add(both);
+        both.Fields.Add(new FieldDefinition("First", FieldAttributes.Public, first));
+        both.Fields.Add(new FieldDefinition("Second", FieldAttributes.Public, second));
+        using var stream = new MemoryStream();
+        module.Write(stream);
+        return stream.ToArray();
+    }
+
+    var image = Image(duplicate: false);
+    using (var pins = new PinnedAssemblies(image, Convert.ToHexStringLower(SHA256.HashData(image)), []))
+    {
+        var module = pins.Selected;
+        var both = module.Types.Single(type => type.Name == "BothPackets");
+        var first = both.Fields[0].FieldType.Resolve();
+        var second = both.Fields[1].FieldType.Resolve();
+        var context = new MetadataValidation.LayoutContext(module, "scalar");
+        context.AddImported([first]);
+        if (first.FullName != second.FullName || context.IsImported(second) || context.Canonical(second) != second)
+            throw new InvalidOperationException("A different TypeDef acquired the first Packet's import");
+        context.AddImported([second]);
+        var evidence = new LayoutEvidence([both, first, second], context);
+        if (evidence.Index(first) == evidence.Index(second) || evidence.Index(first) < 0 || evidence.Index(second) < 0)
+            throw new InvalidOperationException("Two distinct Packet TypeDefs share a layout index");
+        var runtime = System.Reflection.Assembly.Load(image).ManifestModule;
+        foreach (var type in new[] { first, second, both })
+        {
+            var actual = runtime.ResolveType(type.MetadataToken.ToInt32());
+            if (context.Canonical(type) != type ||
+                context.Size(type) != System.Runtime.InteropServices.Marshal.SizeOf(actual))
+                throw new InvalidOperationException("Incorrect layout for TypeDef " + type.MetadataToken);
+        }
+    }
+
+    var invalid = Image(duplicate: true);
+    using var repeated = new PinnedAssemblies(invalid, Convert.ToHexStringLower(SHA256.HashData(invalid)), []);
+    var packet = repeated.Selected.Types.First(type => type.Name == "Packet");
+    try { MetadataValidation.AggregateLayout(packet, repeated.Selected); }
+    catch (InvalidDataException error) when (
+        error.Message.StartsWith("Unsupported aggregate layout:", StringComparison.Ordinal))
+    {
+        Console.WriteLine("PASS distinct Packet TypeDefs retain their CLR sizes and duplicate definitions are refused");
+        return;
+    }
+    throw new InvalidOperationException("Accepted two definitions with the same metadata name and scope");
 }
 
 static void CheckFieldReferences()

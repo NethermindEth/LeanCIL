@@ -12,8 +12,8 @@ internal sealed class LayoutEvidence
     readonly string[] identityTerms;
     readonly Dictionary<string, string> namedOperandTypes = new(StringComparer.Ordinal);
     // Raw metadata is topological; emitted layout constants retain the caller supplied order.
-    readonly Dictionary<string, int> emittedIndices = new(StringComparer.Ordinal);
-    readonly Dictionary<string, int> typeIndices = new(StringComparer.Ordinal);
+    readonly Dictionary<StructuralSignatures.Signature, int> emittedIndices = [];
+    readonly Dictionary<StructuralSignatures.Signature, int> typeIndices = [];
     readonly MetadataValidation.LayoutContext layouts;
     string Architecture => layouts.Architecture;
 
@@ -21,14 +21,14 @@ internal sealed class LayoutEvidence
     {
         this.layouts = layouts;
         for (var index = 0; index < types.Length; index++)
-            emittedIndices.TryAdd(Identity(types[index]), index);
+            emittedIndices.TryAdd(layouts.Signature(types[index]), index);
         rawTypes = Topological(types);
         identityTerms = new string[rawTypes.Length];
         for (var index = 0; index < rawTypes.Length; index++)
         {
             var type = rawTypes[index];
             var identity = Identity(type);
-            typeIndices.Add(identity, index);
+            typeIndices.Add(layouts.Signature(type), index);
             identityTerms[index] = rawTypes.Length == 1 ? IdentityText.Quote(identity) :
                 ScopedIdentityTerm(identity, Scope(type).Length + "::".Length);
         }
@@ -37,10 +37,10 @@ internal sealed class LayoutEvidence
     TypeReference[] Topological(TypeReference[] entries)
     {
         var ordered = new List<TypeReference>();
-        var seen = new HashSet<string>();
+        var seen = new HashSet<StructuralSignatures.Signature>();
         void Include(TypeReference type)
         {
-            if (!seen.Add(Identity(type))) return;
+            if (!seen.Add(layouts.Signature(type))) return;
             foreach (var field in layouts.Fields(type))
                 if (MetadataValidation.IsAggregate(field.Type, type.Module)) Include(field.Type);
             ordered.Add(type);
@@ -116,7 +116,8 @@ internal sealed class LayoutEvidence
 
     internal string[] Identities => rawTypes.Select(Identity).ToArray();
 
-    internal int Index(TypeReference type) => typeIndices.GetValueOrDefault(Identity(type), -1);
+    internal int Index(TypeReference type) => typeIndices.Count != 0 && type.GetElementType().MetadataToken.RID != 0
+        ? typeIndices.GetValueOrDefault(layouts.Signature(type), -1) : -1;
 
     // Layouts in one assembly share the UTF-8 encoding of its scope during kernel reduction.
     static string ScopedIdentityTerm(string identity, int boundary)
@@ -216,7 +217,7 @@ internal sealed class LayoutEvidence
         lean.AppendLine("def computedLayouts : Array Extraction.ComputedLayout := #[" +
             string.Join(", ", rawTypes.Select(type =>
             {
-                var index = emittedIndices.GetValueOrDefault(Identity(type), -1);
+                var index = emittedIndices[layouts.Signature(type)];
                 var alignment = layouts.AggregateLayout(type).Alignment;
                 return $"⟨layout{index}, {alignment}⟩";
             })) + "]");

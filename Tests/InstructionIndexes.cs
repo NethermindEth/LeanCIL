@@ -14,6 +14,41 @@ using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
+// Layout identities come from the same physical rows as the instructions that use them.
+static void WriteLayoutFixture(string source, string destination)
+{
+    using var module = ModuleDefinition.ReadModule(source);
+    var valueType = module.GetType("Examples.Packet").BaseType;
+    var inner = new TypeDefinition("Fixture", "ZInner", Mono.Cecil.TypeAttributes.Public |
+        Mono.Cecil.TypeAttributes.Sealed | Mono.Cecil.TypeAttributes.SequentialLayout,
+        valueType);
+    inner.Fields.Add(new FieldDefinition("Value", Mono.Cecil.FieldAttributes.Public, module.TypeSystem.UInt64));
+    module.Types.Add(inner);
+    var outer = new TypeDefinition("Fixture", "AOuter", Mono.Cecil.TypeAttributes.Public |
+        Mono.Cecil.TypeAttributes.Sealed | Mono.Cecil.TypeAttributes.SequentialLayout,
+        valueType);
+    outer.Fields.Add(new FieldDefinition("Inner", Mono.Cecil.FieldAttributes.Public, inner));
+    module.Types.Add(outer);
+    var intrinsicsScope = module.AssemblyReferences.Single(reference => reference.Name == "System.Runtime.Intrinsics");
+    var vector = new GenericInstanceType(new TypeReference("System.Runtime.Intrinsics", "Vector256`1",
+        module, intrinsicsScope, true));
+    vector.GenericArguments.Add(module.TypeSystem.UInt64);
+    var vectorOwner = new TypeDefinition("Fixture", "VectorOwner", outer.Attributes, valueType);
+    module.Types.Add(vectorOwner);
+    vectorOwner.Fields.Add(new FieldDefinition("Tag", Mono.Cecil.FieldAttributes.Public, module.TypeSystem.Byte));
+    vectorOwner.Fields.Add(new FieldDefinition("Vector", Mono.Cecil.FieldAttributes.Public, vector));
+    var chain = new List<TypeDefinition>();
+    for (var depth = 0; depth < 129; depth++)
+    {
+        var nested = new TypeDefinition("Fixture", "Depth" + depth, outer.Attributes, valueType);
+        nested.Fields.Add(new FieldDefinition("Child", Mono.Cecil.FieldAttributes.Public,
+            depth == 0 ? module.TypeSystem.UInt64 : chain[^1]));
+        module.Types.Add(nested);
+        chain.Add(nested);
+    }
+    module.Write(destination);
+}
+
 var extractor = Assembly.LoadFrom(ExtractorPath);
 var indexType = extractor.GetType("Nethermind.LeanCIL.InstructionIndex", true)!;
 var position = indexType.GetMethod("Position", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -45,7 +80,10 @@ using (var core = new PinnedMetadata(extractor, typeof(int).Assembly.Location))
 }
 Console.WriteLine("PASS pinned CoreLib integer definitions retain their scalar storage");
 
-using var pinned = new PinnedMetadata(extractor, At("Examples/Assembly/bin/Examples.dll"));
+var layoutFixture = At("artifacts/InstructionIndexes/Layouts.dll");
+Directory.CreateDirectory(Path.GetDirectoryName(layoutFixture)!);
+WriteLayoutFixture(At("Examples/Assembly/bin/Examples.dll"), layoutFixture);
+using var pinned = new PinnedMetadata(extractor, layoutFixture);
 var module = pinned.Module;
 var method = new MethodDefinition("Body", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
 var first = Instruction.Create(OpCodes.Nop);
@@ -138,19 +176,8 @@ Validate(choose);
 linked.Clear();
 if (Links(linked).Count != 0 || linked.Count != 0) throw new Exception("A branch carries a call link");
 Console.WriteLine("PASS call indexes reject missing callees and a switch requires no outline descriptor or call link");
-var runtimeScope = module.AssemblyReferences.Single(reference => reference.Name == "System.Runtime");
-module.TypeSystem.UInt64.Scope = runtimeScope;
-var valueType = new TypeReference("System", "ValueType", module, runtimeScope);
-var inner = new TypeDefinition("Fixture", "ZInner", Mono.Cecil.TypeAttributes.Public |
-    Mono.Cecil.TypeAttributes.Sealed | Mono.Cecil.TypeAttributes.SequentialLayout,
-    valueType);
-inner.Fields.Add(new FieldDefinition("Value", Mono.Cecil.FieldAttributes.Public, module.TypeSystem.UInt64));
-module.Types.Add(inner);
-var outer = new TypeDefinition("Fixture", "AOuter", Mono.Cecil.TypeAttributes.Public |
-    Mono.Cecil.TypeAttributes.Sealed | Mono.Cecil.TypeAttributes.SequentialLayout,
-    valueType);
-outer.Fields.Add(new FieldDefinition("Inner", Mono.Cecil.FieldAttributes.Public, inner));
-module.Types.Add(outer);
+var inner = module.GetType("Fixture.ZInner");
+var outer = module.GetType("Fixture.AOuter");
 var contextType = extractor.GetType("Nethermind.LeanCIL.MetadataValidation+LayoutContext", true)!;
 object Context(ModuleDefinition owner, string architecture) => Activator.CreateInstance(contextType,
     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [owner, architecture], null)!;
@@ -186,15 +213,11 @@ inner.Fields.Add(duplicateField);
 RejectLayout(outer, "Invalid field layout: ");
 inner.Fields.Remove(duplicateField);
 Layout(outer);
-var duplicateType = new TypeDefinition(inner.Namespace, inner.Name, inner.Attributes, inner.BaseType);
-module.Types.Add(duplicateType);
-RejectLayout(outer, "Unsupported aggregate layout: ");
-module.Types.Remove(duplicateType);
 inner.Fields.Add(new FieldDefinition("Second", Mono.Cecil.FieldAttributes.Public, module.TypeSystem.UInt64));
 var changedLayout = Layout(outer);
 if ((int)changedLayout.GetType().GetProperty("Size")!.GetValue(changedLayout)! != 16)
     throw new Exception("Aggregate indexes were reused after metadata changed");
-Console.WriteLine("PASS aggregate name indexes preserve duplicate rejection and fresh-call mutation visibility");
+Console.WriteLine("PASS aggregate validation observes field changes between calls");
 
 var contextLayout = contextType.GetMethod("AggregateLayout", BindingFlags.Instance | BindingFlags.NonPublic)!;
 var contextFields = contextType.GetMethod("Fields", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -208,15 +231,7 @@ if (!ReferenceEquals(contextFields.Invoke(freshContext, [inner]), contextFields.
     (int)contextFieldIndex.Invoke(freshContext, [inner, inner.Fields[1], false])! != 1 ||
     (int)contextFieldIndex.Invoke(freshContext, [inner, duplicateField, false])! != -1)
     throw new Exception("Field snapshots lost field identity or instance order");
-var intrinsicsScope = module.AssemblyReferences.Single(reference => reference.Name == "System.Runtime.Intrinsics");
-var vector = new GenericInstanceType(new TypeReference("System.Runtime.Intrinsics", "Vector256`1",
-    module, intrinsicsScope, true));
-vector.GenericArguments.Add(module.TypeSystem.UInt64);
-var vectorOwner = new TypeDefinition("Fixture", "VectorOwner", outer.Attributes, valueType);
-module.Types.Add(vectorOwner);
-module.TypeSystem.Byte.Scope = runtimeScope;
-vectorOwner.Fields.Add(new FieldDefinition("Tag", Mono.Cecil.FieldAttributes.Public, module.TypeSystem.Byte));
-vectorOwner.Fields.Add(new FieldDefinition("Vector", Mono.Cecil.FieldAttributes.Public, vector));
+var vectorOwner = module.GetType("Fixture.VectorOwner");
 int ContextSize(object selected, TypeReference type)
 {
     var result = contextLayout.Invoke(selected, [type])!;
@@ -225,15 +240,7 @@ int ContextSize(object selected, TypeReference type)
 if (ContextSize(Context(module, "x64"), vectorOwner) != 64 ||
     ContextSize(Context(module, "arm64"), vectorOwner) != 48)
     throw new Exception("Layout results leaked between architectures");
-var chain = new List<TypeDefinition>();
-for (var depth = 0; depth < 129; depth++)
-{
-    var nested = new TypeDefinition("Fixture", "Depth" + depth, outer.Attributes, valueType);
-    nested.Fields.Add(new FieldDefinition("Child", Mono.Cecil.FieldAttributes.Public,
-        depth == 0 ? module.TypeSystem.UInt64 : chain[^1]));
-    module.Types.Add(nested);
-    chain.Add(nested);
-}
+var chain = Enumerable.Range(0, 129).Select(depth => module.GetType("Fixture.Depth" + depth)).ToArray();
 var deepContext = Context(module, "scalar");
 ContextSize(deepContext, chain[64]);
 try

@@ -239,10 +239,10 @@ internal sealed class StructuralSignatures(PinnedAssemblies owner)
     internal Func<TypeReference, Signature> LayoutSnapshot()
     {
         Dictionary<TypeReference, int> complete = new(ReferenceEqualityComparer.Instance);
-        return type => new(this, Types([type], complete)[0]);
+        return type => new(this, Types([type], complete, layout: true)[0]);
     }
 
-    int[] Types(TypeReference[] roots, Dictionary<TypeReference, int>? complete = null)
+    int[] Types(TypeReference[] roots, Dictionary<TypeReference, int>? complete = null, bool layout = false)
     {
         RequireLive();
         complete ??= new(ReferenceEqualityComparer.Instance);
@@ -254,8 +254,15 @@ internal sealed class StructuralSignatures(PinnedAssemblies owner)
             if (complete.ContainsKey(entry.Type)) continue;
             if (entry.Snapshot is { } snapshot)
             {
-                int id = snapshot.Prefix.Length == 0 ? Leaf(entry.Type) :
-                    Intern(snapshot.Prefix.Concat(snapshot.Children.Select(child => (long)complete[child])));
+                int id;
+                if (snapshot.Prefix.Length == 0)
+                {
+                    id = Leaf(entry.Type);
+                    // Layouts distinguish primitive element codes and named CLASS/VALUETYPE occurrences.
+                    if (layout) id = Intern([17, id, IsPrimitiveElement(entry.Type) ? 1 : 0,
+                        entry.Type.IsValueType ? 1 : 0]);
+                }
+                else id = Intern(snapshot.Prefix.Concat(snapshot.Children.Select(child => (long)complete[child])));
                 complete.Add(entry.Type, id);
                 visiting.Remove(entry.Type);
                 continue;

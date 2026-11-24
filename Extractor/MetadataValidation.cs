@@ -114,29 +114,57 @@ internal static class MetadataValidation
     // A read-only validation/emission phase owns its context; metadata rewrites require a new one.
     internal sealed class LayoutContext(ModuleDefinition module, string architecture)
     {
-        readonly Dictionary<string, AggregateInfo> validated = new(StringComparer.Ordinal);
+        readonly Dictionary<StructuralSignatures.Signature, AggregateInfo> validated = [];
         readonly Dictionary<TypeReference, FieldSet> fields = new(ReferenceEqualityComparer.Instance);
         // Selected definitions of admitted imported layouts; the ambient resolver never supplies one.
-        readonly Dictionary<string, TypeDefinition> imported = new(StringComparer.Ordinal);
-        Dictionary<string, int>? typeCounts;
+        readonly Dictionary<StructuralSignatures.Signature, TypeDefinition> imported = [];
+        readonly Dictionary<ModuleDefinition, ILookup<string, TypeDefinition>> definitions =
+            new(ReferenceEqualityComparer.Instance);
+        Func<TypeReference, StructuralSignatures.Signature>? signatureOf;
         internal string Architecture => architecture;
+
+        /// <summary>The row-based signature shared by lookups during this read-only layout pass.</summary>
+        internal StructuralSignatures.Signature Signature(TypeReference type)
+        {
+            signatureOf ??= StructuralSignatures.Current.LayoutSnapshot();
+            return signatureOf(type);
+        }
 
         internal void AddImported(IEnumerable<TypeDefinition> definitions)
         {
             foreach (TypeDefinition definition in definitions)
-                imported.TryAdd(LayoutEvidence.Identity(definition), definition);
+                imported.TryAdd(Signature(definition), definition);
         }
 
+        TypeDefinition? ImportedDefinition(TypeReference type) =>
+            imported.Count != 0 && type.IsValueType && type is not (TypeSpecification or GenericParameter)
+                ? imported.GetValueOrDefault(Signature(type)) : null;
+
         /// <summary>The type names an admitted layout of another assembly.</summary>
-        internal bool IsImported(TypeReference type) =>
-            type is not TypeSpecification && imported.ContainsKey(LayoutEvidence.Identity(type));
+        internal bool IsImported(TypeReference type) => ImportedDefinition(type) is not null;
 
         /// <summary>The type has a layout table entry: one of this module's aggregates or an imported layout.</summary>
         internal bool IsLayout(TypeReference type) => IsAggregate(type, module) || IsImported(type);
 
         /// <summary>An imported reference replaced by its selected definition; other types unchanged.</summary>
-        internal TypeReference Canonical(TypeReference type) => type is not TypeSpecification &&
-            imported.TryGetValue(LayoutEvidence.Identity(type), out TypeDefinition? definition) ? definition : type;
+        internal TypeReference Canonical(TypeReference type) => ImportedDefinition(type) ?? type;
+
+        ILookup<string, TypeDefinition> Definitions(ModuleDefinition owner)
+        {
+            if (definitions.TryGetValue(owner, out var known)) return known;
+            var rows = owner.GetTypes().ToLookup(type => type.FullName, StringComparer.Ordinal);
+            definitions.Add(owner, rows);
+            return rows;
+        }
+
+        /// <summary>A layout named in a generated Lean table must have a unique spelling in its module.</summary>
+        internal void RequireEmittableName(TypeReference type)
+        {
+            if (ValueTuples.Is(type)) return;
+            var definition = LayoutDefinition(type.GetElementType());
+            if (Definitions(definition.Module)[definition.FullName].Skip(1).Any())
+                throw new InvalidDataException("Ambiguous layout identity: " + LayoutEvidence.Identity(type));
+        }
 
         internal void Require(ModuleDefinition owner, string requestedArchitecture)
         {
@@ -180,29 +208,21 @@ internal static class MetadataValidation
 
         internal AggregateInfo AggregateLayout(TypeReference reference)
         {
-            if (validated.TryGetValue(LayoutEvidence.Identity(reference), out var cached))
+            var definition = ImportedDefinition(reference);
+            reference = definition ?? reference;
+            var signature = Signature(reference);
+            if (validated.TryGetValue(signature, out var cached)) return cached;
+            if (definition is not null || Home(reference, module).Module != module)
             {
-                if (ValueTuples.Is(reference)) ValueTuples.RequirePrimitiveArguments((GenericInstanceType)reference);
-                return cached;
-            }
-            if (imported.TryGetValue(LayoutEvidence.Identity(reference), out TypeDefinition? definition))
-            {
-                // The selected module's own metadata computes an imported layout, as admission did.
-                var external = MetadataValidation.AggregateLayout(definition, definition.Module, architecture);
-                validated.Add(LayoutEvidence.Identity(reference), external);
+                var owner = definition?.Module ?? module;
+                var external = MetadataValidation.AggregateLayout(reference, owner, architecture);
+                validated.Add(signature, external);
                 return external;
             }
-            if (Home(reference, module).Module != module)
-            {
-                var referenced = MetadataValidation.AggregateLayout(reference, module, architecture);
-                validated.Add(LayoutEvidence.Identity(reference), referenced);
-                return referenced;
-            }
-            typeCounts ??= module.GetTypes().CountBy(type => type.FullName, StringComparer.Ordinal).ToDictionary();
             // A new root keeps its own recursion-depth check, even if a child was validated earlier.
-            var layout = MetadataValidation.AggregateLayout(reference, module, architecture, [],
-                new Dictionary<string, AggregateInfo>(), typeCounts);
-            validated.Add(LayoutEvidence.Identity(reference), layout);
+            var layout = MetadataValidation.AggregateLayout(reference, module, architecture, new LayoutWalk(Signature),
+                Definitions(module));
+            validated.Add(signature, layout);
             return layout;
         }
 
@@ -227,8 +247,9 @@ internal static class MetadataValidation
     internal static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module, string architecture = "scalar")
     {
         (reference, module) = Home(reference, module);
-        return AggregateLayout(reference, module, architecture, [], new Dictionary<string, AggregateInfo>(),
-            module.GetTypes().CountBy(type => type.FullName, StringComparer.Ordinal).ToDictionary());
+        var walk = new LayoutWalk(StructuralSignatures.Current.LayoutSnapshot());
+        return AggregateLayout(reference, module, architecture, walk,
+            module.GetTypes().ToLookup(type => type.FullName, StringComparer.Ordinal));
     }
 
     // A pinned referenced type is laid out from its own module's definition, never the referencing module.
@@ -238,8 +259,7 @@ internal static class MetadataValidation
         if (reference is GenericInstanceType closed && GenericStructs.Is(closed) && closed.Scope != module &&
             PinnedAssemblies.Active?.ModuleOf(closed.ElementType) is { } owner)
         {
-            var definition = closed.ElementType.Resolve() ??
-                throw new InvalidDataException("Unresolved pinned aggregate: " + closed.FullName);
+            var definition = LayoutDefinition(closed.ElementType);
             if (definition.Module != owner || !definition.IsValueType || !closed.ElementType.IsValueType)
                 throw new InvalidDataException("Unsupported aggregate layout: " + closed.FullName);
             var homed = new GenericInstanceType(definition);
@@ -248,44 +268,63 @@ internal static class MetadataValidation
         }
         return reference is not TypeSpecification && reference.Scope != module &&
             PinnedAssemblies.Active?.ModuleOf(reference) is { } home
-            ? (reference.Resolve() ??
-                throw new InvalidDataException("Unresolved pinned aggregate: " + reference.FullName), home)
+            ? (LayoutDefinition(reference), home)
             : (reference, module);
+    }
+
+    // Cecil resolves a layout's nominal head; the pinned rows must identify that same declaration.
+    static TypeDefinition LayoutDefinition(TypeReference head)
+    {
+        var definition = head.Resolve() ?? throw new InvalidDataException("Unresolved aggregate: " + head.FullName);
+        if (!ReferenceEquals(head, definition) &&
+            StructuralSignatures.Current.Type(head) != StructuralSignatures.Current.Type(definition))
+            throw new InvalidDataException("Mismatched aggregate definition: " + head.FullName);
+        return definition;
+    }
+
+    // Each root checks its own nesting depth and shares computed children, including children in another module.
+    sealed class LayoutWalk(Func<TypeReference, StructuralSignatures.Signature> signature)
+    {
+        internal readonly Func<TypeReference, StructuralSignatures.Signature> Signature = signature;
+        internal readonly HashSet<StructuralSignatures.Signature> Active = [];
+        internal readonly Dictionary<StructuralSignatures.Signature, AggregateInfo> Computed = [];
     }
 
     // A child in another pinned module shares the root's active set, so a cycle through modules is rejected.
     static AggregateInfo Nested(TypeReference type, ModuleDefinition module, string architecture,
-        HashSet<string> active, Dictionary<string, AggregateInfo> layouts, Dictionary<string, int> typeCounts)
+        LayoutWalk walk, ILookup<string, TypeDefinition> definitions)
     {
         var (home, owner) = Home(type, module);
-        return owner == module ? AggregateLayout(type, module, architecture, active, layouts, typeCounts)
-            : AggregateLayout(home, owner, architecture, active, layouts,
-                owner.GetTypes().CountBy(definition => definition.FullName, StringComparer.Ordinal).ToDictionary());
+        return owner == module ? AggregateLayout(type, module, architecture, walk, definitions)
+            : AggregateLayout(home, owner, architecture, walk,
+                owner.GetTypes().ToLookup(definition => definition.FullName, StringComparer.Ordinal));
     }
 
     static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module, string architecture,
-        HashSet<string> active, Dictionary<string, AggregateInfo> layouts, Dictionary<string, int> typeCounts)
+        LayoutWalk walk, ILookup<string, TypeDefinition> definitions)
     {
         if (ValueTuples.Is(reference)) return TupleLayout(reference, module, architecture);
-        var type = reference.Resolve() ?? throw new InvalidDataException("Unresolved aggregate");
+        var type = LayoutDefinition(reference.GetElementType());
         if (reference is GenericInstanceType closed) GenericStructs.Validate(closed);
         if (reference.Scope != module || type.Module != module || !reference.IsValueType ||
             !type.IsValueType || !RuntimeModels.HasRuntimeValueTypeBase(type) ||
             !(type.IsExplicitLayout || type.IsSequentialLayout) || (type.HasGenericParameters && reference is not GenericInstanceType) ||
             type.ClassSize is < -1 or > 65536 || (type.IsExplicitLayout && type.ClassSize <= 0) ||
             type.CustomAttributes.Any(a => a.AttributeType.FullName == "System.Runtime.CompilerServices.InlineArrayAttribute") ||
-            typeCounts.GetValueOrDefault(type.FullName) != 1)
+            definitions[type.FullName].Count(other => ReferenceEquals(type, other) ||
+                StructuralSignatures.Current.Type(type) == StructuralSignatures.Current.Type(other)) != 1)
             throw new InvalidDataException($"Unsupported aggregate layout: {reference.FullName}");
 
-        if (layouts.TryGetValue(LayoutEvidence.Identity(reference), out var cached)) return cached;
-        if (active.Count >= 128 || !active.Add(LayoutEvidence.Identity(reference)))
+        var signature = walk.Signature(reference);
+        if (walk.Computed.TryGetValue(signature, out var cached)) return cached;
+        if (walk.Active.Count >= 128 || !walk.Active.Add(signature))
             throw new InvalidDataException($"Recursive or excessively nested aggregate layout: {reference.FullName}");
 
         if (reference is GenericInstanceType instance)
             foreach (var argument in instance.GenericArguments)
             {
                 if (IsAggregate(argument, module))
-                    _ = Nested(argument, module, architecture, active, layouts, typeCounts);
+                    _ = Nested(argument, module, architecture, walk, definitions);
                 else
                 {
                     RuntimeModels.ValidateTypeIdentity(argument, module, architecture);
@@ -312,7 +351,7 @@ internal static class MetadataValidation
             int? vectorWidth = VectorFieldWidth(fieldType);
             if (fieldType is TypeSpecification && vectorWidth is null && !aggregate)
                 throw new InvalidDataException($"Unsupported field type: {fieldType.FullName}");
-            var nested = aggregate ? Nested(fieldType, module, architecture, active, layouts, typeCounts) : null;
+            var nested = aggregate ? Nested(fieldType, module, architecture, walk, definitions) : null;
             int width = nested?.Size ?? vectorWidth ?? PrimitiveWidth(fieldType);
             if (vectorWidth == 32 && pack > 16 && architecture is not ("x64" or "arm64"))
                 throw new InvalidDataException($"Unsupported vector field packing: {field.FullName}");
@@ -334,9 +373,9 @@ internal static class MetadataValidation
         var size = type.ClassSize > 0 ? Math.Max(end, type.ClassSize) : (end + alignment - 1) / alignment * alignment;
         size = Math.Max(1, size);
         if (size > 65536) throw new InvalidDataException($"Unsupported aggregate size: {reference.FullName}");
-        active.Remove(LayoutEvidence.Identity(reference));
+        walk.Active.Remove(signature);
         var result = new AggregateInfo(size, alignment, offsets);
-        layouts.Add(LayoutEvidence.Identity(reference), result);
+        walk.Computed.Add(signature, result);
         return result;
     }
 
