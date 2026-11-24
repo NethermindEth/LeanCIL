@@ -69,7 +69,8 @@ Exact scalar matching covers integer literals, wrapping/checked add/subtract/mul
 unsigned divide/remainder, bitwise operations, shifts, negation, integer comparisons, admitted
 integer conversions and all short/long compare-and-branch encodings. Literal ranges and
 high-bit-set int64 values, conversion width/signedness/checkedness and exact branch targets cannot
-pass by stack effect alone. Type-test folds and runtime queries can emit scalar constants when their site checks pass.
+pass by stack effect alone. Type tests keep their `ldtoken`, getter and comparison or branch
+instructions; a constant runtime query, such as a hardware feature test, only decides which pcs are live.
 A `sizeof` instruction pushes the width of its closed operand. An `Unsafe.SizeOf` call retains
 its call instruction and obtains its result from its runtime model.
 
@@ -401,12 +402,13 @@ Lean takes on trust that each carried row, heap entry and body is the image's by
 copy cannot be detected without the whole stream; every row must still have the length the header's
 widths give, every blob its length prefix and every string one terminating zero), the PE container
 where a body sits in the image and the mapping of its address to its bytes, definitions in platform assemblies (so whether a
-platform type is an enum, the field order of `ValueTuple`, and that `System.Object` declares no
-instance fields), public key tokens of referenced assemblies, imported implementation definitions,
+platform type is a value type, a class or an enum, an enum's underlying type, the field order of
+`ValueTuple`, and that `System.Object` declares no instance fields), public key tokens of referenced assemblies, imported implementation definitions,
 raw layout content, dispatch catalog completeness, static data bytes and generic parameter constraints.
 For a generic contract import, Lean reconstructs the open definition key from the caller's
 metadata, encodes its bytes in uppercase hexadecimal and checks the closed arguments and
-signature. The implementation and interface digests belong to the deployment record.
+signature. Lean does not recompute the implementation and interface digests, the hashed part of a generic
+import identity; they belong to the deployment record.
 The import slot carries the contract closure digest separately. The verifier hashes the audited
 canonical closure and compares it with that digest. For supported static generic calls, the
 deep audit also checks the producer's MethodDef and the selected export against the slot.
