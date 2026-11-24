@@ -54,9 +54,9 @@ private def checkCarriedKeys (images : List PreparedImage) (slice : MetadataSlic
 def checkPublicKeys (images : List PinnedImage) (pins : List AssemblyPin)
     (evidence : List MethodEvidence) : Except AuditError Bool := do
   let prepared ← prepare images
-  let mut keys : Std.TreeMap String (Option Nat) := {}
+  let mut assemblies : Std.TreeMap (List Nat) AssemblyColumns := {}
   for image in prepared do
-    keys := keys.insert image.identity (← definitionKeyToken image)
+    assemblies := assemblies.insert (bytesOf image.identity) image.assembly
   for item in evidence do
     for slice in item.body.metadata.slices do
       unless pins.any (·.identity == slice.assembly.identity) do
@@ -69,12 +69,12 @@ def checkPublicKeys (images : List PinnedImage) (pins : List AssemblyPin)
     for i in [:source.layout.rowCount Table.assemblyRef] do
       seen := true
       let token ← checkedTokenOf Table.assemblyRef (i + 1) .rowOverflow
-      let text ← assemblyIdentityAt source.view source.layout token 0
-      let expected ← referenceKeyToken source token
-      match keys.get? (String.ofList (text.map Char.ofNat)) with
+      let (reference, _) ← namedAssemblyAt source.view source.layout token 0
+      match assemblies.get? reference.spelling with
       | none => complete := false
       | some actual =>
-        unless actual == expected do throw (.referenceKeyMismatch source.identity token)
+        unless actual.token == reference.token do throw (.referenceKeyMismatch source.identity token)
+        unless actual == reference do throw (.referenceScopeMismatch source.identity token)
   return seen && complete
 
 /-- All references have images whose full keys reproduce their tokens, including unsigned targets. -/

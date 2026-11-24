@@ -20,6 +20,8 @@ namespace StrictBinding
 /-- A pinned image, decoded: its identity, the checked view of its bytes and its tables. -/
 structure PreparedImage where
   identity : String
+  /-- Name, version, culture and publisher read from the defining Assembly row. -/
+  assembly : CIL.Extraction.AssemblyColumns
   view : ImageView
   layout : MetadataLayout
   /-- The offset and width of the RVA column of a MethodDef row, computed once. -/
@@ -33,9 +35,11 @@ structure PreparedImage where
 def prepareOne (pinned : PinnedImage) : Except AuditError PreparedImage := do
   let view ← ImageView.ofImage pinned.image
   let layout ← decodeMetadata view
-  if (← assemblyIdentity view layout) != asciiOf pinned.identity then
+  let assembly ← namedAssemblyAt view layout (tokenOf 0x20 1) 1
+  if assembly.2 != asciiOf pinned.identity then
     throw (.identityMismatch pinned.identity)
-  pure { identity := pinned.identity, view, layout, rvaColumn := ← layout.columnIn 0x06 0,
+  pure { identity := pinned.identity, assembly := assembly.1, view, layout,
+         rvaColumn := ← layout.columnIn 0x06 0,
          implementationColumn := ← layout.columnIn 0x06 1, columns := layout.columnTable }
 
 /-- The laid-out columns of `table` in the image's rows. -/
@@ -55,6 +59,15 @@ def prepare (images : List PinnedImage) : Except AuditError (List PreparedImage)
   match duplicateIdentity? prepared with
   | some identity => throw (.duplicateImage identity)
   | none => pure prepared
+
+/-- A referenced scope with a supplied image must match that image's physical Assembly columns. -/
+def checkedReferenceScope (images : List PreparedImage) (source : PreparedImage) (token : Nat) :
+    Except AuditError (List Nat) := do
+  let (columns, _) ← namedAssemblyAt source.view source.layout token 0
+  let scope := columns.spelling
+  if let some target := images.find? (fun image => CIL.Extraction.bytesOf image.identity == scope) then
+    unless target.assembly == columns do throw (.referenceScopeMismatch source.identity token)
+  return scope
 
 /-- The prepared image that is pinned under `identity`. -/
 def located (prepared : List PreparedImage) (identity : String) :

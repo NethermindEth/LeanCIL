@@ -73,6 +73,8 @@ inductive AuditError where
 
   /-- An AssemblyRef's key or token differs from the physical definition or the carried row. -/
   | referenceKeyMismatch (identity : String) (token : Nat)
+  /-- The named target of an AssemblyRef has different identity columns in its defining row. -/
+  | referenceScopeMismatch (identity : String) (token : Nat)
   /-- A read of `count` bytes at `offset` leaves the image. -/
   | outsideImage (offset count : Nat)
   | pe (error : PeError)

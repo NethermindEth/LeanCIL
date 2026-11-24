@@ -63,7 +63,7 @@ def ordinaryTypeName (space name : String) : Bool :=
     (metadataChars space).all (fun c => component c || c == '.')
 
 /-- A top-level TypeDef or AssemblyRef-scoped TypeRef with its physical assembly identity. -/
-private def constraintTypeParts (image : PreparedImage) (token : Nat) :
+private def constraintTypeParts (images : List PreparedImage) (image : PreparedImage) (token : Nat) :
     Except AuditError (String × ClassName) := do
   let cell := image.layout.cell image.view token
   let space ← image.layout.stringAt image.view (← cell typeNamespaceColumn)
@@ -81,15 +81,18 @@ private def constraintTypeParts (image : PreparedImage) (token : Nat) :
     | 1 => do
       let coded ← cell 0
       unless coded % 4 == 2 do throw .uncoveredConstraint
-      referenceIdentity image (← checkedTokenOf Table.assemblyRef (coded / 4) .rowOverflow)
+      let scope ← checkedReferenceScope images image
+        (← checkedTokenOf Table.assemblyRef (coded / 4) .rowOverflow)
+      let some text := spelled? scope | throw (.tables .invalidUtf8)
+      pure text
     | _ => throw .uncoveredConstraint
   let some declaration := ClassName.ofParts? [space, name] | throw (.constraintMismatch token)
   return (scope, declaration)
 
 /-- The scoped identity of a closed constraint type. -/
-private def constraintTypeName (image : PreparedImage) (token : Nat) :
+private def constraintTypeName (images : List PreparedImage) (image : PreparedImage) (token : Nat) :
     Except AuditError String := do
-  let (scope, name) ← constraintTypeParts image token
+  let (scope, name) ← constraintTypeParts images image token
   let some text := name.signatureName? | throw (.constraintMismatch token)
   return scope ++ "::" ++ text
 
@@ -98,7 +101,7 @@ private def constraintTypeName (image : PreparedImage) (token : Nat) :
 private def constraintHead (images : List PreparedImage) (image : PreparedImage)
     (head arity : Nat) (requireInterface : Bool) : Except AuditError (String × ClassName) := do
   unless tableOf head == Table.typeDef || tableOf head == Table.typeRef do throw .uncoveredConstraint
-  let (scope, name) ← constraintTypeParts image head
+  let (scope, name) ← constraintTypeParts images image head
   let (defining, row) ← if tableOf head == Table.typeDef then pure (image, head % 2^24)
     else do
       let cell := image.layout.cell image.view head
@@ -137,7 +140,7 @@ private def readApplication (images : List PreparedImage) (image : PreparedImage
     closed argument of its declaring type. The outer local interface uses scoped argument names. -/
 private def constraintIdentity (images : List PreparedImage) (image : PreparedImage) (token : Nat)
     (arguments : Option (List String) := none) : Except AuditError String := do
-  if tableOf token != Table.typeSpec then return ← constraintTypeName image token
+  if tableOf token != Table.typeSpec then return ← constraintTypeName images image token
   let blob ← image.layout.blobAt image.view (← image.layout.cell image.view token 0)
   let .ok spec := decodeTypeSpec blob | throw .uncoveredConstraint
   match spec with
@@ -159,7 +162,8 @@ private def constraintIdentity (images : List PreparedImage) (image : PreparedIm
         return scope ++ "::" ++ text ++ "<" ++ String.intercalate "," args ++ ">")
       blob.length spec true
   | .modified true modifier (.named false base) =>
-    let name := (← constraintTypeName image modifier) ++ "!" ++ (← constraintTypeName image base)
+    let name := (← constraintTypeName images image modifier) ++ "!" ++
+      (← constraintTypeName images image base)
     unless name == unmanagedTypeConstraint do throw .uncoveredConstraint
     return name
   | _ => throw .uncoveredConstraint

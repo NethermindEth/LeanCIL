@@ -296,8 +296,9 @@ theorem reference_rejects_invalid_token_widths :
 #print axioms reference_rejects_invalid_token_widths
 
 theorem spells_version_components :
-    decimal 0 = asciiOf "0" ∧ decimal 7 = asciiOf "7" ∧ decimal 10 = asciiOf "10" ∧
-    decimal 65535 = asciiOf "65535" := by
+    let digits := CIL.Extraction.decimalDigits 5
+    digits 0 = asciiOf "0" ∧ digits 7 = asciiOf "7" ∧ digits 10 = asciiOf "10" ∧
+    digits 65535 = asciiOf "65535" := by
   decide +kernel
 #print axioms spells_version_components
 

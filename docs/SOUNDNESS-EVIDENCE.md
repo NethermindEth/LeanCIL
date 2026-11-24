@@ -247,10 +247,12 @@ owner of an instance method, and enums carry their whole field lists.
 
 What `MetadataResolution` and `MetadataBinding` check:
 
-- The scope of every type is the assembly identity its `AssemblyRef` row spells (name, version,
-  culture, key token); nested types are named `Outer/Inner`, and the namespace and simple names of a
-  type and of each type enclosing it stay apart in the comparison between a reference and its
-  definition, so namespace `A.B` with name `C` is not namespace `A` with name `B.C`. A type defined
+- When a TypeRef selects a carried assembly, Lean compares the name, version, culture and publisher
+  token from its AssemblyRef with the individual fields of the defining Assembly row. It makes
+  the same comparison at the destination of an ExportedType forwarder. An empty culture and the
+  literal bytes of `neutral` both print as `Culture=neutral` and select different identities.
+  Nested types print as `Outer/Inner`. Each declaring row retains its namespace and simple name,
+  so namespace `A.B` with name `C` differs from namespace `A` with name `B.C`. A type defined
   in a carried slice has the value type, enum (with its integer type), class or interface kind its
   flags and base give. To recognize `System.ValueType`, `System.Enum` or the `System.Object` at
   the end of a class hierarchy, Lean checks the base TypeRef's own AssemblyRef. It must name
@@ -475,7 +477,7 @@ target table. The translation certificate also checks that every catalog assembl
 Constrained calls, interface dispatch, virtual slots named by external MemberRefs, unsupported
 override forms, additional metadata modules and unsupported signatures leave this fact uncovered.
 With all direct reference images supplied, the audit checks each AssemblyRef against its target's
-full publisher key or unsigned definition. It also compares each carried AssemblyRef token with
+name, version, culture and publisher token. It derives the token from the full definition key. It also compares each carried AssemblyRef token with
 the physical row in its source assembly. For scalar static generic calls on top-level classes with
 primitive type arguments, supply both the caller and the producer images. Lean reads the call
 operand, follows its MethodSpec, MemberRef, TypeRef and AssemblyRef, and requires a unique

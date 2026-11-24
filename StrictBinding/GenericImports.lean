@@ -42,8 +42,8 @@ private def primitiveArg : SigType → Option ResolvedType
   | _ => none
 
 /-- Follow a MethodSpec through the MemberRef and its top-level TypeRef to the physical AssemblyRef. -/
-private def targetAt (caller : PreparedImage) (env : MetadataEnv) (frame : Frame) (token : Nat)
-    (slot : ImportSlot) : Option (String × List Nat × List ResolvedType) := do
+private def targetAt (prepared : List PreparedImage) (caller : PreparedImage) (env : MetadataEnv)
+    (frame : Frame) (token : Nat) (slot : ImportSlot) : Option (String × List Nat × List ResolvedType) := do
   guard (token / 2^24 == Table.methodSpec)
   let spec := caller.layout.cell caller.view token
   let parent ← (spec 0).toOption
@@ -54,8 +54,8 @@ private def targetAt (caller : PreparedImage) (env : MetadataEnv) (frame : Frame
   let ty := caller.layout.cell caller.view (StrictBinding.tokenOf Table.typeRef (owner/8))
   let resolution ← (ty 0).toOption
   guard (resolution % 4 == 2)
-  let scope ← (assemblyIdentityAt caller.view caller.layout
-    (StrictBinding.tokenOf Table.assemblyRef (resolution/4)) 0).toOption
+  let scope ← (checkedReferenceScope prepared caller
+    (StrictBinding.tokenOf Table.assemblyRef (resolution/4))).toOption
   let stringAt := fun n => (caller.layout.stringAt caller.view n).toOption
   let name ← stringAt (← (member 1).toOption)
   let sig ← (caller.layout.blobAt caller.view (← (member 2).toOption)).toOption
@@ -92,7 +92,7 @@ def resolveCalls (item : MethodEvidence) (prepared : List PreparedImage) :
     let .call site := instruction.operand | none
     guard (instruction.opcode == 0x28 && site.target == .external slot.identity)
     let 0x28 :: a :: b :: c :: d :: _ := bytes.drop (header + instruction.offset) | none
-    let (identity, name, arguments) ← targetAt caller env frame (a+256*(b+256*(c+256*d))) slot
+    let (identity, name, arguments) ← targetAt prepared caller env frame (a+256*(b+256*(c+256*d))) slot
     let producer ← (located prepared identity).toOption
     -- MethodPtr indirection and metadata in linked files extend the MethodDef search space.
     guard (producer.layout.rowCount 5 == 0)

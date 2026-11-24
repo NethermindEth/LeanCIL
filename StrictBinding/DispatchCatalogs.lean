@@ -208,8 +208,8 @@ private def singleModule (image : PreparedImage) : Reading Unit := do
 
 /-- Read the namespace, outer name and nested names from the TypeRef chain, ending at
     the physical AssemblyRef. A cyclic or module-scoped reference is uncovered. -/
-private def referencedClass (image : PreparedImage) : Nat → Nat → List (List Nat) →
-    Reading (String × List (List Nat))
+private def referencedClass (images : List PreparedImage) (image : PreparedImage) :
+    Nat → Nat → List (List Nat) → Reading (List Nat × List (List Nat))
   | 0, _, _ => failure
   | fuel + 1, token, nested => do
     let cell := image.layout.cell image.view token
@@ -219,11 +219,11 @@ private def referencedClass (image : PreparedImage) : Nat → Nat → List (List
     match scope % 4 with
     | 2 =>
       let assembly ← physical (checkedTokenOf Table.assemblyRef (scope / 4) .rowOverflow)
-      return (← physical (referenceIdentity image assembly), space :: name :: nested)
+      return (← physical (checkedReferenceScope images image assembly), space :: name :: nested)
     | 3 =>
       guard space.isEmpty
       let enclosing ← physical (checkedTokenOf Table.typeRef (scope / 4) .rowOverflow)
-      referencedClass image fuel enclosing (space :: name :: nested)
+      referencedClass images image fuel enclosing (space :: name :: nested)
     | _ => failure
 
 /-- Locate a class at its TypeDef or through an AssemblyRef in the body that tests it.
@@ -233,10 +233,10 @@ private def testDefinition (prepared : List PreparedImage) (home : PreparedImage
   let _ ← physical (home.layout.rowAt token)
   if tableOf token == Table.typeDef then return (home, token % 2^24)
   guard (tableOf token == Table.typeRef)
-  let (identity, parts) ← referencedClass home (home.layout.rowCount Table.typeRef) token []
-  let some target := prepared.find? (·.identity == identity) | failure
+  let (identity, parts) ← referencedClass prepared home (home.layout.rowCount Table.typeRef) token []
+  let some target := prepared.find? (fun image => bytesOf image.identity == identity) | failure
   singleModule target
-  match ← physical (definitionRoute target parts) with
+  match ← physical (definitionRoute prepared target parts) with
   | .defined row => return (target, row)
   | .forwarded scope =>
     for image in prepared do singleModule image

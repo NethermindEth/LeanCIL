@@ -8,7 +8,8 @@ open CIL.Extraction
 
 /-- A matching top-level ExportedType must be a unique forwarder to an AssemblyRef. Nested
     exports have an ExportedType as their implementation and belong to their enclosing export. -/
-private def forwardedScope? (image : PreparedImage) (space name : List Nat) :
+private def forwardedScope? (images : List PreparedImage) (image : PreparedImage)
+    (space name : List Nat) :
     Except AuditError (Option (Nat × List Nat)) := do
   let exportedType := 0x27
   let cell := image.layout.cellOfRow image.view exportedType
@@ -22,8 +23,7 @@ private def forwardedScope? (image : PreparedImage) (space name : List Nat) :
     if target.isSome || implementation % 4 != 1 || implementation / 4 == 0 ||
         (← cell row 0) &&& 0x00200000 == 0 then throw (.typeDefMismatch row .typeName)
     let token ← checkedTokenOf Table.assemblyRef (implementation / 4) .rowOverflow
-    let identity ← assemblyIdentityAt image.view image.layout token 0
-    target := some (row, bytesOf (String.ofList (identity.map Char.ofNat)))
+    target := some (row, ← checkedReferenceScope images image token)
   return target
 
 /-- Find each nested export by its enclosing ExportedType and its exact namespace/name pair. -/
@@ -52,11 +52,11 @@ inductive DefinitionRoute where
 
 /-- Resolve the outermost name in the current image. A local definition owns its nested types,
     and a forwarder carries the whole enclosing name chain to the referenced assembly. -/
-def definitionRoute (image : PreparedImage) (parts : List (List Nat)) :
+def definitionRoute (images : List PreparedImage) (image : PreparedImage) (parts : List (List Nat)) :
     Except AuditError DefinitionRoute := do
   let space :: name :: nested := parts | throw (.typeDefMismatch 0 .typeName)
   let outer ← enumDefinition? image 0 [space, name]
-  let forward ← forwardedScope? image space name
+  let forward ← forwardedScope? images image space name
   match outer, forward with
   | some row, none =>
     if nested.isEmpty then return .defined row
@@ -73,7 +73,7 @@ def findPinnedDefinition (images : List PreparedImage) (parts : List (List Nat))
   | 0 => throw (.typeDefMismatch 0 .typeName)
   | fuel + 1 => do
     let some image := images.find? (fun image => bytesOf image.identity == scope) | return none
-    match ← definitionRoute image parts with
+    match ← definitionRoute images image parts with
     | .defined row => return some (image, row)
     | .forwarded target => findPinnedDefinition images parts target fuel
 
@@ -82,11 +82,11 @@ inductive PinnedDefinitionAt (images : List PreparedImage) (parts : List (List N
     List Nat → PreparedImage → Nat → Prop where
   | here {scope image row}
       (selected : images.find? (fun candidate => bytesOf candidate.identity == scope) = some image)
-      (defined : definitionRoute image parts = .ok (.defined row)) :
+      (defined : definitionRoute images image parts = .ok (.defined row)) :
       PinnedDefinitionAt images parts scope image row
   | forward {scope image next target row}
       (selected : images.find? (fun candidate => bytesOf candidate.identity == scope) = some image)
-      (forwarded : definitionRoute image parts = .ok (.forwarded next))
+      (forwarded : definitionRoute images image parts = .ok (.forwarded next))
       (found : PinnedDefinitionAt images parts next target row) :
       PinnedDefinitionAt images parts scope target row
 
@@ -103,7 +103,7 @@ theorem pinnedDefinitionAt_of_find {images : List PreparedImage} {parts : List (
     | none => simp [selected, pure, Except.pure] at found
     | some candidate =>
       simp only [selected] at found
-      cases route : definitionRoute candidate parts with
+      cases route : definitionRoute images candidate parts with
       | error fault => simp [route] at found
       | ok routeValue =>
         cases routeValue with

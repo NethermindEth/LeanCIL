@@ -24,14 +24,22 @@ private def medium : PinnedIndex := cil_pin_index identities 512
 private def large : PinnedIndex := cil_pin_index identities 2048
 #print axioms large
 
+/-- The same unsigned Assembly row and heap entries accompany each method. -/
+private def assembly : AssemblyMetadata :=
+  { identity := "X, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+    header := .ofCounts 0 [(32, 1)]
+    tableHeader := fixedBytes 28 0x00000000020000010000000001000000000000000000000001000000
+    assemblyRow := fixedBytes 22 0x04800000010000000000000000000000000001000000
+    strings := [(0, [0]), (1, [88, 0])], blobs := [(0, [0])] }
+
 /-- Each independent method has fixed metadata and queries the package's checked pin index. -/
 private def methodCheck (pinned : PinnedIndex) (position : Nat) : Bool :=
-  let metadata : MethodMetadata := { own := { corlib := position } }
+  let metadata : MethodMetadata := { own := { assembly, corlib := position } }
   let tables : IndexTables :=
     { rows := .leaf, strings := .leaf, blobs := .leaf,
       userStrings := .leaf, links := .leaf, instanceBefore := .leaf, instanceTotal := .leaf,
       genericOwners := .leaf }
-  match metadata.environmentWith [[88]] [tables] pinned {} with
+  match metadata.environmentWith [bytesOf assembly.identity] [tables] pinned {} with
   | .error _ => false
   | .ok env =>
     env.pinned.matches [65, 0, 0, 44, 99] && env.exactPins.contains [65, 0, 0, 44] &&

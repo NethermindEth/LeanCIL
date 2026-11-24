@@ -414,7 +414,7 @@ or an unsupported constraint signature reports `not covered`.
 For `public-key-tokens`, include the image for each direct assembly reference of the selected
 assembly and its pinned references. Lean reads each physical AssemblyRef, compares the tokens
 carried by the extraction with those rows, and computes each publisher token from the full key
-in the referenced image. An empty definition key denotes an unsigned assembly. A missing
+in the referenced image. The name, version and culture must also match the defining Assembly row. An empty definition key denotes an unsigned assembly. A missing
 target leaves the fact `not covered`. The report records additional images
 used for this check with role `reference`.
 

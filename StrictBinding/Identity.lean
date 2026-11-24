@@ -1,5 +1,6 @@
 import StrictBinding.Tables
 import CIL.Crypto.Sha1
+import CIL.Extraction.MetadataBytes
 
 /-!
 # Heaps and assembly identity
@@ -81,13 +82,6 @@ def MetadataLayout.stringText (layout : MetadataLayout) (view : ImageView) (key 
 /-- The code points of a text, which are ASCII for the identities audited here. -/
 def asciiOf (text : String) : List Nat := text.toList.map Char.toNat
 
-/-- The ASCII decimal digits of a version component, which is a 16-bit number. -/
-def decimal (value : Nat) : List Nat :=
-  let places := (List.range 5).map fun place => 48 + value / 10 ^ (4 - place) % 10
-  match places.dropWhile (· == 48) with
-  | [] => [48]
-  | digits => digits
-
 /-- `count` lowercase hexadecimal digits of a number, as ASCII. -/
 def hexDigits (count value : Nat) : List Nat :=
   (List.range count).map fun place =>
@@ -111,8 +105,8 @@ def rowKeyToken (row flags : Nat) (key : List Nat) : Except AuditError (Option N
   if row == tokenOf 0x20 1 then .ok (publisherToken key) else assemblyKeyToken flags key
 
 /-- The identity columns shared by Assembly and AssemblyRef, starting at the major version. -/
-def assemblyIdentityAt (view : ImageView) (layout : MetadataLayout) (row first : Nat) :
-    Except AuditError (List Nat) := do
+def assemblyColumnsAt (view : ImageView) (layout : MetadataLayout) (row first : Nat) :
+    Except AuditError CIL.Extraction.AssemblyColumns := do
   let cell := fun column => layout.cell view row (first + column)
   let major ← cell 0
   let minor ← cell 1
@@ -120,15 +114,23 @@ def assemblyIdentityAt (view : ImageView) (layout : MetadataLayout) (row first :
   let revision ← cell 3
   let flags ← cell 4
   let key ← layout.blobAt view (← cell 5)
-  let name ← layout.stringText view (← cell 6)
-  let culture ← layout.stringText view (← cell 7)
-  let version := decimal major ++ [46] ++ decimal minor ++ [46] ++ decimal build ++ [46] ++
-    decimal revision
+  let name ← layout.stringAt view (← cell 6)
+  let culture ← layout.stringAt view (← cell 7)
   let token ← rowKeyToken row flags key
-  let token := token.map (hexDigits 16) |>.getD (asciiOf "null")
-  pure (name ++ asciiOf ", Version=" ++ version ++ asciiOf ", Culture=" ++
-    (if culture.isEmpty then asciiOf "neutral" else culture) ++ asciiOf ", PublicKeyToken=" ++
-    token)
+  return ⟨name, ⟨major, minor, build, revision⟩, culture, (token.map (hexDigits 16)).getD []⟩
+
+/-- Read the independent identity columns and their Unicode display name from one physical row. -/
+def namedAssemblyAt (view : ImageView) (layout : MetadataLayout) (row first : Nat) :
+    Except AuditError (CIL.Extraction.AssemblyColumns × List Nat) := do
+  let columns ← assemblyColumnsAt view layout row first
+  let bytes := columns.spelling
+  let some points := utf8CodePoints bytes.length bytes | throw (.tables .invalidUtf8)
+  return (columns, points)
+
+/-- The Unicode display name of a physical Assembly or AssemblyRef with valid UTF-8 fields. -/
+def assemblyIdentityAt (view : ImageView) (layout : MetadataLayout) (row first : Nat) :
+    Except AuditError (List Nat) :=
+  Prod.snd <$> namedAssemblyAt view layout row first
 
 /-- The code points of the identity the Assembly row spells. -/
 def assemblyIdentity (view : ImageView) (layout : MetadataLayout) : Except AuditError (List Nat) :=

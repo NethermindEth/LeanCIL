@@ -19,7 +19,8 @@ private def forwarded (flags := 0x00200000) (typeDefId := 0) (implementation := 
     (forwardName := "InvalidOperationException") (targetName := "Core")
     (declaredName := "InvalidOperationException") (visibility := 1)
     (forwarderSlice := 1) (carry := true) (nested := false) (childParent := 6)
-    (childFlags := 0) (childVisibility := 2) (childExportName := "Child") : Option (List Nat) := do
+    (facadeCulture := "") (referenceCulture := "")
+    (childFlags := 0) (childVisibility := 2) (childExportName := "Child") : Except MetadataError (List Nat) := do
   let identity := fun (name : String) => name ++ ", Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
   let make := fun (name : String) (entries : Step Nat) => build entries (bytesOf name) (identity name)
   let (library, definition) := make "Core" do
@@ -33,7 +34,8 @@ private def forwarded (flags := 0x00200000) (typeDefId := 0) (implementation := 
     return child
   let (facade, exported) := make "Facade" do
     let dest ← string targetName
-    let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, dest, 0, 0]
+    let culture ← string facadeCulture
+    let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, dest, culture, 0]
     let name ← string forwardName
     let ns ← string "System"
     let outer ← row Table.exportedType [flags, typeDefId, name, ns, implementation]
@@ -41,7 +43,8 @@ private def forwarded (flags := 0x00200000) (typeDefId := 0) (implementation := 
     row Table.exportedType [childFlags, 0, ← string childExportName, 0, childParent]
   let (caller, reference) := make "Caller" do
     let scope ← string "Facade"
-    let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, scope, 0, 0]
+    let culture ← string referenceCulture
+    let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, scope, culture, 0]
     let name ← string "InvalidOperationException"
     let ns ← string "System"
     let outer ← row Table.typeRef [6, name, ns]
@@ -50,32 +53,47 @@ private def forwarded (flags := 0x00200000) (typeDefId := 0) (implementation := 
     link linkDefinition reference 2 definition
     if carry then link linkForwarder reference forwarderSlice exported
     return reference
-  let slices ← [caller, facade, library].mapM fun slice => slice.index.toOption
-  let .inl named ← (typeRefTarget (.ofSlices slices) 0 resolveFuel reference).toOption | none
+  let slices ← [caller, facade, library].mapM MetadataSlice.index
+  let .inl named ← typeRefTarget (.ofSlices slices) 0 resolveFuel reference
+    | throw (.unresolvedType reference)
   return named.scope
 
 /-- A top-level forwarder selects the public definition in its named implementation.
     A changed flag, name, implementation tag, assembly, visibility or witness fails. -/
 theorem checked_forwarder :
-    forwarded = some (bytesOf "Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null") ∧
+    forwarded.toOption = some (bytesOf "Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null") ∧
     [forwarded (flags := 0), forwarded (typeDefId := 1), forwarded (implementation := 0),
      forwarded (implementation := 1), forwarded (implementation := 4),
      forwarded (implementation := 6), forwarded (implementation := 7),
      forwarded (forwardName := "Exception"), forwarded (declaredName := "Exception"),
      forwarded (targetName := "Other"), forwarded (visibility := 0),
-     forwarded (forwarderSlice := 0), forwarded (carry := false)].all Option.isNone := by
+     forwarded (forwarderSlice := 0), forwarded (carry := false)].all (fun result => !result.isOk) := by
   decide +kernel
 #print axioms checked_forwarder
 
 /-- The nested export must point to its enclosing export, whose AssemblyRef reaches a public
     outer and public nested definition. Wrong names, parent tags, cycles and visibility fail. -/
 theorem checked_nested_forwarder :
-    forwarded (nested := true) = some (bytesOf "Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null") ∧
+    (forwarded (nested := true)).toOption = some (bytesOf "Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null") ∧
     [forwarded (nested := true) (childParent := 10), forwarded (nested := true) (childParent := 5),
      forwarded (nested := true) (childFlags := 0x00200000), forwarded (nested := true) (visibility := 0),
      forwarded (nested := true) (childVisibility := 3), forwarded (nested := true) (childExportName := "Other"),
-     forwarded (nested := true) (targetName := "Other")].all Option.isNone := by decide +kernel
+     forwarded (nested := true) (targetName := "Other")].all (fun result => !result.isOk) := by decide +kernel
 #print axioms checked_nested_forwarder
+
+/-- Empty culture and the literal bytes of "neutral" spell the same display name. Neither the
+    original reference nor a forwarder can use one to bind the other assembly. -/
+theorem forwarded_culture_columns :
+    let rejects := fun (result : Except MetadataError (List Nat)) (token : Nat) =>
+      match result with
+      | .error error => error == .operandMismatch token
+      | .ok _ => false
+    rejects (forwarded (referenceCulture := "neutral")) 0x01000001 = true ∧
+    rejects (forwarded (facadeCulture := "neutral")) 0x01000001 = true ∧
+    rejects (forwarded (nested := true) (referenceCulture := "neutral")) 0x01000001 = true ∧
+    rejects (forwarded (nested := true) (facadeCulture := "neutral")) 0x01000002 = true := by
+  decide +kernel
+#print axioms forwarded_culture_columns
 
 /-- Prefix matching agrees with the prefix predicate, including overlapping and empty prefixes. -/
 theorem prefixes :

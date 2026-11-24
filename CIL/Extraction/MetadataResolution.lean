@@ -284,6 +284,32 @@ def MetadataIndex.corlibIdentity (index : MetadataIndex) :
     if !(← index.coreAssemblyRef token) then throw (.unsupportedAssemblyRef token)
     .ok (some (← index.assemblyRefIdentity token))
 
+/-- A display-name lookup may select a carried slice only when all four identity fields agree
+    with its Assembly row. A missing slice leaves resolution to the platform or import checks. -/
+def MetadataEnv.referencePosition (env : MetadataEnv) (columns : AssemblyColumns) (token : Nat) :
+    Except MetadataError (Option Nat) := do
+  let some position := env.identities[columns.spelling]? | return none
+  let target ← env.slice position token
+  unless target.assembly == some columns do throw (.operandMismatch token)
+  return some position
+
+/-- A carried reference resolves only to a slice with the same assembly identity columns. -/
+theorem MetadataEnv.referencePosition_columns {env : MetadataEnv} {columns : AssemblyColumns}
+    {token position : Nat} (found : env.referencePosition columns token = .ok (some position)) :
+    ∃ target, env.slice position token = .ok target ∧ target.assembly = some columns := by
+  unfold MetadataEnv.referencePosition at found
+  cases lookup : env.identities[columns.spelling]? with
+  | none => simp [lookup, pure, Except.pure] at found
+  | some selected =>
+    cases read : env.slice selected token with
+    | error err => simp [lookup, read, bind, Except.bind] at found
+    | ok target =>
+      by_cases same : target.assembly = some columns
+      · simp [lookup, read, same, bind, Except.bind, pure, Except.pure] at found
+        exact found ▸ ⟨target, read, same⟩
+      · simp [lookup, read, same, bind, Except.bind, pure, Except.pure, throw, MonadExceptOf.throw] at found
+#print axioms MetadataEnv.referencePosition_columns
+
 /-- The scope, full name and name parts a `TypeRef` spells: its assembly, or the outermost
     enclosing type's. -/
 def typeRefQualified (env : MetadataEnv) (position : Nat) :
@@ -296,7 +322,10 @@ def typeRefQualified (env : MetadataEnv) (position : Nat) :
     let simple ← index.string row.name
     let name := qualifiedName namespace_ simple
     match metadataTableOf row.scope with
-    | 0x23 => .ok (← index.assemblyRefIdentity row.scope, name, [namespace_, simple])
+    | 0x23 => do
+      let columns ← index.referenceColumns row.scope
+      let _ ← env.referencePosition columns token
+      return (columns.spelling, name, [namespace_, simple])
     | 0x00 => .ok (index.identity, name, [namespace_, simple])
     | 0x01 =>
       let (scope, enclosing, parts) ← typeRefQualified env position fuel row.scope
@@ -515,11 +544,10 @@ private def checkedDefinitionLink (env : MetadataEnv) (index : MetadataIndex)
   let source ← env.slice facade exported
   if source.identity != scope then throw (.operandMismatch token)
   let destination ← source.forwardedAssembly exported parts
-  if env.identities[destination]? != some linked then throw (.operandMismatch token)
+  if (← env.referencePosition destination token) != some linked then throw (.operandMismatch token)
   let implementation ← env.slice linked definition
-  if implementation.identity != destination then throw (.operandMismatch token)
   publicForwarded implementation linked definition parts.reverse
-  return (linked, definition, destination)
+  return (linked, definition, destination.spelling)
 
 /-- A carried reference binds the qualified name in the checked defining assembly. -/
 private def linkedType (env : MetadataEnv) (position token target : Nat) (scope : List Nat)
