@@ -456,11 +456,15 @@ void CheckPercentVariants(ModuleDefinition image, MethodDefinition method, strin
         theorem correctness :
             bounded.RefutedAtEntryCLR Extracted.program 0 Extracted.translation_valid .net11WinX64 := by
           refine ⟨image, memory, by cil_kernel_rfl, by cil_kernel_rfl, by decide, ?_⟩
+          intro extra
           apply OutcomeContract.RefutedCLR.of_return (input := (101 : W32)) (initial := memory)
             (fuel := 66) (final := memory) (values := [.scalar (.i32 101)])
           · exact ⟨rfl, trivial⟩
-          · cil_kernel_rfl
+          · apply invoke_extend (base := image.methods) ⟨extra, rfl⟩ _ _ _ _ _
+            · intro fault impossible
+              cases impossible
+            · cil_kernel_rfl
           · trivial
-        """, example: At("Examples/Proofs/Percent.lean"), imports: "import CIL.Runtime.EntryContract");
+        """, example: At("Examples/Proofs/Percent.lean"), imports: "import CIL.Runtime.EntryContract\nimport CIL.Safety.Imports");
     Console.WriteLine("PASS Percent: returning 101 refutes the packaged CLR contract at its first out-of-range input");
 }

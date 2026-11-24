@@ -1054,7 +1054,9 @@ For the compiled `Throws.Percent(uint)`, the default proof selects the .NET 11 W
 entry from `Extracted.translation_valid`. The loader starts with empty caller storage.
 Inputs through 100 return unchanged. Larger inputs raise `ArgumentOutOfRangeException`
 under ordinary heap availability. An explicit zero quota fails at the original allocation.
-The proof applies to both compiled locales and every implementation of the resource getter.
+The positive contract and its refutation quantify over every implementation of the declared
+resource getter. The proof applies to both compiled locales. A fault caused by entering a
+missing method body in one completion cannot by itself refute the packaged CLR contract.
 Use `OutcomeContract.HoldsAtEntryCLR`
 to state a contract over a method of the original package after binding and startup.
 For a variant, `RefutedAtEntryCLR` requires a counterexample on the same target

@@ -9,13 +9,20 @@ open CIL CIL.Extraction CIL.Safety CIL.Safety.LiteralImage CIL.Runtime.Net11WinX
 set_option maxRecDepth 65536
 set_option maxHeartbeats 30000000
 
+private def physicalEntry := Extracted.managedPackage.map ProgramEntry.range
+
+/-- The audited entry selects the same methods as the caller's physical package. -/
+private theorem entry_eq :
+    Extracted.translation_valid.entry .net11WinX64 = physicalEntry := by cil_kernel_rfl
+#print axioms entry_eq
+
 /-- MemberRef operand of the compiled exception constructor. -/
 def memberToken (body : BodyEvidence) : Option Nat :=
   body.constructorTokenAt? 0 0 5
 
 /-- Bind the packaged caller using the facade and CoreLib rows carried with the runtime. -/
 def pinnedCaller : Option BodyEvidence :=
-  match Extracted.translation_valid.entry .net11WinX64 with
+  match physicalEntry with
   | some (.range image) => some image.caller.body
   | _ => none
 
@@ -39,9 +46,9 @@ theorem rejectsInvalidBindings :
 /-- The Windows x64 constructor image requires a compatible target and the actual newobj. -/
 theorem rejectsOtherTarget :
     (Extracted.translation_valid.entry .portable).isNone ∧
-    (rangeImage? (Extracted.methodEvidence[0]'(by decide)) 5
+    (rangeImage? (.ofEvidence (Extracted.methodEvidence[0]'(by decide))) 5
       { Extracted.profile with architecture := .arm64 } Extracted.environment).isNone ∧
-    (rangeImage? (Extracted.methodEvidence[0]'(by decide)) 6
+    (rangeImage? (.ofEvidence (Extracted.methodEvidence[0]'(by decide))) 6
       Extracted.profile Extracted.environment).isNone := by
   repeat' constructor
   all_goals cil_kernel_rfl
@@ -91,7 +98,7 @@ theorem callerEvidence :
 
 /-- The managed method and its evidence as returned by the runtime binder. -/
 private def managedCaller := do
-  let some (.range image) := Extracted.translation_valid.entry .net11WinX64 | none
+  let some (.range image) := physicalEntry | none
   return (image.caller, ← image.methods[0]?)
 
 private def callerPair := managedCaller.getD (Extracted.methodEvidence[0]'(by decide),
@@ -149,10 +156,10 @@ theorem managedCallerValid : ManagedCallerValid := by
 #print axioms managedCallerValid
 
 /-- Decoded caller linked to the seven CoreLib method bodies reached by Percent. -/
-def linkedProgram : Option Program := (Extracted.translation_valid.entry .net11WinX64).map (·.methods)
+def linkedProgram : Option Program := physicalEntry.map (·.methods)
 
 /-- Original bodies used by the package's image loader. -/
-def inputs : List RawMethod := ((Extracted.translation_valid.entry .net11WinX64).map (·.originals)).getD []
+def inputs : List RawMethod := (physicalEntry.map (·.originals)).getD []
 
 /-- Decoded execution for every unsigned input at a caller-selected allocation budget. -/
 theorem outcome (budget : Option Nat) :
@@ -230,7 +237,7 @@ theorem rangeExceptionAtEntry {executable : Program} {initial : Safety.Memory} {
 /-- The generated image loads and executes from empty caller storage, including for an
 explicit deployment quota. Neither the caller nor the proof supplies runtime method bodies. -/
 def imageExecution (budget : Option Nat) : Prop :=
-  ∃ image initial, (Extracted.translation_valid.entry .net11WinX64) = some image ∧
+  ∃ image initial, Extracted.translation_valid.entry .net11WinX64 = some image ∧
     image.initialMemory budget = .ok initial ∧
     ∀ value : W32, image.invoke 66 [.scalar (.i32 value)] budget = .ok
       (if value ≤ 100 then .ok (initial, [.scalar (.i32 value)])
@@ -239,7 +246,9 @@ def imageExecution (budget : Option Nat) : Prop :=
 
 theorem imageFromEmpty (budget : Option Nat) : imageExecution budget := by
   obtain ⟨executable, initial, generated, loaded, runs⟩ := outcome budget
-  cases found : (Extracted.translation_valid.entry .net11WinX64) with
+  unfold imageExecution
+  rw [entry_eq]
+  cases found : physicalEntry with
   | none => simp [linkedProgram, found] at generated
   | some image =>
     have same : image.methods = executable := by simpa [linkedProgram, found] using generated

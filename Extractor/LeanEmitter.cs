@@ -399,6 +399,20 @@ internal static class LeanEmitter
                 $"(Extraction.lowerConstrainedRaw method{n}DispatchTypes " +
                 $"method{n}Closed) method{n}Reachable method{n} := {Decide}");
         }
+        if (methods.Length == 1 && methods[0].Body.Instructions.Any(i => i.OpCode.Code == Code.Newobj))
+        {
+            lean.AppendLine($$"""
+                /-- The physical source fields for binding a managed constructor entry. -/
+                def constructorSource : Runtime.Net11WinX64.ConstructorSource := {
+                  original := method0Original, body := method0Body, arguments := method0TypeArgumentsRaw,
+                  reachable := method0Reachable, featureStates := method0FeatureStates,
+                  layoutUses := method0LayoutUses, dispatchTypes := method0DispatchTypes,
+                  assembly := assembly{{pinned.Index(methods[0].Module)}}, signature := method0Signature }
+                /-- The managed definitions and declarations derived from the caller's physical inputs. -/
+                def managedPackage : Option Extraction.ManagedPackage :=
+                  Runtime.Net11WinX64.constructorPackage? constructorSource imports profile environment
+                """);
+        }
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
         // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them. Each
         // entry is its evidence record's, which the body check equates with the full name its metadata row spells.

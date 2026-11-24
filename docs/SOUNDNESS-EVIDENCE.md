@@ -520,10 +520,13 @@ For a closed package without an external exception constructor or a folded throw
 uses the certified methods and loads literals from the original method evidence. For the
 two-string range constructor on `.net11WinX64`, Lean locates the live `newobj`, resolves the
 original MemberRef through the facade, checks the MethodDef and signature, and decodes the
-caller and seven runtime methods. The caller's evidence records the managed construction link.
-Lean infers scalar stack kinds from its decoded instructions, checks that incoming edges agree,
-and validates those kinds against the emitted code. The constructor requires an immediately preceding `ldstr`
-message with no branch into `newobj`. The resource getter occupies the first import slot.
+caller and seven runtime methods. For a single-method extraction with a construction site,
+`Extracted.managedPackage` derives the executable table from the original body, metadata and
+flow inputs. The package checks all eight methods against the same table, pins, layouts and
+platform, including their scalar and feature flow, static storage and call targets. The final
+slot declares the physical resource getter. Lean checks its body bytes and signature and
+supplies no return-value fact for that declaration. The constructor requires an immediately
+preceding `ldstr` message with no branch into `newobj`.
 A non-null message bypasses it. Open packages and constructors without a checked runtime
 binding produce `none` at this entry.
 

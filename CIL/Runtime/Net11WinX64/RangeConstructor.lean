@@ -1,3 +1,4 @@
+import CIL.Extraction.ManagedPackage
 import CIL.Runtime.Net11WinX64.RangeMethods
 
 /-! Managed execution of the two-string range exception constructor in the .NET 11.0.0
@@ -95,26 +96,18 @@ def links (table : List SpecializedMethod) (raw : RawMethod) :=
 /-- The physical getter reached only by the null-message branch of the constructor. -/
 def rangeResourceImport : SpecializedMethod := ⟨[], RangeResource.raw, ⟨coreLibraryScope⟩⟩
 
-/-- The caller and executable runtime bodies, their original literal operands and the
-remaining managed import, whose index follows the last executable body. -/
-structure RangeImage where
-  caller : MethodEvidence
-  methods : Program
-  originals : List RawMethod
-  resourceImport : SpecializedMethod
-
 /-- The scalar and x64 execution profiles with the runtime image's pointer width and byte order. -/
 def supportsProfile (profile : FeatureProfile) : Bool :=
   profile.nativeWidth == 64 && profile.littleEndian && profile.architecture != .arm64
 
-/-- Infer the incoming scalar stacks of the rebound caller from its original instructions.
-Each reachable pc enters the queue once. Incoming edges must agree on the stack kinds. -/
-private def callerScalars? (raw : RawMethod) (features : FeatureCertificate)
-    (method : Method) : Option ScalarCertificate := do
+/-- Infer scalar stacks along reachable paths. With no caller-supplied feature facts, both
+successors of a conditional are considered and every stack value has unknown feature bits. -/
+private def inferFlow? (raw : RawMethod) (method : Method)
+    (supplied : Option FeatureCertificate) : Option (FeatureCertificate × ScalarCertificate) := do
   let sites := (raw.code.zip (foldRoles raw.code)).toArray
-  let facts := features.toArray
+  let facts := supplied.map List.toArray
   let code := method.code.toArray
-  guard (sites.size > 0 && facts.size == sites.size && code.size == sites.size)
+  guard (sites.size > 0 && facts.all (·.size == sites.size) && code.size == sites.size)
   let context := nativeDispatchContext raw
   let locals := ScalarLocals.indexed raw context
   let rec visit : Nat → List Nat → Array (Option (List ScalarKind)) → Option ScalarCertificate
@@ -123,11 +116,13 @@ private def callerScalars? (raw : RawMethod) (features : FeatureCertificate)
     | fuel + 1, pc :: pending, states => do
       let (op, role) ← sites[pc]?
       let some stack ← states[pc]? | none
-      let some feature ← facts[pc]? | none
       let emitted ← code[pc]?
       if scalarStoreFault raw op stack emitted locals then return ← visit fuel pending states
+      let features ← match facts with
+        | none => some (List.replicate stack.length none)
+        | some known => (known[pc]?).join.map (·.stack)
       let after ← scalarTransfer raw op stack role context locals
-      let next ← featureSuccessors role pc op feature.stack
+      let next ← featureSuccessors role pc op features
       let mut todo := pending
       let mut incoming := states
       for target in next do
@@ -138,13 +133,76 @@ private def callerScalars? (raw : RawMethod) (features : FeatureCertificate)
           todo := target :: todo
       visit fuel todo incoming
   let states ← visit sites.size [0] ((Array.replicate sites.size none).set! 0 (some []))
-  guard (decide (ScalarFlowValid raw features states method.code))
-  return states
+  let features := supplied.getD (states.map (·.map fun stack =>
+    { stack := List.replicate stack.length none, locals := [] }))
+  return (features, states)
+
+/-- Physical runtime definitions use the caller's complete pin index, platform and layouts. -/
+private def runtimeRow? (table : List SpecializedMethod) (caller : BodyEvidence)
+    (profile : FeatureProfile) (environment : LayoutEnvironment)
+    (source : BodyEvidence × RawMethod) : Option (MethodEvidence × Method) := do
+  let original := source.2
+  let body := { source.1 with
+    pinned := caller.pinned, platform := caller.platform,
+    layoutDeclarations := caller.layoutDeclarations }
+  let closed ← instantiateMethod environment.rawLayouts original []
+  let storage ← closedArguments environment.rawLayouts closed
+  let live := List.replicate original.code.length true
+  let bound := links table closed
+  let method ← Method.ofBody? profile environment bound live body original []
+  let (features, scalars) ← inferFlow? closed method none
+  let signature ← spelled? body.names.signature
+  let item : MethodEvidence := {
+    original, body, arguments := [], closed, parameterInput := storage,
+    reachable := live, featureStates := features, scalarStates := scalars, layoutUses := [],
+    assembly := ⟨coreLibraryScope⟩, signature, links := bound }
+  return (item, method)
+
+/-- The resource slot exposes the physical getter's metadata, with no executable feature facts. -/
+private def resourceDeclaration? (caller : BodyEvidence) (environment : LayoutEnvironment) :
+    Option MethodEvidence := do
+  let original := RangeResource.raw
+  let body := { RangeResource.body with
+    names := RangeResource.names, pinned := caller.pinned,
+    platform := caller.platform, layoutDeclarations := caller.layoutDeclarations }
+  let closed ← instantiateMethod environment.rawLayouts original []
+  let storage ← closedArguments environment.rawLayouts closed
+  let signature ← spelled? body.names.signature
+  return {
+    original, body, arguments := [], closed, parameterInput := storage, reachable := [],
+    featureStates := [], scalarStates := [], layoutUses := [], assembly := ⟨coreLibraryScope⟩,
+    signature }
+
+/-- Physical inputs needed to bind a caller. The executable, closed method, construction
+links and scalar certificate are derived after resolving the managed constructor. -/
+structure ConstructorSource where
+  original : RawMethod
+  body : BodyEvidence
+  arguments : List TypeExpr
+  reachable : List Bool
+  featureStates : FeatureCertificate
+  layoutUses : List LayoutUse
+  dispatchTypes : List DispatchType
+  assembly : AssemblyPin
+  signature : String
+
+/-- The raw source fields shared with an ordinary extraction. -/
+def ConstructorSource.ofEvidence (item : MethodEvidence) : ConstructorSource :=
+  ⟨item.original, item.body, item.arguments, item.reachable, item.featureStates,
+    item.layoutUses, item.dispatchTypes, item.assembly, item.signature⟩
+
+/-- Live external exception constructions in source instruction order. -/
+def ConstructorSource.sites (source : ConstructorSource) : List Nat :=
+  (source.original.code.zip source.reachable).zipIdx.filterMap fun ((op, live), pc) => do
+    guard (live && op.opcode == 0x73)
+    let .call site := op.operand | none
+    let _ ← exceptionConstructor? site
+    return pc
 
 /-- Decode a single entry method and the seven framework methods reached with a non-null
 message. The caller must resolve its constructor through the two pinned runtime slices. -/
-def rangeImage? (item : MethodEvidence) (pc : Nat)
-    (profile : FeatureProfile) (environment : LayoutEnvironment) : Option RangeImage := do
+def rangeImage? (item : ConstructorSource) (pc : Nat)
+    (profile : FeatureProfile) (environment : LayoutEnvironment) : Option ManagedPackage := do
   guard (supportsProfile profile && item.arguments.isEmpty)
   let original := item.body
   let source := item.original
@@ -165,13 +223,32 @@ def rangeImage? (item : MethodEvidence) (pc : Nat)
   let entry ← Method.ofBody? profile environment boundLinks item.reachable body raw []
   let closed ← instantiateMethod environment.rawLayouts raw []
   let storage ← closedArguments environment.rawLayouts closed
-  let scalars ← callerScalars? closed item.featureStates entry
-  let caller := { item with
+  let (_, scalars) ← inferFlow? closed entry (some item.featureStates)
+  let caller : MethodEvidence := {
     original := raw, body, closed, parameterInput := storage, links := boundLinks,
-    scalarStates := scalars }
-  let constructors ← coreBytes.mapM fun (evidence, method) =>
-    Method.ofBody? .scalar {} (links table method)
-      (List.replicate method.code.length true) evidence method []
-  return ⟨caller, entry :: constructors, raw :: runtime, rangeResourceImport⟩
+    scalarStates := scalars, arguments := item.arguments, reachable := item.reachable,
+    featureStates := item.featureStates, layoutUses := item.layoutUses,
+    dispatchTypes := item.dispatchTypes, assembly := item.assembly, signature := item.signature }
+  let definitions ← coreBytes.mapM (runtimeRow? table body profile environment)
+  let resource ← resourceDeclaration? body environment
+  return ⟨(caller, entry), definitions, [resource]⟩
+
+/-- The caller, runtime definitions and declared getter share the same physical pin table. -/
+def packagePins (source : List AssemblyPin) : List AssemblyPin :=
+  source ++ [⟨runtimeScope⟩, ⟨coreLibraryScope⟩]
+
+/-- Bind the unique live exception constructor in a closed single-caller extraction. -/
+def constructorPackage? (source : ConstructorSource) (imports : List ImportSlot)
+    (profile : FeatureProfile) (environment : LayoutEnvironment) : Option ManagedPackage := do
+  guard imports.isEmpty
+  let [pc] := source.sites | none
+  rangeImage? source pc profile environment
+
+/-- Check the executable prefix and its declarations against the extraction's physical inputs. -/
+def checkPackage? (package : ManagedPackage) (environment : LayoutEnvironment)
+    (pins : List AssemblyPin) (platform : PlatformTable) :
+    Option {p : ManagedPackage // p.checked environment (packagePins pins) platform} :=
+  if valid : package.checked environment (packagePins pins) platform then some ⟨package, valid⟩
+  else none
 
 end CIL.Runtime.Net11WinX64

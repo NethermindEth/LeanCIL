@@ -2082,11 +2082,11 @@ void PlatformTableCosts()
         /-- The environment of no slices under the table. -/
         def env{{size}} : MetadataEnv := MetadataEnv.ofSlices [] (platform := table{{size}})
         #kernel_cost "platform reference {{size}}"
-          ((env{{size}}.externalNamed 0 runtimeScopeBytes (bytesOf "System.Console")
+          ((env{{size}}.externalNamed 0 runtimeColumns (bytesOf "System.Console")
             {{Parts("System", "Console")}} (some false)).isOk = true)
         #kernel_cost "platform enum {{size}}"
           ((do
-            let head <- env{{size}}.externalNamed 0 runtimeScopeBytes (bytesOf "Number")
+            let head <- env{{size}}.externalNamed 0 runtimeColumns (bytesOf "Number")
               {{Parts("", "Number")}} (some true)
             let frame : Frame :=
               { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
@@ -2136,6 +2136,9 @@ void PlatformTableCosts()
         def named (name : String) (parts : List (List Nat)) : NamedType :=
           { scope := runtimeScopeBytes, name := bytesOf name, parts, kind := .external (some false),
             pinned := false }
+        /-- AssemblyRef columns of the platform definitions exercised by these lookups. -/
+        def runtimeColumns : AssemblyColumns :=
+          ⟨bytesOf "System.Runtime", ⟨11, 0, 0, 0⟩, [], bytesOf "b03f5f7f11d50a3a"⟩
         {{string.Join("\n", sizes.Select(Table))}}
         """);
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());

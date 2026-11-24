@@ -9,7 +9,8 @@ open CIL CIL.Safety CIL.Extraction
 set_option maxRecDepth 65536
 set_option maxHeartbeats 30000000
 
-private def entry := (Extracted.translation_valid.entry .net11WinX64).getD (.translated [] [])
+private def package := Extracted.managedPackage.get (by cil_kernel_rfl)
+private def entry := ProgramEntry.range package
 private def initial := entry.initialMemory.toOption.getD Safety.Memory.empty
 private def caller := entry.methods[0]?.getD { code := [], locals := [], returnsValue := true }
 private def frame : Safety.Frame := ⟨initial.nextIdentity, [], [], 0⟩
@@ -74,13 +75,16 @@ private theorem raising :
 /-- Both branches stay in the bound methods for every input. Any implementation of
 the remaining resource getter gives the same return or located range exception. -/
 theorem independentOfResource :
-    ∃ image memory, Extracted.translation_valid.entry .net11WinX64 = some image ∧
-      image.initialMemory = .ok memory ∧ ∀ (extra : Program) (value : W32),
-        invoke (image.methods ++ extra) 66 0 [.scalar (.i32 value)] memory =
+    ∃ body memory, Extracted.managedPackage = some body ∧
+      body.checked Extracted.environment (Runtime.Net11WinX64.packagePins Extracted.assemblies)
+        Extracted.platformDefinitions = true ∧
+      (ProgramEntry.range body).initialMemory = .ok memory ∧ ∀ (extra : Program) (value : W32),
+        invoke (body.methods ++ extra) 66 0 [.scalar (.i32 value)] memory =
           if value ≤ 100 then .ok (memory, [.scalar (.i32 value)])
           else .error ⟨0, 6, .thrown .argumentOutOfRange⟩ := by
-  refine ⟨entry, initial, by cil_kernel_rfl, by cil_kernel_rfl, ?_⟩
+  refine ⟨package, initial, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, ?_⟩
   intro extra value
+  change invoke (entry.methods ++ extra) 66 0 [.scalar (.i32 value)] initial = _
   have root := congrFun found extra
   rw [atComparison _ root value initial]
   change run (entry.methods ++ extra) (63 + 1) 0 2 [.scalar (.i32 value)] frame
@@ -91,6 +95,15 @@ theorem independentOfResource :
   · simpa only [within, ite_false] using congrFun (congrFun raising extra) value
 #print axioms independentOfResource
 
+/-- The public package entry selects the same validated definitions as the physical source. -/
+private theorem certifiedEntry {body : ManagedPackage}
+    (source : Extracted.managedPackage = some body) :
+    Extracted.translation_valid.entry .net11WinX64 = some (.range body) := by
+  have selected : Extracted.managedPackage = some package := by cil_kernel_rfl
+  cases Option.some.inj (selected.symm.trans source)
+  cil_kernel_rfl
+#print axioms certifiedEntry
+
 /-- From empty caller storage, startup loads the original literals. Every in-range input
 returns without changing that memory, and every larger input raises the range exception. -/
 theorem managedContract :
@@ -99,12 +112,13 @@ theorem managedContract :
       ∀ value : W32, Extracted.translation_valid.invoke .net11WinX64 66 [.scalar (.i32 value)] =
         some (.ok (if value ≤ 100 then .ok (memory, [.scalar (.i32 value)])
           else .error ⟨0, 6, .thrown .argumentOutOfRange⟩)) := by
-  obtain ⟨image, memory, bound, loaded, runs⟩ := independentOfResource
-  refine ⟨image, memory, bound, loaded, ?_⟩
+  obtain ⟨body, memory, source, _, loaded, runs⟩ := independentOfResource
+  have bound := certifiedEntry source
+  refine ⟨.range body, memory, bound, loaded, ?_⟩
   intro value
   simp only [TranslationValid.invoke, bound, Option.map_some, ProgramEntry.invoke, loaded, Except.map]
   apply congrArg (fun result => some (Except.ok result))
-  simpa only [List.append_nil] using runs [] value
+  simpa only [ProgramEntry.methods, List.append_nil] using runs [] value
 #print axioms managedContract
 
 /-- The root CLR contract at the memory prepared by package startup. -/
@@ -120,14 +134,12 @@ def contract : OutcomeContract W32 W32 where
 constructs the initial memory. The caller supplies neither runtime bodies nor message text. -/
 theorem correctness :
     contract.HoldsAtEntryCLR Extracted.program 0 Extracted.translation_valid .net11WinX64 := by
-  obtain ⟨image, memory, selected, loaded, runs⟩ := managedContract
-  refine ⟨image, memory, selected, loaded, by decide, ?_⟩
-  intro value initial permitted
+  obtain ⟨body, memory, source, _, loaded, runs⟩ := independentOfResource
+  refine ⟨.range body, memory, certifiedEntry source, loaded, by decide, ?_⟩
+  intro extra value initial permitted
   have same : initial = memory := permitted.1
   subst initial
-  have actual := runs value
-  simp only [TranslationValid.invoke, selected, Option.map_some, ProgramEntry.invoke, loaded,
-    Except.map, Option.some.injEq, Except.ok.injEq] at actual
+  have actual := runs extra value
   by_cases within : value ≤ 100
   · simp only [OutcomeContract.atStartup, contract, within, ite_true]
     rw [ite_eq_left within] at actual
