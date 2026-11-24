@@ -231,10 +231,13 @@ void CheckLayoutTableScaling(string extraction)
         ("the header check of generic structs", "Generic", Emitted("layouts_validated")),
         ("a method's check of nested structs", "Nested", Emitted("method0_layouts_validated"))
     ];
+    // One definition per row keeps the compiler's recursion depth independent of the table size.
     string Table(string space, int count, Func<int, string> raw, Func<int, string> layout) => $$"""
         namespace {{space}}
-        def rawLayouts : List Extraction.RawLayout := [
-        {{string.Join(",\n", Enumerable.Range(0, count).Select(raw))}}]
+        {{string.Join("\n", Enumerable.Range(0, count).Select(index =>
+            $"def rawLayout{index} : Extraction.RawLayout :=\n" + raw(index)))}}
+        def rawLayouts : List Extraction.RawLayout :=
+          [{{string.Join(", ", Enumerable.Range(0, count).Select(index => $"rawLayout{index}"))}}]
         {{string.Join("\n", Enumerable.Range(0, count).Select(index => $"def layout{index} : AggregateLayout := " +
             layout(index)))}}
         def computedLayouts : Array Extraction.ComputedLayout :=

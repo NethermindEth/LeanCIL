@@ -215,10 +215,14 @@ theorem runtimeScope_spells_runtimeAssembly :
 
 #print axioms runtimeScope_spells_runtimeAssembly
 
+/-- A metadata column's bytes as a bucket key; every malformed code shares the empty key. -/
+private def columnKey (column : MetadataName) : List UInt8 :=
+  (column.bytes?.getD []).map Nat.toUInt8
+
 /-- The namespace and simple name of every declaration level contribute to its type key. -/
 private def ClassName.keyInto (name : ClassName) (rest : List (List UInt8)) : List (List UInt8) :=
   name.levels.foldr (fun level tail =>
-    keyBytes (toString level.typeNamespace.code) :: keyBytes (toString level.name.code) :: tail) rest
+    columnKey level.typeNamespace :: columnKey level.name :: tail) rest
 
 /-- Constructor-delimited type buckets retain scopes and aggregate positions. Lookups through
     these keys still compare full identities, in case two encodings were to share a bucket. -/
@@ -231,7 +235,7 @@ def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
   | .aggregate identity index, rest =>
     keyBytes "aggregate" :: keyBytes identity :: keyBytes (toString index) :: rest
   | .enum identity underlying, rest =>
-    keyBytes "enum" :: keyBytes (toString identity.assembly.name.code) ::
+    keyBytes "enum" :: columnKey identity.assembly.name ::
       ClassName.keyInto ⟨identity.levels⟩ (typeKeyInto underlying rest)
   | .parameter index, rest => keyBytes "parameter" :: keyBytes (toString index) :: rest
   | .ownerParameter index, rest => keyBytes "ownerParameter" :: keyBytes (toString index) :: rest
