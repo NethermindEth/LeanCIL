@@ -517,20 +517,24 @@ The supplied quota remains available for allocations during execution. For both 
 of `Throws.Percent`, the verifier checks that both original operands load even with zero heap quota.
 The audited translation theorem supplies the entry through `Extracted.translation_valid.entry`.
 For a closed package without an external exception constructor or a folded throw, the entry
-uses the certified methods and loads literals from the original method evidence. For the
-two-string range constructor on `.net11WinX64`, Lean locates the live `newobj`, resolves the
-original MemberRef through the facade, checks the MethodDef and signature, and decodes the
-caller and seven runtime methods. For a single-method extraction with a construction site,
-`Extracted.managedPackage` derives the executable table from the original body, metadata and
-flow inputs. For the supported constructor, `Extracted.program` contains the caller and seven
-runtime bodies. The public translation certificate binds exactly that table and its separate
-managed declarations. The package checks all eight methods against the same table, pins, layouts and
-platform, including their scalar and feature flow, static storage and call targets. The final
-slot declares the physical resource getter. Lean checks its body bytes and signature and
-supplies no return-value fact for that declaration. The constructor requires an immediately
-preceding `ldstr` message with no branch into `newobj`.
-A non-null message bypasses it. Open packages and constructors without a checked runtime
-binding produce `none` at this entry.
+uses the certified methods and loads literals from the original method evidence. On
+`.net11WinX64`, Lean binds one live `newobj` in a single-method extraction to one of four
+constructors: `ArgumentOutOfRangeException(string, string)`,
+`ArgumentOutOfRangeException(string, object, string)`, `ArgumentException(string, string, Exception)`
+and `InvalidOperationException(string, Exception)`. Lean resolves the original MemberRef through
+the facade, checks the MethodDef and signature, and decodes the caller and every CoreLib method
+the constructor reaches with a non-null message. `Extracted.managedPackage` derives the
+executable table from the original body, metadata and flow inputs, and `Extracted.program`
+contains the caller and those runtime bodies. The public translation certificate binds exactly
+that table and its separate managed declarations. The package checks every method against the
+same table, pins, layouts and platform, including their scalar and feature flow, static storage
+and call targets. When the constructor reads a default message from `System.SR` for a null
+message, the final slot declares that physical getter. Lean checks its body bytes and signature
+and supplies no return-value fact for that declaration. Such a constructor is admitted only when
+the loads directly before `newobj` make the message a string literal on every path: `ldstr` for
+the range constructors and `ldstr; ldnull` for `InvalidOperationException`, with no branch into
+`newobj` or into a load after the first. A non-null message bypasses the getter. Open packages
+and constructors without a checked runtime binding produce `none` at this entry.
 
 `Extracted.translation_valid.invoke target fuel args budget` starts from empty caller storage
 and reports binding, image loading and execution separately. The pinned .NET 11.0.0 Windows

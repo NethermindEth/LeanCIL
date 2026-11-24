@@ -46,7 +46,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var extracted = Path.Combine(folder, "Extracted.lean");
     var source = File.ReadAllText(extracted);
     var entry = throwMethods.Single(candidate => candidate.Name == name);
-    var boundConstructor = name is "Percent" or "ActualValue" or "ArgumentInner";
+    var boundConstructor = name is "Percent" or "ActualValue" or "ArgumentInner" or "Inner";
     var method = name is "Null" or "Quotient" ? 1 : 0;
     var owner = method == 0 ? entry : ((MethodReference)entry.Body.Instructions
         .Single(instruction => instruction.OpCode.Code == Code.Call).Operand).Resolve();
@@ -136,7 +136,6 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var entryCheck = name switch
     {
         "Null" => "example : (Extracted.translation_valid.entry .portable).map (·.methods) = some Extracted.program := by cil_kernel_rfl",
-        "Inner" => "example : (Extracted.translation_valid.entry .net11WinX64).isNone = true := by cil_kernel_rfl",
         _ => ""
     };
     var proof = Path.Combine(folder, "BoundaryProof.lean");
@@ -170,16 +169,20 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     {
         using var translated = ModuleDefinition.ReadModule(assembly);
         var translatedMethod = translated.GetType("Examples.Throws").Methods.Single(candidate => candidate.Name == name);
-        var literals = translatedMethod.Body.Instructions.Where(site => site.OpCode.Code == Code.Ldstr).ToArray();
-        if (literals.Length != 2) throw new InvalidOperationException("Expected parameter and message literals");
-        literals[0].Operand = "valeur";
-        literals[1].Operand = "La valeur dépasse la limite.";
+        foreach (var literal in translatedMethod.Body.Instructions.Where(site => site.OpCode.Code == Code.Ldstr))
+            literal.Operand = (string)literal.Operand switch
+            {
+                "value" => "valeur",
+                "must not exceed 100" => "La valeur dépasse la limite.",
+                "invalid value" => "valeur non valide",
+                var text => throw new InvalidOperationException("Untranslated exception literal: " + text)
+            };
         var image = Path.Combine(folder, "Examples.dll");
         translated.Write(image);
         queue.Add(new(selector, proof, Path.Combine(root, name + "-Translated"), Assembly: image), () =>
             Console.WriteLine($"PASS {name}: the same boundary proof checks with translated exception literals"));
 
-        if (name is "ActualValue" or "ArgumentInner")
+        if (name is "ActualValue" or "ArgumentInner" or "Inner")
         {
             foreach (var (suffix, path) in new[] { ("", assembly), ("-Translated", image) })
                 queue.Add(new(selector, At("Tests/ExceptionConstructor/Proof.lean"),
@@ -204,7 +207,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         CheckPercentVariants(translated, translatedMethod, selector);
     }
 
-    if (name is "Null" or "Inner")
+    if (name == "Null")
     {
         var nullPc = body.IndexOf(body.First(site => site.OpCode.Code == Code.Ldnull));
         var erased = Path.Combine(root, name + "-erased-null.lean");

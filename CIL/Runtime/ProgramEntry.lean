@@ -61,7 +61,7 @@ def TranslationValid.entry {rawLayouts layouts pins platform evidence imports pr
     guard (target == .net11WinX64)
     let [item] := evidence | none
     let [method] := program | none
-    let package ← Runtime.Net11WinX64.rangeImage?
+    let package ← Runtime.Net11WinX64.constructorImage?
       (.ofEvidence item) pc method.profile method.environment
     return .range (← Runtime.Net11WinX64.checkPackage? package method.environment pins platform).val
   | _ => none

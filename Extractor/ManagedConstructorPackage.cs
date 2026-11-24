@@ -21,15 +21,41 @@ internal static class ManagedConstructorPackage
             ctor.Parameters.Any(parameter => LayoutEvidence.Scope(parameter.ParameterType) != TypeTests.RuntimeScope))
             return null;
         var parameters = ctor.Parameters.Select(parameter => parameter.ParameterType.MetadataType).ToArray();
-        return (Throws.Owner(ctor.DeclaringType), parameters) switch
+        var innerException = ctor.Parameters is [.., { ParameterType.FullName: "System.Exception" }];
+        // The loads directly before newobj that make the message a literal, so no resource getter runs.
+        Code[]? loads = (Throws.Owner(ctor.DeclaringType), parameters) switch
         {
             (ExceptionType.ArgumentOutOfRange, [MetadataType.String, MetadataType.String] or
-                [MetadataType.String, MetadataType.Object, MetadataType.String])
-                when site.Previous?.OpCode.Code == Code.Ldstr => site,
+                [MetadataType.String, MetadataType.Object, MetadataType.String]) => [Code.Ldstr],
             (ExceptionType.Argument, [MetadataType.String, MetadataType.String, MetadataType.Class])
-                when ctor.Parameters[2].ParameterType.FullName == "System.Exception" => site,
+                when innerException => [],
+            (ExceptionType.InvalidOperation, [MetadataType.String, MetadataType.Class])
+                when innerException => [Code.Ldstr, Code.Ldnull],
             _ => null
         };
+        return loads is not null && LoadsOnEveryEntry(entry.Body, site, loads) ? site : null;
+    }
+
+    /// <summary>
+    /// The instructions before <paramref name="site"/> are <paramref name="loads"/> in order, and no branch
+    /// enters after the first load, so every path to the allocation runs them all.
+    /// </summary>
+    static bool LoadsOnEveryEntry(MethodBody body, Instruction site, Code[] loads)
+    {
+        var entered = body.Instructions.SelectMany(instruction => instruction.Operand switch
+        {
+            Instruction target => [target],
+            Instruction[] targets => targets,
+            _ => Array.Empty<Instruction>()
+        }).ToHashSet();
+        var current = site;
+        for (var index = loads.Length - 1; index >= 0; index--)
+        {
+            if (entered.Contains(current)) return false;
+            current = current.Previous;
+            if (current?.OpCode.Code != loads[index]) return false;
+        }
+        return !entered.Contains(site);
     }
 
     internal static void EmitSource(StringBuilder lean, int assembly) =>

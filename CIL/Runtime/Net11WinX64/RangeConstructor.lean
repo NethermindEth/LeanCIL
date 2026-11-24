@@ -2,9 +2,10 @@ import CIL.Extraction.ManagedPackage
 import CIL.Runtime.Net11WinX64.ActualValueCtor
 import CIL.Runtime.Net11WinX64.InnerMethods
 
-/-! Managed execution of the two-string range exception constructor in the .NET 11.0.0
-Windows x64 runtime. The resource getter on the null-message branch occupies the first
-import slot after the local methods. -/
+/-! Managed execution of the bound exception constructors in the .NET 11.0.0 Windows x64 runtime:
+the two range constructors and the ArgumentException and InvalidOperationException constructors
+with an inner exception. A resource getter reached only by a null message is declared in the slot
+after the executable methods. -/
 
 namespace CIL.Runtime.Net11WinX64
 open CIL.Extraction Core
@@ -115,6 +116,47 @@ private def argumentInnerDependencies : List MetadataSlice := [{
     corlib := 0,
     links := [⟨1, 100666595, 2, 33554673⟩] }]
 
+/-- Forwarders and MethodDef for the InvalidOperationException constructor with an inner
+exception. -/
+private def invalidOperationInnerDependencies : List MetadataSlice := [{
+    assembly := facadeAssembly,
+    rows := [(587202561, (fixedBytes 20 0x0B00000000000000000000000100050000000000)),
+      (654311620, (fixedBytes 14 0x0000200000000000010004000500)),
+      (654311720, (fixedBytes 14 0x0000200000000000020004000500)),
+      (654311851, (fixedBytes 14 0x0000200000000000030004000500))],
+    strings := [(0, (fixedBytes 1 0x00)),
+      (1, (fixedBytes 10 0x457863657074696F6E00)),
+      (2, (fixedBytes 26 0x496E76616C69644F7065726174696F6E457863657074696F6E00)),
+      (3, (fixedBytes 7 0x4F626A65637400)),
+      (4, (fixedBytes 7 0x53797374656D00)),
+      (5, (fixedBytes 23 0x53797374656D2E507269766174652E436F72654C696200))],
+    blobs := [(1, (fixedBytes 9 0x087CEC85D7BEA7798E))],
+    userStrings := [],
+    corlib := 1,
+    links := [] }, {
+    assembly := CoreLib.assembly,
+    rows := [(33554576, (fixedBytes 18 0x0120100002000000050000008802A802E505)),
+      (33554577, (fixedBytes 18 0x05010000FFFFFFFF000000002402B8021A06)),
+      (33554594, (fixedBytes 18 0x0120100004000000050000000000FE021C07)),
+      (33554816, (fixedBytes 18 0x012010000300000005000000A4078205631B)),
+      (33554817, (fixedBytes 18 0x01211000FFFFFFFF05000000A4078205671B)),
+      (33554921, (fixedBytes 18 0x01201000060000000500000040022F067826)),
+      (100670309, (fixedBytes 20 0x00000000000086180100000001000000DF310000)),
+      (704643081, (fixedBytes 12 0x0000180016010000FFFFFFFF)),
+      (704643082, (fixedBytes 12 0x000004006A010000FFFFFFFF)),
+      (704643390, (fixedBytes 12 0x00001800E6020000FFFFFFFF)),
+      (704643391, (fixedBytes 12 0x0000010006030000FFFFFFFF))],
+    strings := [(1, (fixedBytes 6 0x2E63746F7200)),
+      (2, (fixedBytes 10 0x457863657074696F6E00)),
+      (3, (fixedBytes 26 0x496E76616C69644F7065726174696F6E457863657074696F6E00)),
+      (4, (fixedBytes 7 0x4F626A65637400)),
+      (5, (fixedBytes 7 0x53797374656D00)),
+      (6, (fixedBytes 16 0x53797374656D457863657074696F6E00))],
+    blobs := [(1, (fixedBytes 8 0x072002010E128240))],
+    userStrings := [],
+    corlib := 0,
+    links := [⟨1, 100670309, 2, 33554816⟩] }]
+
 /-- Physical bodies reached by the constructor with a non-null message argument. -/
 def coreBytes : List (BodyEvidence × RawMethod) := [
     ({ RangeCtor.body with names := RangeCtor.names }, RangeCtor.definition),
@@ -134,6 +176,11 @@ private def argumentInnerMethods : List (BodyEvidence × RawMethod) := [
     ({ ObjectCtor.body with names := ObjectCtor.names }, ObjectCtor.definition),
     ({ SetHResult.body with names := SetHResult.names }, SetHResult.definition)]
 
+/-- Executable definitions reached by the InvalidOperationException overload with a message. -/
+private def invalidOperationInnerMethods : List (BodyEvidence × RawMethod) :=
+  ({ InvalidOperationInnerCtor.body with names := InvalidOperationInnerCtor.names },
+    InvalidOperationInnerCtor.definition) :: argumentInnerMethods.tail
+
 /-- Admit a managed call or allocation only if the raw site selects its unique physical target. -/
 def linked (table : List SpecializedMethod) (raw : RawInstruction) : Option Link := do
   let .call site := raw.operand | none
@@ -151,9 +198,6 @@ def linked (table : List SpecializedMethod) (raw : RawInstruction) : Option Link
 /-- Checked links indexed by the original instruction positions. -/
 def links (table : List SpecializedMethod) (raw : RawMethod) :=
   raw.code.zipIdx.filterMap fun (op,pc) => (linked table op).map (pc,·)
-
-/-- The physical getter reached only by the null-message branch of the constructor. -/
-def rangeResourceImport : SpecializedMethod := ⟨[], RangeResource.raw, ⟨coreLibraryScope⟩⟩
 
 /-- The scalar and x64 execution profiles with the runtime image's pointer width and byte order. -/
 def supportsProfile (profile : FeatureProfile) : Bool :=
@@ -218,11 +262,11 @@ private def runtimeRow? (table : List SpecializedMethod) (caller : BodyEvidence)
   return (item, method)
 
 /-- The resource slot exposes the physical getter's metadata, with no executable feature facts. -/
-private def resourceDeclaration? (caller : BodyEvidence) (environment : LayoutEnvironment) :
-    Option MethodEvidence := do
-  let original := RangeResource.raw
-  let body := { RangeResource.body with
-    names := RangeResource.names, pinned := caller.pinned,
+private def resourceDeclaration? (caller : BodyEvidence) (environment : LayoutEnvironment)
+    (getter : ResourceGetter) : Option MethodEvidence := do
+  let original := getter.raw
+  let body := { getter.body with
+    names := getter.names, pinned := caller.pinned,
     platform := caller.platform, layoutDeclarations := caller.layoutDeclarations }
   let closed ← instantiateMethod environment.rawLayouts original []
   let storage ← closedArguments environment.rawLayouts closed
@@ -258,35 +302,63 @@ def ConstructorSource.sites (source : ConstructorSource) : List Nat :=
     let _ ← exceptionConstructor? site
     return pc
 
-/-- Decode a single entry method and the seven framework methods reached with a non-null
-message. The caller must resolve its constructor through the two pinned runtime slices. -/
-def rangeImage? (item : ConstructorSource) (pc : Nat)
+/-- The physical call graph bound for one constructor overload. `loads` lists the opcodes that
+must load the trailing arguments directly before `newobj`, so a declared getter is never
+reached. -/
+private structure BoundOverload where
+  dependencies : List MetadataSlice
+  methods : List (BodyEvidence × RawMethod)
+  getter : Option ResourceGetter
+  loads : List Nat
+
+/-- `ldstr`, which loads a non-null string. -/
+private def loadString := 0x72
+
+/-- `ldnull`. -/
+private def loadNull := 0x14
+
+/-- Select the bound overload from the exception owner and arity. Binding then checks that the
+MemberRef resolves to the head method's MethodDef, so a different overload is rejected. -/
+private def boundOverload? (constructor : CallSite) : Option BoundOverload := do
+  match ← exceptionConstructor? constructor, constructor.parameterCount with
+  | .argumentOutOfRange, 2 => some ⟨rangeDependencies, coreBytes, some rangeResource, [loadString]⟩
+  | .argumentOutOfRange, 3 =>
+    some ⟨actualDependencies, ({ ActualValueCtor.body with names := ActualValueCtor.names },
+      ActualValueCtor.definition) :: coreBytes.tail, some rangeResource, [loadString]⟩
+  | .argument, 3 => some ⟨argumentInnerDependencies, argumentInnerMethods, none, []⟩
+  | .invalidOperation, 2 => some ⟨invalidOperationInnerDependencies, invalidOperationInnerMethods,
+      some invalidOperationResource, [loadString, loadNull]⟩
+  | _, _ => none
+
+/-- Decode a single entry method and the framework methods reached with a non-null message.
+The caller must resolve its constructor through the two pinned runtime slices. -/
+def constructorImage? (item : ConstructorSource) (pc : Nat)
     (profile : FeatureProfile) (environment : LayoutEnvironment) : Option ManagedPackage := do
   guard (supportsProfile profile && item.arguments.isEmpty)
   let original := item.body
   let source := item.original
   let site ← source.code[pc]?
   let .call constructor := site.operand | none
-  let owner ← exceptionConstructor? constructor
-  let closedArgument := owner == .argument && constructor.parameterCount == 3
-  let (dependencies, methods) := if closedArgument then (argumentInnerDependencies, argumentInnerMethods)
-    else if constructor.parameterCount == 3 then
-      (actualDependencies, ({ ActualValueCtor.body with names := ActualValueCtor.names },
-        ActualValueCtor.definition) :: coreBytes.tail)
-    else (rangeDependencies, coreBytes)
-  let (_, callee) ← methods.head?
-  let body ← original.bindConstructor? source pc dependencies ⟨[], callee, ⟨coreLibraryScope⟩⟩
+  let image ← boundOverload? constructor
+  let (_, callee) ← image.methods.head?
+  let body ← original.bindConstructor? source pc image.dependencies
+    ⟨[], callee, ⟨coreLibraryScope⟩⟩
   let code ← (checkBody body source []).toOption
   let raw := { source with code := code.code, initLocals := code.initLocals }
-  -- Every entry to this newobj must load the message immediately before the allocation.
-  let prior ← raw.code[pc - 1]?
-  guard (pc > 0 && (closedArgument || prior.opcode == 0x72) && !(branchTargets raw.code).contains pc)
-  -- This single-entry image supplies only the range constructor at the selected call site.
+  -- Every entry to this newobj runs these loads, so the message is a string literal.
+  let start := pc - image.loads.length
+  let targets := branchTargets raw.code
+  guard (pc ≥ image.loads.length && !targets.contains pc &&
+    (image.loads.zipIdx.all fun (opcode, offset) =>
+      (raw.code[start + offset]?.map (·.opcode)) == some opcode &&
+        !targets.contains (start + offset + 1)))
+  -- This single-entry image supplies only the constructor at the selected call site.
   guard (raw.code.zipIdx.all fun (site, index) =>
     match site.operand with | .call _ => index == pc | _ => true)
-  let runtime := methods.map Prod.snd
+  let runtime := image.methods.map Prod.snd
+  let getter := image.getter.toList.map (·.raw)
   let table : List SpecializedMethod := ⟨[], raw, ⟨original.metadata.own.assembly.identity⟩⟩ ::
-    (runtime.map (⟨[], ·, ⟨coreLibraryScope⟩⟩) ++ (if closedArgument then [] else [rangeResourceImport]))
+    (runtime ++ getter).map (⟨[], ·, ⟨coreLibraryScope⟩⟩)
   let boundLinks := links table raw
   let entry ← Method.ofBody? profile environment boundLinks item.reachable body raw []
   let closed ← instantiateMethod environment.rawLayouts raw []
@@ -297,9 +369,8 @@ def rangeImage? (item : ConstructorSource) (pc : Nat)
     scalarStates := scalars, arguments := item.arguments, reachable := item.reachable,
     featureStates := item.featureStates, layoutUses := item.layoutUses,
     dispatchTypes := item.dispatchTypes, assembly := item.assembly, signature := item.signature }
-  let definitions ← methods.mapM (runtimeRow? table body profile environment)
-  let declarations ← if closedArgument then pure [] else
-    (resourceDeclaration? body environment).map ([·])
+  let definitions ← image.methods.mapM (runtimeRow? table body profile environment)
+  let declarations ← image.getter.toList.mapM (resourceDeclaration? body environment)
   return ⟨(caller, entry), definitions, declarations⟩
 
 /-- The caller, runtime definitions and declared getter share the same physical pin table. -/
@@ -311,7 +382,7 @@ def constructorPackage? (source : ConstructorSource) (imports : List ImportSlot)
     (profile : FeatureProfile) (environment : LayoutEnvironment) : Option ManagedPackage := do
   guard imports.isEmpty
   let [pc] := source.sites | none
-  rangeImage? source pc profile environment
+  constructorImage? source pc profile environment
 
 /-- Check the executable prefix and its declarations against the extraction's physical inputs. -/
 def checkPackage? (package : ManagedPackage) (environment : LayoutEnvironment)

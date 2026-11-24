@@ -46,9 +46,9 @@ theorem rejectsInvalidBindings :
 /-- The Windows x64 constructor image requires a compatible target and the actual newobj. -/
 theorem rejectsOtherTarget :
     (Extracted.translation_valid.entry .portable).isNone ∧
-    (rangeImage? (.ofEvidence (Extracted.methodEvidence[0]'(by decide))) 5
+    (constructorImage? (.ofEvidence (Extracted.methodEvidence[0]'(by decide))) 5
       { Extracted.profile with architecture := .arm64 } Extracted.environment).isNone ∧
-    (rangeImage? (.ofEvidence (Extracted.methodEvidence[0]'(by decide))) 6
+    (constructorImage? (.ofEvidence (Extracted.methodEvidence[0]'(by decide))) 6
       Extracted.profile Extracted.environment).isNone := by
   repeat' constructor
   all_goals cil_kernel_rfl

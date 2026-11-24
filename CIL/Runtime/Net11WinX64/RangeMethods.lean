@@ -802,10 +802,20 @@ def lookup : MethodRef := {
   owner := .object coreLibraryScope "System.SR", name := name!"GetResourceString",
   hasThis := false, genericArity := 0, returnType := .object coreLibraryScope "System.String",
   parameters := [.object coreLibraryScope "System.String"] }
-namespace RangeResource
+/-- A parameterless `System.SR` getter whose body loads one resource key and calls
+`GetResourceString`. Getters differ only in MethodDef token, name, body bytes and key. -/
+structure ResourceGetter where
+  token : Nat
+  name : String
+  bytes : List Nat
+  keyOffset : Nat
+  key : String
+  keyBlob : List Nat
 
-/-- Metadata rows and heap entries used by this method. -/
-def rows : MethodMetadata := {
+namespace ResourceGetter
+
+/-- Metadata rows and heap entries used by the getter. -/
+def rows (getter : ResourceGetter) : MethodMetadata := {
   own := {
     assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly,
     rows := [(33554594, (fixedBytes 18 0x0120100002000000040000000000FE021C07)),
@@ -816,30 +826,23 @@ def rows : MethodMetadata := {
       (67110425, (fixedBytes 10 0x1100FFFFFFFFFFFFFFFF)), (67110426, (fixedBytes 10 0x1100FFFFFFFFFFFFFFFF)),
       (67110427, (fixedBytes 10 0x3100FFFFFFFFFFFFFFFF)), (67110428, (fixedBytes 10 0x1100FFFFFFFFFFFFFFFF)),
       (100671851, (fixedBytes 20 0x00000000000093000100000002000000603C0000)),
-      (100671882, (fixedBytes 20 0x00000000000093080500000001000000733C0000)),
+      (getter.token, (fixedBytes 20 0x00000000000093080500000001000000733C0000)),
       (704643081, (fixedBytes 12 0x0000180016010000FFFFFFFF)), (704643082, (fixedBytes 12 0x000004006A010000FFFFFFFF)),
       (704643422, (fixedBytes 12 0x00001800B4030000FFFFFFFF)), (704643423, (fixedBytes 12 0x0000000006040000FFFFFFFF))],
     strings := [(1, (fixedBytes 18 0x4765745265736F75726365537472696E6700)),
       (2, (fixedBytes 7 0x4F626A65637400)), (3, (fixedBytes 3 0x535200)),
-      (4, (fixedBytes 7 0x53797374656D00)), (5, (fixedBytes 36 0x6765745F4172675F417267756D656E744F75744F6652616E6765457863657074696F6E00))],
+      (4, (fixedBytes 7 0x53797374656D00)), (5, bytesOf getter.name ++ [0])],
     blobs := [(1, (fixedBytes 4 0x0300000E)), (2, (fixedBytes 5 0x0400010E0E))],
-    userStrings := [(11466, (fixedBytes 64 0x3F4100720067005F0041007200670075006D0065006E0074004F00750074004F006600520061006E006700650045007800630065007000740069006F006E0000))],
+    userStrings := [(getter.keyOffset, getter.keyBlob)],
     corlib := 0,
-    links := [⟨1, 100671851, 0, 33554911⟩, ⟨1, 100671882, 0, 33554911⟩]},
+    links := [⟨1, 100671851, 0, 33554911⟩, ⟨1, getter.token, 0, 33554911⟩]},
   others := []}
 
-/-- Metadata indexes reconstructed from the supplied rows. -/
-private def tables : List IndexTables := rows.tables.toOption.getD []
-
-/-- The reconstructed indexes match the carried metadata. -/
-theorem tables_valid : tablesMatch rows tables = true := by decide +kernel
-#print axioms tables_valid
-
 /-- Original IL bytes and the scoped operands needed to decode them. -/
-def body : BodyEvidence := {
-  bytes := [46, 114, 202, 44, 0, 112, 40, 107, 33, 0, 6, 42],
+def body (getter : ResourceGetter) : BodyEvidence := {
+  bytes := getter.bytes,
   tokens := {
-    operands := [(1879059658, .text "Arg_ArgumentOutOfRangeException"),
+    operands := [(0x70000000 + getter.keyOffset, .text getter.key),
       (100671851, .call {
           method := lookup,
           name := "GetResourceString",
@@ -848,37 +851,80 @@ def body : BodyEvidence := {
           typeArguments := [],
           parameterCount := 1,
           returnsValue := true})]},
-  metadata := rows,
+  metadata := getter.rows,
   identities := [identity],
-  tables,
+  tables := getter.rows.tables.toOption.getD [],
   names := {
     },
   pinned := PinnedIndex.ofIdentities [identity]}
 
 /-- Decode the original body in its checked metadata environment. -/
-def checked := do
-  let env ← body.environment.mapError BodyError.metadata
-  decodeBody env 0 0 body
+def checked (getter : ResourceGetter) := do
+  let env ← getter.body.environment.mapError BodyError.metadata
+  decodeBody env 0 0 getter.body
 
 /-- Method declaration with instructions, stack limit and locals from the decoder. -/
-def raw : RawMethod :=
-  let decoded := checked.toOption.getD { maxStack := 0, initLocals := false, localSignature := 0, code := [], statics := [] }
-  { token := 100671882, owner := (coreLibraryScope ++ "::System.SR"), hasThis := false, explicitThis := false,
-    callingConvention := 0, attributes := 2195,
+def raw (getter : ResourceGetter) : RawMethod :=
+  let decoded := getter.checked.toOption.getD
+    { maxStack := 0, initLocals := false, localSignature := 0, code := [], statics := [] }
+  { token := getter.token, owner := (coreLibraryScope ++ "::System.SR"), hasThis := false,
+    explicitThis := false, callingConvention := 0, attributes := 2195,
     implementation := 0,
     returnType := .object coreLibraryScope "System.String", parameters := [], locals := [],
-    initLocals := decoded.initLocals, maxStack := decoded.maxStack, genericParameters := [], code := decoded.code }
+    initLocals := decoded.initLocals, maxStack := decoded.maxStack, genericParameters := [],
+    code := decoded.code }
+
+/-- Signature text of the getter. -/
+def signature (getter : ResourceGetter) : String :=
+  "System.String System.SR::" ++ getter.name ++ "()"
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
-def names : MethodNames := {
-  owner := bytesOf (coreLibraryScope ++ "::System.SR"), signature := bytesOf "System.String System.SR::get_Arg_ArgumentOutOfRangeException()" }
+def names (getter : ResourceGetter) : MethodNames := {
+  owner := bytesOf (coreLibraryScope ++ "::System.SR"), signature := bytesOf getter.signature }
+
+end ResourceGetter
+
+/-- The getter called by the range constructor when its message is null. -/
+def rangeResource : ResourceGetter := {
+  token := 100671882, name := "get_Arg_ArgumentOutOfRangeException",
+  bytes := [46, 114, 202, 44, 0, 112, 40, 107, 33, 0, 6, 42],
+  keyOffset := 11466, key := "Arg_ArgumentOutOfRangeException",
+  keyBlob := (fixedBytes 64 0x3F4100720067005F0041007200670075006D0065006E0074004F00750074004F006600520061006E006700650045007800630065007000740069006F006E0000) }
+
+/-- The reconstructed indexes match the carried metadata. -/
+theorem rangeResource_tables :
+    tablesMatch rangeResource.rows rangeResource.body.tables = true := by
+  decide +kernel
+#print axioms rangeResource_tables
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
-    {body with names} raw [] "System.String System.SR::get_Arg_ArgumentOutOfRangeException()" :=
-  ⟨.cons identified .nil, tables_valid, by cil_kernel_rfl, by decide +kernel,rfl,by cil_kernel_rfl,
-   by cil_kernel_rfl, by cil_body_decodes⟩
-#print axioms bound
-end RangeResource
+theorem rangeResource_bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+    {rangeResource.body with names := rangeResource.names} rangeResource.raw []
+      "System.String System.SR::get_Arg_ArgumentOutOfRangeException()" :=
+  ⟨.cons identified .nil, rangeResource_tables, by cil_kernel_rfl, by decide +kernel, rfl,
+   by cil_kernel_rfl, by cil_kernel_rfl, by cil_body_decodes⟩
+#print axioms rangeResource_bound
+
+/-- The getter called by the InvalidOperationException constructor when its message is null. -/
+def invalidOperationResource : ResourceGetter := {
+  token := 100671961, name := "get_Arg_InvalidOperationException",
+  bytes := [46, 114, 164, 60, 0, 112, 40, 107, 33, 0, 6, 42],
+  keyOffset := 15524, key := "Arg_InvalidOperationException",
+  keyBlob := (fixedBytes 60 0x3B4100720067005F0049006E00760061006C00690064004F007000650072006100740069006F006E0045007800630065007000740069006F006E0000) }
+
+/-- The reconstructed indexes match the carried metadata. -/
+theorem invalidOperationResource_tables :
+    tablesMatch invalidOperationResource.rows invalidOperationResource.body.tables = true := by
+  decide +kernel
+#print axioms invalidOperationResource_tables
+
+/-- The typed declaration and instructions are bound to the original body and metadata. -/
+theorem invalidOperationResource_bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+    {invalidOperationResource.body with names := invalidOperationResource.names}
+      invalidOperationResource.raw []
+      "System.String System.SR::get_Arg_InvalidOperationException()" :=
+  ⟨.cons identified .nil, invalidOperationResource_tables, by cil_kernel_rfl, by decide +kernel,
+   rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_body_decodes⟩
+#print axioms invalidOperationResource_bound
 
 end CIL.Runtime.Net11WinX64.Core
