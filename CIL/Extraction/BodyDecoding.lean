@@ -248,7 +248,7 @@ structure BodyEvidence where
   /-- The direct import links and published layout names bound by the translation certificate. -/
   imports : BodyImports := {}
   /-- Relevant declaration columns in the same index order as the certified program layouts. -/
-  layoutDeclarations : Array (String × List TypeLevel) := #[]
+  layoutDeclarations : Array LayoutIdentity := #[]
   /-- The type arguments of a generic instance, method arguments first, as the types its
       signature names; empty for a method that is not an instance. -/
   instantiation : List InstanceArgument := []

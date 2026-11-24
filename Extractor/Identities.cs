@@ -379,6 +379,24 @@ internal sealed record TypeLevel(MetadataName Namespace, MetadataName Name)
     internal static TypeLevel Of(TypeDefinition definition, MetadataImage image) =>
         IdentityRows.Level(image, definition.MetadataToken);
 
+    /// <summary>The namespace and name columns from the outermost row to this TypeRef or TypeDef.</summary>
+    internal static ImmutableArray<TypeLevel> Levels(TypeReference type, MetadataImage image)
+    {
+        IdentityRows.RequireModule(image, type.Module);
+        var levels = ImmutableArray.CreateBuilder<TypeLevel>();
+        var visited = new HashSet<uint>();
+        uint token = type.MetadataToken.ToUInt32();
+        do
+        {
+            if (!visited.Add(token)) throw new InvalidDataException("Cyclic nested type identity");
+            var row = image.NamedType(token);
+            levels.Add(new(image.Name(row.Namespace), image.Name(row.Name)));
+            token = row.Parent;
+        } while (token != 0);
+        levels.Reverse();
+        return levels.ToImmutable();
+    }
+
     /// <summary>The structure literal of the level.</summary>
     internal string ToLean() => $"{{ typeNamespace := {Namespace.ToLean()}, name := {Name.ToLean()} }}";
 
@@ -410,19 +428,9 @@ internal sealed record TypeIdentity(AssemblyName Assembly, MetadataName Namespac
         AssemblyName assembly = AssemblyName.Of(definition.Module.Assembly.Name, image) ??
             throw new InvalidDataException("Assembly row without a version or an eight-byte public key token: " +
                 definition.Module.Assembly.Name.FullName);
-        var enclosing = ImmutableArray.CreateBuilder<TypeLevel>();
-        var visited = new HashSet<uint>();
-        uint parent = image.NamedType(definition.MetadataToken.ToUInt32()).Parent;
-        while (parent != 0)
-        {
-            if (!visited.Add(parent)) throw new InvalidDataException("Cyclic nested type identity");
-            var row = image.NamedType(parent);
-            enclosing.Add(new(image.Name(row.Namespace), image.Name(row.Name)));
-            parent = row.Parent;
-        }
-        enclosing.Reverse();
-        TypeLevel level = TypeLevel.Of(definition, image);
-        return new(assembly, level.Namespace, enclosing.ToImmutable(), level.Name);
+        var levels = TypeLevel.Levels(definition, image);
+        var level = levels[^1];
+        return new(assembly, level.Namespace, levels.RemoveAt(levels.Length - 1), level.Name);
     }
 
     /// <summary>The structure literal of the type, without <c>enclosing</c> when the type is not nested.</summary>

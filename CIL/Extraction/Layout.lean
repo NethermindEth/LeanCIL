@@ -141,6 +141,30 @@ structure GenericLayout where
 def GenericLayout.closedType (layout : GenericLayout) : TypeExpr :=
   layout.arguments.foldl TypeExpr.apply layout.owner
 
+mutual
+
+/-- A closed value argument, preserving element codes and the name columns of every named type. -/
+inductive LayoutArgument where
+  | primitive (code : Nat)
+  | named (scope : String) (levels : List TypeLevel)
+  | instanceType (scope : String) (levels : List TypeLevel) (arguments : LayoutArguments)
+  deriving DecidableEq, Repr
+
+/-- The arguments of a generic layout in CLI signature order. -/
+inductive LayoutArguments where
+  | nil
+  | cons (head : LayoutArgument) (tail : LayoutArguments)
+  deriving DecidableEq, Repr
+
+end
+
+/-- The type at a layout index, including the scoped spelling consumed by existing methods. -/
+structure LayoutIdentity where
+  spelling : String
+  levels : List TypeLevel
+  arguments : Option LayoutArguments
+  deriving DecidableEq, Repr
+
 /-- Children precede parents; indices refer to raw metadata, not computed sizes. -/
 structure RawLayout where
   identity : String := ""
@@ -156,14 +180,15 @@ structure RawLayout where
   interfaces : List String := []
   /-- Closed sequential generic layouts additionally prove their original field substitutions. -/
   generic : Option GenericLayout := none
-  /-- Physical namespace and simple name at each enclosing level of a nominal layout.
-      A constructed generic instance has no nominal declaration of its own. -/
+  /-- Physical namespace and simple name of the definition or generic constructor at each level. -/
   declaration : List TypeLevel := []
+  /-- Closed type arguments for a constructed layout, including platform aggregates. -/
+  genericArguments : Option LayoutArguments := none
   deriving DecidableEq, Repr
 
-/-- The scoped identity and nominal name columns at each index in the program's layout table. -/
-def layoutDeclarations (rows : List RawLayout) : Array (String × List TypeLevel) :=
-  (rows.map fun row => (row.identity, row.declaration)).toArray
+/-- The declarations and closed arguments in program layout order. -/
+def layoutDeclarations (rows : List RawLayout) : Array LayoutIdentity :=
+  (rows.map fun row => ⟨row.identity, row.declaration, row.genericArguments⟩).toArray
 
 /-- A struct's field offsets and size, with the alignment it imposes when nested. -/
 structure ComputedLayout where

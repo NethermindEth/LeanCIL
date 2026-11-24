@@ -11,6 +11,7 @@ open CIL.Extraction _root_.StrictBinding
 /-- Two 32-bit fields at offsets zero and four occupy the eight-byte explicit Overlay. -/
 private def overlay : RawLayout := {
   identity := StrictFixture.identity ++ "::StrictFixture.Overlay", explicit := true,
+  declaration := [⟨name!"StrictFixture", name!"Overlay"⟩],
   packing := 0, declaredSize := 8, fields := [⟨.signed32, some 0⟩, ⟨.signed32, some 4⟩] }
 
 /-- Compare raw layouts against the supplied version of the same compiled assembly. -/
@@ -22,6 +23,8 @@ private def check (layouts : List RawLayout) (bytes := StrictFixture.image) :=
 theorem selection :
     let missing := {overlay with identity := "Other, Version=1.0.0.0::Missing"}
     (check [overlay]).toOption = some true ∧
+    failsWith (check [{overlay with declaration := [⟨name!"", name!"StrictFixture.Overlay"⟩]}])
+      (.layoutMismatch overlay.identity) = true ∧
     (check []).toOption = some false ∧
     (check [missing, overlay]).toOption = some false ∧
     failsWith (check [missing, {overlay with packing := 1}])

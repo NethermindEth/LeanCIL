@@ -145,7 +145,7 @@ structure MetadataEnv where
   /-- Exact value-layout identities published by the selected import slots. -/
   publishedLayouts : Array (List Nat) := #[]
   /-- Available when resolving a body against its program layout table. -/
-  layoutDeclarations : Option (Array (String × List TypeLevel)) := none
+  layoutDeclarations : Option (Array LayoutIdentity) := none
 
 /-- Build all assembly lookups once, keeping the first occurrence of each identity. -/
 def MetadataEnv.ofSlices (slices : List MetadataIndex) (pinned : AssemblyPrefixes := {})
@@ -1248,7 +1248,7 @@ structure Frame where
   /-- A member declaration numbers each owner's variables from zero in its own signature. -/
   rawIndices : Bool := false
   /-- Standalone signature checks have no layout table. Certified bodies always supply it. -/
-  layoutDeclarations : Option (Array (String × List TypeLevel)) := none
+  layoutDeclarations : Option (Array LayoutIdentity) := none
 
 /-- Each namespace and name in the resolved nesting chain has its own metadata column. -/
 def declarationMatches : List TypeLevel → List (List Nat) → Bool
@@ -1258,15 +1258,41 @@ def declarationMatches : List TypeLevel → List (List Nat) → Bool
       MetadataName.ofBytes? name == some level.name && declarationMatches rest parts
   | _, _ => false
 
-/-- A body operand selects its scoped layout at the stated index. A nominal type must match
-    every name column, and a constructed generic instance must select an instance layout. -/
-def Frame.layoutMatches (frame : Frame) (index : Nat) (identity : String)
-    (parts : List (List Nat)) : Bool :=
+mutual
+
+/-- Compare a closed layout argument with the type that the physical signature resolved. -/
+private def layoutArgumentMatches : Nat → LayoutArgument → ResolvedType → Bool
+  | fuel + 1, claim, resolved =>
+    match claim, resolved with
+    | .primitive expected, .primitive actual => expected == actual
+    | .named scope levels, .named named =>
+      bytesOf scope == named.scope && declarationMatches levels named.parts
+    | .instanceType scope levels claims, .genericInst head actual =>
+      bytesOf scope == head.scope && declarationMatches levels head.parts &&
+        layoutArgumentsMatch fuel claims actual
+    | _, _ => false
+  | 0, _, _ => false
+
+/-- Each supplied argument has to match in order, with both lists ending together. -/
+private def layoutArgumentsMatch : Nat → LayoutArguments → ResolvedList → Bool
+  | _ + 1, .nil, .nil => true
+  | fuel + 1, .cons head tail, .cons actual rest =>
+    layoutArgumentMatches fuel head actual && layoutArgumentsMatch fuel tail rest
+  | _, _, _ => false
+
+end
+
+/-- The indexed row matches the physical declaration and all arguments of the operand. -/
+def Frame.layoutMatches (frame : Frame) (index : Nat) (identity : String) (head : NamedType)
+    (arguments : Option ResolvedList) : Bool :=
   match frame.layoutDeclarations with
   | none => true
   | some rows => (rows[index]?).any fun row =>
-    row.1 == identity && declarationMatches row.2 parts
-
+    row.spelling == identity && declarationMatches row.levels head.parts &&
+      match row.arguments, arguments with
+      | none, none => true
+      | some claims, some actual => layoutArgumentsMatch resolveFuel claims actual
+      | _, _ => false
 
 /-- A class, interface or external type that may be a class. -/
 def classLike : TypeKind → Bool
@@ -1360,7 +1386,7 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
         (!named.fixedStorage || named.name == systemStringName)
     | .named named, .aggregate identity index =>
       bytesOf identity == named.scope ++ [58, 58] ++ named.name && valueLike named.kind &&
-        !named.fixedStorage && frame.layoutMatches index identity named.parts
+        !named.fixedStorage && frame.layoutMatches index identity named none
     | .named named, .enum identity underlying =>
       bytesOf identity == named.scope ++ [58, 58] ++ named.name &&
         match named.kind with
@@ -1378,7 +1404,7 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
     | .pointer element, .pointer inner => typeAdmits frame fuel element inner
     | .szarray element, .array inner => typeAdmits frame fuel element inner
     | .genericInst head arguments, .aggregate identity index =>
-      frame.layoutMatches index identity [] && valueLike head.kind &&
+      frame.layoutMatches index identity head (some arguments) && valueLike head.kind &&
         aggregateValueArgs fuel arguments &&
         (if head.pinned || (head.parts == [systemNamespace, valueTuplePairName] &&
             head.scope == bytesOf runtimeScope) ||

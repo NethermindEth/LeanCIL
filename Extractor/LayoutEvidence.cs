@@ -119,6 +119,30 @@ internal sealed class LayoutEvidence
     internal int Index(TypeReference type) => typeIndices.Count != 0 && type.GetElementType().MetadataToken.RID != 0
         ? typeIndices.GetValueOrDefault(layouts.Signature(type), -1) : -1;
 
+    static string Declaration(TypeReference head)
+    {
+        var image = PinnedAssemblies.Active!.IdentityMetadata(head.Module);
+        return "[" + string.Join(", ", TypeLevel.Levels(head, image).Select(level => level.ToLean())) + "]";
+    }
+
+    // Named signature occurrences and primitive element codes have distinct storage identities.
+    static string LayoutArgument(TypeReference type)
+    {
+        if (StructuralSignatures.Current.IsPrimitiveElement(type)) return $".primitive {(int)type.MetadataType}";
+        var head = type is GenericInstanceType generic ? generic.ElementType : type;
+        var name = $"{IdentityText.Quote(Scope(head))} {Declaration(head)}";
+        return type is GenericInstanceType instance
+            ? $".instanceType {name} {LayoutArguments(instance)}" : $".named {name}";
+    }
+
+    static string LayoutArguments(GenericInstanceType instance)
+    {
+        var chain = new StringBuilder();
+        foreach (var argument in instance.GenericArguments)
+            chain.Append($"(.cons ({LayoutArgument(argument)}) ");
+        return chain.Append(".nil").Append(')', instance.GenericArguments.Count).ToString();
+    }
+
     // Layouts in one assembly share the UTF-8 encoding of its scope during kernel reduction.
     static string ScopedIdentityTerm(string identity, int boundary)
     {
@@ -207,8 +231,10 @@ internal sealed class LayoutEvidence
             var interfaces = layouts.IsImported(type) ? "" : $"interfaces := [{string.Join(", ",
                 metadata.Interfaces.Select(implementation => IdentityText.Quote(InterfaceIdentity(
                     GenericStructs.Substitute(implementation.InterfaceType, type as GenericInstanceType)))))}], ";
-            var declaration = type is GenericInstanceType ? "" :
-                $"declaration := {ContractLayoutLevel.Lean(ContractLayoutLevel.Read(metadata))}, ";
+            var head = type is GenericInstanceType constructed ? constructed.ElementType : metadata;
+            var declaration = $"declaration := {Declaration(head)}, ";
+            if (type is GenericInstanceType instance)
+                declaration += $"genericArguments := some {LayoutArguments(instance)}, ";
             var attributes = $"{declaration}{genericEvidence}{kind}{auto}{marker}{interfaces}";
             var size = $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}";
             var fieldList = string.Join(", ", fields);

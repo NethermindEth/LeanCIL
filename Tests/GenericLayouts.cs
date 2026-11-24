@@ -129,17 +129,19 @@ using (var pinned = new PinnedMetadata(extractor, shadowImage))
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution");
 var evidence = new GeneratedEvidence(root);
 var rejected = new RejectedEvidence(root);
-var dottedPacket = Path.Combine(root, "DottedPacket.dll");
+var dottedImage = Path.Combine(root, "DottedDeclarations.dll");
 using (var source = ModuleDefinition.ReadModule(assembly))
 {
-    var packet = source.GetType("Examples.Packet");
-    packet.Name = packet.FullName;
-    packet.Namespace = "";
-    source.Write(dottedPacket);
+    foreach (var type in new[] { source.GetType("Examples.Packet"), source.GetType("Examples.GenericPair`1") })
+    {
+        type.Name = type.FullName;
+        type.Namespace = "";
+    }
+    source.Write(dottedImage);
 }
 foreach (var (label, image, otherSpace, otherName) in new[]
 {
-    ("QualifiedPacket", assembly, "", "Examples.Packet"), ("DottedPacket", dottedPacket, "Examples", "Packet")
+    ("QualifiedPacket", assembly, "", "Examples.Packet"), ("DottedPacket", dottedImage, "Examples", "Packet")
 })
 {
     var output = Path.Combine(root, label);
@@ -168,6 +170,46 @@ foreach (var (label, image, otherSpace, otherName) in new[]
         end Extracted
         """);
     evidence.Add(path, "PASS initobj binds the namespace and simple name in " + label, "swapped_declaration_rejected");
+
+    var nested = Path.Combine(root, label + "Nested");
+    Run(["dotnet", ExtractorPath, "extract", image, "GenericLayouts::Nested(uint,uint)", nested]);
+    var nestedProof = Path.Combine(nested, "Extracted.lean");
+    var otherGenericName = otherSpace.Length == 0 ? "Examples.GenericPair`1" : "GenericPair`1";
+    File.AppendAllText(nestedProof, $$"""
+
+        namespace Extracted
+        open CIL CIL.Extraction
+
+        /-- The alternative metadata declaration has the same scoped display spelling. -/
+        private def otherPair : List TypeLevel := [⟨name!"{{otherSpace}}", name!"{{otherGenericName}}"⟩]
+
+        /-- Checking the nested return signature fails at this physical MethodDef. -/
+        private def rejectsReturn (change : RawLayout → RawLayout) : Bool :=
+          let rows := rawLayouts.modify 1 change
+          match checkBody { method0Body with layoutDeclarations := layoutDeclarations rows }
+              method0Original method0TypeArgumentsRaw with
+          | .error (.metadata (.methodMismatch token)) => token == method0Original.token
+          | _ => false
+
+        /-- Change just the argument list of the outer generic application. -/
+        private def changeInner (change : String → List TypeLevel → LayoutArguments → LayoutArgument)
+            (row : RawLayout) : RawLayout :=
+          match row.genericArguments with
+          | some (.cons (.instanceType scope levels args) .nil) =>
+            { row with genericArguments := some (.cons (change scope levels args) .nil) }
+          | _ => row
+
+        /-- Equal display names cannot replace the outer constructor, inner constructor or UInt32 code. -/
+        theorem nested_identity_checked :
+            rejectsReturn (fun row => { row with declaration := otherPair }) = true ∧
+            rejectsReturn (changeInner fun scope _ args => .instanceType scope otherPair args) = true ∧
+            rejectsReturn (changeInner fun scope levels _ => .instanceType scope levels
+              (.cons (.named runtimeScope [⟨name!"System", name!"UInt32"⟩]) .nil)) = true := by
+          exact ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+        #print axioms nested_identity_checked
+        end Extracted
+        """);
+    evidence.Add(nestedProof, "PASS nested generic identity in " + label, "nested_identity_checked");
 }
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.GenericLayouts")!;
 foreach (var (name, signature) in new[]

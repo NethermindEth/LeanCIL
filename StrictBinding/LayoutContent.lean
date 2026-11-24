@@ -17,16 +17,20 @@ private def hasLayoutOwner (image : PreparedImage) (table owner : Nat) :
     if (← image.layout.cellOfRow image.view table (index + 1) 0) == owner then return true
   return false
 
-/-- Reconstruct a supported value layout using only its scoped name and physical metadata.
+/-- Locate a top-level scalar value layout by its physical namespace and simple name.
     Custom attributes, interfaces, generics, automatic layouts and nonscalar fields are partial. -/
-def physicalLayout (images : List PreparedImage) (identity : String) :
+def physicalLayout (images : List PreparedImage) (identity : String) (levels : List CIL.TypeLevel) :
     Except AuditError (Option RawLayout) := do
   let some (scope, name) := namedType (.aggregate identity 0) | return none
   let some image := images.find? (·.identity == String.ofList scope) | return none
-  let (owner, arity) ← match valueLayoutOwner image identity name with
-    | .error .uncoveredConstraint => return none
-    | other => other
-  unless arity == 0 do return none
+  let [level] := levels | return none
+  let some space := level.typeNamespace.bytes? | throw (.layoutMismatch identity)
+  let some simple := level.name.bytes? | throw (.layoutMismatch identity)
+  let some owner ← enumDefinition? image 0 [space, simple] | throw (.layoutMismatch identity)
+  let (kind, arity) ← physicalTypeShape image owner
+  unless kind == .valueType && arity == 0 do return none
+  unless (if space.isEmpty then simple else space ++ [46] ++ simple) == bytesOf (String.ofList name)
+    do throw (.layoutMismatch identity)
   let flags ← image.layout.cellOfRow image.view Table.typeDef owner typeDefFlagsColumn
   let layoutKind := flags &&& 0x18
   let explicit := layoutKind == 0x10
@@ -55,12 +59,13 @@ def physicalLayout (images : List PreparedImage) (identity : String) :
     let offset ← row.mapM fun index => image.layout.cellOfRow image.view fieldLayoutTable index 0
     unless offset.isSome == explicit do throw (.layoutMismatch identity)
     fields := fields.push { type := storage, offset }
-  return some { identity, explicit, packing, declaredSize, fields := fields.toList }
+  return some { identity, declaration := [level], explicit, packing, declaredSize,
+                fields := fields.toList }
 
 /-- A supported physical layout must agree in every field, including its flags and interfaces. -/
 private def checkOneLayout (images : List PreparedImage) (layout : RawLayout) :
     Except AuditError Bool := do
-  let some actual ← physicalLayout images layout.identity | return false
+  let some actual ← physicalLayout images layout.identity layout.declaration | return false
   if actual = layout then return true
   throw (.layoutMismatch layout.identity)
 
@@ -85,7 +90,8 @@ instance (images : List PinnedImage) (layouts : List RawLayout) (imports : List 
 theorem LayoutContentChecked.physical {images : List PinnedImage} {layouts : List RawLayout}
     {imports : List CIL.ImportSlot} (checked : LayoutContentChecked images layouts imports true) :
     ∃ prepared, prepare images = .ok prepared ∧
-      ∀ layout ∈ layouts, physicalLayout prepared layout.identity = .ok (some layout) := by
+      ∀ layout ∈ layouts,
+        physicalLayout prepared layout.identity layout.declaration = .ok (some layout) := by
   have done : checkLayoutContent images layouts imports = .ok true := by
     cases result : checkLayoutContent images layouts imports with
     | error err => simp [LayoutContentChecked, result, Except.toOption] at checked

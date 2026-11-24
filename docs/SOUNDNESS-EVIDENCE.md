@@ -623,8 +623,9 @@ The extractor selects imported layout definitions and assigns layout indices usi
 namespace and simple name of each enclosing type and the type itself. Generic arguments are part
 of the lookup. For a nominal aggregate operand, Lean checks the layout index against the program's
 raw layout table and checks each namespace and simple name against the resolved metadata columns.
-For constructed generic types it checks the row index and scoped spelling. Extraction rejects
-ambiguous display names before emitting the table.
+For a constructed type, Lean also checks the constructor's name columns and the ordered arguments
+against the resolved signature. Each nested argument retains its assembly scope and name columns or
+its primitive element code. Extraction rejects ambiguous display names before emitting the table.
 
 An imported aggregate local sizes caller frame storage from the same pinned metadata that byref
 contracts already trust; it adds a consumer and no trusted source. `ImportedLocalLayoutsBound`

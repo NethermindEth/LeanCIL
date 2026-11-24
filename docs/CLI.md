@@ -372,7 +372,8 @@ nested enum, and reads the integer signature of the defining row's instance fiel
 An extraction with no enum or a missing destination reports `not covered`. A supplied
 definition with the wrong storage code fails verification.
 
-For `layout-content`, Lean reads each selected struct from the pinned image. It checks
+For `layout-content`, Lean locates each supported top-level struct by its namespace and simple name
+columns in the pinned image. It checks
 sequential or explicit layout, packing, declared size, instance field order and integer field
 signatures, and explicit field offsets. The certified extraction uses those same raw layouts
 to compute sizes, alignments and offsets for its architecture. An empty selection, imports,
