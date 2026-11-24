@@ -1,9 +1,9 @@
-import Tests.CoreLibImage
+import CIL.Runtime.Net11WinX64.CoreLib
 
 /-! Method bodies, metadata and constructor signatures from the .NET 11.0.0 Windows x64
-CoreLib fixture. Each body is replayed with the metadata tables reconstructed from its rows. -/
+CoreLib image. Each body is replayed with the metadata tables reconstructed from its rows. -/
 
-namespace Tests.PercentRuntime.Core
+namespace CIL.Runtime.Net11WinX64.Core
 open CIL CIL.Extraction
 
 set_option maxRecDepth 32768
@@ -14,7 +14,7 @@ private def identity := bytesOf coreLibraryScope
 
 /-- The runtime assembly identity is justified by its table row and heaps. -/
 private theorem identified :
-    AssemblyIdentified Tests.CoreLibImage.assembly (bytesOf coreLibraryScope) :=
+    AssemblyIdentified CIL.Runtime.Net11WinX64.CoreLib.assembly (bytesOf coreLibraryScope) :=
   ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
 #print axioms identified
 
@@ -23,7 +23,7 @@ namespace RangeCtor
 /-- Metadata rows and heap entries used by this method. -/
 def rows : MethodMetadata := {
   own := {
-    assembly := Tests.CoreLibImage.assembly,
+    assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly,
     rows := [(33554576, (fixedBytes 18 0x0120100004000000070000008802A802E505)),
       (33554577, (fixedBytes 18 0x05010000FFFFFFFF000000002402B8021A06)),
       (33554594, (fixedBytes 18 0x0120100005000000070000000000FE021C07)),
@@ -185,7 +185,7 @@ namespace ArgumentCtor
 /-- Metadata rows and heap entries used by this method. -/
 def rows : MethodMetadata := {
   own := {
-    assembly := Tests.CoreLibImage.assembly,
+    assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly,
     rows := [(33554576, (fixedBytes 18 0x0120100003000000050000008802A802E505)),
       (33554577, (fixedBytes 18 0x05010000FFFFFFFF000000002402B8021A06)),
       (33554594, (fixedBytes 18 0x0120100004000000050000000000FE021C07)),
@@ -319,7 +319,7 @@ namespace SystemExceptionCtor
 /-- Metadata rows and heap entries used by this method. -/
 def rows : MethodMetadata := {
   own := {
-    assembly := Tests.CoreLibImage.assembly,
+    assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly,
     rows := [(33554576, (fixedBytes 18 0x0120100002000000040000008802A802E505)),
       (33554577, (fixedBytes 18 0x05010000FFFFFFFF000000002402B8021A06)),
       (33554594, (fixedBytes 18 0x0120100003000000040000000000FE021C07)),
@@ -445,7 +445,7 @@ namespace ExceptionMessageCtor
 /-- Metadata rows and heap entries used by this method. -/
 def rows : MethodMetadata := {
   own := {
-    assembly := Tests.CoreLibImage.assembly,
+    assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly,
     rows := [(33554576, (fixedBytes 18 0x0120100002000000040000008802A802E505)),
       (33554577, (fixedBytes 18 0x05010000FFFFFFFF000000002402B8021A06)),
       (33554594, (fixedBytes 18 0x0120100003000000040000000000FE021C07)),
@@ -547,7 +547,7 @@ namespace ExceptionCtor
 /-- Metadata rows and heap entries used by this method. -/
 def rows : MethodMetadata := {
   own := {
-    assembly := Tests.CoreLibImage.assembly,
+    assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly,
     rows := [(33554576, (fixedBytes 18 0x0120100002000000040000008802A802E505)),
       (33554577, (fixedBytes 18 0x05010000FFFFFFFF000000002402B8021A06)),
       (33554594, (fixedBytes 18 0x0120100003000000040000000000FE021C07)),
@@ -650,7 +650,7 @@ namespace ObjectCtor
 /-- Metadata rows and heap entries used by this method. -/
 def rows : MethodMetadata := {
   own := {
-    assembly := Tests.CoreLibImage.assembly,
+    assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly,
     rows := [(33554594, (fixedBytes 18 0x0120100002000000030000000000FE021C07)),
       (33554595, (fixedBytes 18 0x09011000FFFFFFFF030000003003FE022507)),
       (100665118, (fixedBytes 20 0x00000000000086180100000001000000C20E0000)),
@@ -720,7 +720,7 @@ namespace SetHResult
 /-- Metadata rows and heap entries used by this method. -/
 def rows : MethodMetadata := {
   own := {
-    assembly := Tests.CoreLibImage.assembly,
+    assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly,
     rows := [(33554576, (fixedBytes 18 0x0120100001000000030000008802A802E505)),
       (33554577, (fixedBytes 18 0x05010000FFFFFFFF000000002402B8021A06)),
       (33554594, (fixedBytes 18 0x0120100002000000030000000000FE021C07)),
@@ -807,7 +807,7 @@ namespace RangeResource
 /-- Metadata rows and heap entries used by this method. -/
 def rows : MethodMetadata := {
   own := {
-    assembly := Tests.CoreLibImage.assembly,
+    assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly,
     rows := [(33554594, (fixedBytes 18 0x0120100002000000040000000000FE021C07)),
       (33554595, (fixedBytes 18 0x09011000FFFFFFFF040000003003FE022507)),
       (33554911, (fixedBytes 18 0x800110000300000004000000880217066821)),
@@ -881,4 +881,4 @@ theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
 #print axioms bound
 end RangeResource
 
-end Tests.PercentRuntime.Core
+end CIL.Runtime.Net11WinX64.Core

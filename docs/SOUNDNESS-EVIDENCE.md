@@ -518,7 +518,14 @@ of `Throws.Percent`, the verifier checks that both original operands load even w
 The extractor emits a binding function for each reachable folded constructor site. Given the
 facade and defining assembly slices and a constructor candidate, it reads the original
 `newobj` token, resolves its declaring type through the carried rows and checks the MethodDef
-and signature. The ordinary packaged exception proof uses the recognized constructor fold.
+and signature. For single-entry methods with a two-string range constructor and an original
+`ldstr` message immediately before `newobj`, the generated `methodNRangeImagePC` can decode
+the caller and its seven managed runtime bodies. The named target is .NET 11.0.0 Windows x64.
+Its CoreLib SHA-256 is `7b82f62a60e1673863813dd78af931a775be0630570a377cffa9e8cb9cb7abab`
+and its System.Runtime facade SHA-256 is `fa44e6e28f385224ff981086d9ca7aad2c9f49ee4de0152913eff60cb4e25416`.
+`RangeImage.invoke` loads the image from empty caller storage before running method zero.
+The resource getter occupies the first import slot. A non-null message bypasses that call.
+The ordinary `Extracted.program` exception proof uses the recognized constructor fold.
 
 For the pinned .NET 11 Windows x64 body of `Throws.Percent(uint)`, Lean checks the original
 caller and the CoreLib constructor methods reached on the throwing path. Starting from empty

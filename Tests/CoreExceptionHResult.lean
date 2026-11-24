@@ -5,7 +5,7 @@ import CIL.Safety.FuelLemmas
 import CIL.Safety.CheckedMemoryFacts
 import CIL.Safety.ObjectSteps
 import CIL.Safety.StepComposition
-import Tests.CoreLibImage
+import CIL.Runtime.Net11WinX64.CoreLib
 
 /-! The .NET 11 Windows x64 System.Exception.HResult setter. -/
 
@@ -13,7 +13,7 @@ namespace Tests.CoreExceptionHResult
 open CIL CIL.Extraction CIL.Safety
 
 private def metadata : MethodMetadata := { own := {
-  assembly := Tests.CoreLibImage.assembly
+  assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly
   rows := [
       (0x02000090, fixedBytes 18 0x0120100001000000030000008802A802E505),
       (0x02000091, fixedBytes 18 0x05010000FFFFFFFF000000002402B8021A06),

@@ -190,6 +190,9 @@ internal static class LeanEmitter
             .ToDictionary(pair => pair.method, pair => pair.index);
         var templates = new List<TemplateEmitter.Method>();
         var outlines = new List<ProofOutline.Method>();
+        var rangeConstructor = methods.Length == 1 && importResolution?.Bindings.Count is null or 0
+            ? Throws.TwoStringRangeConstructor(methods[0]) : null;
+        var runtimeImport = rangeConstructor is null ? "" : "import CIL.Runtime.Net11WinX64.RangeConstructor\n";
         StringBuilder lean = new($"""
             import CIL.Extraction.Translation
             import CIL.Extraction.DecodedDefinition
@@ -198,7 +201,7 @@ internal static class LeanEmitter
             import CIL.Safety.Execution
             import CIL.Safety.ResolutionFacts
 
-            namespace Extracted
+            {runtimeImport}namespace Extracted
             open CIL
 
             set_option maxRecDepth {RecursionDepth(methods.Max(method => method.Body.Instructions.Count))}
@@ -324,6 +327,13 @@ internal static class LeanEmitter
             }
             inputs?.Append(lean, inputStart, lean.Length - inputStart);
             genericEvidence.EmitMethod(lean, m, n, reachable, methods.Length, staticInput, inputs, compareOriginal);
+            if (rangeConstructor is not null && reachable.Contains(rangeConstructor))
+            {
+                var pc = m.Body.Instructions.IndexOf(rangeConstructor);
+                lean.AppendLine($"/-- Managed range constructor image for .NET 11.0.0 Windows x64. -/\n" +
+                    $"def method{n}RangeImage{pc} := CIL.Runtime.Net11WinX64.rangeImage? " +
+                    $"method{n}Body method{n}Original {pc} profile environment");
+            }
             // A field access names its operand's definition, so stepping reads that operand's shape fact.
             var (naming, objectProof) = operandShapes.RecordMethod(m, n, reachable, genericEvidence);
             if (GenericEvidence.FirstDecodeRefusal(m, reachable, callSites, importResolution) is { } refusal)

@@ -1,6 +1,6 @@
 import CIL.Extraction.DecodedMethod
 import CIL.Safety.StepComposition
-import Tests.CoreLibImage
+import CIL.Runtime.Net11WinX64.CoreLib
 
 /-!
 # The native pointer displacement in ObjectHeader.GetHeaderPtr
@@ -20,7 +20,7 @@ private def pointerTo (type : String) := TypeExpr.pointer (.atom coreLibraryScop
 
 /-- Carried owner, method and generic-boundary rows for MethodDef 0x06003b1f. -/
 private def metadata : MethodMetadata := { own := {
-  assembly := Tests.CoreLibImage.assembly
+  assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly
   rows := [(0x020000a2, fixedBytes 18 0x0120100002000000040000000000FE021C07),
     (0x02000363, fixedBytes 18 0x8001100003000000050000008802380C1F3B),
     (0x02000364, fixedBytes 18 0x02010000FFFFFFFF000000002402380C293B),

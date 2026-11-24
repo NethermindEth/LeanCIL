@@ -4,7 +4,7 @@ import CIL.Safety.RuntimeExceptions
 
 /-! Checked execution of the compiled Percent caller with the pinned runtime constructors. -/
 namespace CompiledPercent
-open CIL CIL.Extraction CIL.Safety CIL.Safety.LiteralImage Tests.PercentRuntime
+open CIL CIL.Extraction CIL.Safety CIL.Safety.LiteralImage CIL.Runtime.Net11WinX64 Tests.PercentRuntime
 
 set_option maxRecDepth 65536
 set_option maxHeartbeats 30000000
@@ -15,8 +15,7 @@ def memberToken (body : BodyEvidence) : Option Nat :=
 
 /-- Bind the packaged caller using the facade and CoreLib rows carried with the runtime. -/
 def pinnedCaller : Option BodyEvidence :=
-  Extracted.method0BindConstructor5 Source.rows.others
-    ⟨[], Core.RangeCtor.definition, ⟨coreLibraryScope⟩⟩
+  Extracted.method0RangeImage5.map (·.caller)
 
 /-- The neighboring throw, a missing defining image, the facade with the same MethodDef
 number, a different MethodDef and a mismatched constructor signature are all refused. -/
@@ -24,15 +23,24 @@ theorem rejectsInvalidBindings :
     let callee : SpecializedMethod := ⟨[], Core.RangeCtor.definition, ⟨coreLibraryScope⟩⟩
     (Extracted.method0Body.constructorTokenAt? 0 0 6).isNone ∧
     (Extracted.method0BindConstructor5 [] callee).isNone ∧
-    (Extracted.method0BindConstructor5 Source.rows.others
+    (Extracted.method0BindConstructor5 rangeDependencies
       { callee with assembly := ⟨runtimeScope⟩ }).isNone ∧
-    (Extracted.method0BindConstructor5 Source.rows.others
+    (Extracted.method0BindConstructor5 rangeDependencies
       { callee with closed := { callee.closed with token := Core.ArgumentCtor.definition.token } }).isNone ∧
-    (Extracted.method0BindConstructor5 Source.rows.others
+    (Extracted.method0BindConstructor5 rangeDependencies
       { callee with closed := { callee.closed with parameters := [] } }).isNone := by
   repeat' constructor
   all_goals cil_kernel_rfl
 #print axioms rejectsInvalidBindings
+
+/-- The Windows x64 constructor image requires a compatible target and the actual newobj. -/
+theorem rejectsOtherTarget :
+    (rangeImage? Extracted.method0Body Extracted.method0Original 5
+      { Extracted.profile with architecture := .arm64 } Extracted.environment).isNone ∧
+    (rangeImage? Extracted.method0Body Extracted.method0Original 6
+      Extracted.profile Extracted.environment).isNone := by
+  constructor <;> cil_kernel_rfl
+#print axioms rejectsOtherTarget
 
 /-- Pinned definition selected by the caller’s actual constructor token. -/
 def binding := do
@@ -65,33 +73,22 @@ theorem callerEvidence :
       Extracted.platformDefinitions Extracted.assembly0 body raw [] Extracted.method0Signature := by
   refine ⟨by cil_kernel_rfl, ?_⟩
   have images : body.metadata.slices.map (·.assembly) =
-      [Extracted.assembly0Metadata, Source.assembly1Metadata, Tests.CoreLibImage.assembly] := by
+      [Extracted.assembly0Metadata, facadeAssembly, CoreLib.assembly] := by
     cil_kernel_rfl
-  have ids : body.identities = [Extracted.assembly0Identity, Source.id1, Source.id2] := by
+  have ids : body.identities = [Extracted.assembly0Identity, facadeIdentity, coreIdentity] := by
     cil_kernel_rfl
   refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · unfold AssembliesIdentified
     rw [images, ids]
-    exact .cons Extracted.assembly0_identified (.cons Source.image1_identified
-      (.cons Source.image2_identified .nil))
+    exact .cons Extracted.assembly0_identified (.cons facadeIdentified
+      (.cons coreIdentified .nil))
   all_goals first | cil_kernel_rfl | decide +kernel | cil_body_decodes
 
 /-- Decoded caller linked to the seven CoreLib method bodies reached by Percent. -/
-def linkedProgram : Option Program := do
-  let body ← pinnedCaller
-  let code ← decoded
-  let raw := { Extracted.method0Original with code := code.code }
-  let table : List SpecializedMethod :=
-    ⟨[], raw, Extracted.assembly0⟩ ::
-      (coreBytes.map Prod.snd ++ [Core.RangeResource.raw]).map (⟨[], ·, ⟨coreLibraryScope⟩⟩)
-  let entry ← Method.ofBody? .scalar {} (links table raw)
-    (List.replicate raw.code.length true) body raw []
-  let constructors ← coreBytes.mapM fun (evidence, method) => Method.ofBody? .scalar {}
-    (links table method) (List.replicate method.code.length true) evidence method []
-  return entry :: constructors
+def linkedProgram : Option Program := Extracted.method0RangeImage5.map (·.methods)
 
-/-- Original method operands used to initialize the runtime string table. -/
-def inputs := Extracted.method0Original :: coreBytes.map Prod.snd
+/-- Original bodies used by the package's image loader. -/
+def inputs : List RawMethod := (Extracted.method0RangeImage5.map (·.originals)).getD []
 
 /-- Decoded execution for every unsigned input at a caller-selected allocation budget. -/
 theorem outcome (budget : Option Nat) :
@@ -166,9 +163,33 @@ theorem rangeExceptionAtEntry {executable : Program} {initial : Safety.Memory} {
     exact iff_of_true (RaisesCLR.of_invoke branch rfl) (Nat.le_of_not_lt short)
 #print axioms rangeExceptionAtEntry
 
+/-- The generated image loads and executes from empty caller storage, including for an
+explicit deployment quota. Neither the caller nor the proof supplies runtime method bodies. -/
+def imageExecution (budget : Option Nat) : Prop :=
+  ∃ image initial, Extracted.method0RangeImage5 = some image ∧
+    image.initialMemory budget = .ok initial ∧
+    ∀ value : W32, image.invoke 66 [.scalar (.i32 value)] budget = .ok
+      (if value ≤ 100 then .ok (initial, [.scalar (.i32 value)])
+       else if budget.getD 128 < 128 then .error ⟨0, 5, .allocationFailure 128 (budget.getD 128)⟩
+       else .error ⟨0, 6, .thrown .argumentOutOfRange⟩)
+
+theorem imageFromEmpty (budget : Option Nat) : imageExecution budget := by
+  obtain ⟨executable, initial, generated, loaded, runs⟩ := outcome budget
+  cases found : Extracted.method0RangeImage5 with
+  | none => simp [linkedProgram, found] at generated
+  | some image =>
+    have same : image.methods = executable := by simpa [linkedProgram, found] using generated
+    have ready : image.initialMemory budget = .ok initial := by
+      simpa [RangeImage.initialMemory, inputs, found] using loaded
+    refine ⟨image, initial, found, ready, ?_⟩
+    intro value
+    rw [RangeImage.invoke, ready, same]
+    exact congrArg Except.ok (runs value)
+#print axioms imageFromEmpty
+
 /-- Original packaged caller evidence and its complete decoded outcome under the image quota. -/
 theorem verified (heapBytes : Nat) :
-    ordinaryExecution ∧
+    imageExecution none ∧ imageExecution heapBytes ∧ ordinaryExecution ∧
     binding = some (some (2, Core.RangeCtor.definition.token)) ∧
     (pinnedCaller = some body ∧
       BodyDecodes (Extracted.assemblies ++ [⟨runtimeScope⟩, ⟨coreLibraryScope⟩])
@@ -183,7 +204,7 @@ theorem verified (heapBytes : Nat) :
         (RaisesCLR executable 0 [.scalar (.i32 value)] initial .argumentOutOfRange ↔
           128 ≤ heapBytes) := by
   obtain ⟨executable, initial, linked, loaded, runs⟩ := outcome heapBytes
-  exact ⟨ordinary, bound, callerEvidence, executable, initial, linked, loaded, runs,
+  exact ⟨imageFromEmpty none, imageFromEmpty heapBytes, ordinary, bound, callerEvidence, executable, initial, linked, loaded, runs,
     rangeExceptionAtEntry linked loaded⟩
 #print axioms verified
 end CompiledPercent

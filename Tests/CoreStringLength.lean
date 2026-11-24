@@ -2,7 +2,7 @@ import CIL.Extraction.DecodedMethod
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.ObjectFields
 import CIL.Safety.ObjectSteps
-import Tests.CoreLibImage
+import CIL.Runtime.Net11WinX64.CoreLib
 
 /-!
 # Execution of the CoreLib string length getter
@@ -21,7 +21,7 @@ open CIL CIL.Extraction CIL.Safety
 
 /-- Carried rows and heap entries for the getter, its owner, the field, and their signatures. -/
 private def metadata : MethodMetadata := { own := {
-  assembly := Tests.CoreLibImage.assembly
+  assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly
   rows := [
       (0x020000a2, fixedBytes 18 0x0120100001000000030000000000FE021C07),
       (0x020000a3, fixedBytes 18 0x09011000FFFFFFFF030000003003FE022507),

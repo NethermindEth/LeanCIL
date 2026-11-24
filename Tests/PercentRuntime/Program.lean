@@ -1,23 +1,12 @@
-import Tests.PercentRuntime.Core
+import CIL.Runtime.Net11WinX64.RangeConstructor
 import Tests.PercentRuntime.Source
 import CIL.Safety.ObjectSteps
 
 /-! Decoding and linkage of Percent and the CoreLib methods executed by its range check. -/
 namespace Tests.PercentRuntime
-open CIL CIL.Extraction CIL.Safety Core
+open CIL CIL.Extraction CIL.Safety CIL.Runtime.Net11WinX64 CIL.Runtime.Net11WinX64.Core
 set_option maxRecDepth 65536
 set_option maxHeartbeats 30000000
-
-/-- Physical bodies reached by the constructor with a non-null message argument. -/
-def coreBytes : List (BodyEvidence × RawMethod) := [
-    ({ RangeCtor.body with names := RangeCtor.names }, RangeCtor.definition),
-    ({ ArgumentCtor.body with names := ArgumentCtor.names }, ArgumentCtor.definition),
-    ({ SystemExceptionCtor.body with names := SystemExceptionCtor.names }, SystemExceptionCtor.definition),
-    ({ ExceptionMessageCtor.body with names := ExceptionMessageCtor.names }, ExceptionMessageCtor.definition),
-    ({ ExceptionCtor.body with names := ExceptionCtor.names }, ExceptionCtor.definition),
-    ({ ObjectCtor.body with names := ObjectCtor.names }, ObjectCtor.definition),
-    ({ SetHResult.body with names := SetHResult.names }, SetHResult.definition)]
-
 
 /-- Original method definitions whose byte and metadata witnesses are checked above. -/
 def imageMethods : List RawMethod := Source.raw :: coreBytes.map Prod.snd
@@ -26,24 +15,6 @@ def imageMethods : List RawMethod := Source.raw :: coreBytes.map Prod.snd
 def table : List SpecializedMethod :=
   ⟨[], Source.raw, ⟨Source.assembly0Metadata.identity⟩⟩ ::
     (coreBytes.map Prod.snd ++ [RangeResource.raw]).map (⟨[], ·, ⟨coreLibraryScope⟩⟩)
-
-/-- Admit a managed call or allocation only if the raw site selects its unique physical target. -/
-def linked (table : List SpecializedMethod) (raw : RawInstruction) : Option Link := do
-  let .call site := raw.operand | none
-  let .managed token := site.target | none
-  let [(callee,ordinal)] := table.zipIdx.filter (fun item => calleeMatchesSite site token item.1) | none
-  if raw.opcode == 0x73 then
-    let link := Link.object ordinal callee.closed.objectBases (objectFieldOffset callee.closed.objectFieldCount)
-    guard (validateConstructionWith (fun i => table[i]?) raw true (some link) site.method)
-    return link
-  guard (raw.opcode == 0x28)
-  let link := Link.direct ordinal
-  guard (validateManagedCallWith table.length (fun i => table[i]?) (fun _ => none)
-    raw true (some link) (.call site.method {}))
-  return link
-/-- Checked links indexed by the original instruction positions. -/
-def links (table : List SpecializedMethod) (raw : RawMethod) :=
-  raw.code.zipIdx.filterMap fun (op,pc) => (linked table op).map (pc,·)
 
 /-- CoreLib methods returned by the ordinary checked decoder. -/
 def coreMethods := coreBytes.mapM fun (body, raw) => CIL.Method.ofBody? .scalar {}

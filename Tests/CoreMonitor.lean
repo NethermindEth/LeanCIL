@@ -1,7 +1,7 @@
 import CIL.Extraction.DecodedMethod
 import CIL.Safety.StepComposition
 import CIL.Safety.CheckedMemoryFacts
-import Tests.CoreLibImage
+import CIL.Runtime.Net11WinX64.CoreLib
 
 /-!
 # The CoreLib Monitor.Enter lockTaken argument
@@ -42,7 +42,7 @@ private def original : RawMethod := {
 
 /-- Method and owner rows, MethodDef links and signature blobs carried by the extractor. -/
 private def metadata : MethodMetadata := { own := {
-  assembly := Tests.CoreLibImage.assembly
+  assembly := CIL.Runtime.Net11WinX64.CoreLib.assembly
   rows := [
     (0x020000a2, fixedBytes 18 0x0120100003000000040000000000FE021C07),
     (0x020003a3, fixedBytes 18 0x8101100002000000050000008802DD0C5B3D),

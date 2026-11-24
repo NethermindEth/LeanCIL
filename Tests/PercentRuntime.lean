@@ -5,7 +5,7 @@ import CIL.Safety.StepComposition
 
 /-! The original exception path after the loader interns both arguments. -/
 namespace Tests.PercentRuntime
-open CIL CIL.Extraction CIL.Safety CIL.Safety.LiteralImage Startup
+open CIL CIL.Extraction CIL.Safety CIL.Safety.LiteralImage CIL.Runtime.Net11WinX64 Startup
 set_option maxRecDepth 65536
 set_option maxHeartbeats 30000000
 

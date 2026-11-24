@@ -1,8 +1,8 @@
 import CIL.Extraction.DecodedMethod
 
-/-! The metadata identity of the .NET 11.0.0 Windows x64 CoreLib fixture. -/
+/-! The metadata identity of the .NET 11.0.0 Windows x64 CoreLib image. -/
 
-namespace Tests.CoreLibImage
+namespace CIL.Runtime.Net11WinX64.CoreLib
 
 open CIL CIL.Extraction
 
@@ -29,4 +29,4 @@ def assembly : AssemblyMetadata := {
       fixedBytes 20 0x3D5DD2BF031700AEC232F6C6B1C785B4305C123B ++
       fixedBytes 2 0x37AB)] }
 
-end Tests.CoreLibImage
+end CIL.Runtime.Net11WinX64.CoreLib

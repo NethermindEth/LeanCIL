@@ -163,6 +163,9 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         var rawProof = CompiledPercentProof(folder);
         foreach (var (suffix, assemblyPath) in new[] { ("", assembly), ("-Translated", image) })
         {
+            queue.Add(new(selector, At("Examples/Proofs/PercentWindowsX64.lean"),
+                Path.Combine(root, "Percent-Managed" + suffix), Theorem: "ExampleProof.managedException",
+                Assembly: assemblyPath), () => Console.WriteLine("PASS Percent: managed entry from empty storage" + suffix));
             queue.Add(new(selector, contract, Path.Combine(root, "Percent-Image" + suffix),
                 Theorem: "ExampleProof.loadedException", Assembly: assemblyPath), () =>
                 Console.WriteLine("PASS Percent: original string operands load from the certified image" + suffix));
@@ -360,7 +363,7 @@ Console.WriteLine("PASS folded throws, located faults, runtime comparisons, forg
 static string CompiledPercentProof(string folder)
 {
     // Single-file consumer proofs carry their fixture declarations alongside the generated Extracted module.
-    string[] modules = ["Tests.CoreLibImage", "Tests.PercentRuntime.Core", "Tests.PercentRuntime.Source",
+    string[] modules = ["Tests.PercentRuntime.Source",
         "Tests.PercentRuntime.Program", "Tests.PercentRuntime.Startup", "Tests.PercentRuntime", "Tests.CompiledPercent.Proof"];
     var imports = new SortedSet<string>(StringComparer.Ordinal);
     var declarations = new List<string>();

@@ -215,6 +215,7 @@ import CIL.Safety.RuntimeTypeSegment
 import CIL.Safety.SegmentLocals
 import CIL.Safety.SegmentContract
 import CIL.Safety.LocalCalls
+import CIL.Runtime.Net11WinX64.RangeConstructor
 
 /-!
 # LeanCIL

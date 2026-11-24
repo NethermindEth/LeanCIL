@@ -43,9 +43,6 @@ name = "Tests.BodyDecoding"
 name = "Tests.CoreStringLength"
 
 [[lean_lib]]
-name = "Tests.CoreLibImage"
-
-[[lean_lib]]
 name = "Tests.CoreExceptionHResult"
 
 [[lean_lib]]
