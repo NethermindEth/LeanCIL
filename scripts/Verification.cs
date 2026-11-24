@@ -3577,7 +3577,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
           | _ => throwError "Expected extraction certificate theorem"
         theorem ExtractionAudit.valid :
             CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts Extracted.assemblies
-              Extracted.platformDefinitions Extracted.methodEvidence Extracted.imports Extracted.program :=
+              Extracted.platformDefinitions Extracted.methodEvidence Extracted.imports Extracted.program Extracted.managedDeclarations :=
               Extracted.translation_valid
         #print Extracted.imports
         """;
@@ -3687,7 +3687,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static AuditRequest ExtractionCertificate(string theorem, string prefix = "") => new(theorem,
         new { app = new[] { AuditConstant("CIL.Extraction.TranslationValid") }.Concat(
             new[] { "rawLayouts", "computedLayouts", "assemblies", "platformDefinitions", "methodEvidence", "imports",
-                "program" }
+                "program", "managedDeclarations" }
                 .Select(name => AuditConstant(prefix + "Extracted." + name))) },
         ApprovedAxioms);
 

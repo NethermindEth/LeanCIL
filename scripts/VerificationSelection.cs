@@ -159,7 +159,7 @@ internal static class VerificationSelection
         inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "ScalarEvidence", "TypeTestEvidence",
             "ThrowEvidence", "SpanEvidence", "StaticValueEvidence", "LayoutCoverage", "ImportEvidence", "ImportedLayouts", "AssemblyPins",
             "BodyEncoding", "LoweredCallRefusal", "PercentRuntime", "PercentRuntime/Source",
-            "PercentRuntime/Startup", "PercentRuntime/Program", "CompiledPercent/Proof", "CompiledPercent/FoldedContract" }
+            "PercentRuntime/Startup", "PercentRuntime/Program", "CompiledPercent/Proof" }
             .Select(name => $"Tests/{name}.lean"));
         inputs["imports"].UnionWith(["Tests/ContractClosure.lean", "Tests/ContractImports/Lib.leancil.contracts", "Tests/ContractImports/ImportFixture.lean", "Tests/ContractImports/Caller.lean",
             "Tests/ContractImports/Lib/Lib.csproj", "Tests/ContractImports/Lib/Library.cs", "Tests/ContractImports/App/App.csproj", "Tests/ContractImports/App/Application.cs"]);

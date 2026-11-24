@@ -522,7 +522,9 @@ two-string range constructor on `.net11WinX64`, Lean locates the live `newobj`, 
 original MemberRef through the facade, checks the MethodDef and signature, and decodes the
 caller and seven runtime methods. For a single-method extraction with a construction site,
 `Extracted.managedPackage` derives the executable table from the original body, metadata and
-flow inputs. The package checks all eight methods against the same table, pins, layouts and
+flow inputs. For the supported constructor, `Extracted.program` contains the caller and seven
+runtime bodies. The public translation certificate binds exactly that table and its separate
+managed declarations. The package checks all eight methods against the same table, pins, layouts and
 platform, including their scalar and feature flow, static storage and call targets. The final
 slot declares the physical resource getter. Lean checks its body bytes and signature and
 supplies no return-value fact for that declaration. The constructor requires an immediately
@@ -534,7 +536,8 @@ binding produce `none` at this entry.
 and reports binding, image loading and execution separately. The pinned .NET 11.0.0 Windows
 x64 CoreLib SHA-256 is `7b82f62a60e1673863813dd78af931a775be0630570a377cffa9e8cb9cb7abab`.
 The facade SHA-256 is `fa44e6e28f385224ff981086d9ca7aad2c9f49ee4de0152913eff60cb4e25416`.
-Direct calls to `Safety.invoke Extracted.program` use the translated methods and caller memory.
+Direct calls to `Safety.invoke Extracted.program` use the supplied caller memory. The package
+entry prepares that memory for the original string loads.
 
 For the pinned .NET 11 Windows x64 body of `Throws.Percent(uint)`, Lean checks the original
 caller and the CoreLib constructor methods reached on the throwing path. Starting from empty
@@ -546,7 +549,7 @@ allocation failure at `newobj`. At image entry, the decoded method satisfies `Ra
 bytes. Allocation failure settles the modeled run at every sufficient fuel. The quota measures
 modeled allocation capacity. The proof works for arbitrary representable literal texts, including
 equal texts. Inputs through 100 also return with every caller memory untouched in the bare
-interpreter. The legacy proof over `Extracted.program` uses the constructor fold.
+interpreter.
 
 An in-place span constructor runs as a runtime-model call on a span home.
 `ObjectOperandsValid` requires its receiver to be the address of a local or parameter of the

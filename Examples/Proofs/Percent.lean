@@ -13,7 +13,6 @@ private def package := Extracted.managedPackage.get (by cil_kernel_rfl)
 private def entry := ProgramEntry.range package
 private def initial := entry.initialMemory.toOption.getD Safety.Memory.empty
 private def caller := entry.methods[0]?.getD { code := [], locals := [], returnsValue := true }
-private def frame : Safety.Frame := ⟨initial.nextIdentity, [], [], 0⟩
 
 private theorem found :
     (fun extra : Program => (entry.methods ++ extra)[0]?) = fun _ => some caller := by cil_kernel_rfl
@@ -54,21 +53,39 @@ private theorem atComparison (program : Program) (lookup : program[0]? = some ca
   | error fault => exact invoke_of_run_fault lookup checked setup (steps.trans outcome)
 #print axioms atComparison
 
+private def callerFrame (memory : Safety.Memory) : Safety.Frame := ⟨memory.nextIdentity, [], [], 0⟩
+
 private theorem comparison :
-    (fun value : W32 => Safety.step caller (.ble_un 7) 2 [.scalar (.i32 value)] frame
-      [.scalar (.i32 100), .scalar (.i32 value)] initial) =
-    (fun value => .ok (.next (if value ≤ 100 then 7 else 3) [] frame initial)) := by cil_kernel_rfl
+    (fun (value : W32) (memory : Safety.Memory) =>
+      Safety.step caller (.ble_un 7) 2 [.scalar (.i32 value)] (callerFrame memory)
+        [.scalar (.i32 100), .scalar (.i32 value)] memory) =
+    (fun value memory => .ok (.next (if value ≤ 100 then 7 else 3) [] (callerFrame memory) memory)) :=
+  by cil_kernel_rfl
 #print axioms comparison
 
 private theorem returning :
-    (fun (extra : Program) (v : W32) =>
-      run (entry.methods ++ extra) 63 0 7 [.scalar (.i32 v)] frame [] initial) =
-    (fun _ v => .ok (initial, [.scalar (.i32 v)])) := by cil_kernel_rfl
+    (fun (extra : Program) (v : W32) (memory : Safety.Memory) =>
+      run (entry.methods ++ extra) 63 0 7 [.scalar (.i32 v)] (callerFrame memory) [] memory) =
+    (fun _ v memory => .ok (memory, [.scalar (.i32 v)])) := by cil_kernel_rfl
 #print axioms returning
+
+/-- The public program returns an in-range value with exactly the caller's original memory. -/
+theorem inRangeFromCallerMemory (value : W32) (within : value ≤ 100) (memory : Safety.Memory) :
+    invoke Extracted.program 66 0 [.scalar (.i32 value)] memory =
+      .ok (memory, [.scalar (.i32 value)]) := by
+  have root : Extracted.program[0]? = some caller := by cil_kernel_rfl
+  rw [atComparison _ root value memory]
+  have branch := congrFun (congrFun comparison value) memory
+  rw [ite_eq_left within] at branch
+  change run Extracted.program (63 + 1) 0 2 _ (callerFrame memory) _ memory = _
+  rw [run_next root (by cil_kernel_rfl) branch]
+  have same : entry.methods = Extracted.program := by cil_kernel_rfl
+  simpa only [List.append_nil, same] using congrFun (congrFun (congrFun returning []) value) memory
+#print axioms inRangeFromCallerMemory
 
 private theorem raising :
     (fun (extra : Program) (v : W32) =>
-      run (entry.methods ++ extra) 63 0 3 [.scalar (.i32 v)] frame [] initial) =
+      run (entry.methods ++ extra) 63 0 3 [.scalar (.i32 v)] (callerFrame initial) [] initial) =
     (fun _ _ => .error ⟨0, 6, .thrown .argumentOutOfRange⟩) := by cil_kernel_rfl
 #print axioms raising
 
@@ -76,7 +93,7 @@ private theorem raising :
 the remaining resource getter gives the same return or located range exception. -/
 theorem independentOfResource :
     ∃ body memory, Extracted.managedPackage = some body ∧
-      body.checked Extracted.environment (Runtime.Net11WinX64.packagePins Extracted.assemblies)
+      body.checked Extracted.environment Extracted.assemblies
         Extracted.platformDefinitions = true ∧
       (ProgramEntry.range body).initialMemory = .ok memory ∧ ∀ (extra : Program) (value : W32),
         invoke (body.methods ++ extra) 66 0 [.scalar (.i32 value)] memory =
@@ -87,11 +104,11 @@ theorem independentOfResource :
   change invoke (entry.methods ++ extra) 66 0 [.scalar (.i32 value)] initial = _
   have root := congrFun found extra
   rw [atComparison _ root value initial]
-  change run (entry.methods ++ extra) (63 + 1) 0 2 [.scalar (.i32 value)] frame
+  change run (entry.methods ++ extra) (63 + 1) 0 2 [.scalar (.i32 value)] (callerFrame initial)
     [.scalar (.i32 100), .scalar (.i32 value)] initial = _
-  rw [run_next root (by cil_kernel_rfl) (congrFun comparison value)]
+  rw [run_next root (by cil_kernel_rfl) (congrFun (congrFun comparison value) initial)]
   by_cases within : value ≤ 100
-  · simpa only [within, ite_true] using congrFun (congrFun returning extra) value
+  · simpa only [within, ite_true] using congrFun (congrFun (congrFun returning extra) value) initial
   · simpa only [within, ite_false] using congrFun (congrFun raising extra) value
 #print axioms independentOfResource
 

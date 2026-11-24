@@ -65,7 +65,10 @@ internal static class Throws
 
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, Analysis> cache = new();
 
-    internal static Analysis Analyze(MethodDefinition method) => cache.GetValue(method, Compute);
+    static readonly Analysis NoFolds = new([], [], []);
+
+    internal static Analysis Analyze(MethodDefinition method, Instruction? managedConstructor = null) =>
+        managedConstructor is null ? cache.GetValue(method, Compute) : NoFolds;
 
     static Analysis Compute(MethodDefinition method)
     {

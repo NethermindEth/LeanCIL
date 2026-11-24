@@ -11,7 +11,7 @@ namespace Nethermind.LeanCIL;
 // Read original definitions from a separate, untouched module over the same assembly
 // bytes. The call-graph walk rewrites call operands in the working module.
 internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence layouts,
-    ImportResolution? imports = null)
+    ImportResolution? imports = null, string assemblyTable = "assemblies")
 {
     // Closed instantiations share their definition's bytes; the first method to use a body names them.
     internal ExternalIdentityEvidence ExternalIdentities { get; } = new();
@@ -552,7 +552,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var proofs = string.Join(", ", body.Identified, body.TablesValid, "by cil_kernel_rfl",
             "pinned_identities_spelled", "rfl", "by cil_kernel_rfl", "by cil_kernel_rfl", "by cil_body_decodes");
         lean.AppendLine(string.Join(" ",
-            $"""theorem method{number}_body_validated : Extraction.BodyDecodes assemblies platformDefinitions""",
+            $"""theorem method{number}_body_validated : Extraction.BodyDecodes {assemblyTable} platformDefinitions""",
             $"""{assembly} method{number}Body method{number}Original method{number}TypeArgumentsRaw""",
             $"""method{number}Signature{bodyImports} :=""", $"\u27e8{proofs}\u27e9"));
     }
@@ -638,15 +638,15 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// The first live instruction without an admitted opcode, field or call binding. Dead sites keep their raw opcode.
     /// </summary>
     internal static DecodeRefusal? FirstDecodeRefusal(MethodDefinition method, IReadOnlySet<Instruction> reachable,
-        ResolvedCallSites calls, ImportResolution? imports)
+        ResolvedCallSites calls, ImportResolution? imports, Instruction? managedConstructor = null)
     {
         var instructions = method.Body.Instructions;
-        var throws = Throws.Analyze(method);
+        var throws = Throws.Analyze(method, managedConstructor);
         for (var pc = 0; pc < instructions.Count; pc++)
         {
             var instruction = instructions[pc];
             if (!reachable.Contains(instruction)) continue;
-            if (throws.Operands.Contains(instruction) || throws.Raises.ContainsKey(instruction))
+            if (instruction == managedConstructor || throws.Operands.Contains(instruction) || throws.Raises.ContainsKey(instruction))
                 continue;
             if (instruction.OpCode.Code == Code.Tail && instruction.Next?.OpCode.Code is Code.Call or Code.Calli)
                 continue;
@@ -845,7 +845,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         for (var k = 0; k < pins.Length; k++)
             lean.AppendLine(
                 $"def assembly{k} : Extraction.AssemblyPin := {{ identity := {Quote(pins[k].Identity)} }}");
-        lean.AppendLine("def assemblies : List Extraction.AssemblyPin := [" +
+        lean.AppendLine($"def {assemblyTable} : List Extraction.AssemblyPin := [" +
             string.Join(", ", Enumerable.Range(0, pins.Length).Select(k => $"assembly{k}")) + "]");
         // Every body lists these identities; one proof that they spell the pins serves them all.
         lean.AppendLine("def pinnedIdentities : List (List Nat) := " +
@@ -855,7 +855,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // The platform definitions go here once every method's slices are known; see InsertPlatformDefinitions.
         platformAt = lean.Length;
         lean.AppendLine("theorem pinned_identities_spelled : pinnedIdentities.mapM Extraction.spelled? = " +
-            "some (assemblies.map (·.identity)) := by cil_kernel_rfl");
+            $"some ({assemblyTable}.map (·.identity)) := by cil_kernel_rfl");
     }
 
     /// <summary>

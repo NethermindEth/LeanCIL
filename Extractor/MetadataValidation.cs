@@ -515,6 +515,7 @@ internal static class MetadataValidation
             blocked.Add(shape = new(definition, null, error, [definition]));
             entry = definition;
         }
+        var entryConstructor = ManagedConstructorPackage.Site(entry, profile);
         MethodSpecialization specializations = new(module, profile.Architecture);
         var staticValues = new StaticValues.Context(module);
         // 1 while visiting, 2 once admitted to the walk, 3 when its body could not be analysed.
@@ -669,14 +670,15 @@ internal static class MetadataValidation
                     if (imports?.ValidateLocal(local.VariableType, profile) == true) ImportedLocal(method, local);
                     else Type(local.VariableType, module, architecture: profile.Architecture, strings: true);
                 }, named: true);
+            var constructorSite = method == entry ? entryConstructor : null;
             HashSet<Instruction> reachable = [];
             TypeTests.Analysis? typeTests = null;
             Throws.Analysis? throws = null;
             const string callees = "this method's calls, callees and instructions";
-            if (!Check(method, null, Hiding(callees, () => reachable = Reachability.Analyze(method, profile)),
+            if (!Check(method, null, Hiding(callees, () => reachable = Reachability.Analyze(method, profile, constructorSite)),
                     named: true) ||
                 !Check(method, null, Hiding(callees,
-                    () => (typeTests, throws) = (TypeTests.Analyze(method), Throws.Analyze(method)))))
+                    () => (typeTests, throws) = (TypeTests.Analyze(method), Throws.Analyze(method, constructorSite)))))
                 return;
             var instructions = new InstructionIndex(method);
             state[method] = 1;
@@ -850,7 +852,7 @@ internal static class MetadataValidation
                     continue;
                 }
                 if (instruction.OpCode.Code is not (Code.Call or Code.Callvirt or Code.Newobj or Code.Ldftn or Code.Ldvirtftn) || instruction.Operand is not MethodReference reference ||
-                    throws!.Operands.Contains(instruction))
+                    instruction == constructorSite || throws!.Operands.Contains(instruction))
                     continue;
                 if (typeTests!.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction))
                 {
@@ -910,18 +912,19 @@ internal static class MetadataValidation
         var layoutContext = new LayoutContext(module, profile.Architecture);
         foreach (var method in methods)
         {
+            var constructorSite = methods.Length == 1 ? entryConstructor : null;
             NativeOperands.Certificate? nativeOperands = null;
             Dictionary<int, int>? parameterHomes = null;
             HashSet<Instruction>? reachable = null;
             if (!Check(method, null, Hiding("this method's instruction translations", () =>
                 {
-                    reachable = Reachability.Analyze(method, profile);
-                    nativeOperands = NativeOperands.Certify(method, reachable, profile);
+                    reachable = Reachability.Analyze(method, profile, constructorSite);
+                    nativeOperands = NativeOperands.Certify(method, reachable, profile, constructorSite);
                     parameterHomes = ParameterStorage.IndexHomes(ParameterStorage.Analyze(method, reachable), method.Body.Variables.Count);
                 }), named: true))
                 continue;
             var admission = new InstructionAdmission(method, profile, methodIndices, constrainedTargets,
-                layoutContext, imports, nativeOperands!, parameterHomes!);
+                layoutContext, imports, nativeOperands!, parameterHomes!, constructorSite);
             foreach (var instruction in reachable!)
                 if (!skipped.Contains(instruction))
                     Check(method, instruction, () => admission.Check(instruction), named: true);

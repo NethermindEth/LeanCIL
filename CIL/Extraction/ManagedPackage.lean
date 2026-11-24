@@ -26,18 +26,7 @@ def ManagedPackage.caller (package : ManagedPackage) := package.root.1
 
 /-- The shared call-resolution table, including managed declarations after the last local body. -/
 def ManagedPackage.lookup (package : ManagedPackage) :=
-  package.rows.map Prod.fst ++ package.declarations
-
-/-- A declared target has a checked physical definition and specialization. Its slot can supply
-no constant return to the caller's feature analysis. -/
-def ManagedPackage.declarationValid (environment : LayoutEnvironment) (pins : List AssemblyPin)
-    (platform : PlatformTable) (item : MethodEvidence) : Bool :=
-  decide (BodyDecodes pins platform item.assembly item.body item.original item.arguments
-    item.signature) &&
-  decide (SpecializationValid environment.rawLayouts item.original item.arguments
-    item.closed item.parameterInput) &&
-  item.featureStates.isEmpty && item.dispatchTypes.isEmpty &&
-  decide (item.body.layoutDeclarations = layoutDeclarations environment.rawLayouts)
+  callableEvidence (package.rows.map Prod.fst) package.declarations
 
 /-- Check every executable method against the same lookup, assembly pins and platform. -/
 def ManagedPackage.rowValid (environment : LayoutEnvironment) (pins : List AssemblyPin)
@@ -52,11 +41,12 @@ def ManagedPackage.checked (package : ManagedPackage) (environment : LayoutEnvir
   let methods := package.methods
   let table := package.lookup
   package.rows.all (rowValid environment pins platform table) &&
-    (package.declarations.all (declarationValid environment pins platform) &&
-    decide (LayoutsValid environment.rawLayouts environment.layouts (programArchitecture methods)) &&
+    (decide (LayoutsValid environment.rawLayouts environment.layouts (programArchitecture methods)) &&
     decide (StaticValuesValid methods) &&
     decide (StaticIdentitiesValid methods (package.rows.map (·.1.body))) &&
-    AttributionValid (bodyOwners table) && DispatchPinsValid pins table)
+    AttributionValid (bodyOwners table) &&
+    callCatalogValid environment.rawLayouts pins platform (package.rows.map Prod.fst)
+      package.declarations)
 
 /-- A successful package check supplies the usual per-method translation proof, with every
 executable slot checked against the exact table that includes the declared call targets. -/
@@ -76,5 +66,18 @@ theorem ManagedPackage.methodsChecked {package : ManagedPackage} {environment pi
   exact compose package.rows (Bool.and_eq_true_iff.mp valid).1
 
 #print axioms ManagedPackage.methodsChecked
+
+/-- The ordinary extraction validator certifies the executable program with its declarations. -/
+theorem ManagedPackage.translationValid {package : ManagedPackage} {environment pins platform}
+    (valid : package.checked environment pins platform = true) :
+    TranslationValid environment.rawLayouts environment.layouts pins platform
+      (package.rows.map Prod.fst) [] package.methods package.declarations := by
+  have global := (Bool.and_eq_true_iff.mp valid).2
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at global
+  obtain ⟨⟨⟨⟨layout, statics⟩, identities⟩, attribution⟩, catalog⟩ := global
+  exact translation_of_methods layout statics (by simpa only [List.map_map, Function.comp_def] using identities)
+    (by simp [ImportedLayoutsValid]) (by simp [ImportedLocalLayoutsBound]) attribution catalog (package.methodsChecked valid)
+
+#print axioms ManagedPackage.translationValid
 
 end CIL.Extraction

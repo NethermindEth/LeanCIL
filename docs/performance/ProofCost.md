@@ -278,10 +278,10 @@ compiled library and extraction on the Lean search path.
 ## Reusing the Percent exception contract
 
 `Examples.Throws.Percent(uint)` returns its input through 100 inclusive and raises
-`System.ArgumentOutOfRangeException` above 100. The public contract holds for any caller
+`System.ArgumentOutOfRangeException` above 100. The measured folded contract held for any caller
 memory. At 101, both consumers prove the exception type from `Memory.empty`. One steps the
 compiled instructions and the other applies the public theorem.
-[Measured folded contract](../../Tests/CompiledPercent/FoldedContract.lean) ·
+[Measured folded contract](https://github.com/NethermindEth/LeanCIL/blob/adbea3f766c5fca3ed940ea656cefe91d1a98bcd/Tests/CompiledPercent/FoldedContract.lean) ·
 [Boundary consumers](../../Tests/ThrowVariants/PercentReuse.lean.in)
 
 The base interpreter at `27953edb` represents the exception type with its full CLR name.
@@ -307,7 +307,7 @@ Replacing both exception literals in the .NET 11 DLL and verifying against its o
 digest required no proof edits. All three kernel heartbeat counts, proof-object counts and
 both compiled proof module sizes matched the original. Median joint replay took 23.8 seconds.
 
-To reproduce, extract `Examples.Throws::Percent(uint)` under the scalar profile. Measure
+To reproduce the folded measurement, use the linked revision and extract `Examples.Throws::Percent(uint)` under the scalar profile. Measure
 the public proof as `Percent` and the boundary consumers as `PercentReuse` with the
 single-module frontend below. On the base, use `"System.ArgumentOutOfRangeException"`
 as the exception type in both modules.

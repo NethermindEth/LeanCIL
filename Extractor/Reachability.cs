@@ -5,10 +5,12 @@ namespace Nethermind.LeanCIL;
 
 internal static class Reachability
 {
-    internal static HashSet<Instruction> Analyze(MethodDefinition method, FeatureProfile? selectedProfile = null)
-        => Certify(method, selectedProfile).Keys.ToHashSet();
+    internal static HashSet<Instruction> Analyze(MethodDefinition method, FeatureProfile? selectedProfile = null,
+        Instruction? managedConstructor = null)
+        => Certify(method, selectedProfile, managedConstructor).Keys.ToHashSet();
 
-    internal static Dictionary<Instruction, FeatureConstants> Certify(MethodDefinition method, FeatureProfile? selectedProfile = null)
+    internal static Dictionary<Instruction, FeatureConstants> Certify(MethodDefinition method, FeatureProfile? selectedProfile = null,
+        Instruction? managedConstructor = null)
     {
         FeatureProfile profile = selectedProfile ?? FeatureProfile.Scalar;
         profile.Validate();
@@ -36,7 +38,7 @@ internal static class Reachability
         // Revisit successors when a backedge or join weakens a constant fact.
         // Facts only move from a constant to unknown, so this reaches a fixed point.
         var typeTests = TypeTests.Analyze(method);
-        var throws = Throws.Analyze(method);
+        var throws = Throws.Analyze(method, managedConstructor);
         InstructionIndex? positions = null;
         Queue<Instruction> pending = new();
         HashSet<Instruction> queued = [instructions[0]];

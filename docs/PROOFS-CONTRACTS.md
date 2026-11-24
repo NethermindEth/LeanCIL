@@ -1051,7 +1051,8 @@ arithmetic operands, invalid bounds, memory faults, unsupported instructions, in
 exhaustion have no name in this mode. The mode does not change `Raises` or `.thrown`.
 `OutcomeContract.Holds.clr` lifts a thrown-outcome proof (`Holds`) to `HoldsCLR`.
 For the compiled `Throws.Percent(uint)`, the default proof selects the .NET 11 Windows x64
-entry from `Extracted.translation_valid`. The loader starts with empty caller storage.
+entry from `Extracted.translation_valid`. The public program contains the decoded caller and
+the runtime constructor bodies. The loader starts with empty caller storage.
 Inputs through 100 return unchanged. Larger inputs raise `ArgumentOutOfRangeException`
 under ordinary heap availability. An explicit zero quota fails at the original allocation.
 The positive contract and its refutation quantify over every implementation of the declared

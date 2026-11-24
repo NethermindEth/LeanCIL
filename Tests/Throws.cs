@@ -51,7 +51,13 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         .Single(instruction => instruction.OpCode.Code == Code.Call).Operand).Resolve();
     var body = owner.Body.Instructions;
     var pc = body.IndexOf(body.Single(instruction => instruction.OpCode.Code == Code.Throw));
-    if (!IsDecodedMethod(source, method)) throw new InvalidOperationException($"Expected decoded {owner.FullName}");
+    if (name == "Percent")
+    {
+        if (!source.Contains("def program : Program := boundPackage.methods", StringComparison.Ordinal) ||
+            source.Contains("cil_decoded_method method0", StringComparison.Ordinal))
+            throw new InvalidOperationException("Expected the physical constructor program");
+    }
+    else if (!IsDecodedMethod(source, method)) throw new InvalidOperationException($"Expected decoded {owner.FullName}");
     if (name == "Null")
     {
         var obligation = $"method{method}_features_validated";
@@ -123,8 +129,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         $"Extracted.method{method}_instruction{item.index}"));
     var raisedInstruction = name == "Null" ? ".throw" : $"(.throw (some .{label}))";
     var throwSite = name == "Percent"
-        ? $"example : ((Extracted.translation_valid.entry .net11WinX64).bind " +
-          $"(fun image => image.methods[{method}]? >>= fun m => m.code[{pc}]?)) = some .throw := by cil_kernel_rfl"
+        ? $"example : (Extracted.program[{method}]? >>= fun m => m.code[{pc}]?) = some .throw := by cil_kernel_rfl"
         : $"example : Extracted.method{method}.code[{pc}]? = some {raisedInstruction} := Extracted.method{method}_instruction{pc}";
     var entryCheck = name switch
     {
@@ -149,13 +154,16 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     queue.Add(new(selector, proof, Path.Combine(root, name + "-Verified")), () =>
         Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons, {label} located at method {method} pc {pc}"));
 
-    // A forged type must fail the feature certificate, independently of the instruction lemma.
-    var forgedLabel = label == "invalidOperation" ? "divideByZero" : "invalidOperation";
-    var forged = ForgeDecodedInstruction(source, method, pc, $"fun _ => .throw (some .{forgedLabel})");
-    var mutated = Path.Combine(root, name + "-forged.lean");
-    File.WriteAllText(mutated, forged);
-    rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
-        "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
+    if (name != "Percent")
+    {
+        // A forged type must fail the feature certificate, independently of the instruction lemma.
+        var forgedLabel = label == "invalidOperation" ? "divideByZero" : "invalidOperation";
+        var forged = ForgeDecodedInstruction(source, method, pc, $"fun _ => .throw (some .{forgedLabel})");
+        var mutated = Path.Combine(root, name + "-forged.lean");
+        File.WriteAllText(mutated, forged);
+        rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
+            "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
+    }
     if (name == "Percent")
     {
         using var translated = ModuleDefinition.ReadModule(assembly);
@@ -169,11 +177,6 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         queue.Add(new(selector, proof, Path.Combine(root, "Percent-Translated"), Assembly: image), () =>
             Console.WriteLine("PASS Percent: the same boundary proof checks with translated exception literals"));
 
-        var contract = At("Tests/CompiledPercent/FoldedContract.lean");
-        queue.Add(new(selector, contract, Path.Combine(root, "Percent-Contract")), () =>
-            Console.WriteLine("PASS Percent: the CLR contract holds for every uint and caller memory"));
-        queue.Add(new(selector, contract, Path.Combine(root, "Percent-Contract-Translated"), Assembly: image), () =>
-            Console.WriteLine("PASS Percent: the same CLR contract holds with translated exception literals"));
         var rawProof = CompiledPercentProof(folder);
         foreach (var (suffix, assemblyPath) in new[] { ("", assembly), ("-Translated", image) })
         {

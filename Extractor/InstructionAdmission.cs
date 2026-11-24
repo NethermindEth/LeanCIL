@@ -7,7 +7,7 @@ namespace Nethermind.LeanCIL;
 internal sealed class InstructionAdmission(MethodDefinition method, FeatureProfile profile,
     IReadOnlyDictionary<MethodDefinition, int> methods, ConstrainedCalls.TargetIndex constrainedTargets,
     MetadataValidation.LayoutContext layouts, ImportResolution? imports, NativeOperands.Certificate native,
-    IReadOnlyDictionary<int, int> homes)
+    IReadOnlyDictionary<int, int> homes, Instruction? managedConstructor = null)
 {
     readonly InstructionIndex instructions = new(method);
 
@@ -15,7 +15,7 @@ internal sealed class InstructionAdmission(MethodDefinition method, FeatureProfi
     {
         InstructionPrefixes.ValidatePrefix(method, site);
         if (site.Previous is { } previous) InstructionPrefixes.ValidatePrefix(method, previous);
-        if (imports?.Slot(site) is not null) return;
+        if (site == managedConstructor || imports?.Slot(site) is not null) return;
         layouts.Require(method.Module, profile.Architecture);
         var code = site.OpCode.Code;
         if (code == Code.Calli && site.Operand is CallSite signature)
@@ -39,7 +39,7 @@ internal sealed class InstructionAdmission(MethodDefinition method, FeatureProfi
             return;
         }
         if (typeTests.Results.ContainsKey(site) || typeTests.Operands.Contains(site)) return;
-        var throws = Throws.Analyze(method);
+        var throws = Throws.Analyze(method, managedConstructor);
         if (code == Code.Constrained)
         {
             var next = site.Next ?? throw new InvalidDataException("Constrained prefix has no call");

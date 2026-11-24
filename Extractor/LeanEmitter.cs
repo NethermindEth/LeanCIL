@@ -236,7 +236,10 @@ internal static class LeanEmitter
         // The shape facts are written here once every method has been translated, so admission reports its own
         // refusals first, and every method's components see them.
         IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
-        GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
+        var constructor = ManagedConstructorPackage.Site(methods, profile, importBindings.Count);
+        var managed = constructor is not null;
+        GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution,
+            managed ? "sourceAssemblies" : "assemblies");
         var importNames = importBindings.Select(binding =>
             genericEvidence.ExternalIdentities.Reference(binding.Identity, reachable: true)).ToArray();
         genericEvidence.ExternalIdentities.Emit(lean, inputs);
@@ -254,9 +257,9 @@ internal static class LeanEmitter
         for (int n = 0; n < methods.Length; n++)
         {
             MethodDefinition m = methods[n];
-            var featureCertificate = Reachability.Certify(m, profile);
+            var featureCertificate = Reachability.Certify(m, profile, constructor);
             var reachable = featureCertificate.Keys.ToHashSet();
-            var scalarCertificate = NativeOperands.Certify(m, reachable, profile);
+            var scalarCertificate = NativeOperands.Certify(m, reachable, profile, constructor);
             var parameterIndices = ParameterStorage.Analyze(m, reachable);
             var dispatch = NativeDispatch.For(m);
             LocalKind KindOf(TypeReference type, int? local = null) => dispatch.Kind(type, local) ??
@@ -325,7 +328,7 @@ internal static class LeanEmitter
             inputs?.Append(lean, inputStart, lean.Length - inputStart);
             genericEvidence.EmitMethod(lean, m, n, reachable, methods.Length, staticInput, inputs, compareOriginal);
             var (naming, objectProof) = operandShapes.RecordMethod(m, n, reachable, genericEvidence);
-            if (GenericEvidence.FirstDecodeRefusal(m, reachable, callSites, importResolution) is { } refusal)
+            if (GenericEvidence.FirstDecodeRefusal(m, reachable, callSites, importResolution, constructor) is { } refusal)
                 throw new GenericEvidence.UndecodedInstruction(m, refusal);
             if (templateInputs)
             {
@@ -349,6 +352,11 @@ internal static class LeanEmitter
             // The decoder's raw definition is the method's only source; the command states its field facts and
             // writes each field operand as the definition the operand shapes name.
             var namedOperands = naming.Length == 0 ? "" : $"[{naming}] ";
+            if (managed)
+            {
+                FeatureEvidence.Emit(lean, m, n, featureCertificate);
+                continue;
+            }
             EmitDecodedMethod(lean, n, namedOperands, inputs);
 
             const string layoutTables = "Extraction.MethodLayoutsValid rawLayouts computedLayouts";
@@ -368,6 +376,12 @@ internal static class LeanEmitter
         // The platform definitions sit after the shape facts' position, so they go in first.
         genericEvidence.InsertPlatformDefinitions(lean);
         lean.Insert(shapeFactsAt, operandShapes.Lean());
+        if (managed)
+        {
+            ManagedConstructorPackage.Emit(lean, pinned.Index(methods[0].Module));
+            return Finish("program.length");
+        }
+        lean.AppendLine("def managedDeclarations : List Extraction.MethodEvidence := []");
         var specialized = Enumerable.Range(0, methods.Length).Select(n =>
             $"⟨method{n}TypeArgumentsRaw, method{n}Closed, assembly{pinned.Index(methods[n].Module)}⟩");
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" +
@@ -400,19 +414,7 @@ internal static class LeanEmitter
                 $"method{n}Closed) method{n}Reachable method{n} := {Decide}");
         }
         if (methods.Length == 1 && methods[0].Body.Instructions.Any(i => i.OpCode.Code == Code.Newobj))
-        {
-            lean.AppendLine($$"""
-                /-- The physical source fields for binding a managed constructor entry. -/
-                def constructorSource : Runtime.Net11WinX64.ConstructorSource := {
-                  original := method0Original, body := method0Body, arguments := method0TypeArgumentsRaw,
-                  reachable := method0Reachable, featureStates := method0FeatureStates,
-                  layoutUses := method0LayoutUses, dispatchTypes := method0DispatchTypes,
-                  assembly := assembly{{pinned.Index(methods[0].Module)}}, signature := method0Signature }
-                /-- The managed definitions and declarations derived from the caller's physical inputs. -/
-                def managedPackage : Option Extraction.ManagedPackage :=
-                  Runtime.Net11WinX64.constructorPackage? constructorSource imports profile environment
-                """);
-        }
+            ManagedConstructorPackage.EmitSource(lean, pinned.Index(methods[0].Module));
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
         // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them. Each
         // entry is its evidence record's, which the body check equates with the full name its metadata row spells.
@@ -456,38 +458,44 @@ internal static class LeanEmitter
         lean.AppendLine("theorem dispatch_pins_validated : " +
             "Extraction.DispatchPinsValid assemblies methodEvidence = true := " + Decide);
         lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
-            "assemblies platformDefinitions methodEvidence imports program := by");
-        lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated");
+            "assemblies platformDefinitions methodEvidence imports program managedDeclarations := by");
+        lean.AppendLine("  apply Extraction.translation_of_methods (program := program) (declarations := managedDeclarations) layouts_validated");
         lean.AppendLine("    statics_validated static_identities_validated import_layouts_validated");
         lean.AppendLine("    imported_locals_validated attribution_validated dispatch_pins_validated");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"  refine Extraction.MethodsChecked.cons method{n}_evidence_validated ?_");
         lean.AppendLine("  exact Extraction.MethodsChecked.nil");
-        // One index of the program, checked once, serves every closure and run that reads it.
-        lean.AppendLine("/-- The number of methods in the extracted program. -/");
-        lean.AppendLine($"def programLength : Nat := {methods.Length}");
-        lean.AppendLine("theorem programLength_eq : programLength = program.length := by cil_kernel_rfl");
-        lean.AppendLine("/-- The balanced index of the extracted methods in program order. -/");
-        lean.AppendLine("def programIndex : Extraction.FlowIndex Method := program_index% program");
-        lean.AppendLine("""
-            theorem programIndex_eq : programIndex = Extraction.FlowIndex.ofList program := by cil_kernel_rfl
-            """);
-        lean.AppendLine("theorem programIndex_get? (index : Nat) : programIndex.get? index = program[index]? := by");
-        lean.AppendLine("  rw [programIndex_eq]; exact Extraction.FlowIndex.get?_ofList program index");
-        ProgramLookupFacts.Append(lean, "program", "method", methods.Length);
-        var classViews = ClassViews.Views(fieldAccesses);
-        var views = ClassViews.Emit(fieldAccesses, classViews);
-        if (views.Length > 0)
+        return Finish(methods.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        Emission Finish(string methodCount)
         {
-            lean.Append(views);
-            const string imported = "import CIL.Safety.Execution\n";
-            lean.Replace(imported, imported + "import CIL.Safety.ObjectFields\n", 0, lean.ToString().IndexOf(imported,
-                StringComparison.Ordinal) + imported.Length);
+            // One index of the program, checked once, serves every closure and run that reads it.
+            lean.AppendLine("/-- The number of methods in the extracted program. -/");
+            lean.AppendLine($"def programLength : Nat := {methodCount}");
+            lean.AppendLine("theorem programLength_eq : programLength = program.length := by cil_kernel_rfl");
+            lean.AppendLine("/-- The balanced index of the extracted methods in program order. -/");
+            var index = managed ? "Extraction.FlowIndex.ofList program" : "program_index% program";
+            lean.AppendLine($"def programIndex : Extraction.FlowIndex Method := {index}");
+            lean.AppendLine("""
+                theorem programIndex_eq : programIndex = Extraction.FlowIndex.ofList program := by cil_kernel_rfl
+                """);
+            lean.AppendLine("theorem programIndex_get? (index : Nat) : programIndex.get? index = program[index]? := by");
+            lean.AppendLine("  rw [programIndex_eq]; exact Extraction.FlowIndex.get?_ofList program index");
+            ProgramLookupFacts.Append(lean, "program", "method", methods.Length);
+            var classViews = ClassViews.Views(fieldAccesses);
+            var views = ClassViews.Emit(fieldAccesses, classViews);
+            if (views.Length > 0)
+            {
+                lean.Append(views);
+                const string imported = "import CIL.Safety.Execution\n";
+                lean.Replace(imported, imported + "import CIL.Safety.ObjectFields\n", 0, lean.ToString().IndexOf(imported,
+                    StringComparison.Ordinal) + imported.Length);
+            }
+            lean.AppendLine("end Extracted");
+            return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), outlines.ToArray(), classViews,
+                fieldAccesses, layouts,
+                inputs?.ToString().ReplaceLineEndings("\n") ?? "");
         }
-        lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), outlines.ToArray(), classViews,
-            fieldAccesses, layouts,
-            inputs?.ToString().ReplaceLineEndings("\n") ?? "");
     }
 
     /// <summary>

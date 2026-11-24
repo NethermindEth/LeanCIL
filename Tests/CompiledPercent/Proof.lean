@@ -54,6 +54,17 @@ theorem rejectsOtherTarget :
   all_goals cil_kernel_rfl
 #print axioms rejectsOtherTarget
 
+/-- Substituting a typed throw at the real stack throw fails method-table validation even
+when the proposed exception class is the one raised by this caller. -/
+theorem rejectsFoldedThrow :
+    let package := Extracted.boundPackage
+    let method := package.root.2
+    let changed := { method with code := method.code.modify 6 (fun _ => .throw (some .argumentOutOfRange)) }
+    let forged := { package with root := (package.caller, changed) }
+    forged.checked Extracted.environment Extracted.assemblies Extracted.platformDefinitions = false :=
+  by cil_kernel_rfl
+#print axioms rejectsFoldedThrow
+
 /-- Pinned definition selected by the caller’s actual constructor token. -/
 def binding := do
   let body ← pinnedCaller
@@ -81,7 +92,7 @@ def raw : RawMethod :=
 additional assembly identities and the relocated constructor token. -/
 theorem callerEvidence :
     pinnedCaller = some body ∧
-    BodyDecodes (Extracted.assemblies ++ [⟨runtimeScope⟩, ⟨coreLibraryScope⟩])
+    BodyDecodes Extracted.assemblies
       Extracted.platformDefinitions Extracted.assembly0 body raw [] Extracted.method0Signature := by
   refine ⟨by cil_kernel_rfl, ?_⟩
   have images : body.metadata.slices.map (·.assembly) =
@@ -117,7 +128,7 @@ private theorem callerCalls :
 #print axioms callerCalls
 
 private theorem callerBody :
-    BodyDecodes (Extracted.assemblies ++ [⟨runtimeScope⟩, ⟨coreLibraryScope⟩])
+    BodyDecodes Extracted.assemblies
       Extracted.platformDefinitions callerPair.1.assembly callerPair.1.body callerPair.1.original
       callerPair.1.arguments callerPair.1.signature := by
   rw [show callerPair.1.assembly = Extracted.assembly0 by cil_kernel_rfl,
@@ -139,7 +150,7 @@ def ManagedCallerValid : Prop :=
         evidenceConstants all = (fun _ => none) →
         (ImportSlotIndex.ofList slots).forLinks all.length method.links = {} →
         MethodEvidenceValid Extracted.rawLayouts Extracted.computedLayouts
-          (Extracted.assemblies ++ [⟨runtimeScope⟩, ⟨coreLibraryScope⟩])
+          Extracted.assemblies
           Extracted.platformDefinitions all slots item method
 
 /-- The evidence emitted by the runtime binder passes each ordinary caller validator. -/
@@ -265,7 +276,7 @@ theorem verified (heapBytes : Nat) :
     ManagedCallerValid ∧ imageExecution none ∧ imageExecution heapBytes ∧ ordinaryExecution ∧
     binding = some (some (2, Core.RangeCtor.definition.token)) ∧
     (pinnedCaller = some body ∧
-      BodyDecodes (Extracted.assemblies ++ [⟨runtimeScope⟩, ⟨coreLibraryScope⟩])
+      BodyDecodes Extracted.assemblies
         Extracted.platformDefinitions Extracted.assembly0 body raw [] Extracted.method0Signature) ∧
     ∃ executable initial, linkedProgram = some executable ∧
       initialMemory inputs heapBytes = .ok initial ∧
