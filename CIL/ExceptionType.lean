@@ -51,6 +51,8 @@ inductive ExceptionType where
   | invalidCast
   /-- `System.ArrayTypeMismatchException`. -/
   | arrayTypeMismatch
+  /-- `System.OutOfMemoryException`. -/
+  | outOfMemory
   deriving DecidableEq, Repr
 
 namespace ExceptionType
@@ -74,6 +76,7 @@ def metadataName : ExceptionType → MetadataName
   | .format => name!"FormatException"
   | .invalidCast => name!"InvalidCastException"
   | .arrayTypeMismatch => name!"ArrayTypeMismatchException"
+  | .outOfMemory => name!"OutOfMemoryException"
 
 /-- The .NET type a member stands for: its type of namespace `System` in `runtimeAssembly`. -/
 def typeIdentity (raised : ExceptionType) : TypeIdentity :=
@@ -84,7 +87,7 @@ def all : List ExceptionType :=
   [.baseException, .systemException, .applicationException, .arithmetic, .divideByZero, .overflow,
     .invalidOperation, .notSupported, .notImplemented, .argument, .argumentNull,
     .argumentOutOfRange, .indexOutOfRange, .nullReference, .format, .invalidCast,
-    .arrayTypeMismatch]
+    .arrayTypeMismatch, .outOfMemory]
 
 /-- `all` lists every member. -/
 theorem mem_all (raised : ExceptionType) : raised ∈ all := by
@@ -132,6 +135,7 @@ def ownerName : ExceptionType → String
   | .format => "System.FormatException"
   | .invalidCast => "System.InvalidCastException"
   | .arrayTypeMismatch => "System.ArrayTypeMismatchException"
+  | .outOfMemory => "System.OutOfMemoryException"
 
 /-- The UTF-8 bytes of `System.`, the namespace of every member and the separator before its
     name. -/

@@ -28,7 +28,7 @@ internal static class Throws
         ExceptionType.ArgumentNull => [[], [Message], [Message, Message]],
         ExceptionType.ArgumentOutOfRange =>
             [[], [Message], [Message, Message], [Message, Inner], [Message, Actual, Message]],
-        ExceptionType.InvalidCast or ExceptionType.ArrayTypeMismatch => [],
+        ExceptionType.InvalidCast or ExceptionType.ArrayTypeMismatch or ExceptionType.OutOfMemory => [],
         _ => throw new ArgumentOutOfRangeException(nameof(exception))
     };
 

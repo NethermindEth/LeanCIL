@@ -292,12 +292,13 @@ theorem allocation_maximum_constant_initialization :
      | .error _ => false) = true := by decide +kernel
 #print axioms allocation_maximum_constant_initialization
 
-/-- Lengths outside the runtime element-count ceiling remain model failures, not CLR throws. -/
-theorem allocation_extent_is_not_exception :
-    (match newArray memory .signed32 (.i64 (maxArrayLength + 1)) with
-     | .error fault => fault == .unsupported "Array length outside supported extent"
-     | .ok _ => false) = true := by decide +kernel
-#print axioms allocation_extent_is_not_exception
+/-- Counts above the array ceiling fail before allocation. A native count too large for
+an Int32 fails at the preceding conversion. -/
+theorem allocation_extent_exceptions :
+    newArray memory .signed32 (.i32 (maxArrayLength + 1)) = .error (.thrown .outOfMemory) ∧
+    newArray memory .unsigned8 (.i64 0x7fffffff) = .error (.thrown .outOfMemory) ∧
+    newArray memory .unsigned8 (.i64 0x80000000) = .error (.thrown .overflow) := ⟨rfl, rfl, rfl⟩
+#print axioms allocation_extent_exceptions
 
 /-- A forged allocator watermark is rejected instead of establishing an allocation exception. -/
 theorem allocation_identity_reuse_is_not_exception :

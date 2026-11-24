@@ -454,19 +454,24 @@ theorem Memory.Renamed.stepLocalloc {indices : LocalIndexMap} {mapping : Allocat
     · cases observable
 #print axioms Memory.Renamed.stepLocalloc
 
-/-- Heap-resource and allocator faults cannot discharge a named exception obligation. -/
-theorem allocateArray_not_thrown (memory : Memory) (element : CIL.ArrayElement) (length : Nat)
-    (exception : ExceptionType) :
-    allocateArray memory element length ≠ .error (.thrown exception) := by
-  intro raised
-  unfold allocateArray checkedAt at raised
-  repeat' first
-    | cases raised
-    | split at raised
-    | simp only [Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure] at raised
-  all_goals rename_i found
-  all_goals split at found <;> cases found
-#print axioms allocateArray_not_thrown
+/-- The CLR exceptions from array allocation depend only on its element and count. -/
+theorem allocateArray_throw_independent (source target : Memory) (element : CIL.ArrayElement)
+    (length : Nat) (exception : ExceptionType)
+    (raised : allocateArray source element length = .error (.thrown exception)) :
+    allocateArray target element length = .error (.thrown exception) := by
+  by_cases large : length > maxArrayLength
+  · cases supported : element.allocationSupported <;>
+      simpa [allocateArray, supported, large, bind, Except.bind, pure, Except.pure] using raised
+  · exfalso
+    unfold allocateArray checkedAt at raised
+    simp only [large, ite_false] at raised
+    repeat' first
+      | cases raised
+      | split at raised
+      | simp only [Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure] at raised
+    all_goals rename_i found
+    all_goals split at found <;> cases found
+#print axioms allocateArray_throw_independent
 
 
 /-- Heap-budget and allocator faults cannot discharge a named exception obligation. -/
@@ -601,7 +606,8 @@ theorem Memory.Renamed.stepNewarr {indices : LocalIndexMap} {mapping : Allocatio
            | error fault =>
              cases fault <;> simp only [allocated, SuccessOrThrow] at observable
              rename_i exception
-             exact False.elim (allocateArray_not_thrown source inline _ exception allocated)
+             rw [allocateArray_throw_independent source target inline _ exception allocated]
+             exact ⟨mapping, .refl mapping, .error _⟩
            | ok result =>
              obtain ⟨view, sourceAfter⟩ := result
              obtain ⟨targetAfter, targetAllocated, memories⟩ := related.allocateArray

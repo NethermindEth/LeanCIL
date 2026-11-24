@@ -19,7 +19,7 @@ internal enum ExceptionType
 {
     BaseException = 1, SystemException, ApplicationException, Arithmetic, DivideByZero, Overflow, InvalidOperation,
     NotSupported, NotImplemented, Argument, ArgumentNull, ArgumentOutOfRange, IndexOutOfRange, NullReference,
-    Format, InvalidCast, ArrayTypeMismatch,
+    Format, InvalidCast, ArrayTypeMismatch, OutOfMemory,
 }
 
 internal static class ExceptionTypeText
@@ -35,7 +35,7 @@ internal static class ExceptionTypeText
         ExceptionType.InvalidOperation, ExceptionType.NotSupported, ExceptionType.NotImplemented,
         ExceptionType.Argument, ExceptionType.ArgumentNull, ExceptionType.ArgumentOutOfRange,
         ExceptionType.IndexOutOfRange, ExceptionType.NullReference, ExceptionType.Format, ExceptionType.InvalidCast,
-        ExceptionType.ArrayTypeMismatch
+        ExceptionType.ArrayTypeMismatch, ExceptionType.OutOfMemory
     ];
 
     /// <summary>The name column of the member's <c>TypeDef</c> row, such as <c>OverflowException</c>.</summary>
@@ -58,6 +58,7 @@ internal static class ExceptionTypeText
         ExceptionType.Format => "FormatException",
         ExceptionType.InvalidCast => "InvalidCastException",
         ExceptionType.ArrayTypeMismatch => "ArrayTypeMismatchException",
+        ExceptionType.OutOfMemory => "OutOfMemoryException",
         _ => throw new ArgumentOutOfRangeException(nameof(exception))
     };
 
@@ -81,6 +82,7 @@ internal static class ExceptionTypeText
         ExceptionType.Format => "format",
         ExceptionType.InvalidCast => "invalidCast",
         ExceptionType.ArrayTypeMismatch => "arrayTypeMismatch",
+        ExceptionType.OutOfMemory => "outOfMemory",
         _ => throw new ArgumentOutOfRangeException(nameof(exception))
     };
 

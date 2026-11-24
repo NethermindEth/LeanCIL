@@ -88,7 +88,7 @@ def admittedParameters : ExceptionType → List (List TypeExpr)
   | .argumentOutOfRange =>
     [[], [messageParameter], [messageParameter, messageParameter],
       [messageParameter, innerParameter], [messageParameter, actualParameter, messageParameter]]
-  | .invalidCast | .arrayTypeMismatch => []
+  | .invalidCast | .arrayTypeMismatch | .outOfMemory => []
 
 /-- Resolve an allowlisted System.Runtime exception constructor from the closed member
     and its declared MemberRef signature. Its printed target must identify the same overload. -/

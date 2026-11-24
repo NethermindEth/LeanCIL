@@ -20,6 +20,7 @@ partial class Program
         [typeof(FormatException)] = "format",
         [typeof(InvalidCastException)] = "invalidCast",
         [typeof(ArrayTypeMismatchException)] = "arrayTypeMismatch",
+        [typeof(OutOfMemoryException)] = "outOfMemory",
     };
 
     /// <summary>

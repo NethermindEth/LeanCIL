@@ -175,7 +175,7 @@ def referenceArrayType (element : CIL.Extraction.TypeExpr) : RuntimeType :=
 
 /-- `newarr` of a class: a fresh array of `length` null references, one 8-byte slot each, charged
     to the heap budget like an instance of that size. A negative CLI length throws
-    `OverflowException`; one above the CoreCLR ceiling is outside the model, as for `newArray`. -/
+    `OverflowException`. Counts above the CoreCLR ceiling raise the same exception as `newArray`. -/
 def newReferenceArray (memory : Memory) (element : CIL.Extraction.TypeExpr)
     (value : CIL.Value) : ExecutionResult (Reference × Memory) := do
   let length ← match value with
@@ -184,7 +184,7 @@ def newReferenceArray (memory : Memory) (element : CIL.Extraction.TypeExpr)
     | _ => .error .invalidState
   if length < 0 then .error (.thrown .overflow) else
   if length.toNat > maxArrayLength then
-    .error (.unsupported "Array length outside supported extent") else
+    .error (.thrown (oversizedArrayException length.toNat)) else
   allocateObject memory (referenceArrayType element) (objectFieldSlot * length.toNat)
 
 end CIL.Safety

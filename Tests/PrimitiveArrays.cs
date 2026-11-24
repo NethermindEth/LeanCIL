@@ -229,7 +229,21 @@ foreach (var (name, element, width) in allocations)
                  | .error fault => fault.fault == .thrown .overflow
                  | .ok _ => false) = true := by decide +kernel
             #print axioms negative_array_overflows
+
+            /-- CoreCLR rejects this representable count before allocating the array. -/
+            theorem excessive_array_length :
+                (match CIL.Safety.invoke Extracted.program 32 0
+                    [.scalar (.i32 0x7fffffc8)] inputMemory with
+                 | .error fault => fault.fault == .thrown .outOfMemory
+                 | .ok _ => false) = true := by decide +kernel
+            #print axioms excessive_array_length
             """);
+        try
+        {
+            runtime.GetMethod(name)!.Invoke(null, [checked(Array.MaxLength + 1)]);
+            throw new Exception("Expected OutOfMemoryException for excessive array length");
+        }
+        catch (TargetInvocationException error) when (error.InnerException is OutOfMemoryException) { }
         try
         {
             runtime.GetMethod(name)!.Invoke(null, [-1]);

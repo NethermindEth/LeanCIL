@@ -37,7 +37,7 @@ theorem allocation_faults :
     newReferenceArray budgeted node (.i32 (-1)) = .error (.thrown .overflow) ∧
     newReferenceArray budgeted node (.i64 5) = .error (.allocationFailure 40 32) ∧
     newReferenceArray budgeted node (.i64 0x80000000) =
-      .error (.unsupported "Array length outside supported extent") := ⟨rfl, rfl, rfl⟩
+      .error (.thrown .overflow) := ⟨rfl, rfl, rfl⟩
 #print axioms allocation_faults
 
 /-- The first array stays on the evaluation stack while the second is allocated. -/
@@ -59,8 +59,12 @@ theorem cumulative_array_budget :
 /-- Array extents are checked in ordinary execution even when global memory is available. -/
 theorem ordinary_extent_checks :
     newReferenceArray Memory.empty node (.i32 (-1)) = .error (.thrown .overflow) ∧
-    newReferenceArray Memory.empty node (.i64 0x80000000) =
-      .error (.unsupported "Array length outside supported extent") := ⟨rfl, rfl⟩
+    newReferenceArray Memory.empty node (.i32 (maxArrayLength + 1)) =
+      .error (.thrown .outOfMemory) ∧
+    newReferenceArray { Memory.empty with heapBudget := some 0 } node (.i64 0x7fffffff) =
+      .error (.thrown .outOfMemory) ∧
+    newReferenceArray Memory.empty node (.i64 0x80000000) = .error (.thrown .overflow) :=
+  ⟨rfl, rfl, rfl, rfl⟩
 #print axioms ordinary_extent_checks
 
 /-- An empty array costs nothing and still has its own identity. -/
