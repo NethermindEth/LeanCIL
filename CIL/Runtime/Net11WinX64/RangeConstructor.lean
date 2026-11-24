@@ -98,7 +98,7 @@ def rangeResourceImport : SpecializedMethod := ⟨[], RangeResource.raw, ⟨core
 /-- The caller and executable runtime bodies, their original literal operands and the
 remaining managed import, whose index follows the last executable body. -/
 structure RangeImage where
-  caller : BodyEvidence
+  caller : MethodEvidence
   methods : Program
   originals : List RawMethod
   resourceImport : SpecializedMethod
@@ -107,11 +107,47 @@ structure RangeImage where
 def supportsProfile (profile : FeatureProfile) : Bool :=
   profile.nativeWidth == 64 && profile.littleEndian && profile.architecture != .arm64
 
+/-- Infer the incoming scalar stacks of the rebound caller from its original instructions.
+Each reachable pc enters the queue once. Incoming edges must agree on the stack kinds. -/
+private def callerScalars? (raw : RawMethod) (features : FeatureCertificate)
+    (method : Method) : Option ScalarCertificate := do
+  let sites := (raw.code.zip (foldRoles raw.code)).toArray
+  let facts := features.toArray
+  let code := method.code.toArray
+  guard (sites.size > 0 && facts.size == sites.size && code.size == sites.size)
+  let context := nativeDispatchContext raw
+  let locals := ScalarLocals.indexed raw context
+  let rec visit : Nat → List Nat → Array (Option (List ScalarKind)) → Option ScalarCertificate
+    | _, [], states => some states.toList
+    | 0, _ :: _, _ => none
+    | fuel + 1, pc :: pending, states => do
+      let (op, role) ← sites[pc]?
+      let some stack ← states[pc]? | none
+      let some feature ← facts[pc]? | none
+      let emitted ← code[pc]?
+      if scalarStoreFault raw op stack emitted locals then return ← visit fuel pending states
+      let after ← scalarTransfer raw op stack role context locals
+      let next ← featureSuccessors role pc op feature.stack
+      let mut todo := pending
+      let mut incoming := states
+      for target in next do
+        match ← incoming[target]? with
+        | some known => guard (known == after)
+        | none =>
+          incoming := incoming.set! target (some after)
+          todo := target :: todo
+      visit fuel todo incoming
+  let states ← visit sites.size [0] ((Array.replicate sites.size none).set! 0 (some []))
+  guard (decide (ScalarFlowValid raw features states method.code))
+  return states
+
 /-- Decode a single entry method and the seven framework methods reached with a non-null
 message. The caller must resolve its constructor through the two pinned runtime slices. -/
-def rangeImage? (original : BodyEvidence) (source : RawMethod) (pc : Nat)
+def rangeImage? (item : MethodEvidence) (pc : Nat)
     (profile : FeatureProfile) (environment : LayoutEnvironment) : Option RangeImage := do
-  guard (supportsProfile profile)
+  guard (supportsProfile profile && item.arguments.isEmpty)
+  let original := item.body
+  let source := item.original
   let body ← original.bindConstructor? source pc rangeDependencies
     ⟨[], RangeCtor.definition, ⟨coreLibraryScope⟩⟩
   let code ← (checkBody body source []).toOption
@@ -125,11 +161,17 @@ def rangeImage? (original : BodyEvidence) (source : RawMethod) (pc : Nat)
   let runtime := coreBytes.map Prod.snd
   let table : List SpecializedMethod := ⟨[], raw, ⟨original.metadata.own.assembly.identity⟩⟩ ::
     (runtime.map (⟨[], ·, ⟨coreLibraryScope⟩⟩) ++ [rangeResourceImport])
-  let entry ← Method.ofBody? profile environment (links table raw)
-    (List.replicate raw.code.length true) body raw []
+  let boundLinks := links table raw
+  let entry ← Method.ofBody? profile environment boundLinks item.reachable body raw []
+  let closed ← instantiateMethod environment.rawLayouts raw []
+  let storage ← closedArguments environment.rawLayouts closed
+  let scalars ← callerScalars? closed item.featureStates entry
+  let caller := { item with
+    original := raw, body, closed, parameterInput := storage, links := boundLinks,
+    scalarStates := scalars }
   let constructors ← coreBytes.mapM fun (evidence, method) =>
     Method.ofBody? .scalar {} (links table method)
       (List.replicate method.code.length true) evidence method []
-  return ⟨body, entry :: constructors, raw :: runtime, rangeResourceImport⟩
+  return ⟨caller, entry :: constructors, raw :: runtime, rangeResourceImport⟩
 
 end CIL.Runtime.Net11WinX64

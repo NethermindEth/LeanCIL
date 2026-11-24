@@ -1141,7 +1141,8 @@ partial class Program
         var expected = originReport?.statementIdentity;
         var identity = report.statementIdentity;
         const string requirement = "an expected rejection needs the refuted theorem to state";
-        const string predicates = "MethodContract.Holds, OutcomeContract.Holds or OutcomeContract.HoldsCLR";
+        const string predicates = "MethodContract.Holds, OutcomeContract.Holds, OutcomeContract.HoldsCLR " +
+            "or OutcomeContract.HoldsAtEntryCLR";
         var reason = originReport is null
             ? $"""{origin} did not verify (stage: {originStage}), so the statement of {theorem
                 } has nothing to match."""
@@ -1173,7 +1174,8 @@ partial class Program
     [
         ("CIL.Safety.MethodContract", "CIL.Safety.MethodContract.Holds"),
         ("CIL.Safety.OutcomeContract", "CIL.Safety.OutcomeContract.Holds"),
-        ("CIL.Safety.RuntimeExceptions", "CIL.Safety.OutcomeContract.HoldsCLR")
+        ("CIL.Safety.RuntimeExceptions", "CIL.Safety.OutcomeContract.HoldsCLR"),
+        ("CIL.Runtime.EntryContract", "CIL.Safety.OutcomeContract.HoldsAtEntryCLR")
     ];
 
     /// <summary>

@@ -16,7 +16,7 @@ def memberToken (body : BodyEvidence) : Option Nat :=
 /-- Bind the packaged caller using the facade and CoreLib rows carried with the runtime. -/
 def pinnedCaller : Option BodyEvidence :=
   match Extracted.translation_valid.entry .net11WinX64 with
-  | some (.range image) => some image.caller
+  | some (.range image) => some image.caller.body
   | _ => none
 
 /-- The neighboring throw, a missing defining image, the facade with the same MethodDef
@@ -39,9 +39,9 @@ theorem rejectsInvalidBindings :
 /-- The Windows x64 constructor image requires a compatible target and the actual newobj. -/
 theorem rejectsOtherTarget :
     (Extracted.translation_valid.entry .portable).isNone ∧
-    (rangeImage? Extracted.method0Body Extracted.method0Original 5
+    (rangeImage? (Extracted.methodEvidence[0]'(by decide)) 5
       { Extracted.profile with architecture := .arm64 } Extracted.environment).isNone ∧
-    (rangeImage? Extracted.method0Body Extracted.method0Original 6
+    (rangeImage? (Extracted.methodEvidence[0]'(by decide)) 6
       Extracted.profile Extracted.environment).isNone := by
   repeat' constructor
   all_goals cil_kernel_rfl
@@ -88,6 +88,65 @@ theorem callerEvidence :
     exact .cons Extracted.assembly0_identified (.cons facadeIdentified
       (.cons coreIdentified .nil))
   all_goals first | cil_kernel_rfl | decide +kernel | cil_body_decodes
+
+/-- The managed method and its evidence as returned by the runtime binder. -/
+private def managedCaller := do
+  let some (.range image) := Extracted.translation_valid.entry .net11WinX64 | none
+  return (image.caller, ← image.methods[0]?)
+
+private def callerPair := managedCaller.getD (Extracted.methodEvidence[0]'(by decide),
+  { code := [], locals := [], returnsValue := false })
+
+private def managedTargets : List SpecializedMethod :=
+  ⟨[], raw, Extracted.assembly0⟩ ::
+    (coreBytes.map fun pair => ⟨[], pair.2, ⟨coreLibraryScope⟩⟩)
+
+/-- The caller's only call-family operand resolves inside the method table for any import list. -/
+private theorem callerCalls :
+    (fun slots : List ImportSlot => decide (ManagedCallsValid managedTargets slots
+      (callModelled callerPair.2) (lowerConstrainedRaw callerPair.1.dispatchTypes
+        callerPair.1.closed) callerPair.1.reachable callerPair.2)) = fun _ => true := by
+  cil_kernel_rfl
+#print axioms callerCalls
+
+private theorem callerBody :
+    BodyDecodes (Extracted.assemblies ++ [⟨runtimeScope⟩, ⟨coreLibraryScope⟩])
+      Extracted.platformDefinitions callerPair.1.assembly callerPair.1.body callerPair.1.original
+      callerPair.1.arguments callerPair.1.signature := by
+  rw [show callerPair.1.assembly = Extracted.assembly0 by cil_kernel_rfl,
+      show callerPair.1.body = body by cil_kernel_rfl,
+      show callerPair.1.original = raw by cil_kernel_rfl,
+      show callerPair.1.arguments = [] by cil_kernel_rfl,
+      show callerPair.1.signature = Extracted.method0Signature by cil_kernel_rfl]
+  exact callerEvidence.2
+#print axioms callerBody
+
+/-- The ordinary per-method validator accepts the rebound caller, including its object
+stack at both string loads, its managed construction link and its stack-based throw. The
+surrounding table supplies the seven resolved callees, with no scalar constant summaries. -/
+def ManagedCallerValid : Prop :=
+    ∃ item method, managedCaller = some (item, method) ∧
+      ∀ (all : List MethodEvidence) (slots : List ImportSlot),
+        specializationTable all = ⟨[], raw, Extracted.assembly0⟩ ::
+          (coreBytes.map fun pair => ⟨[], pair.2, ⟨coreLibraryScope⟩⟩) →
+        evidenceConstants all = (fun _ => none) →
+        (ImportSlotIndex.ofList slots).forLinks all.length method.links = {} →
+        MethodEvidenceValid Extracted.rawLayouts Extracted.computedLayouts
+          (Extracted.assemblies ++ [⟨runtimeScope⟩, ⟨coreLibraryScope⟩])
+          Extracted.platformDefinitions all slots item method
+
+/-- The evidence emitted by the runtime binder passes each ordinary caller validator. -/
+theorem managedCallerValid : ManagedCallerValid := by
+  have selected : managedCaller = some callerPair := by cil_kernel_rfl
+  refine ⟨_, _, selected, ?_⟩
+  intro all slots targets constants imports
+  unfold MethodEvidenceValid
+  rw [targets, constants, imports]
+  refine ⟨?_, ?_, ?_, ?_, of_decide_eq_true (congrFun callerCalls slots), ?_, ?_, ?_, ?_, ?_,
+    ?_, ⟨?_, ?_⟩, ?_, callerBody, ?_, ?_, ?_, ?_⟩
+  all_goals first | cil_kernel_rfl | decide +kernel
+
+#print axioms managedCallerValid
 
 /-- Decoded caller linked to the seven CoreLib method bodies reached by Percent. -/
 def linkedProgram : Option Program := (Extracted.translation_valid.entry .net11WinX64).map (·.methods)
@@ -194,7 +253,7 @@ theorem imageFromEmpty (budget : Option Nat) : imageExecution budget := by
 
 /-- Original packaged caller evidence and its complete decoded outcome under the image quota. -/
 theorem verified (heapBytes : Nat) :
-    imageExecution none ∧ imageExecution heapBytes ∧ ordinaryExecution ∧
+    ManagedCallerValid ∧ imageExecution none ∧ imageExecution heapBytes ∧ ordinaryExecution ∧
     binding = some (some (2, Core.RangeCtor.definition.token)) ∧
     (pinnedCaller = some body ∧
       BodyDecodes (Extracted.assemblies ++ [⟨runtimeScope⟩, ⟨coreLibraryScope⟩])
@@ -209,7 +268,8 @@ theorem verified (heapBytes : Nat) :
         (RaisesCLR executable 0 [.scalar (.i32 value)] initial .argumentOutOfRange ↔
           128 ≤ heapBytes) := by
   obtain ⟨executable, initial, linked, loaded, runs⟩ := outcome heapBytes
-  exact ⟨imageFromEmpty none, imageFromEmpty heapBytes, ordinary, bound, callerEvidence, executable, initial, linked, loaded, runs,
+  exact ⟨managedCallerValid, imageFromEmpty none, imageFromEmpty heapBytes, ordinary, bound,
+    callerEvidence, executable, initial, linked, loaded, runs,
     rangeExceptionAtEntry linked loaded⟩
 #print axioms verified
 end CompiledPercent

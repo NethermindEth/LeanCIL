@@ -110,7 +110,11 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
             label = ExceptionMember(error.InnerException!);
             outcome = $".error \u27e8{method}, {pc}, .thrown .{label}\u27e9";
         }
-        return $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(v => $".scalar (.i32 {v})"))}] CIL.Safety.Memory.empty).map Prod.snd = {outcome}";
+        var args = string.Join(", ", input.Select(v => $".scalar (.i32 {v})"));
+        if (name == "Percent")
+            return $"(Extracted.translation_valid.invoke .net11WinX64 66 [{args}]).map " +
+                $"(fun loaded => loaded.map (·.map Prod.snd)) = some (.ok ({outcome}))";
+        return $"(CIL.Safety.invoke Extracted.program 64 0 [{args}] CIL.Safety.Memory.empty).map Prod.snd = {outcome}";
     }).ToList();
     if (label is null) throw new InvalidOperationException($"No runtime input reached the throw in {name}");
     var nullLoads = body.Select((site, index) => (site, index)).Where(item => item.site.OpCode.Code == Code.Ldnull);
@@ -118,6 +122,10 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         $"example : Extracted.method{method}.code[{item.index}]? = some .ldnull := " +
         $"Extracted.method{method}_instruction{item.index}"));
     var raisedInstruction = name == "Null" ? ".throw" : $"(.throw (some .{label}))";
+    var throwSite = name == "Percent"
+        ? $"example : ((Extracted.translation_valid.entry .net11WinX64).bind " +
+          $"(fun image => image.methods[{method}]? >>= fun m => m.code[{pc}]?)) = some .throw := by cil_kernel_rfl"
+        : $"example : Extracted.method{method}.code[{pc}]? = some {raisedInstruction} := Extracted.method{method}_instruction{pc}";
     var entryCheck = name switch
     {
         "Null" => "example : (Extracted.translation_valid.entry .portable).map (·.methods) = some Extracted.program := by cil_kernel_rfl",
@@ -131,11 +139,10 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         namespace ExampleProof
         {{entryCheck}}
         {{nullEquations}}
-        example : Extracted.method{{method}}.code[{{pc}}]? = some {{raisedInstruction}} :=
-          Extracted.method{{method}}_instruction{{pc}}
+        {{throwSite}}
         theorem correctness :
           {{string.Join(" \u2227\n  ", claims)}} := by
-          repeat' first | apply And.intro | rfl
+          repeat' first | apply And.intro | {{(name == "Percent" ? "cil_kernel_rfl" : "rfl")}}
         #print axioms correctness
         end ExampleProof
         """);
@@ -180,7 +187,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
                 theorem: "CompiledPercent.verified");
             Console.WriteLine("PASS Percent: decoded caller and CoreLib exception path at every heap quota" + suffix);
         }
-        CheckPercentExceptionType(translated, percent, selector, contract);
+        CheckPercentVariants(translated, percent, selector);
     }
 
     if (name is "Null" or "Inner" or "ArgumentInner" or "ActualValue")
@@ -391,7 +398,7 @@ static string CompiledPercentProof(string folder)
     return path;
 }
 
-void CheckPercentExceptionType(ModuleDefinition image, MethodDefinition method, string selector, string example)
+void CheckPercentVariants(ModuleDefinition image, MethodDefinition method, string selector)
 {
     // Preserve both translated ldstr operands and the constructor signature. Change only the exception class.
     var site = method.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Newobj);
@@ -404,8 +411,33 @@ void CheckPercentExceptionType(ModuleDefinition image, MethodDefinition method, 
     var changed = Path.Combine(root, "Percent-WrongType.dll");
     image.Write(changed);
 
-    verification.VerifyContractVariant(assembly, "Examples", selector, Path.Combine(root, "Percent-Type-Original"),
-        changed, selector, Path.Combine(root, "Percent-Type-Changed"), """
+    var invoked = Assembly.Load(File.ReadAllBytes(changed)).GetType("Examples.Throws")!.GetMethod("Percent")!;
+    try { invoked.Invoke(null, [101u]); throw new InvalidOperationException("Expected ArgumentException"); }
+    catch (TargetInvocationException error) when (error.InnerException?.GetType() == typeof(ArgumentException)) { }
+
+    var unbound = Path.Combine(root, "UnboundPercent.lean");
+    File.WriteAllText(unbound, """
+        import Extracted
+        import CIL.Runtime.EntryContract
+        namespace ExampleProof
+        open CIL CIL.Safety
+        theorem correctness (c : OutcomeContract W32 W32) :
+            ¬ c.RefutedAtEntryCLR Extracted.program 0 Extracted.translation_valid .net11WinX64 :=
+          OutcomeContract.not_refuted_of_unbound (by cil_kernel_rfl)
+        #print axioms correctness
+        end ExampleProof
+        """);
+    verification.Verify(changed, "Examples", selector, unbound, Path.Combine(root, "Percent-Type-Unbound"));
+    Console.WriteLine("PASS Percent: the CLR throws ArgumentException and its unbound constructor supplies no counterexample");
+
+    site.Operand = original;
+    var threshold = method.Body.Instructions.Single(instruction =>
+        instruction.OpCode.Code == Code.Ldc_I4_S && Equals(instruction.Operand, (sbyte)100));
+    threshold.Operand = (sbyte)101;
+    var offByOne = Path.Combine(root, "Percent-OffByOne.dll");
+    image.Write(offByOne);
+    verification.VerifyContractVariant(assembly, "Examples", selector, Path.Combine(root, "Percent-Contract-Original"),
+        offByOne, selector, Path.Combine(root, "Percent-OffByOne"), """
         def bounded : OutcomeContract W32 W32 where
           args value := [.scalar (.i32 value)]
           results result := [.scalar (.i32 result)]
@@ -414,14 +446,21 @@ void CheckPercentExceptionType(ModuleDefinition image, MethodDefinition method, 
           post value _ _ result := result = value
           raises value _ := if value ≤ 100 then none else some .argumentOutOfRange
         """, """
-        theorem correctness : bounded.HoldsCLR Extracted.program 0 := ExampleProof.correctness
+        theorem correctness :
+            bounded.HoldsAtEntryCLR Extracted.program 0 Extracted.translation_valid .net11WinX64 :=
+          ExampleProof.correctness
         """, """
-        theorem correctness : bounded.RefutedCLR Extracted.program 0 := by
-          have ran : invoke Extracted.program 64 0 [.scalar (.i32 101)] Memory.empty =
-              .error ⟨0, 6, .thrown .argument⟩ := by cil_kernel_rfl
-          apply OutcomeContract.RefutedCLR.of_fault (input := (101 : W32)) trivial (by decide) ran
-          change (ExecutionFault.thrown .argument).clrException ≠ some .argumentOutOfRange
-          decide
-        """, example: example, imports: "import CIL.Safety.RuntimeExceptions");
-    Console.WriteLine("PASS Percent(101) with ArgumentException refutes the public CLR contract from empty memory");
+        private def image := (Extracted.translation_valid.entry .net11WinX64).getD (.translated [] [])
+        private def memory := image.initialMemory.toOption.getD Memory.empty
+
+        theorem correctness :
+            bounded.RefutedAtEntryCLR Extracted.program 0 Extracted.translation_valid .net11WinX64 := by
+          refine ⟨image, memory, by cil_kernel_rfl, by cil_kernel_rfl, by decide, ?_⟩
+          apply OutcomeContract.RefutedCLR.of_return (input := (101 : W32)) (initial := memory)
+            (fuel := 66) (final := memory) (values := [.scalar (.i32 101)])
+          · exact ⟨rfl, trivial⟩
+          · cil_kernel_rfl
+          · trivial
+        """, example: At("Examples/Proofs/Percent.lean"), imports: "import CIL.Runtime.EntryContract");
+    Console.WriteLine("PASS Percent: returning 101 refutes the packaged CLR contract at its first out-of-range input");
 }

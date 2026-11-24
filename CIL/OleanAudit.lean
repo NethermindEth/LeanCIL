@@ -253,7 +253,9 @@ def contracts : List Contract :=
     ⟨`CIL.Safety.OutcomeContract.Holds, `CIL.Safety.OutcomeContract.Refuted,
       `CIL.Safety.OutcomeContract⟩,
     ⟨`CIL.Safety.OutcomeContract.HoldsCLR, `CIL.Safety.OutcomeContract.RefutedCLR,
-      `CIL.Safety.RuntimeExceptions⟩]
+      `CIL.Safety.RuntimeExceptions⟩,
+    ⟨`CIL.Safety.OutcomeContract.HoldsAtEntryCLR, `CIL.Safety.OutcomeContract.RefutedAtEntryCLR,
+      `CIL.Runtime.EntryContract⟩]
 
 /-- How many definitions `unfoldAliases` unfolds at the head of a statement. -/
 def aliasDepth : Nat := 16
