@@ -91,11 +91,16 @@ def ClassName.signatureName? (name : ClassName) : Option String := do
   let suffix ← nested.mapM fun level => columnText? level.name
   return "/".intercalate ((if space.isEmpty then simple else space ++ "." ++ simple) :: suffix)
 
+/-- Linked UTF-8 bytes avoid indexed string decoding while comparing type keys. -/
+def keyBytes (text : String) : List UInt8 := text.toByteArray.data.toList
+
 /-- Cecil assembly scope reconstructed from the typed Assembly row for signature consumers. -/
 def assemblyScope? (assembly : AssemblyName) : Option String := do
   let name ← columnText? assembly.name
   let culture ← columnText? assembly.culture
-  let hasComma := fun (s : String) => s.toByteArray.data.any (fun byte => byte.toNat == 44)
+  -- Elaborator reduction does not unfold the well-founded `Array.any`; a stuck enum scope
+  -- leaves its span bulk call without a runtime-model fact.
+  let hasComma := fun (s : String) => (keyBytes s).any (fun byte => byte.toNat == 44)
   guard (!name.isEmpty && !hasComma name && !hasComma culture && culture != "neutral")
   let text := if culture.isEmpty then "neutral" else culture
   return name ++ ", Version=" ++ assembly.version.display ++ ", Culture=" ++ text ++
@@ -196,9 +201,6 @@ theorem groupIndex_get {α κ : Type} [Ord κ] [Std.TransOrd κ] [Std.LawfulEqOr
     · simp [same, ih]
 
 #print axioms groupIndex_get
-
-/-- Linked UTF-8 bytes avoid indexed string decoding while comparing type keys. -/
-def keyBytes (text : String) : List UInt8 := text.toByteArray.data.toList
 
 /-- `runtimeScope` is the display name of `runtimeAssembly`, compared in bytes because display
     text does not reduce in the kernel; a version or token changed in only one of them fails it. -/
