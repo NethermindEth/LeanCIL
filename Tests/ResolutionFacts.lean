@@ -1096,6 +1096,15 @@ stops at
   hiddenGetter
 -/
 #guard_msgs (whitespace := lax) in cil_runtime_models hiddenGetterCaller
+/-- An unmodelled method behind a definition the elaborator does not unfold. -/
+@[irreducible] def hiddenUnmodelled : MethodRef := unmodelledMethod
+/-- A body whose only call the elaborator cannot read and the kernel finds unmodelled. -/
+def hiddenUnmodelledCaller : CIL.Method :=
+  { locals := [], returnsValue := false, code := [.call hiddenUnmodelled {}, .ret] }
+cil_instruction_equations hiddenUnmodelledCaller
+#guard_msgs in cil_runtime_models hiddenUnmodelledCaller
+/-- error: Unknown identifier `hiddenUnmodelledCaller_model0` -/
+#guard_msgs in #check hiddenUnmodelledCaller_model0
 /-- The modelled type getter behind a constant no reduction unfolds. -/
 opaque opaqueMethod : MethodRef := getTypeFromHandle.method
 /-- A body whose only call targets a method no reduction reads. -/
