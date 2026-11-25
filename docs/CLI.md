@@ -1133,8 +1133,8 @@ Verified: ExampleProof.addTwo_holds
   `reason`, in this order: `body-bytes`, `metadata-rows`, `member-links`, `platform-type-kinds`,
   `enum-underlying-types`, `value-tuple-field-order`, `object-fields`, `layout-content`,
   `dispatch-catalogs`, `static-data`, `generic-constraints`, `public-key-tokens`,
-  `import-identities` and `imported-layouts`. `verify` writes `mode` `default`, reads no digest file, sources or image,
-  and lists every fact as `trusted`, with no theorem or reason.
+  `import-identities` and `imported-layouts`. `verify` writes `mode` `default`, reads no digest
+  file, sources or image, and lists every fact as `trusted`, with no theorem or reason.
   `verify` accepts no certificate of another schema, mode or fact list, nor one with a missing,
   repeated or reordered fact or an unknown status: a cached result whose certificate it refuses
   is verified again.
