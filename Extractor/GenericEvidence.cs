@@ -156,8 +156,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         if (type.FullName == "System.Void") return ".void";
         if (EnumTypes.IsEnum(type))
         {
-            var underlying = type.Resolve().Fields.Single(field => !field.IsStatic).FieldType;
-            return $".enum {EnumTypes.Identity(type).ToLean()} {EnumTypes.StorageLean(underlying)}";
+            return $".enum {EnumTypes.Identity(type).ToLean()} {EnumTypes.StorageLean(type)}";
         }
         if (ObjectTypes.Reference(type)) return ObjectType(type);
         return Aggregate(localOnly: true) ?? RuntimePrimitive(type) ?? $".atom {Scope(type)} {Quote(type.FullName)}";
