@@ -800,6 +800,7 @@ Examples:System.UInt32 Examples.SpanTables::Word(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.StaticScalars::ReadInt()	B	B	B	B	B	B	B	B
 Examples:System.UInt32 Examples.Throws::ActualValue(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::ArgumentInner(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Throws::Guarded(System.UInt32,System.UInt32[],Examples.FaultSlot)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::Inner(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::Message(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::NamedArgument(System.UInt32)	A	A	A	A	A	A	A	A
@@ -1140,6 +1141,7 @@ Examples:System.Void Examples.Enums::Assign(Examples.Unsigned64&,Examples.Unsign
 Examples:System.Void Examples.ExceptionDocumentation::Reference(System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ExplicitCounterValue::Examples.ICounterValue.Increment()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ExplicitGenericCounterValue`1::Examples.ICounterValue.Increment()	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.FaultSlot::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Gauge::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Gauge::Settle()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.GenericCounterValue`1::Increment()	B	B	B	B	B	B	B	B
