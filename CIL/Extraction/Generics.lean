@@ -119,6 +119,8 @@ structure RawMethod where
   objectBases : List TypeExpr := []
   /-- Each reachable static access has a descriptor at its instruction index. -/
   staticFields : List (Nat × StaticFieldSite) := []
+  /-- The exception clauses of the body in instruction indices, nested clauses first. -/
+  handlers : List ExceptionClause := []
   deriving DecidableEq, Repr
 
 /-- Whether this method takes an object reference for its receiver. -/
@@ -287,9 +289,14 @@ def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
       let operand ← substituteOperand arguments layouts original.genericParameters.length
         instruction.operand
       return { instruction with operand }
+    let handlers ← original.handlers.mapM fun clause => match clause.kind with
+      | .catch type => (fun closed => { clause with kind := .catch closed }) <$>
+          substituteType arguments type
+      | .finally => some clause
     -- Masking with 239 clears the generic calling-convention bit (0x10).
     return { original with
-      returnType, parameters, locals, code, genericParameters := [], ownerParameters := [],
+      returnType, parameters, locals, code, handlers, genericParameters := [],
+      ownerParameters := [],
       ownerArgumentCount := original.ownerParameters.length,
       callingConvention := original.callingConvention &&& 239 }
 
@@ -303,7 +310,7 @@ theorem instantiateMethod_token {layouts : List RawLayout} {original closed : Ra
   · cases instantiated
   · simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
       Option.some.injEq] at instantiated
-    obtain ⟨_, _, _, _, _, _, _, _, rfl⟩ := instantiated
+    obtain ⟨_, _, _, _, _, _, _, _, _, _, rfl⟩ := instantiated
     rfl
 
 #print axioms instantiateMethod_token
@@ -318,7 +325,7 @@ theorem instantiateMethod_initLocals {layouts : List RawLayout} {original closed
   · cases instantiated
   · simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
       Option.some.injEq] at instantiated
-    obtain ⟨_, _, _, _, _, _, _, _, rfl⟩ := instantiated
+    obtain ⟨_, _, _, _, _, _, _, _, _, _, rfl⟩ := instantiated
     rfl
 
 #print axioms instantiateMethod_initLocals

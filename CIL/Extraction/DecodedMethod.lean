@@ -40,13 +40,16 @@ theorem SpecializationValid.ofRaw?_eq_ofClosed? {environment : LayoutEnvironment
 #print axioms SpecializationValid.ofRaw?_eq_ofClosed?
 
 /-- The method pinned body bytes denote with link table `links`: `checkBody` checks the
-    definition's metadata, and the code and init flag are the ones decoded from the bytes. -/
+    definition's metadata, and the code, init flag and exception clauses are the ones decoded
+    from the bytes. -/
 def _root_.CIL.Method.ofBody? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (links : List (Nat × Link)) (reachable : List Bool) (body : BodyEvidence)
     (original : RawMethod) (arguments : List TypeExpr) : Option Method := do
   let decoded ← (checkBody body original arguments).toOption
   Method.ofRaw? profile environment links reachable
-    { original with code := decoded.code, initLocals := decoded.initLocals } arguments
+    { original with
+      code := decoded.code, initLocals := decoded.initLocals, handlers := decoded.handlers }
+    arguments
 
 /-- Find a unique matching type row in a carried slice. Forwarders are resolved against
 the referenced assembly's identity columns before the implementation is searched. -/
@@ -198,20 +201,22 @@ theorem decodedProgram?_statics {profile : FeatureProfile} {environment : Layout
 
 #print axioms decodedProgram?_statics
 
-/-- A body that decodes to `method` passes `checkBody` with the method's own code and init flag. -/
+/-- A body that decodes to `method` passes `checkBody` with the method's own code, init flag and
+    exception clauses. -/
 theorem BodyDecodes.code {pins : List AssemblyPin} {platform : PlatformTable}
     {pin : AssemblyPin} {body : BodyEvidence}
     {method : RawMethod} {arguments : List TypeExpr} {signature : String}
     {calls : BodyImports}
     (decodes : BodyDecodes pins platform pin body method arguments signature calls) :
     ∃ decoded, checkBody body method arguments = .ok decoded ∧
-      decoded.code = method.code ∧ decoded.initLocals = method.initLocals := by
+      decoded.code = method.code ∧ decoded.initLocals = method.initLocals ∧
+      decoded.handlers = method.handlers := by
   have matched := decodes.2.2.2.2.2.2.2
   unfold bodyMatches at matched
   split at matched
   · next decoded checks =>
     simp only [Bool.and_eq_true, beq_iff_eq] at matched
-    exact ⟨decoded, checks, matched.1.2, matched.1.1.2⟩
+    exact ⟨decoded, checks, matched.1.1.2, matched.1.1.1.2, matched.2⟩
   · exact absurd matched Bool.false_ne_true
 
 #print axioms BodyDecodes.code
@@ -265,12 +270,14 @@ theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {platform
     (decodes : BodyDecodes pins platform pin body original arguments signature calls) :
     Method.ofBody? profile environment links reachable body original arguments =
       Method.ofRaw? profile environment links reachable original arguments := by
-  obtain ⟨decoded, checks, sameCode, sameInit⟩ := BodyDecodes.code decodes
+  obtain ⟨decoded, checks, sameCode, sameInit, sameHandlers⟩ := BodyDecodes.code decodes
   unfold Method.ofBody?
   rw [checks]
   show Method.ofRaw? profile environment links reachable
-    { original with code := decoded.code, initLocals := decoded.initLocals } arguments = _
-  rw [sameCode, sameInit]
+    { original with
+      code := decoded.code, initLocals := decoded.initLocals, handlers := decoded.handlers }
+    arguments = _
+  rw [sameCode, sameInit, sameHandlers]
 
 #print axioms Method.ofBody?_of_decodes
 

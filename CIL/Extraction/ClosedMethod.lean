@@ -65,7 +65,7 @@ def _root_.CIL.Method.ofClosed? (profile : FeatureProfile) (environment : Layout
       parameterHomes := parameterHomes, declared := DeclaredSignature.ofRaw closed,
       environment := environment, links := links,
       staticSites := closed.staticDescriptors,
-      returnsValue := closed.returnType != .void }
+      returnsValue := closed.returnType != .void, handlers := closed.handlers }
   | _, _ => .error .invalidFrame
 
 /-- Closed decoding binds the code and every static descriptor to the same raw method. -/
@@ -82,6 +82,20 @@ theorem _root_.CIL.Method.ofClosed?_fields {profile : FeatureProfile}
   all_goals first | contradiction | (cases decoded; exact ⟨rfl, rfl⟩)
 
 #print axioms Method.ofClosed?_fields
+
+/-- Closed decoding keeps the exception clauses of the raw method. -/
+theorem _root_.CIL.Method.ofClosed?_handlers {profile : FeatureProfile}
+    {environment : LayoutEnvironment} {links : List (Nat × Link)} {reachable : List Bool}
+    {closed : RawMethod} {storage : RawArguments} {method : Method}
+    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method) :
+    method.handlers = closed.handlers := by
+  unfold Method.ofClosed? at decoded
+  cases failure : firstLiveHole 0 reachable (methodCode profile environment links reachable closed)
+    <;> simp only [failure] at decoded
+  repeat' split at decoded
+  all_goals first | contradiction | (cases decoded; rfl)
+
+#print axioms Method.ofClosed?_handlers
 
 /-- At a reachable instruction, a hole is incompatible with a successful scan. -/
 private theorem firstLiveHole_ne_none {start pc opcode : Nat} {reachable : List Bool}

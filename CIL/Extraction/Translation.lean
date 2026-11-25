@@ -242,7 +242,7 @@ theorem instantiateMethod_managedSite {layouts : List RawLayout} {original close
   · cases instantiated
   · simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
       Option.some.injEq] at instantiated
-    obtain ⟨_, _, _, _, _, _, code, mapped, rfl⟩ := instantiated
+    obtain ⟨_, _, _, _, _, _, code, mapped, _, _, rfl⟩ := instantiated
     change code[pc]? = some after at present
     rw [getElem?_of_mapM mapped pc, fetched] at present
     simp only [Option.bind_some, Option.bind_eq_some_iff, Option.some.injEq, called,
@@ -290,7 +290,7 @@ theorem instantiateMethod_prefixEntryFree {layouts : List RawLayout} {original c
   · cases instantiated
   · simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
       Option.some.injEq] at instantiated
-    obtain ⟨_, _, _, _, _, _, code, substituted, rfl⟩ := instantiated
+    obtain ⟨_, _, _, _, _, _, code, substituted, _, _, rfl⟩ := instantiated
     have entries := getElem?_of_mapM substituted
     have closedAt : ∀ (index : Nat) (instruction : RawInstruction),
         code[index]? = some instruction →

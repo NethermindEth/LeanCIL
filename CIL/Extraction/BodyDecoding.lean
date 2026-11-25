@@ -1,6 +1,7 @@
 import CIL.Extraction.MetadataBinding
 import CIL.Extraction.PinnedIndex
 import CIL.Extraction.Prefixes
+import CIL.Extraction.ExceptionRegions
 import Std.Data.TreeMap
 import Std.Data.TreeMap.Lemmas
 
@@ -8,9 +9,9 @@ import Std.Data.TreeMap.Lemmas
 # Method body decoding
 
 `decodeBody` reads the exact bytes of an ECMA-335 method body (II.25.4): the tiny or fat
-header and the instruction stream (III and VI.C). `BodyDecodes` states that the result is the
-`maxStack`, `initLocals`, `locals` and `code` of a `RawMethod`, so an extractor's decoded
-definition cannot differ from the bytes it was read from.
+header, the instruction stream (III and VI.C) and the exception section after it. `BodyDecodes`
+states that the result is the `maxStack`, `initLocals`, `locals`, `code` and `handlers` of a
+`RawMethod`, so an extractor's decoded definition cannot differ from the bytes it was read from.
 
 A `TokenTable` says which decoded operand each metadata token resolves to in this method. The
 decoder ties every operand to the four token bytes in the body, and `MetadataBinding` checks
@@ -23,9 +24,10 @@ stay trusted.
 Opcodes use the numbering of `RawInstruction`: one-byte opcodes keep their byte and two-byte
 opcodes `0xFE nn` are `0xFE00 + nn`. Branch operands become instruction indices, and a branch may
 not enter a prefixed instruction after its first prefix, so the decoded code satisfies
-`PrefixEntryFree` (`checkBody_prefixEntryFree`). Executable methods require section-free bodies.
-The exception-section readers bind a typed catch and an optional enclosing finally for proofs
-about their protected ranges and handlers.
+`PrefixEntryFree` (`checkBody_prefixEntryFree`). A fat header may announce one exception section
+of small or fat clauses. Typed catch and finally clauses decode to `ExceptionClause`s in
+instruction indices, a catch taking its class from the token table; filter and fault clauses are
+refused, and `checkRegions` decides the structural rules for the clauses on the decoded code.
 -/
 
 namespace CIL.Extraction
@@ -158,7 +160,8 @@ def operandKind : Nat → Option OperandKind
   | 0xD0 => some .token
   | _ => none
 
-/-- The extractor's claim of the operand each metadata token resolves to in this method. -/
+/-- The extractor's claim of the operand each metadata token resolves to in this method: the
+    tokens of its instructions and the class tokens of its catch clauses. -/
 structure TokenTable where
   operands : List (Nat × RawOperand)
   deriving DecidableEq, Repr
@@ -226,8 +229,8 @@ theorem BodyImports.checked_call_has_link {bound : BodyImports}
 
 #print axioms BodyImports.checked_call_has_link
 
-/-- Method bytes, their operand table and the metadata used to resolve the tokens.
-    Executable evidence carries the header and code. Catch inspection also takes the section. -/
+/-- Method bytes, their operand table and the metadata used to resolve the tokens. The bytes are
+    the header, the code and the exception section the header announces. -/
 structure BodyEvidence where
   bytes : List Nat
   tokens : TokenTable
@@ -267,6 +270,8 @@ structure DecodedBody where
   /-- The instruction index and token of each static field access whose field a carried row
       defines, as `BodyEvidence.statics` lists them. -/
   statics : List (Nat × Nat)
+  /-- The exception clauses of the section, in instruction indices and section order. -/
+  handlers : List ExceptionClause := []
   deriving DecidableEq, Repr
 
 /-- Why a body does not decode. Offsets are byte offsets of the instruction within the code. -/
@@ -275,8 +280,17 @@ inductive BodyError where
   | truncatedHeader
   | truncatedOpcode (offset : Nat)
   | unsupportedHeader (flags : Nat)
+  /-- A data section after the exception section. -/
   | extraSections
-  | invalidCatchSection
+  /-- The exception section's layout, size or reserved fields are malformed. -/
+  | invalidSection
+  /-- A filter (1), fault (4) or other clause kind than a typed catch (0) or finally (2). -/
+  | unsupportedClause (flags : Nat)
+  /-- The clause at this position has a range that is empty, overlaps its other range or does
+      not end at instruction boundaries, a catch without a type token, or a finally operand. -/
+  | invalidClause (index : Nat)
+  /-- The clauses break a structural rule of `checkRegions`. -/
+  | regions (error : RegionError)
   | codeSizeMismatch (declared supplied : Nat)
   | duplicateToken (token : Nat)
   | metadata (error : MetadataError)
@@ -471,31 +485,33 @@ structure BodyHeader where
   initLocals : Bool
   codeSize : Nat
   localSignature : Nat
+  /-- The header announces a data section after the code. -/
+  moreSections : Bool
 
 /-- A tiny header carries no locals and the CLR's fixed evaluation stack depth. -/
 def tinyMaxStack : Nat := 8
 
+/-- The fat header flags without and with InitLocals, and each with MoreSects. -/
+private def fatFlags : List Nat := [0x03, 0x13, 0x0B, 0x1B]
+
 /-- Decode the tiny or fat header (II.25.4.2 and II.25.4.3), returning the bytes after it. A fat
-    header has three words and can set InitLocals. MoreSects must match the requested form. -/
-private def decodeHeader (withSection : Bool) : List Nat → Except BodyError (BodyHeader × List Nat)
+    header has three words, can set InitLocals and can announce a data section. -/
+private def decodeHeader : List Nat → Except BodyError (BodyHeader × List Nat)
   | [] => .error .truncatedHeader
   | first :: rest =>
     if first % 4 == 2 then
-      if withSection then .error .invalidCatchSection else
       .ok ({ maxStack := tinyMaxStack, initLocals := false, codeSize := first / 4,
-             localSignature := 0 }, rest)
+             localSignature := 0, moreSections := false }, rest)
     else if first % 4 == 3 then
       match rest with
       | second :: stack0 :: stack1 :: size0 :: size1 :: size2 :: size3 ::
           token0 :: token1 :: token2 :: token3 :: code =>
         let flags := first + 256 * (second % 16)
-        if second / 16 != 3 then .error (.unsupportedHeader flags)
-        else if !withSection && flags / 8 % 2 == 1 then .error .extraSections
-        else if withSection && !(flags == 0x0B || flags == 0x1B) then .error .invalidCatchSection
-        else if !withSection && flags != 0x03 && flags != 0x13 then .error (.unsupportedHeader flags)
+        if second / 16 != 3 || !fatFlags.contains flags then .error (.unsupportedHeader flags)
         else .ok ({ maxStack := stack0 + 256 * stack1, initLocals := flags / 16 % 2 == 1,
                     codeSize := size0 + 256 * (size1 + 256 * (size2 + 256 * size3)),
-                    localSignature := token0 + 256 * (token1 + 256 * (token2 + 256 * token3)) },
+                    localSignature := token0 + 256 * (token1 + 256 * (token2 + 256 * token3)),
+                    moreSections := flags / 8 % 2 == 1 },
                   code)
       | _ => .error .truncatedHeader
     else .error (.unsupportedHeader first)
@@ -569,56 +585,17 @@ def MethodMetadata.environment (metadata : MethodMetadata)
   .ok (MetadataEnv.ofSlices (← metadata.slices.mapM MetadataSlice.index)
     pinned.prefixes (exactPins := pinned.exact))
 
-/-- Decode the complete instruction stream under the checked header and operand table. -/
-private def decodeCode (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
-    (header : BodyHeader) (code : List Nat) : Except BodyError DecodedBody := do
-  if code.length != header.codeSize then
-    throw (.codeSizeMismatch header.codeSize code.length)
-  let frame ← (env.frame arity ownerArity).mapError BodyError.metadata
-  let imports := body.imports.byIdentity
-  let tokens <- checkTable env frame imports body.tokens.operands {}
-  let (raw, statics) ← decodeInstructions tokens code.length 0 0 code
-  if !body.imports.calls.isEmpty && !body.imports.checkUses imports raw then
-    throw (.metadata (.operandMismatch 0))
-  let starts := indexStarts raw 0 false {}
-  let instructions ← raw.mapM (resolveBranches starts code.length)
-  .ok { maxStack := header.maxStack, initLocals := header.initLocals,
-        localSignature := header.localSignature, code := instructions, statics := statics }
-
-/-- Decode a method body: its header and its instructions, with branch operands as instruction
-    indices and every token operand checked against the metadata. `arity` is the number of
-    generic parameters of the method and `ownerArity` that of its owner. The supplied bytes
-    must be exactly the header and the declared code. -/
-def decodeBody (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence) :
-    Except BodyError DecodedBody := do
-  if !body.bytes.all (· < 256) then throw .invalidByte
-  let (header, code) ← decodeHeader false body.bytes
-  decodeCode env arity ownerArity body header code
-
-/-- A single typed catch clause with half-open IL byte ranges. -/
-structure CatchClause where
-  tryStart : Nat
-  tryEnd : Nat
-  handlerStart : Nat
-  handlerEnd : Nat
-  classToken : Nat
-  deriving Repr, DecidableEq
-
-/-- The protected range and handler range of a CLI exception clause, in IL byte offsets. -/
-structure ExceptionRanges where
-  tryStart : Nat
-  tryEnd : Nat
-  handlerStart : Nat
-  handlerEnd : Nat
-  deriving Repr, DecidableEq
-
-/-- The flags select the interpretation of the final four bytes of an EH clause. -/
+/-- One exception clause as the section encodes it, with byte offsets and lengths made into
+    half-open byte ranges and the class token or reserved word in `operand`. -/
 private structure EncodedClause where
   flags : Nat
-  ranges : ExceptionRanges
+  tryStart : Nat
+  tryEnd : Nat
+  handlerStart : Nat
+  handlerEnd : Nat
   operand : Nat
 
-/-- Read one small or fat clause, leaving the bytes of subsequent clauses in the section. -/
+/-- Read one small or fat clause, leaving the bytes of the clauses after it. -/
 private def readClause (fat : Bool) (fields : List Nat) :
     Except BodyError (EncodedClause × List Nat) := do
   let offsetSize := if fat then 4 else 2
@@ -629,66 +606,106 @@ private def readClause (fat : Bool) (fields : List Nat) :
   let (handlerStart, fields) ← readUnsigned 0 offsetSize fields
   let (handlerLength, fields) ← readUnsigned 0 lengthSize fields
   let (operand, tail) ← readUnsigned 0 4 fields
-  return (⟨flags, ⟨tryStart, tryStart + tryLength, handlerStart, handlerStart + handlerLength⟩,
+  return (⟨flags, tryStart, tryStart + tryLength, handlerStart, handlerStart + handlerLength,
     operand⟩, tail)
 
-/-- Both ranges must be nonempty, disjoint, and aligned with legal instruction boundaries. -/
-private def ExceptionRanges.valid (range : ExceptionRanges) (boundary : Nat → Bool) : Bool :=
-  range.tryStart < range.tryEnd && range.handlerStart < range.handlerEnd &&
-    (range.tryEnd ≤ range.handlerStart || range.handlerEnd ≤ range.tryStart) &&
-    [range.tryStart, range.tryEnd, range.handlerStart, range.handlerEnd].all boundary
+/-- The clause flags of a typed catch and of a finally (II.25.4.6). -/
+private def catchFlags : Nat := 0
+private def finallyFlags : Nat := 2
 
-/-- Decode the original instructions and the aligned EH section (II.25.4.6). The covered
-    shapes are one typed catch and a typed catch enclosed by one finally. -/
-private def decodeTypedCatch (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
-    (catchType : TypeExpr) (withFinally : Bool) :
-    Except BodyError (DecodedBody × CatchClause × Option ExceptionRanges) := do
-  unless body.bytes.all (· < 256) do throw .invalidByte
-  let (header, payload) ← decodeHeader true body.bytes
-  let (code, tail) := payload.splitAt header.codeSize
-  let decoded ← decodeCode env arity ownerArity body header code
-  let padding := (4 - header.codeSize % 4) % 4
-  let kind :: size :: 0 :: 0 :: fields := tail.drop padding | throw .invalidCatchSection
-  let fat := kind == 0x41
+/-- The clause at position `index` in instruction indices: each byte boundary is an instruction
+    start that follows no prefix, or the end of the `codeLength` bytes, which is the index
+    `count`; both ranges are nonempty and disjoint. A catch takes the class its token has in the
+    checked token table, and a finally's reserved word is zero. -/
+private def decodeClause (tokens : Std.TreeMap Nat (RawOperand × TokenFacts))
+    (starts : Std.TreeMap Nat (Nat × Bool)) (codeLength count index : Nat)
+    (encoded : EncodedClause) : Except BodyError ExceptionClause := do
+  let boundary := fun offset =>
+    if offset == codeLength then some count
+    else match starts[offset]? with
+      | some (position, false) => some position
+      | _ => none
+  let (some tryStart, some tryEnd, some handlerStart, some handlerEnd) :=
+      (boundary encoded.tryStart, boundary encoded.tryEnd, boundary encoded.handlerStart,
+        boundary encoded.handlerEnd) | throw (.invalidClause index)
+  unless tryStart < tryEnd && handlerStart < handlerEnd &&
+      (tryEnd ≤ handlerStart || handlerEnd ≤ tryStart) do throw (.invalidClause index)
+  let kind ← if encoded.flags == catchFlags then
+      match tokens[encoded.operand]? with
+      | some (.type type, _) =>
+        if typeTable (metadataTableOf encoded.operand) then pure (HandlerKind.catch type)
+        else throw (.invalidClause index)
+      | _ => throw (.invalidClause index)
+    else if encoded.flags == finallyFlags then
+      if encoded.operand == 0 then pure HandlerKind.finally else throw (.invalidClause index)
+    else throw (.unsupportedClause encoded.flags)
+  return ⟨tryStart, tryEnd, handlerStart, handlerEnd, kind⟩
+
+/-- Decode `remaining` clauses from `fields`, numbering them from `index`. -/
+private def decodeClauses (tokens : Std.TreeMap Nat (RawOperand × TokenFacts))
+    (starts : Std.TreeMap Nat (Nat × Bool)) (codeLength count : Nat) (fat : Bool) :
+    Nat → Nat → List Nat → Except BodyError (List ExceptionClause)
+  | 0, _, _ => .ok []
+  | remaining + 1, index, fields => do
+    let (encoded, rest) ← readClause fat fields
+    let clause ← decodeClause tokens starts codeLength count index encoded
+    return clause :: (← decodeClauses tokens starts codeLength count fat remaining (index + 1) rest)
+
+/-- Section kinds: an exception table, in small or fat form (II.25.4.5). -/
+private def smallTable : Nat := 0x01
+private def fatTable : Nat := 0x41
+
+/-- The exception clauses of the `sectionBytes` after the `codeLength` bytes of `count`
+    instructions, when the header announces one: padding to a four-byte boundary, then one small
+    or fat table that holds at least one clause and ends the body. -/
+private def decodeSection (tokens : Std.TreeMap Nat (RawOperand × TokenFacts))
+    (starts : Std.TreeMap Nat (Nat × Bool)) (codeLength count : Nat) (header : BodyHeader)
+    (sectionBytes : List Nat) : Except BodyError (List ExceptionClause) := do
+  if !header.moreSections then return []
+  let padding := (4 - codeLength % 4) % 4
+  let kind :: size0 :: size1 :: size2 :: fields := sectionBytes.drop padding
+    | throw .invalidSection
+  if kind / 128 % 2 == 1 then throw .extraSections
+  let fat := kind == fatTable
+  unless fat || kind == smallTable && size1 == 0 && size2 == 0 do throw .invalidSection
+  let size := if fat then size0 + 256 * (size1 + 256 * size2) else size0
   let width := if fat then 24 else 12
-  let count := if withFinally then 2 else 1
-  unless (fat || kind == 1) && size == 4 + count * width && size == 4 + fields.length do
-    throw .invalidCatchSection
-  let (caught, rest) ← readClause fat fields
-  let table := caught.operand / 2^24
-  unless caught.flags == 0 && table ∈ [Table.typeRef, Table.typeDef, Table.typeSpec] &&
-      catchType matches .object .. do throw .invalidCatchSection
+  unless padding ≤ sectionBytes.length && size == 4 + fields.length && 0 < fields.length &&
+      fields.length % width == 0 do throw .invalidSection
+  decodeClauses tokens starts codeLength count fat (fields.length / width) 0 fields
+
+/-- Decode the complete instruction stream under the checked header and operand table, then the
+    exception section after it, whose clauses must pass `checkRegions`. -/
+private def decodeCode (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
+    (header : BodyHeader) (code sectionBytes : List Nat) : Except BodyError DecodedBody := do
+  if code.length != header.codeSize then
+    throw (.codeSizeMismatch header.codeSize code.length)
   let frame ← (env.frame arity ownerArity).mapError BodyError.metadata
-  let _ ← (checkTypeOperand env frame caught.operand catchType).mapError BodyError.metadata
-  let starts := indexStarts decoded.code 0 false {}
-  let boundary := fun offset => offset == code.length || (starts[offset]?).any (!·.2)
-  let inner := caught.ranges
-  unless inner.valid boundary do throw .invalidCatchSection
-  let clause := ⟨inner.tryStart, inner.tryEnd, inner.handlerStart, inner.handlerEnd, caught.operand⟩
-  unless withFinally do return (decoded, clause, none)
-  let (cleanup, _) ← readClause fat rest
-  let outer := cleanup.ranges
-  unless cleanup.flags == 2 && cleanup.operand == 0 && outer.valid boundary &&
-      outer.tryStart ≤ min inner.tryStart inner.handlerStart &&
-      max inner.tryEnd inner.handlerEnd ≤ outer.tryEnd &&
-      decoded.code.any (fun i => i.offset + 1 == outer.handlerEnd && i.opcode == 0xDC) do
-    throw .invalidCatchSection
-  return (decoded, clause, some outer)
+  let imports := body.imports.byIdentity
+  let tokens <- checkTable env frame imports body.tokens.operands {}
+  let (raw, statics) ← decodeInstructions tokens code.length 0 0 code
+  if !body.imports.calls.isEmpty && !body.imports.checkUses imports raw then
+    throw (.metadata (.operandMismatch 0))
+  let starts := indexStarts raw 0 false {}
+  let instructions ← raw.mapM (resolveBranches starts code.length)
+  let handlers ← decodeSection tokens starts code.length raw.length header sectionBytes
+  (checkRegions instructions handlers).mapError BodyError.regions
+  .ok { maxStack := header.maxStack, initLocals := header.initLocals,
+        localSignature := header.localSignature, code := instructions, statics := statics,
+        handlers := handlers }
 
-/-- Read the code and one small or fat typed catch. Both half-open ranges end at instruction
-    boundaries or the end of code. A boundary inside a prefix group is refused. -/
-def decodeSingleCatch (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
-    (catchType : TypeExpr) : Except BodyError (DecodedBody × CatchClause) := do
-  let (decoded, clause, _) ← decodeTypedCatch env arity ownerArity body catchType false
-  return (decoded, clause)
-
-/-- Read a typed catch nested inside a finally. The outer try contains the entire inner try
-    and handler. The finally handler ends with the original endfinally instruction. -/
-def decodeCatchFinally (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
-    (catchType : TypeExpr) : Except BodyError (DecodedBody × CatchClause × ExceptionRanges) := do
-  let (decoded, clause, some cleanup) ← decodeTypedCatch env arity ownerArity body catchType true
-    | throw .invalidCatchSection
-  return (decoded, clause, cleanup)
+/-- Decode a method body: its header, its instructions, with branch operands as instruction
+    indices and every token operand checked against the metadata, and its exception clauses.
+    `arity` is the number of generic parameters of the method and `ownerArity` that of its
+    owner. The supplied bytes must be exactly the header, the declared code and the section the
+    header announces. -/
+def decodeBody (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence) :
+    Except BodyError DecodedBody := do
+  if !body.bytes.all (· < 256) then throw .invalidByte
+  let (header, payload) ← decodeHeader body.bytes
+  let (code, sectionBytes) :=
+    if header.moreSections then payload.splitAt header.codeSize else (payload, [])
+  decodeCode env arity ownerArity body header code sectionBytes
 
 /-- The metadata environment and imported layouts used to check the body's own tokens. -/
 def BodyEvidence.environment (body : BodyEvidence) : Except MetadataError MetadataEnv := do
@@ -704,7 +721,7 @@ def BodyEvidence.constructorTokenAt? (body : BodyEvidence) (arity ownerArity pc 
   let decoded ← (decodeBody env arity ownerArity body).toOption
   let site ← decoded.code[pc]?
   guard (site.opcode == 0x73)
-  let (_, code) ← (decodeHeader false body.bytes).toOption
+  let (_, code) ← (decodeHeader body.bytes).toOption
   let (token, _) ← (readUnsigned site.offset 4 (code.drop (site.offset + 1))).toOption
   return token
 
@@ -735,7 +752,7 @@ def checkBody (body : BodyEvidence) (method : RawMethod) (arguments : List TypeE
   match checkBody body method arguments with
   | .ok decoded => decoded.maxStack == method.maxStack &&
       decoded.initLocals == method.initLocals && decoded.code == method.code &&
-      decoded.statics == body.statics
+      decoded.statics == body.statics && decoded.handlers == method.handlers
   | .error _ => false
 
 /-- The body's tables are what its metadata bytes give, and the method's definition, locals,
@@ -1109,7 +1126,7 @@ private theorem BodyDecodes.callOperand {pins platform pin body method arguments
   split at matched
   · rename_i decoded checked
     simp only [Bool.and_eq_true, beq_iff_eq] at matched
-    rw [← matched.1.2] at fetched
+    rw [← matched.1.1.2] at fetched
     unfold checkBody at checked
     simp only [bind, Except.bind] at checked
     repeat' split at checked

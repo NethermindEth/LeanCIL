@@ -125,7 +125,8 @@ def Instruction.valueOpcode (opcode : Nat) : Bool :=
     opcode == 141 || (142 <= opcode && opcode <= 151) ||
     (154 <= opcode && opcode <= 159) || (162 <= opcode && opcode <= 164) ||
     (179 <= opcode && opcode <= 186) || (208 <= opcode && opcode <= 224) ||
-    (65025 <= opcode && opcode <= 65030) || (65033 <= opcode && opcode <= 65039) || opcode == 0xfe15 || opcode == 0xfe16 ||
+    (65025 <= opcode && opcode <= 65030) || (65033 <= opcode && opcode <= 65039) ||
+    opcode == 0xfe15 || opcode == 0xfe16 ||
     opcode == 0xfe1c || opcode == 0xfe1e || opcode == 0xfe12 || opcode == 0xfe17 ||
     opcode == 0xfe18
 

@@ -8,7 +8,9 @@ Hand-made ECMA-335 bodies with tiny and fat headers, short and long branches, a 
 two-byte opcodes, token operands and float constants must decode to the expected `RawMethod`
 fields, with every token operand, the locals and the method definition checked against the
 metadata of a hand-built assembly. Each rejection changes one fact about a body that matches and
-asserts the error or mismatch it causes. The opcode table is compared in
+asserts the error or mismatch it causes. Exception sections with typed catch and finally clauses
+decode to instruction-index clauses, and malformed or misplaced clauses are refused by kind.
+The opcode table is compared in
 `operand_kinds_agree_with_cecil` with a static list generated once from `Mono.Cecil.Cil.OpCodes`;
 no test reads Cecil at run time.
 -/
@@ -414,11 +416,18 @@ theorem rejects_init_locals_claimed_set :
   decide +kernel
 #print axioms rejects_init_locals_claimed_set
 
-/-- A fat header whose flags also set the extra-sections bit, as a body with handlers does. -/
-theorem rejects_body_with_exception_section :
-    failsWith (evidence (0x1B :: fatBytes.tail)) .extraSections fatMethod = true := by
+/-- A fat header whose flags announce an exception section that the body does not carry. -/
+theorem rejects_a_missing_exception_section :
+    failsWith (evidence (0x1B :: fatBytes.tail)) .invalidSection fatMethod = true := by
   decide +kernel
-#print axioms rejects_body_with_exception_section
+#print axioms rejects_a_missing_exception_section
+
+/-- The class the fixture's catch clauses name. -/
+private def boxType : TypeExpr := .object libScope "Lib.Box"
+
+/-- A body whose token table also binds the catch class token to `caught`. -/
+private def catchEvidence (bytes : List Nat) (caught := boxType) : BodyEvidence :=
+  evidence bytes [(tokens.boxRef, .type caught)]
 
 /-- A six-byte body with a two-byte alignment gap before its small exception section.
     The handler pops the caught object and leaves to the return at byte offset five. -/
@@ -427,34 +436,52 @@ private def catchBytes : List Nat :=
    0x14, 0x7A, 0x26, 0xDE, 0, 0x2A, 0, 0,
    1, 16, 0, 0, 0, 0, 0, 0, 2, 2, 0, 3] ++ token tokens.boxRef
 
-/-- Decode the catch and its branch destinations against the fixture's pinned metadata. -/
-private def readCatch (bytes : List Nat) (caught := TypeExpr.object libScope "Lib.Box") :
-    Except BodyError (List RawInstruction × CatchClause) := do
-  let body := evidence bytes
-  let env ← body.environment.mapError BodyError.metadata
-  let (decoded, clause) ← decodeSingleCatch env 0 0 body caught
-  return (decoded.code, clause)
+/-- The decoded `catchBytes`: byte ranges become instruction indices and the leave targets the
+    return at index four. -/
+private def catchMethod : RawMethod :=
+  { method 1 false [] [instr 0 0x14, instr 1 0x7A, instr 2 0x26, instr 3 0xDE (.target 4),
+      instr 5 0x2A] with handlers := [⟨0, 2, 2, 4, .catch boxType⟩] }
 
-/-- The catch retains the class token and half-open byte ranges. The leave targets instruction
-    four. Executable body decoding still refuses the exception section at the same bytes. -/
-theorem single_catch_binds_code_and_class :
-    readCatch catchBytes = .ok ([instr 0 0x14, instr 1 0x7A, instr 2 0x26,
-        instr 3 0xDE (.target 4), instr 5 0x2A], ⟨0, 2, 2, 5, tokens.boxRef⟩) ∧
-    failsWith (evidence catchBytes) .extraSections fatMethod = true :=
-  ⟨by cil_kernel_rfl, by decide +kernel⟩
-#print axioms single_catch_binds_code_and_class
+/-- The body matches only the method that carries its clause, with the class its token names. -/
+theorem single_catch_decodes :
+    bodyMatches (catchEvidence catchBytes) catchMethod [] = true ∧
+    mismatches (catchEvidence catchBytes) { catchMethod with handlers := [] } = true ∧
+    mismatches (catchEvidence catchBytes)
+      { catchMethod with handlers := [⟨0, 2, 2, 4, .finally⟩] } = true ∧
+    mismatches (catchEvidence catchBytes)
+      { catchMethod with handlers := [⟨0, 2, 2, 5, .catch boxType⟩] } = true := by
+  decide +kernel
+#print axioms single_catch_decodes
 
-/-- Catch clauses must be complete, disjoint and instruction-aligned. The header, section
-    kind, clause flags, class token and resolved type all bind independently. -/
+/-- The header flag, section kind, size, clause kind, ranges, class token and resolved type of
+    the section each bind; filter and fault clauses are refused by kind. -/
 theorem malformed_catch_refused :
-    ([catchBytes.set 0 3, catchBytes.set 20 0x81, catchBytes.set 21 15, catchBytes.set 24 2,
-      catchBytes.set 28 0, catchBytes.set 29 1, catchBytes.set 31 2, catchBytes.set 31 5,
-      catchBytes.set 35 6, catchBytes.take 35, catchBytes ++ [0]].all fun bytes =>
-        match readCatch bytes with | .error .invalidCatchSection => true | _ => false) = true ∧
-    readCatch catchBytes (.object ownIdentity "Program") =
-      .error (.metadata (.operandMismatch tokens.boxRef)) :=
-  ⟨by decide +kernel, by cil_kernel_rfl⟩
+    ([(catchBytes.set 0 3, BodyError.codeSizeMismatch 6 24),
+      (catchBytes.set 20 0x81, .extraSections), (catchBytes.set 20 2, .invalidSection),
+      (catchBytes.set 21 15, .invalidSection), (catchBytes.set 22 1, .invalidSection),
+      (catchBytes.set 24 1, .unsupportedClause 1), (catchBytes.set 24 4, .unsupportedClause 4),
+      (catchBytes.set 24 2, .invalidClause 0), (catchBytes.set 28 0, .invalidClause 0),
+      (catchBytes.set 29 1, .invalidClause 0), (catchBytes.set 31 2, .invalidClause 0),
+      (catchBytes.set 31 5, .invalidClause 0), (catchBytes.set 35 6, .invalidClause 0),
+      (catchBytes.take 35, .invalidSection), (catchBytes ++ [0], .invalidSection)].all
+        fun (bytes, error) => failsWith (catchEvidence bytes) error catchMethod) = true ∧
+    failsWith (catchEvidence catchBytes (.object ownIdentity "Program"))
+      (.metadata (.operandMismatch tokens.boxRef)) catchMethod = true := by
+  decide +kernel
 #print axioms malformed_catch_refused
+
+/-- Clauses that decode but break a structural rule are refused: a return inside a handler, an
+    `endfinally` in a catch, a branch out of a handler, a leave into the middle of a try and a
+    try that falls through into code outside it. -/
+theorem misplaced_control_refused :
+    ([(catchBytes.set 31 4, BodyError.regions (.forbidden 4)),
+      (catchBytes.set 14 0xDC, .regions (.endsOutsideFinally 2)),
+      (catchBytes.set 15 0x2B, .regions (.crossesRegion 3)),
+      (catchBytes.set 16 0xFC, .regions (.crossesRegion 3)),
+      (catchBytes.set 28 1, .regions (.crossesRegion 0))].all
+        fun (bytes, error) => failsWith (catchEvidence bytes) error catchMethod) = true := by
+  decide +kernel
+#print axioms misplaced_control_refused
 
 /-- A 262-byte try requires a fat clause. The handler pops the exception and leaves to ret. -/
 private def wideCatch : List Nat :=
@@ -463,68 +490,75 @@ private def wideCatch : List Nat :=
     [0x41,28,0,0] ++ token 0 ++ token 0 ++ token 262 ++ token 262 ++ token 3 ++
     token tokens.boxRef
 
+/-- The decoded `wideCatch`: 260 `nop`s and the six bytes of `catchBytes`. -/
+private def wideMethod : RawMethod :=
+  { method 1 false [] ((List.range 260).map (instr · 0) ++ [instr 260 0x14, instr 261 0x7A,
+      instr 262 0x26, instr 263 0xDE (.target 264), instr 265 0x2A]) with
+    handlers := [⟨0, 262, 262, 264, .catch boxType⟩] }
+
 set_option maxRecDepth 8192 in
-/-- The upper length byte belongs to the try, and the upper offset byte to the handler. -/
-theorem wide_catch_ranges :
-    ((readCatch wideCatch).toOption.map Prod.snd) = some ⟨0, 262, 262, 265, tokens.boxRef⟩ := by
+/-- The upper length byte belongs to the try, and the upper offset byte to the handler; the
+    section kind, size, flags and ranges each bind. -/
+theorem wide_catch_decodes :
+    bodyMatches (catchEvidence wideCatch) wideMethod [] = true ∧
+    ([(wideCatch.set 280 0xC1, BodyError.extraSections), (wideCatch.set 281 27, .invalidSection),
+      (wideCatch.set 282 1, .invalidSection), (wideCatch.set 287 1, .unsupportedClause 0x1000000),
+      (wideCatch.set 294 1, .invalidClause 0), (wideCatch.set 297 0, .invalidClause 0),
+      (wideCatch.take 307, .invalidSection), (wideCatch ++ [0], .invalidSection)].all
+        fun (bytes, error) => failsWith (catchEvidence bytes) error wideMethod) = true := by
   decide +kernel
-#print axioms wide_catch_ranges
+#print axioms wide_catch_decodes
 
-set_option maxRecDepth 8192 in
-/-- A fat section must have the exact size, flags and ranges and resolve the catch type. -/
-theorem malformed_wide_catch_refused :
-    ([wideCatch.set 280 0xC1, wideCatch.set 281 27, wideCatch.set 282 1,
-      wideCatch.set 287 1, wideCatch.set 294 1, wideCatch.set 297 0,
-      wideCatch.take 307, wideCatch ++ [0]].all fun bytes =>
-        readCatch bytes matches .error .invalidCatchSection) = true ∧
-    readCatch wideCatch (.object ownIdentity "Program") =
-      .error (.metadata (.operandMismatch tokens.boxRef)) :=
-  ⟨by decide +kernel, by cil_kernel_rfl⟩
-#print axioms malformed_wide_catch_refused
-
-/-- The catch leaves its enclosing try. The outer handler ends immediately before the return. -/
+/-- A typed catch inside a finally: the catch leaves both regions for the return, which runs the
+    finally on the way out. -/
 private def nestedCatchBytes : List Nat :=
   [0x0B,0x30,1,0,7,0,0,0,0,0,0,0, 0x14,0x7A,0x26,0xDE,1,0xDC,0x2A,0,
    1,28,0,0, 0,0,0,0,2,2,0,3] ++ token tokens.boxRef ++ [2,0,0,0,5,5,0,1,0,0,0,0]
 
-/-- The typed catch and the enclosing finally in the original encoded body. -/
-private def readNested (bytes : List Nat) : Except BodyError (CatchClause × ExceptionRanges) := do
-  let body := evidence bytes
-  let env ← body.environment.mapError BodyError.metadata
-  let (_, caught, cleanup) ← decodeCatchFinally env 0 0 body (.object libScope "Lib.Box")
-  return (caught, cleanup)
+/-- The decoded `nestedCatchBytes`, with the inner clause first. -/
+private def nestedMethod : RawMethod :=
+  { method 1 false [] [instr 0 0x14, instr 1 0x7A, instr 2 0x26, instr 3 0xDE (.target 5),
+      instr 5 0xDC, instr 6 0x2A] with
+    handlers := [⟨0, 2, 2, 4, .catch boxType⟩, ⟨0, 4, 4, 5, .finally⟩] }
 
-/-- The inner leave crosses the outer try, and a single-clause request rejects the extra clause. -/
+/-- Clauses in the opposite order: the enclosing finally precedes the catch it contains. -/
+private def swappedNestedBytes : List Nat :=
+  nestedCatchBytes.take 24 ++ nestedCatchBytes.drop 36 ++ (nestedCatchBytes.drop 24).take 12
+
+/-- The nested pair decodes; the finally's kind, reserved operand, range, `endfinally`, section
+    length and clause order each bind. -/
 theorem nested_catch_finally :
-    readNested nestedCatchBytes = .ok (⟨0,2,2,5,tokens.boxRef⟩, ⟨0,5,5,6⟩) ∧
-    readCatch nestedCatchBytes = .error .invalidCatchSection :=
-  ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
-#print axioms nested_catch_finally
-
-/-- The cleanup kind, reserved operand, nesting, endfinally, section flag and length all bind. -/
-theorem malformed_nested_finally_refused :
-    ([nestedCatchBytes.set 36 4, nestedCatchBytes.set 44 1, nestedCatchBytes.set 40 4,
-      nestedCatchBytes.set 17 0, nestedCatchBytes.set 20 0x81, nestedCatchBytes.take 47].all
-        fun bytes => readNested bytes matches .error .invalidCatchSection) = true := by
+    bodyMatches (catchEvidence nestedCatchBytes) nestedMethod [] = true ∧
+    ([(nestedCatchBytes.set 36 4, BodyError.unsupportedClause 4),
+      (nestedCatchBytes.set 44 1, .invalidClause 1), (nestedCatchBytes.set 40 4, .invalidClause 1),
+      (nestedCatchBytes.set 17 0, .regions (.crossesRegion 4)),
+      (nestedCatchBytes.set 20 0x81, .extraSections), (nestedCatchBytes.take 47, .invalidSection),
+      (swappedNestedBytes, .regions .misnested)].all
+        fun (bytes, error) => failsWith (catchEvidence bytes) error nestedMethod) = true := by
   decide +kernel
-#print axioms malformed_nested_finally_refused
+#print axioms nested_catch_finally
 
 /-- In `ldarg.0; volatile.; ldind.i4`, the prefix starts at byte one and the load at three.
     A protected range may start at the prefix, but cannot skip it by starting at the load. -/
+private def prefixedCatchBytes : List Nat :=
+  [0x0B, 0x30, 1, 0, 11, 0, 0, 0, 0, 0, 0, 0,
+    2, 0xFE, 0x13, 0x4A, 0x26, 0x14, 0x7A, 0x26, 0xDE, 0, 0x2A, 0,
+    1, 16, 0, 0, 0, 0, 1, 0, 6, 7, 0, 3] ++ token tokens.boxRef
+
+/-- The decoded `prefixedCatchBytes`: the try starts at the prefix, index one. -/
+private def prefixedMethod : RawMethod :=
+  { method 1 false [] [instr 0 0x02, instr 1 0xFE13, instr 3 0x4A, instr 4 0x26, instr 5 0x14,
+      instr 6 0x7A, instr 7 0x26, instr 8 0xDE (.target 8), instr 10 0x2A] with
+    handlers := [⟨1, 6, 6, 8, .catch boxType⟩] }
+
+/-- A protected range starts at a prefix, never between a prefix and its instruction. -/
 theorem catch_boundary_respects_prefixes :
-    let bytes := [0x0B, 0x30, 1, 0, 11, 0, 0, 0, 0, 0, 0, 0,
-      2, 0xFE, 0x13, 0x4A, 0x26, 0x14, 0x7A, 0x26, 0xDE, 0, 0x2A, 0,
-      1, 16, 0, 0, 0, 0, 1, 0, 6, 7, 0, 3] ++ token tokens.boxRef
-    ((readCatch bytes).toOption.map Prod.snd = some ⟨1, 7, 7, 10, tokens.boxRef⟩) ∧
-      readCatch ((bytes.set 30 3).set 32 4) = .error .invalidCatchSection := by
-  exact ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
+    bodyMatches (catchEvidence prefixedCatchBytes) prefixedMethod [] = true ∧
+    failsWith (catchEvidence ((prefixedCatchBytes.set 30 3).set 32 4)) (.invalidClause 0)
+      prefixedMethod = true := by
+  decide +kernel
 #print axioms catch_boundary_respects_prefixes
 
-/-- A body with an exception section does not match the method that has the same code. -/
-theorem body_with_exception_section_does_not_match :
-    bodyMatches (evidence (0x1B :: fatBytes.tail)) fatMethod [] = false := by
-  decide +kernel
-#print axioms body_with_exception_section_does_not_match
 
 /-- The method's locals differ from the types the signature token names. -/
 theorem rejects_wrong_locals :
