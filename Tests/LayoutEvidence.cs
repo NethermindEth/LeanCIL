@@ -49,7 +49,7 @@ void Reject(string name, string source, string mutated, string marker = "decide"
 }
 
 // A field operand naming another field of the struct no longer matches the decoded body.
-Reject("field-index", baseline, baseline.Replace("index := 1, type := .atom", "index := 0, type := .atom"),
+Reject("field-index", baseline, baseline.Replace("index := 1, type := .primitive", "index := 0, type := .primitive"),
     "the decoded method has no field operand");
 // Offset 3 remains within the 8-byte aggregate, so old bounds-only validation passes.
 Reject("computed-offset", baseline, baseline.Replace("⟨4, 4, false⟩", "⟨3, 4, false⟩"));
