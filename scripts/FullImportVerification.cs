@@ -1054,6 +1054,7 @@ run_cmd do
             "(callerProof : HoldsGiven Extracted.program Extracted.ImportsHold claim) :\n" +
             "    claim (link Extracted.program libraries) :=\n  composed (callerProof.mono bridge) rfl");
         source.AppendLine(FiniteLibraryProof("libraries", callers, "closed", false));
+        source.AppendLine(FiniteLibraryProof("libraries", callers, "free", false));
         source.AppendLine(FiniteLibraryProof("libraries", callers, "holds", true));
         source.AppendLine(FullClaimSelector(callerTheorem));
         source.AppendLine("theorem certified : linkChecked Extracted.program libraries = " +
@@ -1094,6 +1095,7 @@ run_cmd do
                 " := rfl");
             source.AppendLine("theorem closed" + index + " : Closed library" + index +
                 ".program := Closed.of_check (by decide +kernel)");
+            source.AppendLine(HandlerFreeTheorem(index));
             source.AppendLine("theorem holds" + index + " : " + holds + " library" + index +
                 ".program 0 := by\n  simpa only [libraryProgram" + index + ", programIdentity" + index + "] using " +
                 certified);
@@ -1111,6 +1113,7 @@ run_cmd do
             " := rfl");
         source.AppendLine("theorem closed" + index + " : Closed library" + index +
             ".program := Closed.of_check (by decide +kernel)");
+        source.AppendLine(HandlerFreeTheorem(index));
         // The kernel checks each conjunct, so the transferred import assumptions need no separate pin.
         source.AppendLine("theorem bridge" + index + " (linked : CIL.Program) (met : Imports " + program + " " +
             "specifications" + index + " linked) : " + library.Module + ".Extracted.ImportsHold linked := by\n" +
@@ -1120,9 +1123,14 @@ run_cmd do
             "  have given := " + certified + "\n  rw [programIdentity" + index + "] at given\n" +
             "  rw [libraryProgram" + index + "]\n  exact composed (given.mono bridge" + index + ") rfl\n" +
             FiniteLibraryProof(dependencies, library.Dependencies, "closed", false) + "\n" +
+            FiniteLibraryProof(dependencies, library.Dependencies, "free", false) + "\n" +
             FiniteLibraryProof(dependencies, library.Dependencies, "holds", true));
         return source.ToString();
     }
+
+    // Relocation keeps no pending handler resumptions only in a library without exception clauses.
+    static string HandlerFreeTheorem(string index) =>
+        "theorem free" + index + " : HandlerFree library" + index + ".program := by handler_free";
 
     static string Conjunction(string[] values) => values.Length == 1 ? values[0] :
         "And.intro (" + values[0] + ") (" + Conjunction(values[1..]) + ")";
