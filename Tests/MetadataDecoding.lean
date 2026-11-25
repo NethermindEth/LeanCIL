@@ -1,6 +1,7 @@
 import CIL.Extraction.Signatures
 import CIL.TypeExpr
 import Lean
+import Tests.Support.FixtureAssembly
 
 /-!
 # Metadata table and heap decoding tests
@@ -208,20 +209,20 @@ private def failsWith {α : Type} (result : Except MetadataError α)
   | .ok _ => false
 
 /-- A slice cut from one of the images. -/
-private def sliceOf (identity : String) (header assemblyRow : List Nat)
-    (rows strings blobs userStrings : List ByteEntry) (keyToken : List Nat := []) :
+private def sliceOf (header assemblyRow : List Nat)
+    (rows strings blobs userStrings : List ByteEntry) (publicKeyToken : Option Nat := none) :
     MetadataSlice :=
-  { assembly := { identity := identity, keyToken := keyToken, tableHeader := header,
-                  assemblyRow := assemblyRow, strings := strings, blobs := blobs },
+  { assembly := { publicKeyToken, tableHeader := header, assemblyRow := assemblyRow,
+                  strings := strings, blobs := blobs },
     rows := rows, strings := strings, blobs := blobs, userStrings := userStrings }
 
 private def examplesSlice : MetadataSlice :=
-  sliceOf examplesIdentity examplesHeader examplesAssemblyRow examplesRows examplesStrings
+  sliceOf examplesHeader examplesAssemblyRow examplesRows examplesStrings
     examplesBlobs examplesUserStrings
 
 private def corelibSlice : MetadataSlice :=
-  sliceOf corelibIdentity corelibHeader corelibAssemblyRow corelibRows corelibStrings
-    corelibBlobs [] (bytesOf "7cec85d7bea7798e")
+  sliceOf corelibHeader corelibAssemblyRow corelibRows corelibStrings
+    corelibBlobs [] (some 0x7cec85d7bea7798e)
 
 /-- The columns of a row as the typed accessors read them, with coded indices as tokens. -/
 private def typedColumns (index : MetadataIndex) (token : Nat) :
@@ -329,11 +330,11 @@ theorem examples_user_strings_decode :
 theorem identities_match_cecil :
     (match examplesSlice.index with
       | .ok index => (List.range 2).all fun position =>
-          gives (index.assemblyRefIdentity (tokenOf Table.assemblyRef (position + 1)))
+          gives ((index.referenceName (tokenOf Table.assemblyRef (position + 1))).map (·.spelling))
             (bytesOf (examplesRefIdentities.getD position ""))
       | .error _ => false) = true ∧
-    gives (examplesSlice.index.map (·.identity)) (bytesOf examplesIdentity) ∧
-    gives (corelibSlice.index.map (·.identity)) (bytesOf corelibIdentity) := by
+    gives (examplesSlice.index.map (·.identity.spelling)) (bytesOf examplesIdentity) ∧
+    gives (corelibSlice.index.map (·.identity.spelling)) (bytesOf corelibIdentity) := by
   decide +kernel
 #print axioms identities_match_cecil
 
@@ -534,19 +535,21 @@ theorem rejects_a_value_above_255 :
       .invalidByte = true := by decide +kernel
 #print axioms rejects_a_value_above_255
 
-/-- The claimed version differs from the one the `Assembly` row spells. -/
+/-- The `Assembly` row names version 1.0.0.0, so a pin of another version is not identified with
+    it, and a token stated for a row without a public key is refused. -/
 theorem rejects_a_changed_assembly_identity :
+    AssemblyIdentified examplesSlice.assembly (Tests.unsignedAssembly name!"Examples") ∧
+    ¬ AssemblyIdentified examplesSlice.assembly (Tests.unsignedAssembly name!"Examples" 2) ∧
     failsWith ({ examplesSlice with assembly := { examplesSlice.assembly with
-        identity :=
-          "Examples, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" } }.index.map
-      (fun _ => ())) .identityMismatch = true := by decide +kernel
+        publicKeyToken := some 0 } }.index.map (fun _ => ())) .identityMismatch = true := by
+  decide +kernel
 #print axioms rejects_a_changed_assembly_identity
 
 /-- A reference with a public key flag has a token only SHA-1 can give. -/
 theorem rejects_an_assembly_reference_with_a_full_key :
     failsWith (({ examplesSlice with rows := [(0x23000001,
         ((examplesRows.lookup 0x23000001).getD []).set 8 1)] }).index.bind
-      (·.assemblyRefIdentity 0x23000001))
+      (·.referenceName 0x23000001))
       (.unsupportedAssemblyRef 0x23000001) = true := by decide +kernel
 #print axioms rejects_an_assembly_reference_with_a_full_key
 

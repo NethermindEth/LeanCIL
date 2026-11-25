@@ -20,13 +20,13 @@ namespace Tests.BodyDecoding
 open CIL CIL.Extraction Tests.BodyEncoding Tests.MetadataBuilder Tests.MetadataWorld
 
 /-- The assembly whose metadata the bodies are checked against. -/
-def pin : AssemblyPin := { identity := ownIdentity }
+def pin : AssemblyPin := ⟨ownAssembly⟩
 
 /-- A decoded method with the given body fields: the world's `Main`, a public static method
     with no parameters. -/
 def method (maxStack : Nat) (initLocals : Bool) (locals : List TypeExpr)
     (code : List RawInstruction) : RawMethod :=
-  { token := tokens.main, owner := ownIdentity ++ "::Program", hasThis := false,
+  { token := tokens.main, owner := ownScope ++ "::Program", hasThis := false,
     explicitThis := false, callingConvention := 0, attributes := 0x96, implementation := 0,
     returnType := .void, parameters := [], locals := locals, initLocals := initLocals,
     maxStack := maxStack, genericParameters := [], code := code }
@@ -156,7 +156,7 @@ private def someField : RawOperand := countOperand
 
 /-- The static field `ldtoken` names in `formsBytes`. -/
 private def staticField : RawOperand :=
-  .field (.atom ownIdentity "Program") 1 int32 name!"total" true
+  .field (.atom ownScope "Program") 1 int32 name!"total" true
 
 /-- The signature `calli` names in `formsBytes`. -/
 private def someSignature : RawOperand := .indirectCall .void [int32] false false 0
@@ -317,7 +317,7 @@ theorem rejects_token_with_different_operand :
     field with the name `total`. -/
 theorem rejects_a_field_operand_named_for_another_row :
     failsWith (evidence ([0x16, 0x7B] ++ token tokens.countField)
-        [(tokens.countField, .field (.atom ownIdentity "Program") 0 int32 name!"total" false)])
+        [(tokens.countField, .field (.atom ownScope "Program") 0 int32 name!"total" false)])
       (.metadata (.operandMismatch tokens.countField)) = true := by decide +kernel
 #print axioms rejects_a_field_operand_named_for_another_row
 
@@ -465,7 +465,7 @@ theorem malformed_catch_refused :
       (catchBytes.set 31 5, .invalidClause 0), (catchBytes.set 35 6, .invalidClause 0),
       (catchBytes.take 35, .invalidSection), (catchBytes ++ [0], .invalidSection)].all
         fun (bytes, error) => failsWith (catchEvidence bytes) error catchMethod) = true ∧
-    failsWith (catchEvidence catchBytes (.object ownIdentity "Program"))
+    failsWith (catchEvidence catchBytes (.object ownScope "Program"))
       (.metadata (.operandMismatch tokens.boxRef)) catchMethod = true := by
   decide +kernel
 #print axioms malformed_catch_refused
@@ -593,7 +593,7 @@ theorem rejects_a_method_with_other_attributes :
 theorem rejects_a_pin_of_another_version (pins : List AssemblyPin) (method : RawMethod)
     (arguments : List TypeExpr) (signature : String) :
     ¬ BodyDecodes pins {}
-      { identity := "T, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" }
+      ⟨unsignedAssembly name!"T" 2⟩
       (evidence tinyBytes) method arguments signature :=
   fun decodes => absurd decodes.2.2.1 (by decide)
 #print axioms rejects_a_pin_of_another_version
@@ -611,8 +611,8 @@ theorem rejects_names_the_metadata_does_not_give :
 /-- The names the metadata gives are tied to the strings the method states: another owner string
     is not what the bytes spell. -/
 theorem rejects_an_owner_string_the_names_do_not_spell :
-    ¬ (evidence tinyBytes).names.Spell { tinyMethod with owner := ownIdentity ++ "::Other" } := by
-  decide
+    ¬ (evidence tinyBytes).names.Spell { tinyMethod with owner := ownScope ++ "::Other" } := by
+  decide +kernel
 #print axioms rejects_an_owner_string_the_names_do_not_spell
 
 /-- Byte `0x24` is not an opcode. -/
@@ -716,8 +716,8 @@ theorem rejects_pinned_identities_other_than_the_pins (method : RawMethod)
     (arguments : List TypeExpr) (signature : String) :
     ¬ BodyDecodes [pin] {} pin (evidence tinyBytes) method arguments signature ∧
     ¬ BodyDecodes [pin] {} pin
-      { evidence tinyBytes with pinned := PinnedIndex.ofIdentities [bytesOf "U"] } method arguments
-      signature :=
+      { evidence tinyBytes with pinned := PinnedIndex.ofIdentities [unsignedAssembly name!"U"] }
+      method arguments signature :=
   ⟨fun decodes => absurd decodes.2.2.2.1 (by decide),
     fun decodes => absurd decodes.2.2.2.1 (by decide +kernel)⟩
 #print axioms rejects_pinned_identities_other_than_the_pins
@@ -733,7 +733,7 @@ private def rejectsWithLibPinned (ownSlice : MetadataSlice) (token : Nat) (opera
     (error : MetadataError) : Bool :=
   match (do
     let env ← { own := ownSlice, others := [lib] : MethodMetadata }.environment
-      (PinnedIndex.ofIdentities [bytesOf libScope])
+      (PinnedIndex.ofIdentities [libAssembly])
     checkEntry env 0 token operand) with
   | .error found => found == error
   | .ok _ => false

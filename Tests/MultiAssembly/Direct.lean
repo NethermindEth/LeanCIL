@@ -43,12 +43,12 @@ theorem direct_member_resolution :
       env.methodSite Extracted.method0Body.tokens.operands[0].1 = .ok site ∧
       site.definition = some (position, Extracted.method1Original.token) ∧
       env.slices.find? position = some index ∧
-      index.identity = bytesOf Extracted.assembly1.identity ∧
+      index.identity.spelling = Extracted.assembly1.identity.spelling ∧
       index.methodDef Extracted.method1Original.token = .ok row := by
   obtain ⟨token, env, site, position, index, row, listed, built, resolved, defined,
     lookup, pin, methodRow⟩ :=
     Extracted.translation_valid.direct_definition ⟨0, by decide⟩ ⟨1, by decide⟩
-      (pc := 1) (target := Extracted.method1Original.token) (scope := Extracted.assembly1.identity)
+      (pc := 1) (target := Extracted.method1Original.token)
       Extracted.program_method0 rfl rfl rfl rfl rfl rfl rfl rfl
   have same := congrArg Prod.fst (List.mem_singleton.mp
     (show (_, _) ∈ [Extracted.method0Body.tokens.operands[0]] from listed))
@@ -64,10 +64,11 @@ theorem direct_member_resolution :
 theorem direct_callee_identity {pin : AssemblyPin} {token : Nat} {arguments : List TypeExpr}
     (bound : DecodedAt Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment 1 pin token arguments) :
-    pin.identity = Extracted.assembly1.identity ∧ token = Extracted.method0Original.token ∧
-      arguments = [] :=
-  bound.direct_site Extracted.method0_calls_validated
+    pin.identity.spelling = Extracted.assembly1.identity.spelling ∧
+      token = Extracted.method0Original.token ∧ arguments = [] := by
+  obtain ⟨spelled, tokenEq, argumentsEq⟩ := bound.direct_site Extracted.method0_calls_validated
     (pc := 1) rfl rfl rfl rfl rfl rfl rfl
+  exact ⟨spelled.trans (by cil_kernel_rfl), tokenEq, argumentsEq⟩
 
 #print axioms direct_callee_identity
 
@@ -87,7 +88,8 @@ theorem app_pin_refused (models : List ModelledCall) :
       Extracted.environment 1 Extracted.assembly0 Extracted.method0Original.token [] models
       stepContract := by
   intro summary
-  exact (by decide : Extracted.assembly0.identity ≠ Extracted.assembly1.identity)
+  exact (by decide +kernel :
+    Extracted.assembly0.identity.spelling ≠ Extracted.assembly1.identity.spelling)
     (direct_callee_identity summary.bound).1
 
 #print axioms app_pin_refused

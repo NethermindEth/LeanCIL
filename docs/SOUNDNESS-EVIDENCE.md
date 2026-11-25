@@ -190,10 +190,15 @@ reaches. Each pinned assembly has one small block, `assembly{k}Metadata`, with i
 bytes, the header they decode to (heap sizes and the row count of each present table) and its `Assembly`
 row, a function of that assembly alone, so every extraction of it writes the same bytes.
 `assembly{k}_identified` proves once per assembly that the bytes decode to the stated header, which every
-method's checks then read without decoding it again, and that the identity its `Assembly` row spells is
-the string the block states (`assembly{k}Identity` holds those bytes). A method's `BodyDecodes` equates its own
-assembly's identity with its pin, lists the identity of every pinned assembly (`pinned`, equated with
-`Extracted.assemblies`) and names the identity each of its slices spells.
+method's checks then read without decoding it again, and that its `Assembly` row and heap entries name
+`assembly{k}Identity`, a `CIL.AssemblyName` of name, version, culture and public key token. The block
+states the token, since Lean does not compute SHA-1 here; the row decides whether there is one. A method's
+`BodyDecodes` equates the assembly its first slice names with its pin, lists every pinned assembly
+(`pinned`, equated with `Extracted.assemblies`) and names the assembly each of its slices carries. Pins,
+slices and owners are compared as `AssemblyName` values, so an empty culture and the culture `neutral`,
+which display alike, are different assemblies. `assembly{k}Scope` is the display text that type
+expressions use as the scope of that assembly's types, and `assembly{k}_scope` proves it is the
+assembly's spelling.
 
 Every byte list of this evidence (body bytes, rows, heap entries, header bytes and UTF-8 names) is written
 as `CIL.Extraction.fixedBytes count code` ([FixedDigits](../CIL/Extraction/FixedDigits.lean), specified in
@@ -644,10 +649,11 @@ trusted inputs on the same terms as the selected one; no other assembly can cont
 - `Extracted.assemblies` lists every pinned identity, the selected assembly first, and each
   `MethodEvidence` carries the identity of the assembly its body came from. Hashes and MVIDs
   are not in the certificate, so `Extracted.lean` depends on the extracted program alone.
-- `TranslationValid` requires `AttributionValid`: each body's owner identity is scoped by its
-  own pin's colon-free identity, so a body attributed to the wrong assembly fails the kernel
-  check ([tests](../Tests/AssemblyPins.lean)). Distinct pins and a complete `assemblies` list
-  are extractor output that `check` regenerates; they are not a Lean obligation.
+- `TranslationValid` requires `AttributionValid`: the assembly whose slice holds each body's
+  owner `TypeDef` row is the body's pin, compared as an `AssemblyName`, so a body attributed
+  to the wrong assembly fails the kernel check ([tests](../Tests/AssemblyPins.lean)). Distinct
+  pins and a complete `assemblies` list are extractor output that `check` regenerates; they are
+  not a Lean obligation.
 - Lean cannot hash bytes. `identity.json` records each assembly's identity, MVID and SHA-256;
   `check`, and so `verify`, rehashes the selected and every referenced DLL against it and
   regenerates the certificate, so a substituted DLL or a changed recorded hash is rejected

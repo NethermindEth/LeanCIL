@@ -54,7 +54,7 @@ def sortedBound (image : PreparedImage) (table : Nat) (key : List Nat) :
 
 /-- A claim that `table` of the image pinned under `identity` is sorted by the columns `key`. -/
 structure SortedClaim where
-  identity : String
+  identity : CIL.AssemblyName
   table : Nat
   key : List Nat
   deriving DecidableEq, Repr

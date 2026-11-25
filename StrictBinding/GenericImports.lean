@@ -31,7 +31,8 @@ private def physicalSite (image : PreparedImage) (token : Nat) (args : List Reso
   guard (sig.convention == 0x10 && sig.genericArity == args.length && !args.isEmpty)
   let fullName := if space.isEmpty then name else space ++ [46] ++ name
   return { owner := .named { scope := bytesOf image.identity, name := fullName,
-                             parts := [space,name], kind := .classType, pinned := true },
+                             parts := [space,name], kind := .classType, pinned := true,
+                             assembly := some image.assembly },
            name := ← stringAt (← (cell 3).toOption), convention := sig.convention,
            genericArity := sig.genericArity, result := ← resolveScalar sig.genericArity sig.result,
            parameters := ← sig.parameters.mapM (resolveScalar sig.genericArity),
@@ -43,7 +44,8 @@ private def primitiveArg : SigType → Option ResolvedType
 
 /-- Follow a MethodSpec through the MemberRef and its top-level TypeRef to the physical AssemblyRef. -/
 private def targetAt (prepared : List PreparedImage) (caller : PreparedImage) (env : MetadataEnv)
-    (frame : Frame) (token : Nat) (slot : ImportSlot) : Option (String × List Nat × List ResolvedType) := do
+    (frame : Frame) (token : Nat) (slot : ImportSlot) :
+    Option (CIL.AssemblyName × List Nat × List ResolvedType) := do
   guard (token / 2^24 == Table.methodSpec)
   let spec := caller.layout.cell caller.view token
   let parent ← (spec 0).toOption
@@ -54,8 +56,9 @@ private def targetAt (prepared : List PreparedImage) (caller : PreparedImage) (e
   let ty := caller.layout.cell caller.view (StrictBinding.tokenOf Table.typeRef (owner/8))
   let resolution ← (ty 0).toOption
   guard (resolution % 4 == 2)
-  let scope ← (checkedReferenceScope prepared caller
-    (StrictBinding.tokenOf Table.assemblyRef (resolution/4))).toOption
+  let referenceToken := StrictBinding.tokenOf Table.assemblyRef (resolution/4)
+  let scope ← (checkedReferenceScope prepared caller referenceToken).toOption
+  let (reference, _) ← (namedAssemblyAt caller.view caller.layout referenceToken 0).toOption
   let stringAt := fun n => (caller.layout.stringAt caller.view n).toOption
   let name ← stringAt (← (member 1).toOption)
   let sig ← (caller.layout.blobAt caller.view (← (member 2).toOption)).toOption
@@ -69,7 +72,7 @@ private def targetAt (prepared : List PreparedImage) (caller : PreparedImage) (e
     signature.convention == site.convention && signature.genericArity == site.genericArity &&
     resolveScalar site.genericArity signature.result == some site.result &&
     signature.parameters.mapM (resolveScalar site.genericArity) == some site.parameters)
-  return (← spelled? scope, name, args)
+  return (reference, name, args)
 
 /-- Resolve each import at its decoded instruction boundary against both pinned images.
     The only supported form here is a static generic method on a top-level class with primitive
@@ -108,7 +111,7 @@ def resolveCalls (item : MethodEvidence) (prepared : List PreparedImage) :
         if method.contractName frame == some (bytesOf slot.identity) then
           candidates := token :: candidates
     let [token] := candidates | none
-    return (slot, identity, token)
+    return (slot, producer.identity, token)
 
 /-- The expected publication for one import, including the consumer-selected sidecar bytes.
     The independent audit binds the producer, sidecar and declaration closure digests. -/

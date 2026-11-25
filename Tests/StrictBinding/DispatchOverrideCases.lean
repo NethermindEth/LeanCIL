@@ -10,10 +10,10 @@ import Tests.StrictBinding.Mutation
 namespace DispatchOverrideCases
 open StrictBinding CIL.Extraction
 
-private def neighbour (bytes : ImageBytes) : PinnedImage := ⟨Extracted.assembly1.identity, bytes⟩
+private def neighbour (bytes : ImageBytes) : PinnedImage := ⟨Extracted.assembly1Scope, bytes⟩
 
 private def images (image : ImageBytes) : List PinnedImage :=
-  [⟨Extracted.assembly0.identity, image⟩, neighbour NeighbourImage.image]
+  [⟨Extracted.assembly0Scope, image⟩, neighbour NeighbourImage.image]
 
 private def audit (image : ImageBytes) (items := Extracted.methodEvidence) :=
   ClassDispatch.check (images image) Extracted.assemblies items Extracted.imports
@@ -26,7 +26,7 @@ theorem original : DispatchCatalogsChecked (images DispatchImage.image) Extracte
 /-- The unrelated IDisposable implementation names an external declaration by MemberRef. -/
 theorem unrelatedMemberRef :
     (do
-      let image ← (prepareOne ⟨Extracted.assembly0.identity, DispatchImage.image⟩).toOption
+      let image ← (prepareOne ⟨Extracted.assembly0Scope, DispatchImage.image⟩).toOption
       let declaration ← (image.layout.cellOfRow image.view 0x19 3 2).toOption
       return (image.layout.rowCount 0x19, declaration % 2)) = some (3, 1) := by decide +kernel
 #print axioms unrelatedMemberRef
@@ -44,7 +44,7 @@ private def mismatch (result : Except AuditError Bool) (expected : Nat) : Bool :
     The entry's bytes still bind, but the slot's physical Int32 result has a different scope. -/
 private def changedPrimitiveScope : Option Bool := do
   let bytes := DispatchImage.image
-  let pin : PinnedImage := ⟨Extracted.assembly0.identity, bytes⟩
+  let pin : PinnedImage := ⟨Extracted.assembly0Scope, bytes⟩
   let image ← (prepareOne pin).toOption
   let row ← (List.range (image.layout.rowCount Table.assemblyRef)).find? fun index =>
     (referenceIdentity image (StrictBinding.tokenOf Table.assemblyRef (index + 1))).toOption ==
@@ -85,7 +85,7 @@ theorem byrefMismatch :
 
 private def crossed (owner : Bool) : Option Bool := do
   let image := DispatchImage.image
-  let prepared ← (prepareOne ⟨Extracted.assembly0.identity, image⟩).toOption
+  let prepared ← (prepareOne ⟨Extracted.assembly0Scope, image⟩).toOption
   let cell := prepared.layout.cellOfRow prepared.view 0x19
   let body ← (cell 1 1).toOption
   let first ← (cell 1 2).toOption
@@ -109,7 +109,7 @@ theorem crossedDeclaration : crossed false = some true := by decide +kernel
 /-- Reparenting the descendant changes its complete name while preserving its base and methods. -/
 private def movedDescendant : Option Bool := do
   let bytes := DispatchImage.image
-  let image ← (prepareOne ⟨Extracted.assembly0.identity, bytes⟩).toOption
+  let image ← (prepareOne ⟨Extracted.assembly0Scope, bytes⟩).toOption
   guard (nestedCount image == 1)
   let parent ← (enclosingOf image 1).toOption
   let some other ← (enumDefinition? image 0 [bytesOf "Geometry", bytesOf "Triangle"]).toOption
@@ -146,7 +146,7 @@ private def foreignCore : Option Bool := do
     (fun index => StrictBinding.tokenOf Table.assemblyRef (index + 1))
   let core ← refs.find? (fun token => (referenceIdentity image token).toOption == some runtimeScope)
   let base ← refs.find? (fun token =>
-    (referenceIdentity image token).toOption == some Extracted.assembly0.identity)
+    (referenceIdentity image token).toOption == some Extracted.assembly0Scope)
   let coreName ← (image.layout.cell image.view core 6).toOption
   let baseName ← (image.layout.cell image.view base 6).toOption
   let (offset, width) ← (image.layout.cellAt base 6).toOption
@@ -163,7 +163,7 @@ private def unlisted : Option Bool := do
   let call ← Extracted.method0Original.code[1]?
   let .call site := call.operand | none
   let .managed slot := site.target | none
-  let home : PinnedImage := ⟨Extracted.assembly0.identity, DispatchImage.image⟩
+  let home : PinnedImage := ⟨Extracted.assembly0Scope, DispatchImage.image⟩
   return mismatch (ClassDispatch.check [home, neighbour DerivedImage.image] Extracted.assemblies
     Extracted.methodEvidence Extracted.imports) slot
 
@@ -172,7 +172,7 @@ theorem unlistedDescendant : unlisted = some true := by decide +kernel
 
 /-- Omitting the neighboring assembly cannot certify the parent graph over both pins. -/
 theorem missingPin :
-    let home : PinnedImage := ⟨Extracted.assembly0.identity, DispatchImage.image⟩
+    let home : PinnedImage := ⟨Extracted.assembly0Scope, DispatchImage.image⟩
     DispatchCatalogsChecked [home] Extracted.assemblies
       Extracted.methodEvidence Extracted.imports false := by decide +kernel
 #print axioms missingPin

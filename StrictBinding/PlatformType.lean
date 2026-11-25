@@ -35,7 +35,7 @@ def platformFieldRange (image : PreparedImage) (row : Nat) : Except AuditError (
 
 /-- A top-level ExportedType forwarder for this System type resolves an exact core AssemblyRef. -/
 private def forwarder (image : PreparedImage) (name : String) (invalid : AuditError) :
-    Except AuditError (Option String) := do
+    Except AuditError (Option CIL.AssemblyName) := do
   let exportedType := 0x27
   let cell := image.layout.cellOfRow image.view exportedType
   let mut target := none
@@ -49,8 +49,7 @@ private def forwarder (image : PreparedImage) (name : String) (invalid : AuditEr
         (← cell row 0) &&& 0x00200000 == 0 then throw invalid
     let token ← CIL.Extraction.checkedTokenOf Table.assemblyRef (implementation / 4) .rowOverflow
     unless ← coreAssemblyAt image token 0 do throw invalid
-    let identity ← assemblyIdentityAt image.view image.layout token 0
-    target := some (String.ofList (identity.map Char.ofNat))
+    target := some (← assemblyColumnsAt image.view image.layout token 0)
   return target
 
 /-- The platform Assembly row carries a full public key that hashes to the recognized token. -/
@@ -61,14 +60,15 @@ def platformAssembly (image : PreparedImage) : Except AuditError Bool :=
     A missing destination leaves coverage incomplete. A cycle or competing definition fails. -/
 def resolvePlatformType (images : List PreparedImage) (name : String)
     (invalid : String → AuditError) (check : PreparedImage → Nat → Except AuditError Unit)
-    (identity : String) : Nat → Except AuditError Bool
-  | 0 => throw (invalid identity)
+    (identity : CIL.AssemblyName) : Nat → Except AuditError Bool
+  | 0 => throw (invalid identity.display)
   | fuel + 1 => do
-    let some image := images.find? (·.identity == identity) | return false
-    unless ← platformAssembly image do throw (invalid identity)
-    match ← definitionRow image name (invalid identity), ← forwarder image name (invalid identity) with
+    let some image := images.find? (·.assembly == identity) | return false
+    let invalidHere := invalid image.identity
+    unless ← platformAssembly image do throw invalidHere
+    match ← definitionRow image name invalidHere, ← forwarder image name invalidHere with
     | some row, none => check image row; pure true
     | none, some next => resolvePlatformType images name invalid check next fuel
-    | _, _ => throw (invalid identity)
+    | _, _ => throw invalidHere
 
 end StrictBinding

@@ -6,11 +6,11 @@ open CIL CIL.Extraction CIL.Safety
 
 /-- Both derived classes have the same public base in the implementation assembly. -/
 private def instanceOf (name : String) (bases : List TypeExpr) : Allocation :=
-  ⟨.object ⟨.object Extracted.assembly2.identity name, bases⟩, ⟨8, 8, []⟩, true, []⟩
+  ⟨.object ⟨.object Extracted.assembly2Scope name, bases⟩, ⟨8, 8, []⟩, true, []⟩
 
 private def before : Safety.Memory := { Safety.Memory.empty with
   allocations := fun id =>
-    let bases := [.object Extracted.assembly2.identity "Forward.Shape"]
+    let bases := [.object Extracted.assembly2Scope "Forward.Shape"]
     match id with
     | 0 => some (instanceOf "Forward.Shape" [])
     | 1 => some (instanceOf "Forward.Second" bases)

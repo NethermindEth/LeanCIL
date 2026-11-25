@@ -171,7 +171,7 @@ private def castToken (span : String) : MetadataSlice × Nat := open Tests.Metad
     let signature ← blob ([0x10, 2, 1] ++ viewOf 1 ++ viewOf 0)
     let member ← row Table.memberRef [tokenRow owner * 8 + 1, ← string "Cast", signature]
     row Table.methodSpec [tokenRow member * 2 + 1, ← blob [0x0a, 2, 0x08, 0x06]])
-    (bytesOf "T") Tests.MetadataWorld.ownIdentity
+    (bytesOf "T")
 
 /-- The token, external target and open declaration all name the same Cast overload. -/
 private def castBinding (writable : Bool) : Bool := Id.run do

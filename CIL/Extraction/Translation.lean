@@ -58,7 +58,7 @@ structure MethodEvidence where
   layoutUses : List LayoutUse
   dispatchTypes : List DispatchType := []
   /-- The pinned assembly whose metadata supplied this body. -/
-  assembly : AssemblyPin := {}
+  assembly : AssemblyPin
   /-- The string a proof selects the method by: an extraction's `signatures` table lists these,
       and `BodyDecodes` equates each with Cecil's full name of the method its row defines. -/
   signature : String := ""
@@ -66,10 +66,10 @@ structure MethodEvidence where
       call check ties each entry to its raw site. -/
   links : List (Nat × Link) := []
 
-/-- The pin and owner identity of every original and closed body, for attribution checks. -/
-def bodyOwners (evidence : List MethodEvidence) : List (AssemblyPin × String) :=
-  evidence.flatMap fun item =>
-    [(item.assembly, item.original.owner), (item.assembly, item.closed.owner)]
+/-- The pin of every body and the assembly whose slice defines its owner, as `BodyDecodes` read
+    it. A closed body keeps its original's owner (`instantiateMethod_owner`). -/
+def bodyOwners (evidence : List MethodEvidence) : List (AssemblyPin × Option AssemblyName) :=
+  evidence.map fun item => (item.assembly, item.body.names.assembly)
 
 /-- The program's method table, as the call check sees it. -/
 def specializationTable (evidence : List MethodEvidence) : List SpecializedMethod :=

@@ -13,8 +13,7 @@ set_option maxRecDepth 32768
 
 /-- An assembly with one carried parameter for each of `count` distinct owners. -/
 private def metadata (count : Nat) : MetadataSlice :=
-  let empty := (build (pure ()) (bytesOf "T")
-    "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null").1
+  let empty := (build (pure ()) (bytesOf "T")).1
   let counts := [(Table.assembly, 1), (Table.genericParam, count)]
   { empty with
     assembly := { empty.assembly with
@@ -28,7 +27,7 @@ private def metadata (count : Nat) : MetadataSlice :=
 private def checksOwners (count : Nat) : Bool :=
   match (do
     let metadata := metadata count
-    let index ← metadata.indexWith (← metadata.tables) []
+    let index := metadata.indexWith (← metadata.tables) (Tests.unsignedAssembly name!"T")
     (List.range count).allM fun position => do
       let rows ← index.genericParameters 0 (tokenOf Table.typeDef (position + 1))
       pure (rows.length == 1)) with
@@ -40,7 +39,7 @@ private def checksOwners (count : Nat) : Bool :=
 private def checksAbsentOwners (count : Nat) : Bool :=
   match (do
     let metadata := metadata count
-    let index ← metadata.indexWith (← metadata.tables) []
+    let index := metadata.indexWith (← metadata.tables) (Tests.unsignedAssembly name!"T")
     (List.range count).allM fun position => do
       let rows ← index.genericParameters 0 (tokenOf Table.methodDef (position + 1))
       pure rows.isEmpty) with

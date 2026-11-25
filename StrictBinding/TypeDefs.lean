@@ -57,7 +57,7 @@ inductive BaseType where
 /-- A claim that TypeDef row `row` of the image pinned under `identity` defines a type with
     these parts. A name is the bytes of its `#Strings` entry without the terminator. -/
 structure TypeDefClaim where
-  identity : String
+  identity : CIL.AssemblyName
   row : Nat
   typeNamespace : List Nat
   typeName : List Nat

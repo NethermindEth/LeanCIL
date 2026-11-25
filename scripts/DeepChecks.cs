@@ -878,10 +878,13 @@ partial class Program
           let evidence := Extracted.methodEvidence ++ Extracted.managedDeclarations
           IO.println s!"methods {Extracted.methodEvidence.length}"
           IO.println s!"declarations {Extracted.managedDeclarations.length}"
-          let named := evidence.map (fun item => item.assembly.identity) ++
-            evidence.flatMap fun item => item.body.metadata.slices.map fun slice => slice.assembly.identity
+          let slices := evidence.flatMap fun item => item.body.metadata.slices
+          let carried ← slices.mapM fun slice => match slice.assembly.name with
+            | .ok identity => pure identity
+            | .error error => throw (IO.userError s!"A carried Assembly block names no assembly: {repr error}")
+          let named := evidence.map (fun item => item.assembly.identity) ++ carried
           for identity in named.eraseDups do
-            IO.println s!"identity {identity}"
+            IO.println s!"identity {identity.display}"
 
         """;
 

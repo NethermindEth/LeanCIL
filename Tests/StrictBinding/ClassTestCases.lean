@@ -9,7 +9,7 @@ namespace ClassTestCases
 open CIL CIL.Extraction StrictBinding
 
 /-- The SDK-built assembly containing the two type tests. -/
-private def images : List PinnedImage := [⟨Extracted.assembly0.identity, TypeTestImage.image⟩]
+private def images : List PinnedImage := [⟨Extracted.assembly0Scope, TypeTestImage.image⟩]
 
 /-- Both original opcodes select one physical class declaration. -/
 theorem covered : DispatchCatalogsChecked images Extracted.assemblies
@@ -69,7 +69,7 @@ theorem wrongConstraintArguments : rejected (changeConstraint fun claim =>
 private def crossed (opcode : Nat) (item : MethodEvidence) : MethodEvidence :=
   {item with original := {item.original with code := item.original.code.map fun instruction =>
     if instruction.opcode == opcode then
-      {instruction with operand := .type (.object Extracted.assembly0.identity "Geometry.Shape")}
+      {instruction with operand := .type (.object Extracted.assembly0Scope "Geometry.Shape")}
     else instruction}}
 
 /-- A different type in the nonthrowing test contradicts the original bytes. -/

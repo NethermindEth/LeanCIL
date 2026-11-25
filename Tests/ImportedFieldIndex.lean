@@ -23,8 +23,9 @@ namespace Tests.ImportedFieldIndex
 
 open CIL CIL.Extraction Tests.MetadataBuilder Tests.BodyEncoding
 
-private def pin : AssemblyPin :=
-  { identity := "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" }
+private def pin : AssemblyPin := ⟨unsignedAssembly name!"T"⟩
+/-- The scope text of `pin`'s types. -/
+private def pinScope : String := "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 private def extScope : String := "Ext, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 private def int32 : TypeExpr := .primitive .int32
 /-- `Ext.Point` as a struct and as a class; its member references admit either reading. -/
@@ -80,7 +81,7 @@ private def world (classOwner : Bool) (opcode : Nat) (parameterless := false) :
 
 private def slice (classOwner : Bool) (opcode : Nat) (parameterless := false) :
     MetadataSlice × Nat × Nat :=
-  build (world classOwner opcode parameterless) (bytesOf "T") pin.identity
+  build (world classOwner opcode parameterless) (bytesOf "T")
 
 /-- `Ext.Point` as a platform definition of this kind. -/
 private def pointDefinition (kind : PlatformKind) : PlatformDefinition :=
@@ -136,7 +137,7 @@ private def raw (owner : TypeExpr) (opcode index : Nat) (flagged parameterless :
     RawMethod :=
   let access : RawOperand := .field owner index int32 name!"Y" flagged
   let receiver := receiverOpcode parameterless
-  { token := 0x06000001, owner := pin.identity ++ "::Fixture", hasThis := false,
+  { token := 0x06000001, owner := pinScope ++ "::Fixture", hasThis := false,
     explicitThis := false, callingConvention := 0, attributes := 0, implementation := 0,
     returnType :=
       if opcode == ldfld then int32 else if opcode == ldflda then .byref int32 else .void,
@@ -335,7 +336,7 @@ private def pairWorldWith (arguments : List Nat) (second := [0x13, 0x01])
 private def pairWorld : PairWorld := pairWorldWith [0x08, 0x08]
 
 private def pairSlice : MetadataSlice × Nat × Nat × Nat :=
-  build pairWorld (bytesOf "T") pin.identity
+  build pairWorld (bytesOf "T")
 
 private def pair : TypeExpr :=
   .aggregate (s!"{runtimeScope}::System.ValueTuple`2<{runtimeScope}::System.Int32,{runtimeScope}::System.Int32>") 0
@@ -375,7 +376,7 @@ theorem pair_argument_scopes_checked :
     second` gives, if any. -/
 private def checkSecond (arguments second : List Nat) (operand : RawOperand) :
     Option MetadataError :=
-  let (slice, _, token, _) := build (pairWorldWith arguments second) (bytesOf "T") pin.identity
+  let (slice, _, token, _) := build (pairWorldWith arguments second) (bytesOf "T")
   checkPair token operand slice
 
 /-- `ValueTuple<int, uint>` as the extractor names it. -/
@@ -387,8 +388,8 @@ private def mixedPair : TypeExpr :=
     first. -/
 theorem pair_second_item_reads_its_own_declaration :
     checkSecond [0x08, 0x08] [0x13, 0x00] (.field pair 1 int32 name!"Item2" false) =
-      some (.operandMismatch (build (pairWorldWith [0x08, 0x08] [0x13, 0x00]) (bytesOf "T")
-        pin.identity).2.2.1) ∧
+      some (.operandMismatch
+        (build (pairWorldWith [0x08, 0x08] [0x13, 0x00]) (bytesOf "T")).2.2.1) ∧
     checkSecond [0x08, 0x09] [0x13, 0x01]
       (.field mixedPair 1 (.primitive .uint32) name!"Item2" false) = none ∧
     (checkSecond [0x08, 0x09] [0x13, 0x01] (.field mixedPair 1 int32 name!"Item2" false)).isSome =
@@ -399,7 +400,7 @@ theorem pair_second_item_reads_its_own_declaration :
 private def itemError (world : PairWorld) (index : Nat) (owner held : TypeExpr)
     (platform := pairPlatform) :
     Option MetadataError :=
-  let (slice, first, second, _) := build world (bytesOf "T") pin.identity
+  let (slice, first, second, _) := build world (bytesOf "T")
   if index == 0 then checkPair first (.field owner index held name!"Item1" false) slice platform
   else checkPair second (.field owner index held name!"Item2" false) slice platform
 

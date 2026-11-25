@@ -26,25 +26,18 @@ private def quoteMap {Key Value : Type} [Ord Key] (keyType valueType : Expr)
   return mkAppN (mkConst ``Std.TreeMap.Raw.mk [.zero, .zero])
     #[keyType, valueType, comparator, tree]
 
-/-- Quote every prefix node with its literal map of byte children. -/
-private partial def quotePrefixes : AssemblyPrefixes -> MetaM Expr
-  | .node terminal children => do
-    let map <- quoteMap (mkConst ``Nat) (mkConst ``AssemblyPrefixes) toExpr quotePrefixes children
-    return mkApp2 (mkConst ``AssemblyPrefixes.node) (toExpr terminal) map
-
 /-- Materialize a closed package pin index; its constructor checks the complete derivation. -/
 elab "cil_pin_index " identities:term : term => do
-  let listType := mkApp (mkConst ``List [.zero])
-    (mkApp (mkConst ``List [.zero]) (mkConst ``Nat))
+  let listType := mkApp (mkConst ``List [.zero]) (mkConst ``AssemblyName)
   let expression ← elabTermEnsuringType identities listType
   synthesizeSyntheticMVarsNoPostponing
   let expression ← instantiateMVars expression
-  let values ← unsafe evalExpr (List (List Nat)) listType expression
-  let prefixes ← quotePrefixes ((values.map assemblyStem).foldl AssemblyPrefixes.insert {})
-  let proof ← mkEqRefl prefixes
-  let bytes := mkApp (mkConst ``List [.zero]) (mkConst ``Nat)
-  let exact <- quoteMap bytes (mkConst ``Unit) toExpr (fun _ => pure (mkConst ``Unit.unit))
-    (indexPins values)
-  return mkAppN (mkConst ``PinnedIndex.mk) #[expression, prefixes, proof, exact, <- mkEqRefl exact]
+  let values ← unsafe evalExpr (List AssemblyName) listType expression
+  let unit := fun (_ : Unit) => pure (Lean.mkConst ``Unit.unit)
+  let names ← quoteMap (mkConst ``MetadataName) (mkConst ``Unit) toExpr unit
+    (indexPinNames values)
+  let exact ← quoteMap (mkConst ``AssemblyName) (mkConst ``Unit) toExpr unit (indexPins values)
+  return mkAppN (mkConst ``PinnedIndex.mk)
+    #[expression, names, ← mkEqRefl names, exact, ← mkEqRefl exact]
 
 end CIL.Extraction

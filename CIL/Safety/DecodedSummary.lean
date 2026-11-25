@@ -286,17 +286,20 @@ theorem DecodedAt.direct_site {program : Program} {evidence : List MethodEvidenc
     (operand : instruction.operand = .call site) (managed : site.target = .managed siteToken)
     (linked : caller.linkAt pc = some (.direct index))
     (hasScope : site.declaringType.headScope = some scope) :
-    pin.identity = scope ∧ token = siteToken ∧ arguments = site.typeArguments := by
+    pin.identity.spelling = bytesOf scope ∧ token = siteToken ∧
+      arguments = site.typeArguments := by
   obtain ⟨item, recorded, rfl, rfl, rfl, instantiated, _⟩ := bound
   obtain ⟨_, callee, selected, fits⟩ :=
     calls.direct_callee found live rawFound operand managed linked
   simp only [specializationTable, List.getElem?_map, recorded, Option.map_some,
     Option.some.injEq] at selected
   subst selected
-  have scopeEq : site.declaringType.headScope = some item.assembly.identity :=
-    beq_iff_eq.mp (Bool.and_eq_true_iff.mp fits).2
+  have scopeEq : site.declaringType.headScope.any item.assembly.identity.spelledAs = true :=
+    (Bool.and_eq_true_iff.mp fits).2
+  rw [hasScope, Option.any_some] at scopeEq
+  simp only [AssemblyName.spelledAs, Bool.and_eq_true, beq_iff_eq] at scopeEq
   simp only [calleeMatchesSite, Bool.and_eq_true, beq_iff_eq, and_assoc] at fits
-  exact ⟨Option.some.inj (scopeEq.symm.trans hasScope),
+  exact ⟨scopeEq.2,
     (instantiateMethod_token instantiated).symm.trans fits.2.1, fits.2.2.1⟩
 
 #print axioms DecodedAt.direct_site
@@ -323,7 +326,7 @@ theorem _root_.CIL.Extraction.TranslationValid.direct_definition
       evidence[caller].body.environment = .ok env ∧ env.methodSite operandToken = .ok site ∧
       site.definition = some (position, evidence[callee].original.token) ∧
       env.slices.find? position = some index ∧
-      index.identity = bytesOf evidence[callee].assembly.identity ∧
+      index.identity.spelling = evidence[callee].assembly.identity.spelling ∧
       index.methodDef evidence[callee].original.token = .ok row := by
   have checked := translation_method_checked valid caller body present
   have calls := checked.2.2.2.2.1
@@ -343,9 +346,9 @@ theorem _root_.CIL.Extraction.TranslationValid.direct_definition
   subst item
   obtain ⟨operandToken, env, site, position, index, row, listed, built, resolved, definition,
     lookup, methodRow, scopeEq⟩ := decodes.callManagedDefinition fetched operand managed
-  rw [tokenEq, pinEq]
+  rw [tokenEq]
   exact ⟨operandToken, env, site, position, index, row, listed, built, resolved, definition,
-    lookup, scopeEq scope named, methodRow⟩
+    lookup, (scopeEq scope named).trans pinEq.symm, methodRow⟩
 
 #print axioms CIL.Extraction.TranslationValid.direct_definition
 

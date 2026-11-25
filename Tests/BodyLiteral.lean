@@ -62,12 +62,6 @@ def strings : List ByteEntry :=
 def blobs : List ByteEntry :=
   [(1, [5, 0, 2, 11, 11, 11]), (2, [8, 176, 63, 95, 127, 17, 213, 10, 58])]
 
-/-- The bytes the `Assembly` row spells. -/
-def identity : List Nat :=
-  [69, 120, 97, 109, 112, 108, 101, 115, 44, 32, 86, 101, 114, 115, 105, 111, 110, 61, 49, 46, 48,
-   46, 48, 46, 48, 44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114, 97, 108,
-   44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101, 110, 61, 110, 117, 108, 108]
-
 /-- The owner name the metadata gives `Add`. -/
 def owner : List Nat :=
   [69, 120, 97, 109, 112, 108, 101, 115, 44, 32, 86, 101, 114, 115, 105, 111, 110, 61, 49, 46, 48,
@@ -88,8 +82,7 @@ end Lists
 /-! ## The evidence as the extractor emits it -/
 
 def assembly0Metadata : Extraction.AssemblyMetadata :=
-  { identity := "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
-    tableHeader :=
+  { tableHeader :=
       (fixedBytes 32 0x000000000200000157DFA32B091E000000FA013300160000010000006A000000) ++
       (fixedBytes 32 0xE7000000E900000006050000CE0600002B000000250200001A00000032010000) ++
       (fixedBytes 32 0x010000001F0000000D00000071000000140000001F000000220000001C000000) ++
@@ -190,17 +183,13 @@ def method0TablesLiteral : List Extraction.IndexTables :=
 theorem tables_literal_is_built : method0TablesLiteral = method0Tables := by cil_kernel_rfl
 #print axioms tables_literal_is_built
 
-/-- The bytes the `Assembly` row spells, which the extraction proves once per assembly. -/
-def assembly0Identity : List Nat :=
-  (fixedBytes 32 0x4578616D706C65732C2056657273696F6E3D312E302E302E302C2043756C7475) ++
-    (fixedBytes 31 0x72653D6E65757472616C2C205075626C69634B6579546F6B656E3D6E756C6C)
-
-/-- The identity literal is the list literal. -/
-theorem identity_literal_is_list : assembly0Identity = Lists.identity := by cil_kernel_rfl
-#print axioms identity_literal_is_list
+/-- The assembly the `Assembly` row names, which the extraction proves once per assembly. -/
+def assembly0Identity : CIL.AssemblyName :=
+  { name := name!"Examples", version := { major := 1, minor := 0, build := 0, revision := 0 },
+    culture := name!"", publicKeyToken := none }
 
 theorem assembly0_identified : AssemblyIdentified assembly0Metadata assembly0Identity :=
-  ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+  ⟨by cil_kernel_rfl, by first | cil_kernel_rfl | decide +kernel⟩
 
 /-- `assembly0Metadata` stating a header with one `TypeDef` row more than its bytes give. -/
 def miscountedAssembly : AssemblyMetadata :=
@@ -225,7 +214,8 @@ theorem refuses_a_header_its_bytes_do_not_give :
 
 /-- The owner name and the full name the metadata gives `Add`, as bytes. -/
 def method0Names : Extraction.MethodNames :=
-  { owner :=
+  { assembly := some assembly0Identity,
+    owner :=
       (fixedBytes 32 0x4578616D706C65732C2056657273696F6E3D312E302E302E302C2043756C7475) ++
       (fixedBytes 32 0x72653D6E65757472616C2C205075626C69634B6579546F6B656E3D6E756C6C3A) ++
       (fixedBytes 20 0x3A4578616D706C65732E41726974686D65746963),
@@ -255,7 +245,7 @@ def method0Body : Extraction.BodyEvidence :=
               pinned := cil_pin_index [assembly0Identity], platform := method0Platform }
 
 /-- The pin of the assembly the method was extracted from. -/
-def pin : AssemblyPin := ⟨"Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"⟩
+def pin : AssemblyPin := ⟨assembly0Identity⟩
 
 theorem add_body_decodes :
     BodyDecodes [pin] method0Platform pin method0Body method0Original [] method0Signature :=

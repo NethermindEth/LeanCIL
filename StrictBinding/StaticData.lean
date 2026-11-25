@@ -125,7 +125,7 @@ private def StaticTables.site (tables : StaticTables) (token : Nat)
 def checkStaticData (images : List PinnedImage) (evidence : List CIL.Extraction.MethodEvidence) :
     Except AuditError Unit := do
   let prepared ← prepare images
-  let mut indexed : Std.TreeMap String StaticTables := {}
+  let mut indexed : Std.TreeMap CIL.AssemblyName StaticTables := {}
   for item in evidence do
     let sites := item.closed.staticFields
     let pcs := sites.map Prod.fst
@@ -136,7 +136,7 @@ def checkStaticData (images : List PinnedImage) (evidence : List CIL.Extraction.
         | throw (.unresolvedStaticField item.original.token pc)
       let some slice := item.body.metadata.slices[position]?
         | throw (.unresolvedStaticField item.original.token pc)
-      let name := slice.assembly.identity
+      let .ok name := slice.assembly.name | throw .unnamedAssembly
       let tables ← match indexed[name]? with
         | some found => pure found
         | none => do StaticTables.read (← located prepared name)

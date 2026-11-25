@@ -246,11 +246,11 @@ partial class Program
         text.Append(string.Join(",\n   ", methods)).Append("]\n\n");
         text.Append("""
             def checkSlice (prepared : List PreparedImage) (slice : MetadataSlice) : Except AuditError Unit := do
-              let image ← located prepared slice.assembly.identity
+              let image ← locatedBlock prepared slice.assembly
               StrictBinding.sliceBound image slice
 
             def markerCells (prepared : List PreparedImage) (slice : MetadataSlice) : Nat :=
-              match located prepared slice.assembly.identity with
+              match locatedBlock prepared slice.assembly with
               | .error _ => 0
               | .ok image => (slice.rows.map fun row =>
                   match image.columnsOf (row.1 / 2 ^ 24) with

@@ -8,7 +8,7 @@ open CIL CIL.Extraction CIL.Safety
 
 /-- The classes of the pinned assembly used as receiver types. -/
 private def named (name : String) :=
-  TypeExpr.object Extracted.assembly0.identity ("Geometry." ++ name)
+  TypeExpr.object Extracted.assembly0Scope ("Geometry." ++ name)
 
 /-- The caller owns a triangle (possibly an equilateral one) and a distinct cube. -/
 private def caller (equilateral : Bool) : Safety.Memory := { Safety.Memory.empty with

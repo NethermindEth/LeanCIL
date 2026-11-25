@@ -47,9 +47,12 @@ private def cultureReference (definition reference : Bool) : Except AuditError (
   let image ← prepareOne (← cultureImage definition reference)
   checkedReferenceScope [image] image (tokenOf 0x23 1)
 
-/-- The audit checks the culture fields even when the remaining identity and publisher agree. -/
+/-- The audit checks the culture fields even when the remaining identity and publisher agree.
+    The pin is the assembly the image's own row names. -/
 private def cultureKeys (definition reference : Bool) : Except AuditError Bool := do
-  checkPublicKeys [← cultureImage definition reference] [⟨StrictFixture.identity⟩] []
+  let culture := if definition then name!"neutral" else name!""
+  checkPublicKeys [← cultureImage definition reference]
+    [⟨{ StrictFixture.assembly with culture }⟩] []
 
 /-- Both equal physical cultures bind. A substitution in either direction fails at AssemblyRef 1
     in the scope checker and in the audit of direct references. -/
@@ -72,7 +75,6 @@ private def first : MethodMetadata := { own := StrictFixture.slice }
 /-- A method in the other assembly also carrying metadata from the fixture. -/
 private def second : MethodMetadata :=
   { own := { assembly := { StrictFixture.assemblyBlock with
-      identity := otherIdentity,
       assemblyRow := flipAt StrictFixture.assemblyBlock.assemblyRow 4 1 } },
     others := [StrictFixture.slice] }
 
@@ -110,7 +112,7 @@ theorem evidence_from_pages (left right : MethodEvidence)
     Exists fun images => And (prepare pinned = .ok images)
       (forall item, List.Mem item [left, right] ->
         forall slice, List.Mem slice item.body.metadata.slices ->
-          Exists fun image => And (located images slice.assembly.identity = .ok image)
+          Exists fun image => And (locatedBlock images slice.assembly = .ok image)
             (SliceMatches image slice)) := by
   apply sliceMatches_of_metadataRowsBound
   have carried : metadataClaims [left, right] = claims := by
@@ -120,11 +122,12 @@ theorem evidence_from_pages (left right : MethodEvidence)
   exact And.intro blocks composed_pages
 #print axioms evidence_from_pages
 
-/-- The second method falsely carries another version's row for its referenced assembly. -/
+/-- The second method carries its referenced assembly's row with a changed hash algorithm,
+    which leaves the assembly the row names unchanged. -/
 private def falseSecond : MethodMetadata :=
   { second with others := [{ StrictFixture.slice with
       assembly := { StrictFixture.assemblyBlock with
-        assemblyRow := flipAt StrictFixture.assemblyBlock.assemblyRow 4 1 } }] }
+        assemblyRow := flipAt StrictFixture.assemblyBlock.assemblyRow 0 1 } }] }
 
 /-- The changed block keeps the fixture's identity yet stays a distinct block to check, since
     blocks are compared whole. -/

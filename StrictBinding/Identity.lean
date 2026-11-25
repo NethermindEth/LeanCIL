@@ -106,7 +106,7 @@ def rowKeyToken (row flags : Nat) (key : List Nat) : Except AuditError (Option N
 
 /-- The identity columns shared by Assembly and AssemblyRef, starting at the major version. -/
 def assemblyColumnsAt (view : ImageView) (layout : MetadataLayout) (row first : Nat) :
-    Except AuditError CIL.Extraction.AssemblyColumns := do
+    Except AuditError CIL.AssemblyName := do
   let cell := fun column => layout.cell view row (first + column)
   let major ← cell 0
   let minor ← cell 1
@@ -117,11 +117,13 @@ def assemblyColumnsAt (view : ImageView) (layout : MetadataLayout) (row first : 
   let name ← layout.stringAt view (← cell 6)
   let culture ← layout.stringAt view (← cell 7)
   let token ← rowKeyToken row flags key
-  return ⟨name, ⟨major, minor, build, revision⟩, culture, (token.map (hexDigits 16)).getD []⟩
+  let some name := CIL.MetadataName.ofBytes? name | throw (.tables .invalidUtf8)
+  let some culture := CIL.MetadataName.ofBytes? culture | throw (.tables .invalidUtf8)
+  return ⟨name, ⟨major, minor, build, revision⟩, culture, token⟩
 
 /-- Read the independent identity columns and their Unicode display name from one physical row. -/
 def namedAssemblyAt (view : ImageView) (layout : MetadataLayout) (row first : Nat) :
-    Except AuditError (CIL.Extraction.AssemblyColumns × List Nat) := do
+    Except AuditError (CIL.AssemblyName × List Nat) := do
   let columns ← assemblyColumnsAt view layout row first
   let bytes := columns.spelling
   let some points := utf8CodePoints bytes.length bytes | throw (.tables .invalidUtf8)

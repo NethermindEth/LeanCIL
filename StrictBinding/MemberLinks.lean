@@ -32,9 +32,9 @@ def parentTypeSpec : Nat := 4
 /-- A link of one evidence slice: the MemberRef token of the image pinned under `source` and
     the MethodDef or Field token of the image pinned under `target` it names. -/
 structure LinkClaim where
-  source : String
+  source : CIL.AssemblyName
   memberRef : Nat
-  target : String
+  target : CIL.AssemblyName
   definition : Nat
   deriving DecidableEq, Repr
 
@@ -48,13 +48,12 @@ def linkClaims (metadata : List MethodMetadata) : Except AuditError (List LinkCl
     for slice in slices do
       for link in slice.links do
         unless link.kind == linkDefinition && tableOf link.source == Table.memberRef do continue
-        let some linked := slices[link.slice]?
-          | throw (.memberLinkMismatch slice.assembly.identity link.source)
-        let claim : LinkClaim := { source := slice.assembly.identity, memberRef := link.source,
-                                   target := linked.assembly.identity, definition := link.target }
-        -- Identity bytes are below 256, so 256 separates the four parts of the key.
-        let key := bytesOf claim.source ++ [256, claim.memberRef, 256] ++
-          bytesOf claim.target ++ [256, claim.definition]
+        let .ok source := slice.assembly.name | throw .unnamedAssembly
+        let some linked := slices[link.slice]? | throw (.memberLinkMismatch source link.source)
+        let .ok target := linked.assembly.name | throw .unnamedAssembly
+        let claim : LinkClaim := { source, memberRef := link.source, target,
+                                   definition := link.target }
+        let key := [identityCode source, claim.memberRef, identityCode target, claim.definition]
         if seen.contains key then continue
         seen := seen.insert key ()
         claims := claims.push claim
@@ -99,13 +98,13 @@ def owningType (image : PreparedImage) (table column member : Nat) :
   let stop ← if row == count then pure (image.layout.rowCount table + 1)
     else first (row + 1) column
   unless (← first row column) ≤ member && member < stop do
-    throw (.memberLinkMismatch image.identity (tokenOf table member))
+    throw (.memberLinkMismatch image.assembly (tokenOf table member))
   return row
 
 /-- How a signature type token is identified across images: by its defining TypeDef, or, when
     no supplied image defines it, by the scope and name chain its TypeRef spells. -/
 inductive TypeKey where
-  | defined (identity : String) (row : Nat)
+  | defined (assembly : CIL.AssemblyName) (row : Nat)
   | named (scope : List Nat) (parts : List (List Nat))
   deriving DecidableEq, Repr
 
@@ -114,12 +113,12 @@ def typeKey (prepared : List PreparedImage) (image : PreparedImage) (token : Nat
     Reading TypeKey := do
   if tableOf token == Table.typeDef then
     let _ ← physical (image.layout.rowAt token)
-    return .defined image.identity (token % 2 ^ 24)
+    return .defined image.assembly (token % 2 ^ 24)
   guard (tableOf token == Table.typeRef)
   let (scope, parts) ←
     referencedClass prepared image (image.layout.rowCount Table.typeRef) token []
   match ← physical (testDefinition prepared image token).run with
-  | some (defining, row) => return .defined defining.identity row
+  | some (defining, row) => return .defined defining.assembly row
   | none => return .named scope parts
 
 /-- Two signature tokens, one of each image, name one type. Different definitions, or different
@@ -188,7 +187,7 @@ def parentDefinition (prepared : List PreparedImage) (source : PreparedImage) (c
     MemberRef's parent resolves to, and it has the MemberRef's name and signature. -/
 def memberLinkBound (prepared : List PreparedImage) (source target : PreparedImage)
     (memberRef definition : Nat) : Reading Unit := do
-  let mismatch := AuditError.memberLinkMismatch source.identity memberRef
+  let mismatch := AuditError.memberLinkMismatch source.assembly memberRef
   unless tableOf memberRef == Table.memberRef do throwThe AuditError mismatch
   let reference := source.layout.cell source.view memberRef
   let parent ← physical (reference 0)
@@ -205,7 +204,7 @@ def memberLinkBound (prepared : List PreparedImage) (source target : PreparedIma
   unless memberName == name do throwThe AuditError mismatch
   let owner ← physical (owningType target table listColumn (definition % 2 ^ 24))
   let (declaring, row) ← parentDefinition prepared source parent
-  unless declaring.identity == target.identity && row == owner do throwThe AuditError mismatch
+  unless declaring.assembly == target.assembly && row == owner do throwThe AuditError mismatch
   let other ←
     physical (target.layout.blobAt target.view (← physical (member signatureColumn)))
   let fuel := signature.length + other.length
@@ -227,19 +226,18 @@ def memberLinkBound (prepared : List PreparedImage) (source target : PreparedIma
 /-- Whether the claim's link resolves in the images: `true` when checked, `false` when a form
     or an image it needs is not covered; a conflicting link is an error. -/
 def linkCovered (prepared : List PreparedImage) (claim : LinkClaim) : Except AuditError Bool := do
-  let some source := prepared.find? (·.identity == claim.source) | return false
-  let some target := prepared.find? (·.identity == claim.target) | return false
+  let some source := prepared.find? (·.assembly == claim.source) | return false
+  let some target := prepared.find? (·.assembly == claim.target) | return false
   return (← (memberLinkBound prepared source target claim.memberRef claim.definition).run).isSome
 
 /-- The member lists of each supplied image a claim links into ascend, each image checked once. -/
 def targetsAscend (prepared : List PreparedImage) (claims : List LinkClaim) :
     Except AuditError Unit := do
-  let mut targets : Std.TreeMap (List Nat) Unit := {}
+  let mut targets : Std.TreeMap CIL.AssemblyName Unit := {}
   for claim in claims do
-    let key := bytesOf claim.target
-    if targets.contains key then continue
-    targets := targets.insert key ()
-    if let some target := prepared.find? (·.identity == claim.target) then
+    if targets.contains claim.target then continue
+    targets := targets.insert claim.target ()
+    if let some target := prepared.find? (·.assembly == claim.target) then
       memberListsAscend target
 
 /-- Check every distinct MemberRef link of the metadata against one preparation of the images.

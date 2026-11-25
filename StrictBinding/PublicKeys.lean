@@ -37,9 +37,9 @@ private def referenceKeyToken (image : PreparedImage) (token : Nat) :
   assemblyKeyToken flags key
 
 /-- Every carried AssemblyRef retains the physical row's key or token under its heap numbering. -/
-private def checkCarriedKeys (images : List PreparedImage) (slice : MetadataSlice) :
-    Except AuditError Unit := do
-  let source ← located images slice.assembly.identity
+private def checkCarriedKeys (images : List PreparedImage) (slice : MetadataSlice)
+    (identity : CIL.AssemblyName) : Except AuditError Unit := do
+  let source ← located images identity
   let .ok index := slice.index | throw (.referenceKeyMismatch source.identity 0)
   for (token, _) in slice.rows do
     unless CIL.Extraction.metadataTableOf token == Table.assemblyRef do continue
@@ -54,14 +54,15 @@ private def checkCarriedKeys (images : List PreparedImage) (slice : MetadataSlic
 def checkPublicKeys (images : List PinnedImage) (pins : List AssemblyPin)
     (evidence : List MethodEvidence) : Except AuditError Bool := do
   let prepared ← prepare images
-  let mut assemblies : Std.TreeMap (List Nat) AssemblyColumns := {}
+  -- Keyed by display bytes, so a reference that spells an image but names another is refused.
+  let mut assemblies : Std.TreeMap (List Nat) CIL.AssemblyName := {}
   for image in prepared do
-    assemblies := assemblies.insert (bytesOf image.identity) image.assembly
+    assemblies := assemblies.insert image.assembly.spelling image.assembly
   for item in evidence do
     for slice in item.body.metadata.slices do
-      unless pins.any (·.identity == slice.assembly.identity) do
-        throw (.unpinned slice.assembly.identity)
-      checkCarriedKeys prepared slice
+      let .ok identity := slice.assembly.name | throw .unnamedAssembly
+      unless pins.any (·.identity == identity) do throw (.unpinned identity)
+      checkCarriedKeys prepared slice identity
   let mut complete := true
   let mut seen := false
   for pin in pins do
@@ -73,7 +74,8 @@ def checkPublicKeys (images : List PinnedImage) (pins : List AssemblyPin)
       match assemblies.get? reference.spelling with
       | none => complete := false
       | some actual =>
-        unless actual.token == reference.token do throw (.referenceKeyMismatch source.identity token)
+        unless actual.publicKeyToken == reference.publicKeyToken do
+          throw (.referenceKeyMismatch source.identity token)
         unless actual == reference do throw (.referenceScopeMismatch source.identity token)
   return seen && complete
 

@@ -4,8 +4,9 @@ import Lean
 /-!
 # Assembly lookup regressions
 
-Assembly lookups preserve positional links, the first identity match and arbitrary pinned
-prefixes. Scaling varies assembly count independently of method instructions and metadata rows.
+Assembly lookups preserve positional links, the first identity match and pinned names, and an
+`Assembly` row names exactly one assembly. Scaling varies assembly count independently of
+method instructions and metadata rows.
 -/
 
 namespace Tests.MetadataAssemblies
@@ -20,9 +21,9 @@ private def forwarded (flags := 0x00200000) (typeDefId := 0) (implementation := 
     (declaredName := "InvalidOperationException") (visibility := 1)
     (forwarderSlice := 1) (carry := true) (nested := false) (childParent := 6)
     (facadeCulture := "") (referenceCulture := "")
-    (childFlags := 0) (childVisibility := 2) (childExportName := "Child") : Except MetadataError (List Nat) := do
-  let identity := fun (name : String) => name ++ ", Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-  let make := fun (name : String) (entries : Step Nat) => build entries (bytesOf name) (identity name)
+    (childFlags := 0) (childVisibility := 2) (childExportName := "Child") :
+    Except MetadataError (Option AssemblyName) := do
+  let make := fun (name : String) (entries : Step Nat) => build entries (bytesOf name)
   let (library, definition) := make "Core" do
     let name ← string declaredName
     let ns ← string "System"
@@ -56,12 +57,15 @@ private def forwarded (flags := 0x00200000) (typeDefId := 0) (implementation := 
   let slices ← [caller, facade, library].mapM MetadataSlice.index
   let .inl named ← typeRefTarget (.ofSlices slices) 0 resolveFuel reference
     | throw (.unresolvedType reference)
-  return named.scope
+  return named.assembly
+
+/-- The assembly the forwarders of `forwarded` lead to. -/
+private def coreAssembly : AssemblyName := unsignedAssembly name!"Core"
 
 /-- A top-level forwarder selects the public definition in its named implementation.
     A changed flag, name, implementation tag, assembly, visibility or witness fails. -/
 theorem checked_forwarder :
-    forwarded.toOption = some (bytesOf "Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null") ∧
+    forwarded.toOption = some (some coreAssembly) ∧
     [forwarded (flags := 0), forwarded (typeDefId := 1), forwarded (implementation := 0),
      forwarded (implementation := 1), forwarded (implementation := 4),
      forwarded (implementation := 6), forwarded (implementation := 7),
@@ -74,51 +78,29 @@ theorem checked_forwarder :
 /-- The nested export must point to its enclosing export, whose AssemblyRef reaches a public
     outer and public nested definition. Wrong names, parent tags, cycles and visibility fail. -/
 theorem checked_nested_forwarder :
-    (forwarded (nested := true)).toOption = some (bytesOf "Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null") ∧
+    (forwarded (nested := true)).toOption = some (some coreAssembly) ∧
     [forwarded (nested := true) (childParent := 10), forwarded (nested := true) (childParent := 5),
      forwarded (nested := true) (childFlags := 0x00200000), forwarded (nested := true) (visibility := 0),
      forwarded (nested := true) (childVisibility := 3), forwarded (nested := true) (childExportName := "Other"),
      forwarded (nested := true) (targetName := "Other")].all (fun result => !result.isOk) := by decide +kernel
 #print axioms checked_nested_forwarder
 
-/-- Empty culture and the literal bytes of "neutral" spell the same display name. Neither the
-    original reference nor a forwarder can use one to bind the other assembly. -/
+/-- Empty culture and the literal bytes of "neutral" spell the same display name. A reference
+    naming the culture `neutral` names no carried assembly, and a forwarder naming it cannot bind
+    the neutral assembly. -/
 theorem forwarded_culture_columns :
-    let rejects := fun (result : Except MetadataError (List Nat)) (token : Nat) =>
+    let rejects := fun (result : Except MetadataError (Option AssemblyName)) error =>
       match result with
-      | .error error => error == .operandMismatch token
+      | .error found => found == error
       | .ok _ => false
-    rejects (forwarded (referenceCulture := "neutral")) 0x01000001 = true ∧
-    rejects (forwarded (facadeCulture := "neutral")) 0x01000001 = true ∧
-    rejects (forwarded (nested := true) (referenceCulture := "neutral")) 0x01000001 = true ∧
-    rejects (forwarded (nested := true) (facadeCulture := "neutral")) 0x01000002 = true := by
+    rejects (forwarded (referenceCulture := "neutral")) (.unresolvedType 0x01000001) = true ∧
+    rejects (forwarded (facadeCulture := "neutral")) (.operandMismatch 0x01000001) = true ∧
+    rejects (forwarded (nested := true) (referenceCulture := "neutral"))
+      (.unresolvedType 0x01000002) = true ∧
+    rejects (forwarded (nested := true) (facadeCulture := "neutral"))
+      (.operandMismatch 0x01000002) = true := by
   decide +kernel
 #print axioms forwarded_culture_columns
-
-/-- Prefix matching agrees with the prefix predicate, including overlapping and empty prefixes. -/
-theorem prefixes :
-    let stored := [[1], [1, 2, 3], [4, 5], [4, 6]]
-    let trie := stored.foldl AssemblyPrefixes.insert {}
-    [[1], [1, 2, 4], [4], [4, 5, 6], [4, 6], [4, 7], []].all
-      (fun scope => trie.matches scope == stored.any (·.isPrefixOf scope)) = true ∧
-      (({} : AssemblyPrefixes).insert []).matches [9] = true := by decide +kernel
-#print axioms prefixes
-
-/-- Full version markers, duplicate stems and large byte keys retain exact prefix matching. -/
-theorem version_prefixes :
-    let stems := [[65] ++ versionMarker, [65, 44] ++ versionMarker, [512, 1], [512, 1]]
-    let trie := stems.foldl AssemblyPrefixes.insert {}
-    [[65] ++ versionMarker ++ [49], [65, 44] ++ versionMarker ++ [50],
-      [65, 44, 32, 86], [66] ++ versionMarker, [512, 1, 2], [512], []].all
-      (fun scope => trie.matches scope == stems.any (·.isPrefixOf scope)) = true := by
-  decide +kernel
-#print axioms version_prefixes
-
-/-- The first complete version marker terminates a stem, even after a partial marker. -/
-theorem version_stems :
-    assemblyStem ([65, 44] ++ versionMarker ++ [49]) = [65, 44] ++ versionMarker ∧
-    assemblyStem [65, 44, 66] = [65, 44, 66] := by decide +kernel
-#print axioms version_stems
 
 /-- `System.Object`, the base of `Lib.Box`, and `Lib.Box` as the platform class it is when no
     slice carries `Lib`. -/
@@ -127,10 +109,9 @@ private def libraryPlatform : PlatformTable := platform_table%
    { scope := bytesOf libScope, parts := [bytesOf "Lib", bytesOf "Box"], kind := .classType }]
 
 /-- Resolve the library type with the supplied assembly order and pins. -/
-private def resolveLibrary (others : List MetadataSlice) (pins : List (List Nat) := []) := do
+private def resolveLibrary (others : List MetadataSlice) (pins : List AssemblyName := []) := do
   let env := MetadataEnv.ofSlices (← (own.1 :: others).mapM MetadataSlice.index)
-    (platform := libraryPlatform)
-    (pins.foldl AssemblyPrefixes.insert {})
+    (platform := libraryPlatform) (indexPinNames pins)
   typeRefNamed env 0 resolveFuel tokens.boxRef none
 
 /-- Compare the exact error while retaining the successful type separately. -/
@@ -139,6 +120,21 @@ private def failedWith (result : Except MetadataError NamedType) (error : Metada
   | .error found => found == error
   | .ok _ => false
 
+/-- `lib`'s `Assembly` row with its culture column naming the string `neutral`. -/
+private def neutralLib : AssemblyMetadata :=
+  let cultureOffset := 0x200
+  { lib.assembly with
+    assemblyRow := lib.assembly.assemblyRow.take 20 ++ [cultureOffset % 256, cultureOffset / 256]
+    strings := lib.assembly.strings ++ [(cultureOffset, bytesOf "neutral" ++ [0])] }
+
+/-- A row whose culture is the name `neutral` has the display name of the neutral assembly but
+    names another assembly, so the neutral pin does not identify it. -/
+theorem neutral_culture_is_another_assembly :
+    (neutralLib.name.map (·.spelling)).toOption = some libAssembly.spelling ∧
+    AssemblyIdentified lib.assembly libAssembly ∧
+    ¬ AssemblyIdentified neutralLib libAssembly := by decide +kernel
+#print axioms neutral_culture_is_another_assembly
+
 /-- Duplicate identities retain their first position; a link to a different position is refused. -/
 theorem first_identity :
     (resolveLibrary [lib, lib]).isOk = true ∧
@@ -146,36 +142,36 @@ theorem first_identity :
   decide +kernel
 #print axioms first_identity
 
-/-- Missing carried assemblies are external only when no pinned prefix covers their identity. -/
+/-- Missing carried assemblies are external only when no pin has their name, at any version. -/
 theorem pinned_missing :
     (resolveLibrary []).isOk = true ∧
-    failedWith (resolveLibrary [] [assemblyStem (bytesOf libScope)])
-      (.missingSlice tokens.boxRef) = true ∧
-    failedWith (resolveLibrary [] [[]]) (.missingSlice tokens.boxRef) = true := by decide +kernel
+    failedWith (resolveLibrary [] [libAssembly]) (.missingSlice tokens.boxRef) = true ∧
+    failedWith (resolveLibrary [] [unsignedAssembly name!"Lib" 2])
+      (.missingSlice tokens.boxRef) = true := by decide +kernel
 #print axioms pinned_missing
 
 /-- A carried version cannot satisfy a reference to another version of the same pinned name. -/
 theorem wrong_version :
-    let versioned := (build libWorld (bytesOf "Lib")
-      "Lib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" 2).1
-    failedWith (resolveLibrary [versioned] [assemblyStem (bytesOf libScope)])
+    let versioned := (build libWorld (bytesOf "Lib") 2).1
+    failedWith (resolveLibrary [versioned] [libAssembly])
       (.missingSlice tokens.boxRef) = true := by decide +kernel
 #print axioms wrong_version
 
-/-- Fixed-width identities keep the benchmark's byte count proportional to assembly count. -/
-private def identity (position : Nat) : List Nat :=
-  [65, position / 256, position % 256, 44]
+/-- Fixed-width names keep the benchmark's byte count proportional to assembly count. -/
+private def identity (position : Nat) : AssemblyName :=
+  { unsignedAssembly name!"A" with
+    name := ⟨(321 * 256 + position / 255 + 1) * 256 + position % 255 + 1⟩ }
 
 /-- Construct and query each assembly once, including the pin lookup for a missing version. -/
 private def exercise (base : MetadataIndex) (count : Nat) : Bool := Id.run do
   let indexes := (List.range count).map fun position => { base with identity := identity position }
   let env := MetadataEnv.ofSlices indexes
-    ((indexes.map (·.identity)).foldl AssemblyPrefixes.insert {})
+    (indexPinNames (indexes.map (·.identity)))
   for position in [:count] do
     let scope := identity position
     if env.identities[scope]? != some position then return false
     if (env.slice position 0).toOption.map (·.identity) != some scope then return false
-    if !env.pinned.matches (scope ++ [99]) then return false
+    if !env.pinned.contains scope.name then return false
   return true
 
 /-- Kernel evaluation includes construction as well as every assembly query. -/

@@ -117,19 +117,18 @@ def methodBytes (method : RawMethod) : Option (List Nat) := do
   some ([convention] ++ (if method.callingConvention / 0x10 % 2 == 1 then [arity] else []) ++
     [parameters.length] ++ result ++ parameters.flatten)
 
-/-- The part of `owner` after `identity ++ "::"`. -/
-def ownerName (identity owner : List Nat) : Option (List Nat) :=
-  if owner.take (identity.length + 2) == identity ++ [58, 58] then
-    some (owner.drop (identity.length + 2))
-  else none
+/-- The part of `owner` after its first `::`, which ends a colon-free assembly scope. -/
+def ownerName : List Nat → Option (List Nat)
+  | 58 :: 58 :: rest => some rest
+  | _ :: rest => ownerName rest
+  | [] => none
 
 /-- The metadata of one method in an assembly of the given pin: `System.Runtime` for the primitive
     types, the owner class `Fixture`-style, the method itself and its locals. The result is the
     slice and the token of the locals signature, or 0. -/
 def methodMetadata (pin : AssemblyPin) (method : RawMethod) : Option (MetadataSlice × Nat) := do
-  let identity := bytesOf pin.identity
-  let typeName ← ownerName identity (bytesOf method.owner)
-  let assemblyName := identity.takeWhile (· != 44)
+  let typeName ← ownerName (bytesOf method.owner)
+  let assemblyName ← pin.identity.name.bytes?
   if method.token != tokenOf Table.methodDef 1 then none
   let arity := method.genericParameters.length
   let signature ← methodBytes method
@@ -162,14 +161,14 @@ def methodMetadata (pin : AssemblyPin) (method : RawMethod) : Option (MetadataSl
     if locals.isEmpty then pure 0 else
       let localBlob ← blob ([0x07, locals.length] ++ locals.flatten)
       row Table.standAloneSig [localBlob]
-  some (build step assemblyName pin.identity)
+  some (build step assemblyName pin.identity.version.major)
 
 /-- The evidence for body bytes and token claims over `metadata`: the identities, tables and
     names the decoder derives from the metadata for `method` under the `platform` definitions,
     which a body that does not resolve leaves empty so the check refuses it. -/
 def evidenceOf (bytes : List Nat) (operands : List (Nat × RawOperand)) (metadata : MethodMetadata)
     (method : RawMethod) (platform : PlatformTable := objectPlatform) : BodyEvidence :=
-  let identities := metadata.slices.map fun slice => (slice.assembly.spelling).toOption.getD []
+  let identities := metadata.slices.filterMap (·.assembly.name.toOption)
   let tables := metadata.tables.toOption.getD []
   let names :=
     match metadata.environmentWith identities tables (PinnedIndex.ofIdentities []) platform with

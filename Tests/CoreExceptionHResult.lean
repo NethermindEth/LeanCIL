@@ -66,11 +66,11 @@ private def original : RawMethod := {
 private def body : BodyEvidence := {
   bytes := [0x22, 2, 3, 0x7d, 0xb5, 2, 0, 4, 0x2a]
   tokens := { operands := [(0x040002b5, operand)] }
-  metadata, tables := metadata.tables.toOption.getD [], identities := [bytesOf coreLibraryScope]
+  metadata, tables := metadata.tables.toOption.getD [], identities := [coreLibraryAssembly]
   names := {
-    owner := bytesOf original.owner
+    assembly := some coreLibraryAssembly, owner := bytesOf original.owner
     signature := bytesOf "System.Void System.Exception::set_HResult(System.Int32)" }
-  pinned := PinnedIndex.ofIdentities [bytesOf coreLibraryScope] }
+  pinned := PinnedIndex.ofIdentities [coreLibraryAssembly] }
 
 @[cil_code] private def setter : Method := {
   locals := [], returnsValue := false, code := [.ldarg 0, .ldarg 1, .stfld resultField, .ret]

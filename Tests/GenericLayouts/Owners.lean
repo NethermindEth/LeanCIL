@@ -8,11 +8,11 @@ open CIL CIL.Extraction
 
 /-- A closed class owner in the fixture assembly. -/
 private def classOwner (name : ClassName) : TypeExpr :=
-  .apply (.objectConstructor Extracted.assembly0.identity name) (.primitive .int32)
+  .apply (.objectConstructor Extracted.assembly0Scope name) (.primitive .int32)
 
 /-- A closed value-type owner in the fixture assembly. -/
 private def valueOwner (name : ClassName) : TypeExpr :=
-  .apply (.constructor Extracted.assembly0.identity name) (.primitive .int32)
+  .apply (.constructor Extracted.assembly0Scope name) (.primitive .int32)
 
 /-- Changing only a call's declaring type must fail at the original MemberRef. -/
 private def rejectsOwner (selected replacement : TypeExpr) : Bool := Id.run do

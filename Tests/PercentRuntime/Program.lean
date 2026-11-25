@@ -13,8 +13,8 @@ def imageMethods : List RawMethod := Source.raw :: coreBytes.map Prod.snd
 
 /-- All physical call targets, including the resource getter on the null-message path. -/
 def table : List SpecializedMethod :=
-  ⟨[], Source.raw, ⟨Source.assembly0Metadata.identity⟩⟩ ::
-    (coreBytes.map Prod.snd ++ [rangeResource.raw]).map (⟨[], ·, ⟨coreLibraryScope⟩⟩)
+  ⟨[], Source.raw, ⟨Source.id0⟩⟩ ::
+    (coreBytes.map Prod.snd ++ [rangeResource.raw]).map (⟨[], ·, ⟨coreLibraryAssembly⟩⟩)
 
 /-- CoreLib methods returned by the ordinary checked decoder. -/
 def coreMethods := coreBytes.mapM fun (body, raw) => CIL.Method.ofBody? .scalar {}

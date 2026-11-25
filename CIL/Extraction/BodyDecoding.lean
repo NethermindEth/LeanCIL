@@ -235,15 +235,15 @@ structure BodyEvidence where
   bytes : List Nat
   tokens : TokenTable
   metadata : MethodMetadata
-  /-- The identity each slice's assembly spells, in the slices' order; `AssembliesIdentified`
-      ties them to the assemblies' bytes once per assembly. -/
-  identities : List (List Nat)
+  /-- The identity each slice's `Assembly` row names, in the slices' order;
+      `AssembliesIdentified` ties them to the assemblies' bytes once per assembly. -/
+  identities : List AssemblyName
   /-- `MetadataSlice.tables` of each slice of `metadata`, built once for the extraction. -/
   tables : List IndexTables
   /-- The owner and base class names the method's definition resolves to. -/
   names : MethodNames
-  /-- The identity of every assembly the extraction pins, as bytes; `BodyDecodes` ties them to
-      the pins. A reference into one of them needs its slice among `metadata`. -/
+  /-- The identity of every assembly the extraction pins; `BodyDecodes` ties them to the pins.
+      A reference into one of them needs its slice among `metadata`. -/
   pinned : PinnedIndex
   /-- The platform definitions the checks read a type outside the carried slices from;
       `BodyDecodes` equates them with the extraction's. -/
@@ -568,22 +568,22 @@ private theorem checkTable_calls {env : MetadataEnv} {frame : Frame} {imports}
 
 /-- The metadata of a body as an environment of indexed slices, its own first, over the given
     identities and tables: independent of the number of rows. -/
-def MethodMetadata.environmentWith (metadata : MethodMetadata) (identities : List (List Nat))
+def MethodMetadata.environmentWith (metadata : MethodMetadata) (identities : List AssemblyName)
     (tables : List IndexTables) (pinned : PinnedIndex) (platform : PlatformTable) :
     Except MetadataError MetadataEnv :=
   if tables.length != metadata.others.length + 1 || identities.length != tables.length then
     .error .tablesMismatch
-  else do
-    let indexed ← (metadata.slices.zip (identities.zip tables)).mapM
+  else
+    let indexed := (metadata.slices.zip (identities.zip tables)).map
       fun (slice, identity, sliceTables) => slice.indexWith sliceTables identity
-    .ok (MetadataEnv.ofSlices indexed pinned.prefixes platform pinned.exact)
+    .ok (MetadataEnv.ofSlices indexed pinned.names platform pinned.exact)
 
 /-- The metadata of a body as an environment of indexed slices, built from its bytes alone. -/
 def MethodMetadata.environment (metadata : MethodMetadata)
     (pinned : PinnedIndex := PinnedIndex.ofIdentities []) :
     Except MetadataError MetadataEnv := do
   .ok (MetadataEnv.ofSlices (← metadata.slices.mapM MetadataSlice.index)
-    pinned.prefixes (exactPins := pinned.exact))
+    pinned.names (exactPins := pinned.exact))
 
 /-- One exception clause as the section encodes it, with byte offsets and lengths made into
     half-open byte ranges and the class token or reserved word in `operand`. -/
@@ -758,8 +758,8 @@ def checkBody (body : BodyEvidence) (method : RawMethod) (arguments : List TypeE
 /-- The body's tables are what its metadata bytes give, and the method's definition, locals,
     `maxStack`, `initLocals` and `code` are what the body bytes and the metadata say, through the
     body's token table. Names are tied to bytes by equations, so no decision evaluates a string:
-    each slice's assembly spells the identity the body lists, the method's own assembly is the
-    pin, the pinned identities the body lists are those of the extraction's pins, its platform
+    each slice's `Assembly` row names the identity the body lists, the method's own assembly is
+    the pin, the pinned identities the body lists are those of the extraction's pins, its platform
     definitions are the extraction's `platform`, its imported calls and layouts are those of
     the verified links and slots, the owner and base class names the metadata
     resolves are the ones the method states, and `signature`, the string a proof selects the
@@ -770,8 +770,8 @@ abbrev BodyDecodes (pins : List AssemblyPin) (platform : PlatformTable) (pin : A
     (imports : BodyImports := {}) : Prop :=
   AssembliesIdentified body.metadata body.identities ∧
     tablesMatch body.metadata body.tables = true ∧
-    body.metadata.own.assembly.identity = pin.identity ∧
-    body.pinned.identities.mapM spelled? = some (pins.map (·.identity)) ∧
+    body.identities.head? = some pin.identity ∧
+    body.pinned.identities = pins.map (·.identity) ∧
     (body.platform, body.imports) = (platform, imports) /\
     body.names.Spell method ∧ body.names.Selects signature ∧
     bodyMatches body method arguments = true
@@ -1190,14 +1190,17 @@ theorem BodyDecodes.callManagedDefinition
       (operand, RawOperand.call call) ∈ body.tokens.operands ∧ body.environment = .ok env ∧
       env.methodSite operand = .ok site ∧ site.definition = some (position, target) ∧
       env.slices.find? position = some index ∧ index.methodDef target = .ok row ∧
-      ∀ scope, call.declaringType.headScope = some scope → index.identity = bytesOf scope := by
+      ∀ scope, call.declaringType.headScope = some scope →
+        index.identity.spelling = bytesOf scope := by
   obtain ⟨operand, env, frame, site, position, listed, built, _, resolved, reference, defined⟩ :=
     decodes.callManagedTarget fetched called managed
   obtain ⟨head, index, row, declared, lookup, scopeEq, methodRow⟩ :=
     env.methodSite_definition resolved defined
-  exact ⟨operand, env, site, position, index, row, listed, built, resolved, defined, lookup,
-    methodRow, fun _ scope =>
-      scopeEq.trans (checkCallReference_scope reference declared scope).symm⟩
+  refine ⟨operand, env, site, position, index, row, listed, built, resolved, defined, lookup,
+    methodRow, fun _ scope => ?_⟩
+  obtain ⟨assembly, found, spelled⟩ := checkCallReference_scope reference declared scope
+  cases Option.some.inj (scopeEq.symm.trans found)
+  exact spelled
 
 #print axioms BodyDecodes.callManagedDefinition
 

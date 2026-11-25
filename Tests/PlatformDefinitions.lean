@@ -19,17 +19,19 @@ namespace Tests.PlatformDefinitions
 
 open CIL CIL.Extraction Tests.MetadataBuilder Tests.MetadataWorld
 
-/-- A local root can supply runtime storage only under the recognized neutral publisher. -/
+/-- A local root can supply runtime storage only under the recognized publisher and the neutral
+    culture; a culture named `neutral`, which displays as the neutral culture, is another one. -/
 theorem carried_core_scope_checks_publisher :
-    isCorlibScope (bytesOf "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a") = true ∧
-    isCorlibScope (bytesOf "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=null") = false ∧
-    isCorlibScope (bytesOf "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e") = false ∧
-    isCorlibScope (bytesOf "System.Runtime, Version=11.0.0.0, Culture=fr, PublicKeyToken=b03f5f7f11d50a3a") = false := by
+    runtimeAssembly.isCoreLibrary = true ∧
+    { runtimeAssembly with publicKeyToken := none }.isCoreLibrary = false ∧
+    { runtimeAssembly with publicKeyToken := some 0x7cec85d7bea7798e }.isCoreLibrary = false ∧
+    { runtimeAssembly with culture := name!"fr" }.isCoreLibrary = false ∧
+    { runtimeAssembly with culture := name!"neutral" }.isCoreLibrary = false := by
   decide +kernel
 #print axioms carried_core_scope_checks_publisher
 
 /-- Three carried class definitions. The root ends the chain and its direct child owns a field. -/
-private def carriedClasses (scope rootName : String) (rootFlags : Nat) :
+private def carriedClasses (assembly : AssemblyName) (rootName : String) (rootFlags : Nat) :
     Except MetadataError MetadataEnv := do
   let rows : Step Unit := do
     let space ← string "System"
@@ -42,35 +44,35 @@ private def carriedClasses (scope rootName : String) (rootFlags : Nat) :
     let _ ← row Table.typeDef [1, parent, space, 4, 1, 1]
     let _ ← row Table.typeDef [1, child, space, 8, 2, 1]
     let _ ← row Table.field [1, fieldName, fieldType]
-  let slice := (build rows (bytesOf "System.Private.CoreLib") scope 11).1
-  let index ← slice.indexWith (← slice.tables) (bytesOf scope)
+  let slice := (build rows (bytesOf "System.Private.CoreLib") 11).1
+  let index := slice.indexWith (← slice.tables) assembly
   return MetadataEnv.ofSlices [index]
 
 /-- Only the checked root ends the lineage. Its child's field counts towards the grandchild. -/
 theorem carried_object_lineage :
-    (do let env ← carriedClasses coreLibraryScope "Object" 1
+    (do let env ← carriedClasses coreLibraryAssembly "Object" 1
         let lineage ← env.classChain resolveFuel 0 0x02000003
         let fields ← env.chainFieldCount lineage
         let frame ← env.frame 0 0
         return (lineage, fields, frame.corlib)) =
-      .ok ([(0, 0x02000002)], 1, some (bytesOf coreLibraryScope)) := by rfl
+      .ok ([(0, 0x02000002)], 1, some coreLibraryAssembly.spelling) := by rfl
 #print axioms carried_object_lineage
 
 /-- The defining CoreLib identity supplies Int32 storage even without a facade reference. -/
 theorem carried_primitive_storage :
     typeStorageAt (fun _ => none) (.atom coreLibraryScope "System.Int32") = some (.field .signed32) ∧
-    typeStorageAt (fun _ => none) (.atom ownIdentity "System.Int32") = none :=
+    typeStorageAt (fun _ => none) (.atom ownScope "System.Int32") = none :=
   ⟨rfl, rfl⟩
 #print axioms carried_primitive_storage
 
 /-- A facade, another name or an interface cannot stand in for the defining root class. -/
 theorem carried_object_rejects_other_definitions :
-    let check := fun scope name flags => do
-      let env ← carriedClasses scope name flags
+    let check := fun assembly name flags => do
+      let env ← carriedClasses assembly name flags
       env.classChain resolveFuel 0 0x02000003
-    check runtimeScope "Object" 1 = .error (.unsupportedBase 0x02000001) ∧
-    check coreLibraryScope "Other" 1 = .error (.unsupportedBase 0x02000001) ∧
-    check coreLibraryScope "Object" 0x21 = .error (.unsupportedBase 0x02000001) :=
+    check runtimeAssembly "Object" 1 = .error (.unsupportedBase 0x02000001) ∧
+    check coreLibraryAssembly "Other" 1 = .error (.unsupportedBase 0x02000001) ∧
+    check coreLibraryAssembly "Object" 0x21 = .error (.unsupportedBase 0x02000001) :=
   ⟨rfl, rfl, rfl⟩
 #print axioms carried_object_rejects_other_definitions
 
@@ -119,7 +121,7 @@ theorem missing_owner_requires_link :
         (platform := removing worldPlatform "Console")
       let missing := MetadataError.missingPlatformDefinition tokens.consoleRef
       let type := SigType.named false tokens.consoleRef
-      let head := ArgumentHead.platform runtimeColumns [systemNamespace, bytesOf "Console"]
+      let head := ArgumentHead.platform runtimeAssembly [systemNamespace, bytesOf "Console"]
       return failedWith (env.methodSite tokens.writeLine) missing &&
         failedWith (env.resolve 0 type) missing &&
         failedWith (env.resolveToken 0 tokens.consoleRef) missing &&
@@ -131,9 +133,9 @@ theorem missing_owner_requires_link :
 
 /-- A pinned base cannot be classified through a platform entry, for any scope or table. -/
 theorem pinned_base_requires_its_definition (env : MetadataEnv) (index : MetadataIndex)
-    (token base : Nat) (scope : List Nat) (parts : List (List Nat)) (core : Bool)
-    (pinned : env.pinned.matches scope = true) :
-    env.externalBaseKind index token base scope parts core = .error (.missingSlice base) := by
+    (token base : Nat) (assembly : AssemblyName) (parts : List (List Nat)) (core : Bool)
+    (pinned : env.pinned.contains assembly.name = true) :
+    env.externalBaseKind index token base assembly parts core = .error (.missingSlice base) := by
   simp [MetadataEnv.externalBaseKind, pinned]
 #print axioms pinned_base_requires_its_definition
 
@@ -159,7 +161,7 @@ private def derivedOwner : Step Nat := do
 /-- A static owner can derive from the closed class Base<int>. -/
 theorem closed_class_base_classifies :
     (do
-      let (image, owner) := build derivedOwner (bytesOf "T") ownIdentity
+      let (image, owner) := build derivedOwner (bytesOf "T")
       let env := MetadataEnv.ofSlices [<- image.index]
       return (<- typeDefNamed env 0 resolveFuel owner).kind).toOption = some .classType := by
   decide +kernel
@@ -187,7 +189,7 @@ private def repeatedBases (depth : Nat) : Step Nat := do
 
 /-- The same number of owner resolutions at each depth, after metadata indexing. -/
 private def measureOwners (depth : Nat) : IO (Prod Nat Nat) := do
-  let (image, owner) := build (repeatedBases depth) (bytesOf "T") ownIdentity
+  let (image, owner) := build (repeatedBases depth) (bytesOf "T")
   let .ok index := image.index | throw (IO.userError "invalid repeated base fixture")
   let env := MetadataEnv.ofSlices [index]
   let repetitions := 512
@@ -236,8 +238,8 @@ theorem platform_arity_matches (env : MetadataEnv) (named : NamedType) (position
 #print axioms platform_arity_matches
 
 /-- A closed argument from a definition requires the complete assembly identity among the pins. -/
-theorem definition_requires_pin (env : MetadataEnv) (scope : AssemblyColumns) (method token count : Nat)
-    (absent : env.exactPins.contains scope.spelling = false) :
+theorem definition_requires_pin (env : MetadataEnv) (scope : AssemblyName)
+    (method token count : Nat) (absent : env.exactPins.contains scope = false) :
     ArgumentHead.resolve env method count (.definition scope token) =
       .error (.missingSlice token) := by
   simp [ArgumentHead.resolve, absent]
@@ -283,9 +285,9 @@ theorem aggregate_argument_keeps_scope (head argument : NamedType) (corlib : Opt
 /-! ## An external enum -/
 
 /-- The scope bytes from the enum assembly row. -/
-private def enumColumns : AssemblyColumns := ⟨bytesOf "E", ⟨1, 0, 0, 0⟩, [], []⟩
+private def numberAssembly : AssemblyName := Tests.unsignedAssembly name!"E"
 
-private def enumScope := enumColumns.spelling
+private def enumScope := numberAssembly.spelling
 
 /-- The platform enum `Number` of `E` over `int`. -/
 private def numberPlatform : PlatformTable := platform_table%
@@ -298,9 +300,9 @@ private def admitsNumber (platform : PlatformTable) (storage : EnumStorage) (spe
   let frame : Frame :=
     { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
   let env := MetadataEnv.ofSlices [] (platform := platform)
-  match env.externalNamed 0 enumColumns (bytesOf spelled) [[], bytesOf "Number"] none with
+  match env.externalNamed 0 numberAssembly (bytesOf spelled) [[], bytesOf "Number"] none with
   | .ok named => frame.admits (.named named)
-    (.enum (Tests.enumIdentity spelled (Tests.enumAssembly name!"E")) storage)
+    (.enum (Tests.enumIdentity spelled (Tests.unsignedAssembly name!"E")) storage)
   | .error _ => false
 
 /-- A platform enum cannot use aggregate storage at any layout index. -/
@@ -312,7 +314,7 @@ theorem enums_refuse_aggregate_storage (frame : Frame) (named : NamedType) (code
 
 /-- A missing entry for a closed platform argument preserves the diagnostic and method token. -/
 theorem missing_closed_argument_definition (method : Nat) :
-    (InstanceArgument.named (.platform enumColumns [[], bytesOf "Number"])).resolve
+    (InstanceArgument.named (.platform numberAssembly [[], bytesOf "Number"])).resolve
       (MetadataEnv.ofSlices []) method resolveFuel =
         .error (.missingPlatformDefinition method) := by
   rfl
@@ -355,7 +357,7 @@ private def checks (platform : PlatformTable) (token : Nat) (operand : RawOperan
 
 /-- `count`, an instance field of the class `Program`, whose chain ends at `System.Object`. -/
 private def countOperand : RawOperand :=
-  .field (.object ownIdentity "Program") 0 int32 name!"count" false
+  .field (.object ownScope "Program") 0 int32 name!"count" false
 
 /-- An instance field of a class is bound only when the chain ends at the definition of
     `System.Object`: without it the class's base is refused, and as a plain class the chain is. -/
@@ -436,13 +438,13 @@ private def extEnumPlatform (kind : PlatformKind) : PlatformTable :=
     or a managed reference. -/
 private def receiver (home : EnumHome) (platform : PlatformTable) (objectReceiver : Bool) :
     Except MetadataError MethodNames := do
-  let fixture := build (enumWorld home) (bytesOf "T") ownIdentity
+  let fixture := build (enumWorld home) (bytesOf "T")
   let method : RawMethod :=
-    { token := fixture.2, owner := ownIdentity ++ "::Program", hasThis := true,
+    { token := fixture.2, owner := ownScope ++ "::Program", hasThis := true,
       explicitThis := false, callingConvention := 0, attributes := 0x86, implementation := 0,
       returnType := .void, parameters := [], locals := [], initLocals := false, maxStack := 8,
       genericParameters := [], code := [],
-      receiverClass := if objectReceiver then some (.object ownIdentity "Program") else none,
+      receiverClass := if objectReceiver then some (.object ownScope "Program") else none,
       objectFieldCount := if objectReceiver then 1 else 0 }
   let env := MetadataEnv.ofSlices [← fixture.1.index] (platform := platform)
   methodIdentityValid env method [] []
@@ -479,15 +481,13 @@ private def coreDefinitions : Step Unit := do
 
 /-- Resolve the same declarations with and without the ECMA publisher key in the Assembly row. -/
 private def carriedKinds (keyed : Bool) : Except MetadataError (List Extraction.TypeKind) := do
-  let token := if keyed then "b77a5c561934e089" else "null"
-  let identity := "mscorlib, Version=1.0.0.0, Culture=neutral, PublicKeyToken=" ++ token
-  let (image, _) := build coreDefinitions (bytesOf "mscorlib") identity
+  let (image, _) := build coreDefinitions (bytesOf "mscorlib")
   let assembly := image.assembly
   let ecmaKey := List.replicate 8 0 ++ [4] ++ List.replicate 7 0
   let assembly := if keyed then
     { assembly with
       assemblyRow := (assembly.assemblyRow.set 12 1).set 16 1
-      keyToken := bytesOf token
+      publicKeyToken := some 0xb77a5c561934e089
       blobs := [(0, [0]), (1, 16 :: ecmaKey)] }
     else assembly
   let env := MetadataEnv.ofSlices [← ({ image with assembly } : MetadataSlice).index]
@@ -506,7 +506,7 @@ theorem carried_core_roots :
 /-- An external System.ValueType in another scope supplies an ordinary class base. -/
 theorem foreign_value_type_is_a_class_base :
     (do
-      let (image, _) := build (enumWorld .ext "ValueType") (bytesOf "T") ownIdentity
+      let (image, _) := build (enumWorld .ext "ValueType") (bytesOf "T")
       let env := MetadataEnv.ofSlices [<- image.index]
       return (<- typeDefNamed env 0 resolveFuel programToken).kind).toOption =
         some .classType := by

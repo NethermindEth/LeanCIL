@@ -13,14 +13,14 @@ private def objectAt (scope name : String) (bases : List TypeExpr) : Allocation 
 /-- The caller owns one local subclass and three objects in the foreign hierarchy. -/
 private def caller : Safety.Memory := { Safety.Memory.empty with
   allocations := fun id => match id with
-    | 0 => some (objectAt Extracted.assembly0.identity "Near.First"
-        [.object Extracted.assembly0.identity "Near.Shape"])
-    | 1 => some (objectAt Extracted.assembly1.identity "Far.Second"
-        [.object Extracted.assembly1.identity "Far.Shape"])
-    | 2 => some (objectAt Extracted.assembly1.identity "Far.Shape" [])
-    | 3 => some (objectAt Extracted.assembly1.identity "Far.Family/Child"
-        [.object Extracted.assembly1.identity "Far.Second",
-         .object Extracted.assembly1.identity "Far.Shape"])
+    | 0 => some (objectAt Extracted.assembly0Scope "Near.First"
+        [.object Extracted.assembly0Scope "Near.Shape"])
+    | 1 => some (objectAt Extracted.assembly1Scope "Far.Second"
+        [.object Extracted.assembly1Scope "Far.Shape"])
+    | 2 => some (objectAt Extracted.assembly1Scope "Far.Shape" [])
+    | 3 => some (objectAt Extracted.assembly1Scope "Far.Family/Child"
+        [.object Extracted.assembly1Scope "Far.Second",
+         .object Extracted.assembly1Scope "Far.Shape"])
     | _ => none
   nextIdentity := 4 }
 

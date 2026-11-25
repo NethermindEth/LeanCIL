@@ -42,20 +42,19 @@ structure DispatchType where
   interfaces : List TypeExpr
   methods : List DispatchMethod
   /-- The pinned assembly whose metadata supplied this entry. -/
-  assembly : AssemblyPin := {}
+  assembly : AssemblyPin
   /-- A class's base class, or `.void` when it derives from `System.Object` or is no class. -/
   base : TypeExpr := .void
   /-- The class is abstract, so it has no instances of its own. -/
   abstractType : Bool := false
   deriving DecidableEq, Repr
 
-/-- The entry names a valid pin that scopes its type. Dispatch reads only such entries, so every
-    type it consults comes from the selected assembly or a pinned reference, never elsewhere. -/
+/-- The entry's pin scopes its type. Dispatch reads only such entries, so every type it
+    consults comes from the selected assembly or a pinned reference, never elsewhere. -/
 def DispatchType.pinned (entry : DispatchType) : Bool :=
-  pinIdentityValid entry.assembly.identity &&
-    match managedOwner entry.identity with
-    | some (owner, _) => ownedBy entry.assembly.identity owner
-    | none => false
+  match managedOwner entry.identity with
+  | some (owner, _) => entry.assembly.identity.scopes owner
+  | none => false
 
 /-- Ambiguous metadata never selects an arbitrary first candidate. -/
 private def unique : List α → Option α

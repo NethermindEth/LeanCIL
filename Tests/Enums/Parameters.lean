@@ -43,11 +43,14 @@ private def withCulture (assembly : AssemblyMetadata) (culture : String) : Assem
   let row := assembly.assemblyRow.take (assembly.assemblyRow.length - width) ++ index
   { assembly with assemblyRow := row, strings := assembly.strings ++ [(offset, bytesOf culture ++ [0])] }
 
-/-- Check each overload's proposed assembly culture against its defining row at its call token. -/
+/-- Check each overload's proposed assembly culture against its defining row at its call token,
+    with the own slice listed as the assembly the changed row names. -/
 private def checksCulture (actual : String) (claimed : MetadataName) (agree : Bool) : Bool := Id.run do
   let original := Extracted.method0Body
   let assembly := withCulture original.metadata.own.assembly actual
-  let body := { original with metadata.own.assembly := assembly }
+  let .ok named := assembly.name | return false
+  let identities := named :: original.identities.drop 1
+  let body := { original with metadata.own.assembly := assembly, identities }
   let .ok env := body.environment | return false
   let calls := body.tokens.operands.filterMap fun (token, operand) =>
     match operand with

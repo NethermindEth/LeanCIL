@@ -47,8 +47,8 @@ structure NamedType where
   kind : TypeKind
   pinned : Bool
   platformArity : Nat := 0
-  /-- Identity columns of the defining Assembly or the external AssemblyRef. -/
-  assembly : Option AssemblyColumns := none
+  /-- The defining assembly of a carried type or the assembly an external reference names. -/
+  assembly : Option AssemblyName := none
   deriving DecidableEq, Repr
 
 mutual
@@ -90,35 +90,20 @@ def ResolvedList.ofList : List ResolvedType → ResolvedList
   | [] => .nil
   | head :: tail => .cons head (ofList tail)
 
-/-- A prefix trie with indexed byte children and exact prefix membership at each node. -/
-inductive AssemblyPrefixes where
-  | node (terminal : Bool) (children : Std.TreeMap.Raw Nat AssemblyPrefixes)
+/-- The simple names of the package's pinned assemblies. A reference to an assembly of one of
+    these names that no carried slice is cannot be a platform type. -/
+abbrev PinnedNames := Std.TreeMap.Raw MetadataName Unit
 
-/-- An empty trie contains no prefixes. -/
-instance : EmptyCollection AssemblyPrefixes := ⟨.node false {}⟩
+/-- Index each pin's simple name once per package. -/
+def indexPinNames (identities : List AssemblyName) : PinnedNames :=
+  identities.foldl (fun names identity => names.insert identity.name ()) {}
 
-/-- Insert one prefix, retaining shared nodes. -/
-def AssemblyPrefixes.insert : AssemblyPrefixes → List Nat → AssemblyPrefixes
-  | .node _ children, [] => .node true children
-  | .node terminal children, byte :: rest =>
-    let child := (children[byte]?).getD {}
-    .node terminal (children.insert byte (child.insert rest))
-
-/-- Whether the supplied identity begins with any stored prefix. -/
-def AssemblyPrefixes.matches : AssemblyPrefixes → List Nat → Bool
-  | .node true _, _ => true
-  | .node false _, [] => false
-  | .node false children, byte :: rest =>
-    match children[byte]? with
-    | some child => child.matches rest
-    | none => false
-
-/-- The package's complete assembly identities, indexed by their exact bytes. -/
-abbrev ExactPins := Std.TreeMap.Raw (List Nat) Unit
+/-- The package's complete assembly identities. -/
+abbrev ExactPins := Std.TreeMap.Raw AssemblyName Unit
 
 /-- Index each full pin once per package. -/
-def indexPins (names : List (List Nat)) : ExactPins :=
-  names.foldl (fun entries name => entries.insert name ()) {}
+def indexPins (identities : List AssemblyName) : ExactPins :=
+  identities.foldl (fun entries identity => entries.insert identity ()) {}
 
 /-- Binary search of a materialized identity index, with structural fuel for kernel reduction. -/
 def containsName (names : Array (List Nat)) (key : List Nat) : Bool :=
@@ -139,8 +124,8 @@ where
 /-- Indexed metadata and assembly identities derived together from checked metadata. -/
 structure MetadataEnv where
   slices : SearchTree MetadataIndex
-  identities : Std.TreeMap.Raw (List Nat) Nat
-  pinned : AssemblyPrefixes
+  identities : Std.TreeMap.Raw AssemblyName Nat
+  pinned : PinnedNames
   exactPins : ExactPins
   /-- What the checks rely on about the types no carried slice defines. -/
   platform : PlatformTable
@@ -150,9 +135,9 @@ structure MetadataEnv where
   layoutDeclarations : Option (Array LayoutIdentity) := none
 
 /-- Build all assembly lookups once, keeping the first occurrence of each identity. -/
-def MetadataEnv.ofSlices (slices : List MetadataIndex) (pinned : AssemblyPrefixes := {})
+def MetadataEnv.ofSlices (slices : List MetadataIndex) (pinned : PinnedNames := {})
     (platform : PlatformTable := {}) (exactPins : ExactPins := {}) : MetadataEnv := Id.run do
-  let mut identities : Std.TreeMap.Raw (List Nat) Nat := {}
+  let mut identities : Std.TreeMap.Raw AssemblyName Nat := {}
   let mut position := 0
   for index in slices do
     if !identities.contains index.identity then
@@ -179,37 +164,30 @@ def IndexTables.link (index : IndexTables) (kind source : Nat) : Option (Nat × 
 /-- How deeply names, enclosing types and signature types may nest. -/
 def resolveFuel : Nat := 32
 
-/-- The simple name of an assembly identity followed by `versionMarker`: every identity of an
-    assembly of that name, at any version, culture or key, starts with it. -/
-def assemblyStem : List Nat → List Nat
-  | [] => []
-  | byte :: rest =>
-    if versionMarker.isPrefixOf (byte :: rest) then versionMarker else byte :: assemblyStem rest
-
-/-- The package's complete pin identities and their checked prefix and exact lookup tables. -/
+/-- The package's complete pin identities and their checked name and exact lookup tables. -/
 structure PinnedIndex where
-  identities : List (List Nat)
-  prefixes : AssemblyPrefixes
-  indexed : prefixes = (identities.map assemblyStem).foldl AssemblyPrefixes.insert {}
+  identities : List AssemblyName
+  names : PinnedNames
+  named : names = indexPinNames identities
   exact : ExactPins
   exactIndexed : exact = indexPins identities
 
 /-- Construct a checked index directly from its complete identity list. -/
-def PinnedIndex.ofIdentities (identities : List (List Nat)) : PinnedIndex :=
-  { identities, prefixes := (identities.map assemblyStem).foldl AssemblyPrefixes.insert {},
-    indexed := rfl, exact := indexPins identities, exactIndexed := rfl }
+def PinnedIndex.ofIdentities (identities : List AssemblyName) : PinnedIndex :=
+  { identities, names := indexPinNames identities, named := rfl, exact := indexPins identities,
+    exactIndexed := rfl }
 
 /-- Complete identities determine every component of a checked pin index. -/
 theorem PinnedIndex.ext {first second : PinnedIndex}
     (identities : first.identities = second.identities) : first = second := by
   cases first with
-  | mk first firstPrefixes firstIndexed firstExact firstBound =>
+  | mk first firstNames firstNamed firstExact firstBound =>
     cases second with
-    | mk second secondPrefixes secondIndexed secondExact secondBound =>
+    | mk second secondNames secondNamed secondExact secondBound =>
       dsimp at identities
       subst second
-      cases firstIndexed
-      cases secondIndexed
+      cases firstNamed
+      cases secondNamed
       cases firstBound
       cases secondBound
       rfl
@@ -243,31 +221,6 @@ where
     | _ :: simple :: rest => nestedParts (nestedName name simple) rest
     | [_] => none
 
-/-- Read one of the four unsigned 16-bit version components in a metadata assembly identity. -/
-private def versionPart? (input : List Nat) : Option (List Nat) := do
-  let digits := input.takeWhile fun b => 48 ≤ b && b ≤ 57
-  let count := digits.length
-  guard (0 < count && count ≤ 5 && (count == 1 || digits.head? != some 48))
-  guard (digits.foldl (fun n b => 10 * n + (b - 48)) 0 ≤ 65535)
-  return input.drop count
-
-/-- The suffix after the remaining dotted version components. -/
-private def versionSuffix? : Nat → List Nat → Option (List Nat)
-  | 0, input => versionPart? input
-  | n + 1, input => do
-    let 46 :: next ← versionPart? input | none
-    versionSuffix? n next
-/-- Check the complete neutral core assembly identity, including its publisher and version. -/
-def isCorlibScope (scope : List Nat) : Bool := Id.run do
-  let name := scope.takeWhile (· != 44)
-  let some metadataName := MetadataName.ofBytes? name | return false
-  let some publisher := coreLibraryKey? metadataName | return false
-  let rest := scope.drop name.length
-  unless versionMarker.isPrefixOf rest do return false
-  let some suffix := versionSuffix? 3 (rest.drop versionMarker.length) | return false
-  return suffix == cultureMarker ++ neutralCulture ++ tokenMarker ++
-    bytesOf (publicKeyTokenText (some publisher))
-
 /-- A base TypeRef counts as a core-library type when its scope names the platform publisher. -/
 def MetadataIndex.coreLibraryReference (index : MetadataIndex) (token : Nat) :
     Except MetadataError Bool := do
@@ -278,44 +231,45 @@ def MetadataIndex.coreLibraryReference (index : MetadataIndex) (token : Nat) :
 /-- CoreLib defines its own primitives. Other slices identify their primitive assembly by its
     AssemblyRef row, if present. -/
 def MetadataIndex.corlibIdentity (index : MetadataIndex) :
-    Except MetadataError (Option (List Nat)) :=
+    Except MetadataError (Option AssemblyName) :=
   if index.corlib == 0 then
-    .ok (if index.identity == bytesOf coreLibraryScope then some index.identity else none)
+    .ok (if index.identity == coreLibraryAssembly then some index.identity else none)
   else do
     let token ← checkedTokenOf Table.assemblyRef index.corlib .rowOverflow
     if !(← index.coreAssemblyRef token) then throw (.unsupportedAssemblyRef token)
-    .ok (some (← index.assemblyRefIdentity token))
+    .ok (some (← index.referenceName token))
 
-/-- A display-name lookup may select a carried slice only when all four identity fields agree
-    with its Assembly row. A missing slice leaves resolution to the platform or import checks. -/
-def MetadataEnv.referencePosition (env : MetadataEnv) (columns : AssemblyColumns) (token : Nat) :
+/-- The carried slice of the assembly a reference names. A missing slice leaves resolution to
+    the platform or import checks. -/
+def MetadataEnv.referencePosition (env : MetadataEnv) (assembly : AssemblyName) (token : Nat) :
     Except MetadataError (Option Nat) := do
-  let some position := env.identities[columns.spelling]? | return none
+  let some position := env.identities[assembly]? | return none
   let target ← env.slice position token
-  unless target.assembly == some columns do throw (.operandMismatch token)
+  unless target.identity == assembly do throw (.operandMismatch token)
   return some position
 
-/-- A carried reference resolves only to a slice with the same assembly identity columns. -/
-theorem MetadataEnv.referencePosition_columns {env : MetadataEnv} {columns : AssemblyColumns}
-    {token position : Nat} (found : env.referencePosition columns token = .ok (some position)) :
-    ∃ target, env.slice position token = .ok target ∧ target.assembly = some columns := by
+/-- A carried reference resolves only to a slice of the assembly it names. -/
+theorem MetadataEnv.referencePosition_identity {env : MetadataEnv} {assembly : AssemblyName}
+    {token position : Nat} (found : env.referencePosition assembly token = .ok (some position)) :
+    ∃ target, env.slice position token = .ok target ∧ target.identity = assembly := by
   unfold MetadataEnv.referencePosition at found
-  cases lookup : env.identities[columns.spelling]? with
+  cases lookup : env.identities[assembly]? with
   | none => simp [lookup, pure, Except.pure] at found
   | some selected =>
     cases read : env.slice selected token with
     | error err => simp [lookup, read, bind, Except.bind] at found
     | ok target =>
-      by_cases same : target.assembly = some columns
+      by_cases same : target.identity = assembly
       · simp [lookup, read, same, bind, Except.bind, pure, Except.pure] at found
         exact found ▸ ⟨target, read, same⟩
-      · simp [lookup, read, same, bind, Except.bind, pure, Except.pure, throw, MonadExceptOf.throw] at found
-#print axioms MetadataEnv.referencePosition_columns
+      · simp [lookup, read, same, bind, Except.bind, pure, Except.pure, throw,
+          MonadExceptOf.throw] at found
+#print axioms MetadataEnv.referencePosition_identity
 
 /-- The scope, full name and name parts a `TypeRef` spells: its assembly, or the outermost
     enclosing type's. -/
 def typeRefQualified (env : MetadataEnv) (position : Nat) :
-    Nat → Nat → Except MetadataError (AssemblyColumns × List Nat × List (List Nat))
+    Nat → Nat → Except MetadataError (AssemblyName × List Nat × List (List Nat))
   | 0, token => .error (.unresolvedType token)
   | fuel + 1, token => do
     let index ← env.slice position token
@@ -325,12 +279,10 @@ def typeRefQualified (env : MetadataEnv) (position : Nat) :
     let name := qualifiedName namespace_ simple
     match metadataTableOf row.scope with
     | 0x23 => do
-      let columns ← index.referenceColumns row.scope
-      let _ ← env.referencePosition columns token
-      return (columns, name, [namespace_, simple])
-    | 0x00 => do
-      let some assembly := index.assembly | throw (.missingSlice token)
+      let assembly ← index.referenceName row.scope
+      let _ ← env.referencePosition assembly token
       return (assembly, name, [namespace_, simple])
+    | 0x00 => return (index.identity, name, [namespace_, simple])
     | 0x01 =>
       let (scope, enclosing, parts) ← typeRefQualified env position fuel row.scope
       .ok (scope, nestedName enclosing simple, parts ++ [namespace_, simple])
@@ -406,11 +358,12 @@ def baseFits (core : Bool) (parts : List (List Nat)) : PlatformKind → Bool
     definition: an enum with the underlying type of its instance field, a value type or a
     class. -/
 def MetadataEnv.externalBaseKind (env : MetadataEnv) (index : MetadataIndex) (token base : Nat)
-    (scope : List Nat) (parts : List (List Nat)) (core : Bool) : Except MetadataError TypeKind :=
-  if env.pinned.matches scope then .error (.missingSlice base)
+    (assembly : AssemblyName) (parts : List (List Nat)) (core : Bool) :
+    Except MetadataError TypeKind :=
+  if env.pinned.contains assembly.name then .error (.missingSlice base)
   else if !core || (parts != [systemNamespace, enumName] &&
       parts != [systemNamespace, valueTypeName]) then .ok .classType
-  else match env.platform.require base scope parts (baseFits core parts) with
+  else match env.platform.require base assembly.spelling parts (baseFits core parts) with
     | .error error => .error error
     | .ok .enumRoot => .enumType <$> enumUnderlying index token
     | .ok .valueTypeRoot => .ok .valueType
@@ -419,13 +372,15 @@ def MetadataEnv.externalBaseKind (env : MetadataEnv) (index : MetadataIndex) (to
 /-- A type is an enum or a value type through an external base only when the base's platform
     definition is `System.Enum` or `System.ValueType`, named so in a core-library scope. -/
 theorem MetadataEnv.externalBaseKind_value {env : MetadataEnv} {index : MetadataIndex}
-    {token base : Nat} {scope : List Nat} {parts : List (List Nat)} {core : Bool}
-    {kind : TypeKind} (found : env.externalBaseKind index token base scope parts core = .ok kind)
+    {token base : Nat} {assembly : AssemblyName} {parts : List (List Nat)} {core : Bool}
+    {kind : TypeKind}
+    (found : env.externalBaseKind index token base assembly parts core = .ok kind)
     (value : kind = .valueType ∨ ∃ underlying, kind = .enumType underlying) :
     core = true ∧
-      ({ scope, parts, kind := .enumRoot } ∈ env.platform.definitions ∧
+      ({ scope := assembly.spelling, parts, kind := .enumRoot } ∈ env.platform.definitions ∧
           parts = [systemNamespace, enumName] ∨
-        { scope, parts, kind := .valueTypeRoot } ∈ env.platform.definitions ∧
+        { scope := assembly.spelling, parts, kind := .valueTypeRoot } ∈
+          env.platform.definitions ∧
           parts = [systemNamespace, valueTypeName]) := by
   unfold MetadataEnv.externalBaseKind at found
   split at found
@@ -539,8 +494,8 @@ private def publicForwarded (index : MetadataIndex) (position token : Nat) :
     The facade's AssemblyRef names the implementation slice and its exported name matches
     the original TypeRef. -/
 private def checkedDefinitionLink (env : MetadataEnv) (index : MetadataIndex)
-    (token target : Nat) (scope : List Nat) (parts : List (List Nat)) :
-    Except MetadataError (Nat × Nat × List Nat) := do
+    (token target : Nat) (scope : AssemblyName) (parts : List (List Nat)) :
+    Except MetadataError (Nat × Nat × AssemblyName) := do
   let some (linked, definition) := index.link linkDefinition token | throw (.unresolvedType token)
   if linked == target then return (linked, definition, scope)
   let some (facade, exported) := index.link linkForwarder token | throw (.unresolvedType token)
@@ -551,16 +506,16 @@ private def checkedDefinitionLink (env : MetadataEnv) (index : MetadataIndex)
   if (← env.referencePosition destination token) != some linked then throw (.operandMismatch token)
   let implementation ← env.slice linked definition
   publicForwarded implementation linked definition parts.reverse
-  return (linked, definition, destination.spelling)
+  return (linked, definition, destination)
 
 /-- A carried reference binds the qualified name in the checked defining assembly. -/
-private def linkedType (env : MetadataEnv) (position token target : Nat) (scope : List Nat)
+private def linkedType (env : MetadataEnv) (position token target : Nat) (scope : AssemblyName)
     (parts : List (List Nat)) (resolve : Nat → Nat → Except MetadataError NamedType) :
     Except MetadataError NamedType := do
   let index ← env.slice position token
   let (linked, definition, identity) ← checkedDefinitionLink env index token target scope parts
   let named ← resolve linked definition
-  if named.scope != identity || named.parts != parts then throw (.operandMismatch token)
+  if named.assembly != some identity || named.parts != parts then throw (.operandMismatch token)
   return named
 
 /-- A modifier needs the qualified name of each enclosing local definition. -/
@@ -582,8 +537,8 @@ private def modifierDefinition (env : MetadataEnv) (position : Nat) :
         if nested.nested != token then throw (.unresolvedType token)
         let enclosing ← modifierDefinition env position fuel nested.enclosing
         pure (nestedName enclosing.name simple, enclosing.parts ++ [namespace_, simple])
-    .ok { scope := index.identity, name, parts, kind := .external none, pinned := false,
-          assembly := index.assembly }
+    .ok { scope := index.scope, name, parts, kind := .external none, pinned := false,
+          assembly := some index.identity }
 
 /-- The storage kind of a resolved platform type, including an enum's integer element code. -/
 def PlatformKind.resolvedKind : PlatformKind → TypeKind
@@ -593,10 +548,11 @@ def PlatformKind.resolvedKind : PlatformKind → TypeKind
 /-- The named type of a reference to a type no carried slice defines: a scope of a pinned name
     is refused, and the type's platform definition must agree with the value-or-class hint and
     gives its kind. -/
-def MetadataEnv.externalNamed (env : MetadataEnv) (token : Nat) (assembly : AssemblyColumns)
-    (name : List Nat) (parts : List (List Nat)) (hint : Option Bool) : Except MetadataError NamedType :=
+def MetadataEnv.externalNamed (env : MetadataEnv) (token : Nat) (assembly : AssemblyName)
+    (name : List Nat) (parts : List (List Nat)) (hint : Option Bool) :
+    Except MetadataError NamedType :=
   let scope := assembly.spelling
-  if env.pinned.matches scope then .error (.missingSlice token)
+  if env.pinned.contains assembly.name then .error (.missingSlice token)
   else match env.platform.require token scope parts (PlatformKind.fitsHint hint) with
     | .error error => .error error
     | .ok kind =>
@@ -605,7 +561,7 @@ def MetadataEnv.externalNamed (env : MetadataEnv) (token : Nat) (assembly : Asse
 
 /-- An external type has a platform definition of its scope and name parts that agrees with the
     hint it was read with and determines its storage kind. -/
-theorem MetadataEnv.externalNamed_ok {env : MetadataEnv} {token : Nat} {scope : AssemblyColumns}
+theorem MetadataEnv.externalNamed_ok {env : MetadataEnv} {token : Nat} {scope : AssemblyName}
     {name : List Nat}
     {parts : List (List Nat)} {hint : Option Bool} {named : NamedType}
     (resolved : env.externalNamed token scope name parts hint = .ok named) :
@@ -638,16 +594,16 @@ def modifierNamed (env : MetadataEnv) (position token : Nat) : Except MetadataEr
     | 0x01 => typeRefQualified env position resolveFuel token
     | 0x02 => do
       let named ← modifierDefinition env position resolveFuel token
-      let some columns := named.assembly | throw (.missingSlice token)
-      pure (columns, named.name, named.parts)
+      let some assembly := named.assembly | throw (.missingSlice token)
+      pure (assembly, named.name, named.parts)
     | _ => throw (.unsupportedTable token)
   pure { scope := assembly.spelling, name := modifierFullName parts, parts,
          kind := .external none, pinned := false, assembly := some assembly }
 
 /-- A named type in a closed argument comes from a definition row or a scoped platform entry. -/
 inductive ArgumentHead where
-  | definition (scope : AssemblyColumns) (token : Nat)
-  | platform (scope : AssemblyColumns) (parts : List (List Nat))
+  | definition (scope : AssemblyName) (token : Nat)
+  | platform (scope : AssemblyName) (parts : List (List Nat))
   deriving DecidableEq, Repr
 
 mutual
@@ -745,16 +701,16 @@ def resolveList (env : MetadataEnv) (position : Nat)
 end
 
 /-- The definition of a resolved reference, or its external scope, spelling and name parts. -/
-abbrev ReferenceTarget := Sum NamedType (AssemblyColumns × List Nat × List (List Nat))
+abbrev ReferenceTarget := Sum NamedType (AssemblyName × List Nat × List (List Nat))
 
 /-- A reference links to its scoped definition or identifies an external name. -/
 private def referenceTarget (env : MetadataEnv) (position token : Nat)
     (resolve : Nat -> Nat -> Except MetadataError NamedType) :
     Except MetadataError ReferenceTarget := do
   let (scope, name, parts) <- typeRefQualified env position resolveFuel token
-  match env.identities[scope.spelling]? with
+  match env.identities[scope]? with
   | none => return .inr (scope, name, parts)
-  | some target => .inl <$> linkedType env position token target scope.spelling parts resolve
+  | some target => .inl <$> linkedType env position token target scope parts resolve
 
 /-- A signature head resolves through its definition or its scoped platform entry. -/
 private def signatureHead (env : MetadataEnv) (position : Nat)
@@ -826,9 +782,9 @@ private theorem definitionParts_add (index : MetadataIndex) (position fuel extra
 #print axioms definitionParts_add
 
 /-- A carried root gives a storage kind only under its own core assembly and exact name. -/
-private def carriedRootKind (index : MetadataIndex) (token : Nat) (scope : List Nat)
+private def carriedRootKind (index : MetadataIndex) (token : Nat) (assembly : AssemblyName)
     (parts : List (List Nat)) : Except MetadataError TypeKind := do
-  if !isCorlibScope scope then return .classType
+  if !assembly.isCoreLibrary then return .classType
   if parts == [systemNamespace, enumName] then return .enumType (<- enumUnderlying index token)
   if parts == [systemNamespace, valueTypeName] then return .valueType
   return .classType
@@ -839,20 +795,20 @@ def typeDefKind (env : MetadataEnv) (index : MetadataIndex) (position token : Na
   if row.flags &&& 0x20 != 0 then return .interfaceType
   let kind <- match metadataTableOf row.extends_ with
     | 0x02 => do
-      if tokenRow row.extends_ == 0 || !isCorlibScope index.identity then pure .classType
+      if tokenRow row.extends_ == 0 || !index.identity.isCoreLibrary then pure .classType
       else
         let base <- index.typeDef row.extends_
         carriedRootKind index token index.identity
           (<- definitionParts index position resolveFuel row.extends_ base)
     | 0x01 => do
       let (assembly, _, parts) <- typeRefQualified env position resolveFuel row.extends_
-      let scope := assembly.spelling
-      match env.identities[scope]? with
+      match env.identities[assembly]? with
       | none => do
         let core <- index.coreLibraryReference row.extends_
-        env.externalBaseKind index token row.extends_ scope parts core
+        env.externalBaseKind index token row.extends_ assembly parts core
       | some target => do
-        let (linked, definition, identity) ← checkedDefinitionLink env index row.extends_ target scope parts
+        let (linked, definition, identity) ←
+          checkedDefinitionLink env index row.extends_ target assembly parts
         let base <- env.slice linked definition
         let baseParts <- definitionParts base linked resolveFuel definition
           (<- base.typeDef definition)
@@ -860,7 +816,7 @@ def typeDefKind (env : MetadataEnv) (index : MetadataIndex) (position token : Na
         carriedRootKind index token base.identity baseParts
     | _ => pure .classType
   if kind == .valueType && ownParts == [systemNamespace, enumName] &&
-      isCorlibScope index.identity then return .classType
+      index.identity.isCoreLibrary then return .classType
   return kind
 
 /-- A carried definition's scoped name and kind, independent of its base's layout. -/
@@ -871,7 +827,8 @@ def typeDefNamed (env : MetadataEnv) (position fuel token : Nat) :
   let parts <- definitionParts index position fuel token row
   let some name := partsName parts | throw (.unresolvedType token)
   let kind <- typeDefKind env index position token row parts
-  return { scope := index.identity, name, parts, kind, pinned := true, assembly := index.assembly }
+  return { scope := index.scope, name, parts, kind, pinned := true,
+           assembly := some index.identity }
 
 /-- Once the enclosing names resolve, any larger nesting budget recovers the same definition. -/
 theorem typeDefNamed_of_le {env : MetadataEnv} {position fuel budget token : Nat} {named : NamedType}
@@ -921,13 +878,13 @@ def namedOf (env : MetadataEnv) (position token : Nat) (hint : Option Bool) :
 def ArgumentHead.resolve (env : MetadataEnv) (method arity : Nat) :
     ArgumentHead → Except MetadataError NamedType
   | .definition scope token => do
-    if !env.exactPins.contains scope.spelling then throw (.missingSlice token)
+    if !env.exactPins.contains scope then throw (.missingSlice token)
     let some position ← env.referencePosition scope token | throw (.missingSlice token)
     let named ← typeDefNamed env position resolveFuel token
     env.requireArity position token named arity
     return named
   | .platform scope parts => do
-    if env.identities.contains scope.spelling then throw (.unresolvedType method)
+    if env.identities.contains scope then throw (.unresolvedType method)
     let some name := partsName parts | throw (.unresolvedType method)
     let named <- env.externalNamed method scope name parts none
     if named.platformArity != arity then throw (.genericMismatch method)
@@ -1447,7 +1404,7 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
       bytesOf identity == named.scope ++ [58, 58] ++ named.name && valueLike named.kind &&
         !named.fixedStorage && frame.layoutMatches index identity named none
     | .named named, .enum identity storage =>
-      (named.assembly.any (·.matches identity.assembly) &&
+      (named.assembly == some identity.assembly &&
         declarationMatches identity.levels named.parts) &&
         match named.kind with
         | .enumType code =>
@@ -1581,20 +1538,17 @@ theorem typeAdmits_runtimePrimitiveAtom {frame : Frame} {fuel : Nat} {type : Res
     | _ => simp [typeAdmits, spelled]
 #print axioms typeAdmits_runtimePrimitiveAtom
 
-/-- Every admitted enum parameter has the assembly columns of its resolved definition or reference. -/
+/-- Every admitted enum parameter names the assembly of its resolved definition or reference. -/
 theorem typeAdmits_enum_assembly {frame : Frame} {fuel : Nat} {named : NamedType}
     {identity : TypeIdentity} {storage : EnumStorage}
     (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity storage) = true) :
-    ∃ columns, named.assembly = some columns ∧ columns.matches identity.assembly = true := by
-  cases row : named.assembly with
-  | none => simp [typeAdmits, row] at admitted
-  | some columns =>
-    simp only [typeAdmits, row, Option.any, Bool.and_eq_true] at admitted
-    exact ⟨columns, rfl, admitted.1.1⟩
+    named.assembly = some identity.assembly := by
+  simp only [typeAdmits, Bool.and_eq_true, beq_iff_eq] at admitted
+  exact admitted.1.1
 #print axioms typeAdmits_enum_assembly
 
 /-- An admitted platform enum has the name and integer storage of its scoped definition. -/
-theorem typeAdmits_external_enum {env : MetadataEnv} {token : Nat} {scope : AssemblyColumns}
+theorem typeAdmits_external_enum {env : MetadataEnv} {token : Nat} {scope : AssemblyName}
     {name : List Nat}
     {parts : List (List Nat)} {hint : Option Bool} {frame : Frame} {fuel : Nat}
     {named : NamedType} {identity : TypeIdentity} {storage : EnumStorage}

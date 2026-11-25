@@ -19,14 +19,25 @@ namespace CIL.Extraction
     number, distinct for distinct pairs. -/
 def tokenSpace : Nat := 2 ^ 32
 
-/-- An assembly identity as one number: its bytes in base 256 after a leading 1, so distinct byte
-    strings give distinct numbers; `none` when an entry is not a byte. -/
-def identityCode (identity : List Nat) : Option Nat :=
-  if identity.all (· < 256) then some (identity.foldl (fun code byte => code * 256 + byte) 1)
-  else none
+/-- The digit that ends each column of an identity code; no decimal digit equals it. -/
+private def columnEnd : Nat := 10
+
+/-- A number's decimal digits followed by `columnEnd`. -/
+private def column (value : Nat) : List Nat :=
+  (Nat.toDigits 10 value).map (·.toNat - '0'.toNat) ++ [columnEnd]
+
+/-- An assembly identity as one number: the columns of its name and culture codes, version and
+    token, each ended by `columnEnd` and read in base 11 after a leading 1, so distinct
+    identities give distinct numbers. A null token is an empty column. -/
+def identityCode (identity : AssemblyName) : Nat :=
+  let version := identity.version
+  let columns := [identity.name.code, version.major, version.minor, version.build,
+    version.revision, identity.culture.code].flatMap column ++
+    (identity.publicKeyToken.map column).getD [columnEnd]
+  columns.foldl (fun code digit => code * (columnEnd + 1) + digit) 1
 
 /-- The code of the identity of each slice a body carries, in the slices' order. -/
-def BodyEvidence.sliceCodes (body : BodyEvidence) : List (Option Nat) :=
+def BodyEvidence.sliceCodes (body : BodyEvidence) : List Nat :=
   body.identities.map identityCode
 
 /-- The metadata slice and Field token a recorded static operand resolves to. -/
@@ -37,10 +48,10 @@ def BodyEvidence.staticFieldRow (body : BodyEvidence) (token : Nat) : Option (Na
 /-- The field a recorded static token names, packed as its assembly's code times `tokenSpace`
     plus its `Field` row token: a `Field` token is a row of the body's own assembly, and a
     `MemberRef` names the row its own slice links it to, the link the token's binding checked. -/
-def BodyEvidence.staticField (body : BodyEvidence) (codes : List (Option Nat)) (token : Nat) :
+def BodyEvidence.staticField (body : BodyEvidence) (codes : List Nat) (token : Nat) :
     Option Nat := do
   let (position, row) ← body.staticFieldRow token
-  let code ← (← codes[position]?)
+  let code ← codes[position]?
   if row < tokenSpace then some (code * tokenSpace + row) else none
 
 /-- The recorded token at each of the ascending `pcs`, walking them beside the recorded accesses

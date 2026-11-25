@@ -106,10 +106,10 @@ def BodyEvidence.bindConstructors? (body : BodyEvidence) (source : RawMethod)
   let (first, _, _) ← distinct.head?
   let slices := body.metadata.others ++ dependencies
   let initial := { body.metadata with others := slices }
-  let added := dependencies.map (fun slice => bytesOf slice.assembly.identity)
+  let added ← dependencies.mapM fun slice => slice.assembly.name.toOption
   let identities := body.identities ++ added
   let defining := distinct.foldl (fun kept (_, _, callee) =>
-    let identity := bytesOf callee.assembly.identity
+    let identity := callee.assembly.identity
     if body.pinned.identities.contains identity || kept.contains identity then kept
     else kept ++ [identity]) []
   let pins := PinnedIndex.ofIdentities (body.pinned.identities ++ defining)
@@ -118,7 +118,7 @@ def BodyEvidence.bindConstructors? (body : BodyEvidence) (source : RawMethod)
   let env ← base.environment.toOption
   let members ← distinct.mapM fun (token, _, callee) => do
     let [position] := identities.zipIdx.filterMap (fun (id, i) =>
-        if id == bytesOf callee.assembly.identity then some i else none) | none
+        if id == callee.assembly.identity then some i else none) | none
     return (⟨linkDefinition, token, position, callee.closed.token⟩ : MetadataLink)
   let index ← (env.slice 0 first).toOption
   let links := body.metadata.own.rows.flatMap fun (key, _) =>
@@ -135,7 +135,7 @@ def BodyEvidence.bindConstructors? (body : BodyEvidence) (source : RawMethod)
   let bound ← distinct.mapM fun (token, external, callee) => do
     let site ← (env.methodSite token).toOption
     let (position, definition) ← site.definition
-    guard (identities[position]? == some (bytesOf callee.assembly.identity) &&
+    guard (identities[position]? == some callee.assembly.identity &&
       definition == callee.closed.token)
     let owner ← callee.closed.receiverClass
     let method := { external.method with

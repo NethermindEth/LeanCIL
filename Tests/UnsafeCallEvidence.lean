@@ -1,5 +1,6 @@
 import CIL.Extraction.DecodedMethod
 import Tests.Support.RawDecoding
+import Tests.Support.FixtureAssembly
 
 /-! Exact runtime operands, modelled reference helpers and the opcodes that can emit null. -/
 
@@ -62,7 +63,7 @@ end Tests.UnsafeCallEvidence
 namespace Tests.UnsafeCallEvidence
 
 /-- A type of the fixture's own assembly with the runtime `Unsafe` class's name. -/
-private def localUnsafe : TypeExpr := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe"
+private def localUnsafe : TypeExpr := .atom fixtureScope "System.Runtime.CompilerServices.Unsafe"
 
 /-- A managed generic AreSame method in the fixture's assembly. -/
 private def localAreSame : CallSite := {
@@ -81,9 +82,9 @@ theorem local_reference_helper_name :
     let instruction := RawInstruction.mk 0 40 (.call localAreSame)
     let emitted := Instruction.call localAreSame.method {}
     let callee : SpecializedMethod := {
-      assembly := ⟨"Fixture"⟩
+      assembly := ⟨fixtureAssembly⟩
       arguments := [word], closed := { raw localAreSame with
-        token := 23, owner := "Fixture::System.Runtime.CompilerServices.Unsafe",
+        token := 23, owner := fixtureScope ++ "::System.Runtime.CompilerServices.Unsafe",
         parameters := localAreSame.parameterTypes, returnType := localAreSame.returnType } }
     let check := validateManagedCallWith 1 (fun i => if i == 0 then some callee else none)
       (fun _ => none) instruction true

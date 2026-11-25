@@ -1,4 +1,5 @@
 import CIL.Extraction.MetadataBinding
+import Tests.Support.FixtureAssembly
 
 /-!
 # Hand-built metadata for tests
@@ -150,14 +151,14 @@ def tableHeader (counts : List (Nat × Nat)) : List Nat :=
   [0, 0, 0, 0, 2, 0, 0, 1] ++ littleEndian 8 valid ++ littleEndian 8 0 ++
     (tables.flatMap fun table => littleEndian 4 ((counts.lookup table).getD 0))
 
-/-- An assembly name and the pinned identity it spells, with one `Assembly` row. -/
-def assemblyBlock (builder : Builder) (name : List Nat) (identity : String) (version : Nat) :
+/-- The assembly `name` at major version `version`, unsigned and neutral, as one `Assembly` row. -/
+def assemblyBlock (builder : Builder) (name : List Nat) (version : Nat) :
     Builder × AssemblyMetadata :=
   let (builder, nameOffset) := builder.addString name
   let counts := builder.counts.filter (·.1 != Table.assembly) ++ [(Table.assembly, 1)]
   let row := littleEndian 4 0x8004 ++ littleEndian 2 version ++ [0, 0, 0, 0, 0, 0] ++
     littleEndian 4 0 ++ littleEndian 2 0 ++ littleEndian 2 nameOffset ++ littleEndian 2 0
-  (builder, { identity := identity, tableHeader := tableHeader counts, assemblyRow := row,
+  (builder, { tableHeader := tableHeader counts, assemblyRow := row,
               strings := [(0, [0]), (nameOffset, name ++ [0])], blobs := [(0, [0])] })
 
 /-- Insert `item` before the first item whose key is not smaller, keeping equal keys in order. -/
@@ -170,10 +171,10 @@ def insertByKey {α : Type} (key : α → Nat) (item : α) : List α → List α
 def sortByKey {α : Type} (key : α → Nat) (items : List α) : List α :=
   items.foldr (insertByKey key) []
 
-/-- The slice a builder describes, with the `Assembly` row of the given name and identity. -/
-def finish (builder : Builder) (name : List Nat) (identity : String) (version : Nat) :
+/-- The slice a builder describes, with the `Assembly` row of the given name and version. -/
+def finish (builder : Builder) (name : List Nat) (version : Nat) :
     MetadataSlice :=
-  let (builder, assembly) := assemblyBlock builder name identity version
+  let (builder, assembly) := assemblyBlock builder name version
   { assembly := { assembly with
         tableHeader := tableHeader (builder.counts.filter (·.1 != Table.assembly) ++
           [(Table.assembly, 1)]) },
@@ -182,9 +183,9 @@ def finish (builder : Builder) (name : List Nat) (identity : String) (version : 
     links := sortByKey (fun link => link.kind * 0x100000000 + link.source) builder.links }
 
 /-- The slice that `step` builds, and what it returns. -/
-def build {α : Type} (step : Step α) (name : List Nat) (identity : String) (version : Nat := 1) :
+def build {α : Type} (step : Step α) (name : List Nat) (version : Nat := 1) :
     MetadataSlice × α :=
   let (value, builder) := step.run {}
-  (finish builder name identity version, value)
+  (finish builder name version, value)
 
 end Tests.MetadataBuilder

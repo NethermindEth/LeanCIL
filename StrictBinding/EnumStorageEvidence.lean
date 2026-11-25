@@ -93,7 +93,8 @@ theorem EnumStorageChecked.carried {images : List PinnedImage} {platform : Platf
 /-- A certified external enum resolves through its supplied forwarders to its physical field code. -/
 theorem EnumStorageChecked.external {images : List PinnedImage} {platform : PlatformTable}
     {methods : List MethodEvidence} {item : MethodEvidence} {env : MetadataEnv} {token fuel : Nat}
-    {scope : AssemblyColumns} {name : List Nat} {parts : List (List Nat)} {hint : Option Bool} {frame : Frame}
+    {scope : CIL.AssemblyName} {name : List Nat} {parts : List (List Nat)} {hint : Option Bool}
+    {frame : Frame}
     {named : NamedType} {identity : TypeIdentity} {storage : EnumStorage}
     (checked : EnumStorageChecked images platform methods true) (method : item ∈ methods)
     (environment : item.body.environment = .ok env)

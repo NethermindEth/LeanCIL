@@ -8,7 +8,7 @@ namespace ImportedLayoutCases
 open StrictBinding CIL.Extraction
 
 /-- The compiled assembly under the identity the extraction records for it. -/
-private def images : List PinnedImage := [⟨Extracted.assembly0.identity, LayoutImage.image⟩]
+private def images : List PinnedImage := [⟨Extracted.assembly0Scope, LayoutImage.image⟩]
 
 /-- The import identity that names the slot in a refusal. -/
 private def slotIdentity := "Gates.Reader::Read(Gates.Overlay&)"

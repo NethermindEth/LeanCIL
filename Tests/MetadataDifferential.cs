@@ -236,7 +236,8 @@ Text(assemblyDefinition.Culture);
 Blob(assemblyDefinition.PublicKey);
 var assemblyRowAt = reader.GetTableMetadataOffset(TableIndex.Assembly);
 var assemblyRow = meta.AsSpan(assemblyRowAt, reader.GetTableRowSize(TableIndex.Assembly)).ToArray();
-var identityText = JsonSerializer.Serialize(module.Assembly.Name.FullName);
+var keyToken = module.Assembly.Name.PublicKeyToken is { Length: > 0 } publicKeyToken
+    ? $"publicKeyToken := some 0x{Convert.ToHexStringLower(publicKeyToken)}, " : "";
 // The runtime directory supplies platform identities; the caller identifies contract libraries separately.
 var runtimeDirectory = Path.GetDirectoryName(typeof(object).Assembly.Location);
 var trusted = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") ??
@@ -285,7 +286,7 @@ var prefix = $$"""
 
     def slice : MetadataSlice :=
       { assembly :=
-          { identity := {{identityText}}, tableHeader := {{Bytes(header)}},
+          { {{keyToken}}tableHeader := {{Bytes(header)}},
             assemblyRow := {{Bytes(assemblyRow)}}, strings := {{Entries(strings)}},
             blobs := {{Entries(blobs)}} },
         rows :={{Entries(rows)}}, strings := {{Entries(strings)}}, blobs := {{Entries(blobs)}}, corlib := {{corlib}},

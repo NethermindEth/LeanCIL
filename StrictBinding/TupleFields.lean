@@ -53,8 +53,7 @@ private def pairRef (index : MetadataIndex) (token : Nat) : Except MetadataError
   if metadataTableOf row.scope != Table.assemblyRef then return false
   if (← index.string row.namespace_) != systemNamespace ||
       (← index.string row.name) != valueTuplePairName then return false
-  return (← index.assemblyRefName row.scope runtimeAssembly) == some runtimeAssembly &&
-    (← index.assemblyRefIdentity row.scope) == runtimeScopeBytes
+  return (← index.referenceName row.scope) == runtimeAssembly
 
 /-- Bind the defining or forwarded pair to both the selected layout and its scoped TypeRef. -/
 def checkTupleFields (images : List PinnedImage) (evidence : List MethodEvidence)
@@ -64,16 +63,16 @@ def checkTupleFields (images : List PinnedImage) (evidence : List MethodEvidence
   let mut used := false
   for item in evidence do
     for slice in item.body.metadata.slices do
-      let .ok index := slice.index | throw (.invalidTupleDefinition slice.assembly.identity)
+      let .ok index := slice.index | throw (.invalidTupleDefinition (blockDisplay slice.assembly))
       for (token, _) in slice.rows do
         let .ok matchesPair := pairRef index token
-          | throw (.invalidTupleDefinition slice.assembly.identity)
+          | throw (.invalidTupleDefinition (blockDisplay slice.assembly))
         if matchesPair then used := true; break
       if used then break
     if used then break
   unless used do return false
   let prepared ← prepare images
-  resolvePlatformType prepared "ValueTuple`2" .invalidTupleDefinition pairFields runtimeScope
+  resolvePlatformType prepared "ValueTuple`2" .invalidTupleDefinition pairFields runtimeAssembly
     (prepared.length + 1)
 
 /-- The selected pair's defining image declares both instance fields in the expected order. -/

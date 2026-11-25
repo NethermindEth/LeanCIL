@@ -6,12 +6,14 @@ namespace DispatchScaling
 open CIL CIL.Extraction
 set_option maxRecDepth 65536
 set_option maxHeartbeats 0
-/-- One interface shared by every concrete type. -/
-def iface : TypeExpr := .atom "Fixture" "IValue"
 /-- The assembly declaring every fixture type. -/
-def pin : AssemblyPin := { identity := "Fixture" }
+def pin : AssemblyPin := ⟨⟨name!"Fixture", ⟨1, 0, 0, 0⟩, name!"", none⟩⟩
+/-- The scope text of `pin` in the fixture's type names. -/
+def scope : String := "Fixture, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+/-- One interface shared by every concrete type. -/
+def iface : TypeExpr := .atom scope "IValue"
 /-- Distinct aggregate identities within one assembly. -/
-def receiver (index : Nat) : TypeExpr := .aggregate ("Fixture::T" ++ toString index) index
+def receiver (index : Nat) : TypeExpr := .aggregate (scope ++ "::T" ++ toString index) index
 /-- Abstract interface method with a simple void signature. -/
 def slot : DispatchMethod := {
   token := 5, name := "Read", hasThis := true, isPublic := true, isAbstract := true,

@@ -158,6 +158,11 @@ theorem digest : StrictBinding.DigestIs image
 def identity : String :=
   "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=null"
 
+/-- The assembly the image's `Assembly` row names, which `identity` displays. -/
+def assembly : CIL.AssemblyName :=
+  { name := name!"StrictFixture", version := ⟨1, 2, 3, 4⟩, culture := name!"",
+    publicKeyToken := none }
+
 /-- What System.Reflection.Metadata reads from the image. -/
 def expectedFacts : List StrictBinding.Fact :=
   [.sectionHeader 1880 8192 2048 512,
@@ -231,8 +236,7 @@ def bodies : List (String × Nat × List Nat) :=
 
 /-- The assembly block an extraction carries for the image. -/
 def assemblyBlock : CIL.Extraction.AssemblyMetadata :=
-  { identity := "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=null",
-    tableHeader :=
+  { tableHeader :=
       [0, 0, 0, 0, 2, 0, 0, 1, 87, 157, 163, 41, 9, 0, 0, 0, 0, 250, 1, 51, 0, 22, 0, 0, 1, 0, 0,
        0, 11, 0, 0, 0, 8, 0, 0, 0, 6, 0, 0, 0, 10, 0, 0, 0, 3, 0, 0, 0, 8, 0, 0, 0, 2, 0, 0, 0,
        6, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0,

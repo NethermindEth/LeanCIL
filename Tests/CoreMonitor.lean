@@ -63,11 +63,11 @@ private def metadata : MethodMetadata := { own := {
 private def body : BodyEvidence := {
   bytes := [78,3,71,44,5,40,105,61,0,6,2,40,97,61,0,6,3,23,82,42]
   tokens := { operands := [(0x06003d69, reject), (0x06003d61, enter)] }
-  metadata, tables := metadata.tables.toOption.getD [], identities := [bytesOf coreLibraryScope]
-  names := { owner := bytesOf original.owner
+  metadata, tables := metadata.tables.toOption.getD [], identities := [coreLibraryAssembly]
+  names := { assembly := some coreLibraryAssembly, owner := bytesOf original.owner
              signature := bytesOf ("System.Void System.Threading.Monitor::Enter(" ++
                "System.Object,System.Boolean&)") }
-  pinned := PinnedIndex.ofIdentities [bytesOf coreLibraryScope] }
+  pinned := PinnedIndex.ofIdentities [coreLibraryAssembly] }
 
 private def decoded := Method.ofBody? .scalar {} [(3,.direct 1), (5,.direct 2)]
     (List.replicate 10 true) body original []

@@ -16,8 +16,8 @@ private def foreignTargets : Option (Bool × Bool × Bool) := do
   let instruction ← Extracted.method0Original.code[1]?
   let .call site := instruction.operand | none
   let .virtual targets := Extracted.method0Link1 | none
-  let foreignType := TypeExpr.object Extracted.assembly1.identity "Neighbours.NewShape"
-  let triangle := TypeExpr.object Extracted.assembly0.identity "Geometry.Triangle"
+  let foreignType := TypeExpr.object Extracted.assembly1Scope "Neighbours.NewShape"
+  let triangle := TypeExpr.object Extracted.assembly0Scope "Geometry.Triangle"
   let (_, localBody) ← targets.find? (·.1 == triangle)
   let types := Extracted.method0DispatchTypes
   let valid table := virtualTableValid types (findDispatchType types)
@@ -30,13 +30,13 @@ theorem exactForeignTarget : foreignTargets = some (true, false, false) := by de
 
 /-- A receiver whose type is declared in the entry assembly. -/
 private def localClass (name : String) :=
-  TypeExpr.object Extracted.assembly0.identity ("Geometry." ++ name)
+  TypeExpr.object Extracted.assembly0Scope ("Geometry." ++ name)
 
 /-- The shape and cube occupy separate live objects in caller memory. -/
 private def caller (foreignShape : Bool) : Safety.Memory := { Safety.Memory.empty with
   allocations := fun id =>
     if id == 0 then
-      let shape := if foreignShape then .object Extracted.assembly1.identity "Neighbours.NewShape"
+      let shape := if foreignShape then .object Extracted.assembly1Scope "Neighbours.NewShape"
         else localClass "Triangle"
       some ⟨.object ⟨shape, [localClass "Shape"]⟩, ⟨8,8,[]⟩, true, []⟩
     else if id == 1 then some ⟨.object ⟨localClass "Cube", [localClass "Solid"]⟩, ⟨8,8,[]⟩, true, []⟩

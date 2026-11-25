@@ -6,7 +6,7 @@ import StrictBinding.StaticData
 namespace StaticSiteCases
 open CIL.Extraction StrictBinding
 
-private def images : List PinnedImage := [⟨Extracted.assembly0.identity, RvaImage.image⟩]
+private def images : List PinnedImage := [⟨Extracted.assembly0Scope, RvaImage.image⟩]
 
 private def change (f : StaticFieldSite → StaticFieldSite) : List MethodEvidence :=
   Extracted.methodEvidence.map fun item =>

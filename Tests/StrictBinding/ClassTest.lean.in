@@ -7,9 +7,9 @@ namespace ClassTest
 open CIL CIL.Extraction CIL.Safety
 
 /-- The runtime type of the fixture's sole object. -/
-private def triangle := TypeExpr.object Extracted.assembly0.identity "Geometry.Triangle"
+private def triangle := TypeExpr.object Extracted.assembly0Scope "Geometry.Triangle"
 /-- The static base class accepted by both branches. -/
-private def shape := TypeExpr.object Extracted.assembly0.identity "Geometry.Shape"
+private def shape := TypeExpr.object Extracted.assembly0Scope "Geometry.Shape"
 
 /-- The caller owns one exact Triangle at allocation zero. -/
 private def caller : Safety.Memory := { Safety.Memory.empty with

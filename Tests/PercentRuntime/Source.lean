@@ -10,7 +10,6 @@ set_option maxHeartbeats 8000000
 
 /-- Examples assembly identity, table header and heaps. -/
 def assembly0Metadata : AssemblyMetadata := {
-  identity := "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
   tableHeader := (fixedBytes 128 0x000000000200000157DFA32B091E000000FA013300160000010000006A000000EB000000F100000013050000E40600002B0000002A0200001A00000032010000010000001F0000000D00000071000000140000001F000000220000001C00000057000000030000000100000004000000230000004C0000003E01000058000000),
   header := .ofCounts 0 [(0, 1), (1, 106), (2, 235), (4, 241), (6, 1299),
     (8, 1764), (9, 43), (10, 554), (11, 26), (12, 306), (14, 1),
@@ -21,11 +20,16 @@ def assembly0Metadata : AssemblyMetadata := {
   strings := [(0, (fixedBytes 1 0x00)), (1, (fixedBytes 9 0x4578616D706C657300))],
   blobs := [(0, (fixedBytes 1 0x00))]}
 
-/-- Identity bytes for the compiled Examples fixture. -/
-def id0 := bytesOf "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+/-- The identity of the compiled Examples fixture. -/
+def id0 : AssemblyName :=
+  { name := name!"Examples", version := ⟨1, 0, 0, 0⟩, culture := name!"", publicKeyToken := none }
+
+/-- The scope text of `id0` in the fixture's type names. -/
+def examplesScope : String := "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 
 /-- The image metadata authenticates the Examples identity. -/
-theorem image0_identified : AssemblyIdentified assembly0Metadata id0 := ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+theorem image0_identified : AssemblyIdentified assembly0Metadata id0 :=
+  ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
 #print axioms image0_identified
 
 /-- The caller constructor reference after resolution to its defining method. -/
@@ -110,7 +114,7 @@ theorem bound_newobj : (decoded.toOption.bind fun d => (d.code[5]?).map (·.oper
 /-- Method declaration with instructions, stack limit and locals from the decoder. -/
 def raw : RawMethod :=
   let b := decoded.toOption.getD { maxStack := 0, initLocals := false, localSignature := 0, code := [], statics := [] }
-  { token := 100664308, owner := (assembly0Metadata.identity ++ "::Examples.Throws"),
+  { token := 100664308, owner := (examplesScope ++ "::Examples.Throws"),
     hasThis := false, explicitThis := false, callingConvention := 0, attributes := 150,
     implementation := 0, returnType := .primitive .uint32,
     parameters := [.primitive .uint32], locals := [], initLocals := b.initLocals,
@@ -118,12 +122,12 @@ def raw : RawMethod :=
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names : MethodNames := {
-  owner := bytesOf (assembly0Metadata.identity ++ "::Examples.Throws"),
+  assembly := some id0, owner := bytesOf (examplesScope ++ "::Examples.Throws"),
   signature := bytesOf "System.UInt32 Examples.Throws::Percent(System.UInt32)" }
 
 /-- The metadata and body bytes justify this caller definition. -/
-theorem body_bound : BodyDecodes [⟨assembly0Metadata.identity⟩,⟨runtimeScope⟩,⟨coreLibraryScope⟩] {}
-    ⟨assembly0Metadata.identity⟩ {source with names} raw [] "System.UInt32 Examples.Throws::Percent(System.UInt32)" :=
+theorem body_bound : BodyDecodes [⟨id0⟩, ⟨facadeIdentity⟩, ⟨coreIdentity⟩] {}
+    ⟨id0⟩ {source with names} raw [] "System.UInt32 Examples.Throws::Percent(System.UInt32)" :=
   ⟨.cons image0_identified (.cons facadeIdentified (.cons coreIdentified .nil)),
    tables_valid, by cil_kernel_rfl, by decide +kernel,rfl,by cil_kernel_rfl, by cil_kernel_rfl,by cil_body_decodes⟩
 #print axioms body_bound

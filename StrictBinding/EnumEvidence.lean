@@ -45,7 +45,8 @@ theorem coveredEnumEntries_each {images : List PreparedImage} {entries : List Pl
 
 /-- The element code an extracted enum operand admits is the code in its physical backing field. -/
 theorem externalEnum_physicalStorage {images : List PreparedImage} {env : MetadataEnv} {token : Nat}
-    {scope : AssemblyColumns} {name : List Nat} {parts : List (List Nat)} {hint : Option Bool} {frame : Frame}
+    {scope : CIL.AssemblyName} {name : List Nat} {parts : List (List Nat)} {hint : Option Bool}
+    {frame : Frame}
     {fuel : Nat} {named : NamedType} {identity : TypeIdentity} {storage : EnumStorage}
     (resolved : env.externalNamed token scope name parts hint = .ok named)
     (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity storage) = true)

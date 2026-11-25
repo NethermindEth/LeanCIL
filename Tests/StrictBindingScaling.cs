@@ -508,7 +508,7 @@ partial class Program
         {
             var file = files[index];
             var identity = StrictBindingFacts.Identity(file);
-            var claims = TypeDefinitionClaims(file, identity, nestedRows[index]);
+            var claims = TypeDefinitionClaims(file, StrictBindingFacts.Name(file), nestedRows[index]);
             var rejections = index == 0 ? TypeDefinitionRejections(file, identity, claims, nestedRows[index]) : "";
             return $$"""
                 namespace Types{{size}}
@@ -532,8 +532,8 @@ partial class Program
         var sorting = string.Concat(sizes.Select((size, index) => $$"""
             namespace Sorted{{size}}
             /-- The NestedClass table of the image is sorted by its nested type column. -/
-            def claims : List StrictBinding.SortedClaim := [{ identity := "{{StrictBindingFacts.Identity(files[index])
-                }}", table := {{(int)TableIndex.NestedClass}}, key := StrictBinding.nestedClassKey }]
+            def claims : List StrictBinding.SortedClaim := [{ identity := {{StrictBindingFacts.Name(files[index])
+                }}, table := {{(int)TableIndex.NestedClass}}, key := StrictBinding.nestedClassKey }]
             {{report}}
             theorem prepared : StrictBinding.ok (StrictBinding.prepare Types{{size}}.pinned) = true := by
               decide +kernel
@@ -606,7 +606,7 @@ partial class Program
             theorem rejects_a_nested_class_table_out_of_order : Tests.StrictBinding.failsWith
                 (StrictBinding.checkAll StrictBinding.sortedClaimBound
                   [{ identity := "{{identity}}", image := image }]
-                  [{ identity := "{{identity}}", table := {{(int)TableIndex.NestedClass}},
+                  [{ identity := {{StrictBindingFacts.Name(changed)}}, table := {{(int)TableIndex.NestedClass}},
                      key := StrictBinding.nestedClassKey }])
                 (.unsortedTable {{(int)TableIndex.NestedClass}} 2) = true := by decide +kernel
             #print axioms rejects_a_nested_class_table_out_of_order
@@ -623,7 +623,7 @@ partial class Program
     /// by System.Reflection.Metadata. A nested type is placed at its NestedClass row and a type at the top level
     /// between the rows that name lower and higher types, given `nestedRows`, the ascending nested type rows.
     /// </summary>
-    static TypeDefinitionClaim[] TypeDefinitionClaims(byte[] file, string identity, int[] nestedRows)
+    static TypeDefinitionClaim[] TypeDefinitionClaims(byte[] file, string name, int[] nestedRows)
     {
         using var reader = new PEReader(System.Collections.Immutable.ImmutableArray.Create(file));
         var metadata = reader.GetMetadataReader();
@@ -663,7 +663,7 @@ partial class Program
                 : baseType.Kind == HandleKind.TypeSpecification ? $".spec {MetadataTokens.GetToken(baseType)}"
                 : $".named {MetadataTokens.GetToken(baseType)} {Ascii(baseNamespace)} {Ascii(baseName)}";
             return new TypeDefinitionClaim(row, metadata.GetString(definition.Name), kind, enclosing,
-                $"{{ identity := \"{identity}\", row := {row}, typeNamespace := {Bytes(definition.Namespace)}, " +
+                $"{{ identity := {name}, row := {row}, typeNamespace := {Bytes(definition.Namespace)}, " +
                 $"typeName := {Bytes(definition.Name)}, nesting := {nesting}, kind := .{kind}, " +
                 $"fields := ({first}, {fields.Count}), base := {baseTerm} }}");
         })];
@@ -894,13 +894,14 @@ partial class Program
     static string AllBodiesModule(byte[] file, int? claims)
     {
         var identity = StrictBindingFacts.Read(file).Last().Text;
+        var name = StrictBindingFacts.Name(file);
         var read = StrictBindingFacts.Bodies(file);
         // A claim count beyond the bodies the image has repeats them, so the claims can outgrow a fixed image.
         var bodies = Enumerable.Range(0, claims ?? read.Count).Select(index => read[index % read.Count]).ToArray();
         var size = BindingPageSize(bodies.Length);
         // One definition per claim keeps each list literal small enough for the elaborator's recursion limit.
         var parts = bodies.Select(body =>
-            $"{{ identity := \"{identity}\", token := 0x{body.Token:x8}, " +
+            $"{{ identity := {name}, token := 0x{body.Token:x8}, " +
             $"bytes := [{string.Join(", ", body.Bytes)}] }}")
             .Chunk(size).ToArray();
         var defs = string.Concat(parts.Select((part, index) =>

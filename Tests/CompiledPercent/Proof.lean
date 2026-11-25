@@ -31,11 +31,11 @@ number, a different MethodDef and a mismatched constructor signature are all ref
 theorem rejectsInvalidBindings :
     let bindCtor := fun dependencies callee =>
       Extracted.method0Body.bindConstructors? Extracted.method0Original [(5, callee)] dependencies
-    let callee : SpecializedMethod := ⟨[], Core.RangeCtor.definition, ⟨coreLibraryScope⟩⟩
+    let callee : SpecializedMethod := ⟨[], Core.RangeCtor.definition, ⟨coreLibraryAssembly⟩⟩
     (Extracted.method0Body.constructorTokenAt? 0 0 6).isNone ∧
     (bindCtor [] callee).isNone ∧
     (bindCtor rangeDependencies
-      { callee with assembly := ⟨runtimeScope⟩ }).isNone ∧
+      { callee with assembly := ⟨runtimeAssembly⟩ }).isNone ∧
     (bindCtor rangeDependencies
       { callee with closed := { callee.closed with token := Core.ArgumentCtor.definition.token } }).isNone ∧
     (bindCtor rangeDependencies
@@ -118,7 +118,7 @@ private def callerPair := managedCaller.getD (Extracted.methodEvidence[0]'(by de
 
 private def managedTargets : List SpecializedMethod :=
   ⟨[], raw, Extracted.assembly0⟩ ::
-    (coreBytes.map fun pair => ⟨[], pair.2, ⟨coreLibraryScope⟩⟩)
+    (coreBytes.map fun pair => ⟨[], pair.2, ⟨coreLibraryAssembly⟩⟩)
 
 /-- The caller's only call-family operand resolves inside the method table for any import list. -/
 private theorem callerCalls :
@@ -147,7 +147,7 @@ def ManagedCallerValid : Prop :=
     ∃ item method, managedCaller = some (item, method) ∧
       ∀ (all : List MethodEvidence) (slots : List ImportSlot),
         specializationTable all = ⟨[], raw, Extracted.assembly0⟩ ::
-          (coreBytes.map fun pair => ⟨[], pair.2, ⟨coreLibraryScope⟩⟩) →
+          (coreBytes.map fun pair => ⟨[], pair.2, ⟨coreLibraryAssembly⟩⟩) →
         evidenceConstants all = (fun _ => none) →
         (ImportSlotIndex.ofList slots).forLinks all.length method.links = {} →
         MethodEvidenceValid Extracted.rawLayouts Extracted.computedLayouts

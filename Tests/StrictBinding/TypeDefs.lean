@@ -35,7 +35,7 @@ private def fixtureBase (row : Nat) (name : String) : BaseType :=
 /-- A claim about TypeDef row `row` of the fixture. -/
 private def claim (row : Nat) (typeNamespace : List Nat) (typeName : String) (kind : TypeKind)
     (fields : Nat × Nat) (base : BaseType) : TypeDefClaim :=
-  { identity := StrictFixture.identity, row, typeNamespace, typeName := asciiOf typeName,
+  { identity := StrictFixture.assembly, row, typeNamespace, typeName := asciiOf typeName,
     nesting := .topLevel 1, kind, fields, base }
 
 /-- The class `Shape`, which Triangle and Square extend. -/
@@ -102,7 +102,7 @@ theorem rejects_a_bracket_past_the_table :
 /-- An empty NestedClass table is sorted by any key. -/
 theorem accepts_the_empty_nested_class_table :
     TablesSorted pinned
-      [{ identity := StrictFixture.identity, table := 0x29, key := nestedClassKey }] := by
+      [{ identity := StrictFixture.assembly, table := 0x29, key := nestedClassKey }] := by
   decide +kernel
 #print axioms accepts_the_empty_nested_class_table
 

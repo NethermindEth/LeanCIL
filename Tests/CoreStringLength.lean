@@ -67,11 +67,11 @@ private def original : RawMethod := {
 /-- The method's tiny header, IL bytes, single operand token, and metadata. -/
 private def body : BodyEvidence := {
   bytes := [0x1e, 2, 0x7b, 0x8b, 3, 0, 4, 0x2a], tokens := { operands := [(0x0400038b, operand)] }
-  metadata, tables := metadata.tables.toOption.getD [], identities := [bytesOf coreLibraryScope]
+  metadata, tables := metadata.tables.toOption.getD [], identities := [coreLibraryAssembly]
   names := {
-    owner := bytesOf original.owner
+    assembly := some coreLibraryAssembly, owner := bytesOf original.owner
     signature := bytesOf "System.Int32 System.String::get_Length()" }
-  pinned := PinnedIndex.ofIdentities [bytesOf coreLibraryScope] }
+  pinned := PinnedIndex.ofIdentities [coreLibraryAssembly] }
 
 /-- The canonical method including the receiver, return type and localsinit bit. -/
 @[cil_code] private def getter : Method := {

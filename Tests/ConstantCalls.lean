@@ -42,7 +42,7 @@ private def state (stack : List (Option W32)) : Option FeatureState := some ⟨s
 private def method (closed : RawMethod) (featureStates : FeatureCertificate) : MethodEvidence := {
   original := closed, body := Tests.BodyEncoding.noBody, arguments := [], closed,
   parameterInput := ⟨[], [], []⟩, reachable := featureStates.map Option.isSome,
-  featureStates, scalarStates := [], layoutUses := [] }
+  featureStates, scalarStates := [], layoutUses := [], assembly := ⟨Tests.fixtureAssembly⟩ }
 
 /-- `ldc.i4.0; ret` and `ldc.i4.1; ret` as Boolean getters. -/
 private def offBody := raw [i 22, i 42] boolean

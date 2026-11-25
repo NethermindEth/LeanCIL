@@ -14,8 +14,7 @@ open CIL.Extraction Core
 
 /-- System.Runtime facade identity, table header and heaps. -/
 def facadeAssembly : AssemblyMetadata := {
-  identity := runtimeScope,
-  keyToken := (fixedBytes 16 0x62303366356637663131643530613361),
+  publicKeyToken := some 0xb03f5f7f11d50a3a,
   tableHeader := (fixedBytes 56 0x000000000200000A071400008900000000FA01330016C40001000000120000000100000010000000140000000100000002000000BE030000),
   header := .ofCounts 0 [(0, 1), (1, 18), (2, 1), (10, 16), (12, 20),
     (32, 1), (35, 2), (39, 958)],
@@ -23,21 +22,23 @@ def facadeAssembly : AssemblyMetadata := {
   strings := [(0, (fixedBytes 1 0x00)), (1, (fixedBytes 15 0x53797374656D2E52756E74696D6500))],
   blobs := [(1, (fixedBytes 162 0x80A0002400000480000094000000060200000024000052534131000400000100010007D1FA57C4AED9F0A32E84AA0FAEFD0DE9E8FD6AEC8F87FB03766C834C99921EB23BE79AD9D5DCC1DD9AD236132102900B723CF980957FC4E177108FC607774F29E8320E92EA05ECE4E821C0A5EFE8F1645C4C0C93C1AB99285D622CAA652C1DFAD63D745D6F2DE5F17E5EAF0FC4963D261C8A12436518206DC093344D5AD293))]}
 
-/-- Identity bytes for the System.Runtime facade. -/
-def facadeIdentity := bytesOf runtimeScope
+/-- Identity of the System.Runtime facade. -/
+def facadeIdentity : AssemblyName := runtimeAssembly
 
 /-- The facade metadata authenticates the System.Runtime identity. -/
-theorem facadeIdentified : AssemblyIdentified facadeAssembly facadeIdentity := ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+theorem facadeIdentified : AssemblyIdentified facadeAssembly facadeIdentity :=
+  ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
 #print axioms facadeIdentified
 
 /-- Defining CoreLib assembly for the forwarded constructor. -/
 private def coreAssembly := CoreLib.assembly
 
-/-- Identity bytes for the defining CoreLib assembly. -/
-def coreIdentity := bytesOf coreLibraryScope
+/-- Identity of the defining CoreLib assembly. -/
+def coreIdentity : AssemblyName := coreLibraryAssembly
 
 /-- The definition metadata authenticates the CoreLib identity. -/
-theorem coreIdentified : AssemblyIdentified coreAssembly coreIdentity := ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+theorem coreIdentified : AssemblyIdentified coreAssembly coreIdentity :=
+  ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
 #print axioms coreIdentified
 
 /-- Caller-side facade and CoreLib slices for the two-string range constructor. -/
@@ -349,7 +350,7 @@ private def runtimeRow? (table : List SpecializedMethod) (caller : BodyEvidence)
   let item : MethodEvidence := {
     original, body, arguments := [], closed, parameterInput := storage,
     reachable := live, featureStates := features, scalarStates := scalars, layoutUses := [],
-    assembly := ⟨coreLibraryScope⟩, signature, links := bound }
+    assembly := ⟨coreLibraryAssembly⟩, signature, links := bound }
   return (item, method)
 
 /-- The resource slot exposes the physical getter's metadata, with no executable feature facts. -/
@@ -364,7 +365,7 @@ private def resourceDeclaration? (caller : BodyEvidence) (environment : LayoutEn
   let signature ← spelled? body.names.signature
   return {
     original, body, arguments := [], closed, parameterInput := storage, reachable := [],
-    featureStates := [], scalarStates := [], layoutUses := [], assembly := ⟨coreLibraryScope⟩,
+    featureStates := [], scalarStates := [], layoutUses := [], assembly := ⟨coreLibraryAssembly⟩,
     signature }
 
 /-- Physical inputs needed to bind a caller. The executable, closed method, construction
@@ -487,7 +488,7 @@ def ConstructorImage.bindCaller? (image : ConstructorImage) (base : Nat) (body :
     let ordinal ← image.methods.findIdx? (·.2.token == callee.token)
     return (pc, overload.loads, callee, base + ordinal)
   let bound ← body.bindConstructors? source
-    (sites.map fun (pc, _, callee, _) => (pc, ⟨[], callee, ⟨coreLibraryScope⟩⟩))
+    (sites.map fun (pc, _, callee, _) => (pc, ⟨[], callee, ⟨coreLibraryAssembly⟩⟩))
     image.dependencies
   let code ← (checkBody bound source []).toOption
   let raw := { source with
@@ -509,7 +510,7 @@ its getter declarations. -/
 def ConstructorImage.table (image : ConstructorImage) (locals : List SpecializedMethod) :
     List SpecializedMethod :=
   locals ++ (image.methods.map Prod.snd ++ image.getters.map (·.raw)).map
-    (⟨[], ·, ⟨coreLibraryScope⟩⟩)
+    (⟨[], ·, ⟨coreLibraryAssembly⟩⟩)
 
 /-- The image's executable definitions and getter declarations, in the program that places
 `locals` first. Each definition uses the pins, platform and layouts of `caller`. -/
@@ -556,14 +557,14 @@ def constructorImage? (item : ConstructorSource) (pc : Nat)
     scalarStates := scalars, arguments := item.arguments, reachable := item.reachable,
     featureStates := item.featureStates, layoutUses := item.layoutUses,
     dispatchTypes := item.dispatchTypes, assembly := item.assembly, signature := item.signature }
-  let own : SpecializedMethod := ⟨[], raw, ⟨bound.body.metadata.own.assembly.identity⟩⟩
+  let own : SpecializedMethod := ⟨[], raw, item.assembly⟩
   let (definitions, declarations) ← image.rows? [own] bound.body profile environment
   return ⟨(caller, entry), definitions, declarations⟩
 
 /-- The pins every package body shares: the source assemblies and CoreLib. The forwarding facade
 is carried as a slice of each bound caller and stays unpinned. -/
 def packagePins (source : List AssemblyPin) : List AssemblyPin :=
-  source ++ [⟨coreLibraryScope⟩]
+  source ++ [⟨coreLibraryAssembly⟩]
 
 /-- Bind the unique live exception constructor in a closed single-caller extraction. -/
 def constructorPackage? (source : ConstructorSource) (imports : List ImportSlot)

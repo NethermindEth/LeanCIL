@@ -475,12 +475,14 @@ Rejected("dropped reference", "External managed dependency", Verify(dropped));
 string extractedSource = File.ReadAllText(Path.Combine(Artifact("Direct"), "Extracted.lean"));
 string libIdentity = libName + ", Version=0.1.0.0" + unsigned;
 string appIdentity = "MultiFixture.App, Version=0.1.0.0" + unsigned;
-if (!extractedSource.Contains($"identity := \"{libIdentity}\"", StringComparison.Ordinal))
-    throw new InvalidOperationException("Precondition: the certificate must pin " + libIdentity);
+const string libPinDefinition = "def assembly1 : Extraction.AssemblyPin := ⟨assembly1Identity⟩";
+if (!extractedSource.Contains(libPinDefinition, StringComparison.Ordinal))
+    throw new InvalidOperationException("Precondition: the certificate must pin the library as assembly1");
 foreach ((string name, string from, string to) in new[]
 {
     ("misattributed body", "assembly := assembly1, signature", "assembly := assembly0, signature"),
-    ("duplicate certificate identity", $"identity := \"{libIdentity}\"", $"identity := \"{appIdentity}\"")
+    ("duplicate certificate identity", libPinDefinition,
+        libPinDefinition.Replace("⟨assembly1Identity⟩", "⟨assembly0Identity⟩", StringComparison.Ordinal))
 })
 {
     string forged = Copy(name.Replace(' ', '-'));
@@ -513,12 +515,12 @@ Console.WriteLine("PASS Lean rejected moved dispatch catalog");
 // The App receiver's catalog reads Lib's IScale entry; attributing that entry to App's pin fails dispatch.
 string repinned = Copy("Repinned", "ScaledAppDerived");
 string repinnedCatalog = Path.Combine(repinned, "Extracted.lean");
-string libPinText = $"assembly := {{ identity := \"{libIdentity}\" }}";
+const string libPinText = "assembly := assembly1 }";
 string repinnedSource = File.ReadAllText(repinnedCatalog);
 if (!repinnedSource.Contains(libPinText, StringComparison.Ordinal))
     throw new InvalidOperationException("Precondition: Scaled<AppDerived> must catalog a Lib entry.");
 File.WriteAllText(repinnedCatalog, repinnedSource.Replace(libPinText,
-    $"assembly := {{ identity := \"{appIdentity}\" }}", StringComparison.Ordinal));
+    "assembly := assembly0 }", StringComparison.Ordinal));
 (int Code, string Output, string Stdout, string Stderr) repinnedKernel =
     Execute(["lake", "env", "lean", repinnedCatalog], cwd: FixturePackage());
 if (repinnedKernel.Code == 0 || !repinnedKernel.Output.Contains("ConstrainedCallsValid", StringComparison.Ordinal))

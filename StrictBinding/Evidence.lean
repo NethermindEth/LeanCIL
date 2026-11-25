@@ -28,19 +28,19 @@ instance (images : List PinnedImage) (evidence : List CIL.Extraction.MethodEvide
   inferInstanceAs (Decidable (ClaimsHold _ _ _))
 
 /-- The rows, heaps and core-library AssemblyRef of each carried slice are checked against the
-    image selected by its assembly's identity. Cost is one lookup and one contents check per
-    carried slice; the Assembly blocks are checked by `assemblyBlockBound`. -/
+    image whose Assembly row names the assembly the slice's row names. Cost is one lookup and one
+    contents check per carried slice; the Assembly blocks are checked by `assemblyBlockBound`. -/
 def methodMetadataBound (prepared : List PreparedImage)
     (metadata : CIL.Extraction.MethodMetadata) : Except AuditError Unit :=
   metadata.slices.forM fun slice => do
-    let image <- located prepared slice.assembly.identity
+    let image <- locatedBlock prepared slice.assembly
     sliceContentsBound image slice
 
-/-- A carried Assembly block, with the identity and key token it states, is checked against the
-    image selected by its identity. -/
+/-- A carried Assembly block, with the key token it states, is checked against the image whose
+    Assembly row names the assembly the block's row names. -/
 def assemblyBlockBound (prepared : List PreparedImage)
     (assembly : CIL.Extraction.AssemblyMetadata) : Except AuditError Unit := do
-  let image <- located prepared assembly.identity
+  let image <- locatedBlock prepared assembly
   assemblyBound image assembly
 
 /-- The carried metadata of each method, in evidence order. -/
@@ -144,7 +144,7 @@ theorem sliceMatches_of_metadataRowsBound {images : List PinnedImage}
     Exists fun prepared => And (prepare images = .ok prepared)
       (forall item, List.Mem item evidence ->
         forall slice, List.Mem slice item.body.metadata.slices ->
-          Exists fun image => And (located prepared slice.assembly.identity = .ok image)
+          Exists fun image => And (locatedBlock prepared slice.assembly = .ok image)
             (SliceMatches image slice)) := by
   cases check_of_claimsHold bound.2 with
   | intro prepared checks =>
@@ -166,11 +166,11 @@ theorem sliceMatches_of_metadataRowsBound {images : List PinnedImage}
         List.mem_eraseDups.mpr (List.mem_flatMap.mpr (Exists.intro item.body.metadata
           (And.intro metadataMember sliceAssembly)))
       have blockOne := blockChecks.2 slice.assembly blockMember
-      cases found : located prepared slice.assembly.identity with
+      cases found : locatedBlock prepared slice.assembly with
       | error error => simp [found, bind, Except.bind, ok] at one
       | ok image =>
         refine Exists.intro image (And.intro rfl ?_)
-        have imageMember : List.Mem image prepared := mem_of_located found
+        have imageMember : List.Mem image prepared := mem_of_locatedBlock found
         have contents : sliceContentsBound image slice = .ok () := by
           cases result : sliceContentsBound image slice with
           | error error => simp [found, result, bind, Except.bind, ok] at one

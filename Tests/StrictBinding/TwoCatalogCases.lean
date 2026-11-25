@@ -10,10 +10,10 @@ namespace TwoCatalogCases
 open CIL.Extraction StrictBinding
 
 /-- The entry method's physical assembly. -/
-private def app : PinnedImage := ⟨Extracted.assembly0.identity, AppImage.image⟩
+private def app : PinnedImage := ⟨Extracted.assembly0Scope, AppImage.image⟩
 
 /-- The called method's physical assembly. -/
-private def library : PinnedImage := ⟨Extracted.assembly1.identity, LibImage.image⟩
+private def library : PinnedImage := ⟨Extracted.assembly1Scope, LibImage.image⟩
 
 /-- Audit the method catalogs with the certified program's original pins and imports. -/
 private def checked (images : List PinnedImage) (items : List MethodEvidence) :=
@@ -146,7 +146,7 @@ theorem movedMethod :
 /-- The physical TypeRef used at a particular foreign class test in the caller. -/
 private def testedReference (name : String) : Option Nat := do
   let instruction ← Extracted.method0Original.code.find? fun raw =>
-    raw.opcode == 0x75 && raw.operand == .type (.object Extracted.assembly1.identity name)
+    raw.opcode == 0x75 && raw.operand == .type (.object Extracted.assembly1Scope name)
   let bytes := Extracted.method0Body.bytes
   let first ← bytes.head?
   let start := (if first % 4 == 2 then 1 else 12) + instruction.offset + 1

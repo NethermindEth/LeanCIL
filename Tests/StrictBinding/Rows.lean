@@ -187,12 +187,16 @@ theorem rejects_a_string_key_without_its_entry :
   decide +kernel
 #print axioms rejects_a_string_key_without_its_entry
 
-/-- Keys 0, for the empty culture and the absent key, need no carried entry. -/
-theorem accepts_zero_keys_without_entries :
-    ok (checked fixture
-      { block with strings := block.strings.filter (·.1 != 0), blobs := [] }) = true := by
+/-- Keys 0, for the empty culture and the absent key, need no carried entry for the row to match
+    the image's; without the empty string the block names no assembly, so it is not the image's. -/
+theorem zero_keys_need_no_entries_to_match :
+    ok (fixture >>= fun image => rowsBound image [(assemblyToken, block.assemblyRow)]
+      (block.strings.filter (·.1 != 0)) []) = true ∧
+    failsWith (checked fixture
+      { block with strings := block.strings.filter (·.1 != 0), blobs := [] })
+      (.ownIdentityMismatch StrictFixture.identity) = true := by
   decide +kernel
-#print axioms accepts_zero_keys_without_entries
+#print axioms zero_keys_need_no_entries_to_match
 
 /-! ## Entries at a suffix of the name -/
 
@@ -270,7 +274,7 @@ private def rowWithNames (name culture : Nat) : List Nat :=
     bytes. -/
 theorem accepts_a_culture_at_a_suffix_of_the_name :
     ok (checked (cultured suffixOffset "Fixture")
-      { block with identity := culturedIdentity "Fixture", assemblyRow := rowWithNames 2 1,
+      { block with assemblyRow := rowWithNames 2 1,
                    strings := [(0, [0]), (1, suffixBytes), (2, nameBytes)] }) = true := by
   decide +kernel
 #print axioms accepts_a_culture_at_a_suffix_of_the_name
@@ -313,6 +317,9 @@ private def keyedImage : ImageBytes :=
 /-- The public key token of `keyBytes`: the low eight bytes of its SHA-1, reversed. -/
 private def keyedToken : String := "4705f121e18edfe3"
 
+/-- `keyedToken` as the big-endian number an identity states. -/
+private def keyedTokenValue : Nat := 0x4705f121e18edfe3
+
 /-- The identity the variant's key spells. -/
 private def keyedIdentity : String :=
   "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=" ++ keyedToken
@@ -323,7 +330,7 @@ private def keyed : Except AuditError PreparedImage :=
 
 /-- The block an extraction carries for the variant: its key is the only blob, ranked 1. -/
 private def keyedBlock : AssemblyMetadata :=
-  { block with identity := keyedIdentity, keyToken := CIL.Extraction.bytesOf keyedToken,
+  { block with publicKeyToken := some keyedTokenValue,
                assemblyRow := rowWithKey publicKeyAt 1,
                blobs := [(1, keyBytes.length :: keyBytes)] }
 
@@ -355,15 +362,19 @@ theorem rejects_key_zero_for_the_key_offset :
   decide +kernel
 #print axioms rejects_key_zero_for_the_key_offset
 
-/-- The marker says the key is not carried, which holds; a carried key no row names is refused. -/
-theorem accepts_the_marker_only_without_the_entry :
-    ok (checked keyed
-      { keyedBlock with assemblyRow := rowWithKey publicKeyAt 0xFFFF, blobs := [] }) = true ∧
+/-- The marker says the key is not carried, which holds for the rows; a carried key no row
+    names is refused. Without its key the block names no assembly, so it is not the image's. -/
+theorem the_key_marker_matches_rows_but_names_no_assembly :
+    ok (keyed >>= fun image => rowsBound image
+      [(assemblyToken, rowWithKey publicKeyAt 0xFFFF)] keyedBlock.strings []) = true ∧
+    failsWith (checked keyed
+      { keyedBlock with assemblyRow := rowWithKey publicKeyAt 0xFFFF, blobs := [] })
+      (.ownIdentityMismatch keyedIdentity) = true ∧
     failsWith
       (checked keyed { keyedBlock with assemblyRow := rowWithKey publicKeyAt 0xFFFF })
       (.heapNumbering blobHeap 1) = true := by
   decide +kernel
-#print axioms accepts_the_marker_only_without_the_entry
+#print axioms the_key_marker_matches_rows_but_names_no_assembly
 
 /-! ## Rows of a slice -/
 
@@ -659,7 +670,7 @@ theorem rejects_a_marker_beside_a_key :
     variant's identity states. -/
 theorem the_keyed_token_is_computed_from_the_key :
     hexDigits 16 (CIL.Crypto.Sha1.keyToken keyBytes) = CIL.Extraction.bytesOf keyedToken ∧
-      (keyed.toOption.map (·.assembly.token)) = some (CIL.Extraction.bytesOf keyedToken) := by
+      (keyed.toOption.map (·.assembly.publicKeyToken)) = some (some keyedTokenValue) := by
   decide +kernel
 #print axioms the_keyed_token_is_computed_from_the_key
 
@@ -667,28 +678,30 @@ theorem the_keyed_token_is_computed_from_the_key :
     right. -/
 theorem rejects_a_forged_own_token :
     failsWith
-      (checked keyed { keyedBlock with keyToken := CIL.Extraction.bytesOf "0123456789abcdef" })
+      (checked keyed { keyedBlock with publicKeyToken := some 0x0123456789abcdef })
       (.ownTokenMismatch keyedIdentity) = true := by
   decide +kernel
 #print axioms rejects_a_forged_own_token
 
 /-- A signed assembly's block that states no token is refused. -/
 theorem rejects_no_token_for_a_signed_assembly :
-    failsWith (checked keyed { keyedBlock with keyToken := [] })
+    failsWith (checked keyed { keyedBlock with publicKeyToken := none })
       (.ownTokenMismatch keyedIdentity) = true := by
   decide +kernel
 #print axioms rejects_no_token_for_a_signed_assembly
 
 /-- An unsigned assembly's block that states a token is refused. -/
 theorem rejects_a_token_for_an_unsigned_assembly :
-    failsWith (checked fixture { block with keyToken := CIL.Extraction.bytesOf keyedToken })
+    failsWith (checked fixture { block with publicKeyToken := some keyedTokenValue })
       (.ownTokenMismatch StrictFixture.identity) = true := by
   decide +kernel
 #print axioms rejects_a_token_for_an_unsigned_assembly
 
-/-- A block naming another identity is refused, though its rows and token are the image's. -/
+/-- A block whose row names another culture is refused, though its token is the image's. -/
 theorem rejects_another_identity :
-    failsWith (checked fixture { block with identity := culturedIdentity "Fixture" })
+    failsWith (fixture >>= fun image => identityBound image
+        { block with assemblyRow := rowWithNames 2 1,
+                     strings := [(0, [0]), (1, suffixBytes), (2, nameBytes)] })
       (.ownIdentityMismatch StrictFixture.identity) = true := by
   decide +kernel
 #print axioms rejects_another_identity
@@ -750,21 +763,21 @@ theorem accepts_a_link_to_its_definition :
 /-- `Triangle::.ctor` has the MemberRef's name and signature but belongs to another class. -/
 theorem rejects_a_link_to_another_method :
     failsWith (linkChecked triangleConstructor)
-      (.memberLinkMismatch StrictFixture.identity objectConstructorRef) = true := by
+      (.memberLinkMismatch StrictFixture.assembly objectConstructorRef) = true := by
   decide +kernel
 #print axioms rejects_a_link_to_another_method
 
 /-- `Shape::Sides` belongs to the class but has another name. -/
 theorem rejects_a_link_to_another_name :
     failsWith (linkChecked shapeSides)
-      (.memberLinkMismatch StrictFixture.identity objectConstructorRef) = true := by
+      (.memberLinkMismatch StrictFixture.assembly objectConstructorRef) = true := by
   decide +kernel
 #print axioms rejects_a_link_to_another_name
 
 /-- A method signature cannot link to a Field row. -/
 theorem rejects_a_link_to_a_field :
     failsWith (linkChecked 0x04000001)
-      (.memberLinkMismatch StrictFixture.identity objectConstructorRef) = true := by
+      (.memberLinkMismatch StrictFixture.assembly objectConstructorRef) = true := by
   decide +kernel
 #print axioms rejects_a_link_to_a_field
 
@@ -791,9 +804,9 @@ theorem checks_the_links_of_the_evidence :
     (MemberLinks.checkMetadataLinks [originalPin] [linkedMethod shapeConstructor]).toOption =
       some false ∧
     failsWith (MemberLinks.checkMetadataLinks [linkedPin] [linkedMethod triangleConstructor])
-      (.memberLinkMismatch StrictFixture.identity objectConstructorRef) = true ∧
+      (.memberLinkMismatch StrictFixture.assembly objectConstructorRef) = true ∧
     failsWith (MemberLinks.checkMetadataLinks [linkedPin] [danglingMethod])
-      (.memberLinkMismatch StrictFixture.identity objectConstructorRef) = true := by
+      (.memberLinkMismatch StrictFixture.assembly objectConstructorRef) = true := by
   decide +kernel
 #print axioms checks_the_links_of_the_evidence
 

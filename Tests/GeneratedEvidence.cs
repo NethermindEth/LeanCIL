@@ -68,7 +68,7 @@ partial class Program
     [GeneratedRegex(@"\AexternalIdentity(?:Chunk\d+|\d+Bytes)_valid\z")]
     private static partial Regex IdentityWitnessName { get; }
 
-    [GeneratedRegex(@"\A(?:method\d+_tables_valid|assembly\d+_identified|pinned_identities_spelled)\z")]
+    [GeneratedRegex(@"\A(?:method\d+_tables_valid|assembly\d+_identified|pinned_identities_listed)\z")]
     private static partial Regex RetainedObligationName { get; }
 
     // A generated report names one theorem or a bracketed group spanning several lines.

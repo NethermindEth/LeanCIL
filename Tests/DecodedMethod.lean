@@ -114,7 +114,7 @@ theorem rvaFieldsDecode :
 
 /-- The fixture's unsigned word field is initialized to seven. -/
 private def bias : StaticDescriptor :=
-  { identity := 9, field := ⟨.object ownIdentity "Statics", 1, uint32, name!"Bias"⟩,
+  { identity := 9, field := ⟨.object ownScope "Statics", 1, uint32, name!"Bias"⟩,
     bytes := [7, 0, 0, 0], scalar := some false,
     initializer := some { method := 0, arguments := [], literal := some (.i32 7) } }
 
@@ -172,7 +172,7 @@ theorem ordinaryStaticRefusals :
     [126, 127, 128].all (fun opcode =>
       let pc := if opcode == 128 then 1 else 0
       let wrong := [{ field with name := name!"Other" }, { field with index := 0 },
-        { field with owner := .object ownIdentity "Other" }, { field with type := int32 }]
+        { field with owner := .object ownScope "Other" }, { field with type := int32 }]
       let errorAt := fun (result : Except MethodDecodeError Method) pc =>
         match result with
         | .error error => error == .liveHole pc opcode
@@ -216,7 +216,7 @@ theorem ordinaryStaticSignednessRefused :
 
 /-- A static field on an aggregate owner requires that aggregate's assembly to match. -/
 theorem ordinaryStaticAggregateOwnerRefused :
-    let localSite := { bias with field.owner := .aggregate (ownIdentity ++ "::Statics") 0 }
+    let localSite := { bias with field.owner := .aggregate (ownScope ++ "::Statics") 0 }
     let foreignSite := { localSite with field.owner := .aggregate "Foreign::Statics" 0 }
     ordinaryLoad localSite = .ok [.ldsfld localSite.field, .ret] ∧
       ordinaryLoad foreignSite = liveHoleAt 0 126 := by decide +kernel
@@ -596,12 +596,12 @@ cil_decoded_method refusedUnbox := Method.ofClosed? .scalar {} [] (allLive unbox
 def item (original : RawMethod) (body : BodyEvidence) : MethodEvidence :=
   { original := original, body := body, arguments := [], closed := original,
     parameterInput := ⟨[], [], []⟩, reachable := allLive original, featureStates := [],
-    scalarStates := [], layoutUses := [] }
+    scalarStates := [], layoutUses := [], assembly := ⟨Tests.fixtureAssembly⟩ }
 
 /-- The receiver method named by its own address operand. -/
 private def instanceAddressSite : CallSite := {
   method := {
-    owner := .object ownIdentity "Program", name := name!"M", hasThis := true,
+    owner := .object ownScope "Program", name := name!"M", hasThis := true,
     genericArity := 0, returnType := .void, parameters := [] },
   declared := { convention := 0x20 }, target := .managed 0x06000001, name := "M",
   typeArguments := [], parameterCount := 0, returnsValue := false }
@@ -797,7 +797,7 @@ private def summingRaw : RawMethod := { sumRaw with token := tokens.main + 1 }
 private def sumSite : CallSite := {
   declared := { convention := 0, returnType := uint32, parameters := [uint32, uint32] },
   method := {
-    owner := .object ownIdentity "Program", name := name!"Sum", hasThis := false,
+    owner := .object ownScope "Program", name := name!"Sum", hasThis := false,
     genericArity := 0, returnType := uint32, parameters := [uint32, uint32] },
   name := "Sum", target := .managed summingRaw.token, typeArguments := [], parameterCount := 2,
   returnsValue := true }
@@ -827,7 +827,8 @@ theorem caller_returns (memory : Safety.Memory) (left right : W32) :
 #print axioms caller_returns
 
 /-- The table `callerMethod`'s link indexes: the caller at 0 and its callee at 1. -/
-private def callTable : List SpecializedMethod := [⟨[], callerRaw, ⟨ownIdentity⟩⟩, ⟨[], summingRaw, ⟨ownIdentity⟩⟩]
+private def callTable : List SpecializedMethod :=
+  [⟨[], callerRaw, ⟨ownAssembly⟩⟩, ⟨[], summingRaw, ⟨ownAssembly⟩⟩]
 
 /-- The call check accepts the link the decoder was given and rejects a forged one: another
     method with the same signature but another token, an index past the table, or a link of

@@ -32,7 +32,7 @@ structure TokenFacts where
 def MetadataEnv.frame (env : MetadataEnv) (arity ownerArity : Nat) :
     Except MetadataError Frame := do
   let index ← env.slice 0 0
-  let corlib ← index.corlibIdentity
+  let corlib := (← index.corlibIdentity).map (·.spelling)
   .ok { corlib, anchor := corlib.getD [], arity, ownerArity,
         layoutDeclarations := env.layoutDeclarations }
 
@@ -140,7 +140,7 @@ def MetadataEnv.fieldDefinition (env : MetadataEnv) (token : Nat) (owner : Named
   let index ← env.slice position token
   let row ← index.field definition
   let declaring ← env.ownerOf position definition
-  if declaring.scope != owner.scope || declaring.parts != owner.parts then
+  if declaring.assembly != owner.assembly || declaring.parts != owner.parts then
     throw (.unresolvedMember token)
   let found ← env.resolveBlob position definition row.signature
   if (← index.string row.name) != name || found != declared then throw (.unresolvedMember token)
@@ -173,24 +173,26 @@ def MetadataEnv.fieldSite (env : MetadataEnv) (token : Nat) : Except MetadataErr
     a reference to an assembly of a core-library name, whose platform definition states that it
     is the root class. One lookup reads the definition, refusing as `MetadataEnv.externalNamed`
     refuses a class before the name and the root kind are checked. -/
-def MetadataEnv.chainRoot (env : MetadataEnv) (token base : Nat) (scope : List Nat)
+def MetadataEnv.chainRoot (env : MetadataEnv) (token base : Nat) (assembly : AssemblyName)
     (parts : List (List Nat)) (core : Bool) : Except MetadataError (List (Nat × Nat)) := do
-  if env.pinned.matches scope then throw (.missingSlice base)
-  let kind ← env.platform.require base scope parts (PlatformKind.fitsHint (some false))
+  if env.pinned.contains assembly.name then throw (.missingSlice base)
+  let kind ← env.platform.require base assembly.spelling parts
+    (PlatformKind.fitsHint (some false))
   if !(core && parts == [systemNamespace, objectName]) then throw (.unsupportedBase token)
   if kind == .objectRoot then .ok [] else .error (.platformKindMismatch base)
 
 /-- A class chain ends outside the carried slices only at a type whose platform definition is
     the root class `System.Object`. -/
-theorem MetadataEnv.chainRoot_ok {env : MetadataEnv} {token base : Nat} {scope : List Nat}
+theorem MetadataEnv.chainRoot_ok {env : MetadataEnv} {token base : Nat} {assembly : AssemblyName}
     {parts : List (List Nat)} {core : Bool} {chain : List (Nat × Nat)}
-    (ended : env.chainRoot token base scope parts core = .ok chain) :
-    { scope, parts, kind := .objectRoot } ∈ env.platform.definitions ∧
+    (ended : env.chainRoot token base assembly parts core = .ok chain) :
+    { scope := assembly.spelling, parts, kind := .objectRoot } ∈ env.platform.definitions ∧
       parts = [systemNamespace, objectName] ∧ core = true := by
   unfold MetadataEnv.chainRoot at ended
-  by_cases pinned : env.pinned.matches scope = true
+  by_cases pinned : env.pinned.contains assembly.name = true
   · simp [pinned, throw, throwThe, MonadExceptOf.throw, bind, Except.bind] at ended
-  cases required : env.platform.require base scope parts (PlatformKind.fitsHint (some false)) with
+  cases required :
+      env.platform.require base assembly.spelling parts (PlatformKind.fitsHint (some false)) with
   | error error => simp [pinned, required, bind, Except.bind] at ended
   | ok kind =>
     have member := (PlatformTable.require_ok required).1
@@ -209,7 +211,7 @@ theorem MetadataEnv.chainRoot_ok {env : MetadataEnv} {token base : Nat} {scope :
 /-- A carried root has the public, nongeneric, fieldless System.Object definition in CoreLib. -/
 def MetadataEnv.carriedObjectRoot (env : MetadataEnv) (index : MetadataIndex)
     (position token : Nat) (row : TypeDefRow) : Except MetadataError Bool := do
-  unless index.identity == bytesOf coreLibraryScope &&
+  unless index.identity == coreLibraryAssembly &&
       row.flags &&& 0x27 == 1 && index.instanceTotal.find? token == some 0 do return false
   let namespaceBytes ← index.string row.namespace_
   let name ← index.string row.name
@@ -243,7 +245,7 @@ def MetadataEnv.classChain (env : MetadataEnv) (fuel position token : Nat)
         if (← env.definitionArity position row.extends_) != 0 then throw (.unsupportedBase token)
         lineage <$> env.classChain fuel linked definition true
       | .inr (scope, _, parts) =>
-        lineage <$> env.chainRoot token row.extends_ scope.spelling parts
+        lineage <$> env.chainRoot token row.extends_ scope parts
           (← index.coreLibraryReference row.extends_)
     | _ => .error (.unsupportedBase token)
 
@@ -326,7 +328,8 @@ def MetadataEnv.platformField (env : MetadataEnv) (token : Nat) (site : FieldSit
   | .genericInst head arguments =>
     match arguments.toList with
     | [first, second] =>
-      if isCorlibScope head.scope && head.parts == [systemNamespace, valueTuplePairName] then
+      if head.assembly.any (·.isCoreLibrary) &&
+          head.parts == [systemNamespace, valueTuplePairName] then
         match env.platform.require token head.scope head.parts (· == .valuePair) with
         | .error error => .error error
         | .ok _ =>
@@ -480,7 +483,7 @@ def MetadataEnv.methodDefinition (env : MetadataEnv) (token : Nat) (owner : Name
   let index ← env.slice position token
   let row ← index.methodDef definition
   let declaring ← env.ownerOf position definition
-  if declaring.scope != owner.scope || declaring.parts != owner.parts then
+  if declaring.assembly != owner.assembly || declaring.parts != owner.parts then
     throw (.unresolvedMember token)
   let found ← env.resolveMethod position (← index.blob row.signature)
   if (← index.string row.name) != name || found != signature then
@@ -494,7 +497,7 @@ private def MetadataEnv.callOwner (env : MetadataEnv) (token : Nat) (linked : Bo
   if metadataTableOf token != Table.typeRef then throw (.unresolvedMember token)
   let (assembly, name, parts) <- typeRefQualified env 0 resolveFuel token
   let scope := assembly.spelling
-  if env.identities.contains scope || env.pinned.matches scope ||
+  if env.identities.contains assembly || env.pinned.contains assembly.name ||
       (env.platform.kindOf scope parts).isSome then throw (.unresolvedMember token)
   return .named { scope, name, parts, kind := .importedOwner, pinned := false,
                   assembly := some assembly }
@@ -555,10 +558,10 @@ private theorem metadataBind_ok {α β : Type} {read : Except MetadataError α}
 
 #print axioms metadataBind_ok
 
-/-- A resolved declaring TypeDef takes its scope from the assembly of its physical slice. -/
+/-- A resolved declaring TypeDef takes its assembly from its physical slice. -/
 private theorem definition_scope {env : MetadataEnv} {position fuel token : Nat} {owner : NamedType}
     (found : typeDefNamed env position fuel token = .ok owner) :
-    ∃ index, env.slice position token = .ok index ∧ index.identity = owner.scope := by
+    ∃ index, env.slice position token = .ok index ∧ owner.assembly = some index.identity := by
   unfold typeDefNamed at found
   simp only [metadataBind_ok] at found
   obtain ⟨index, slice, row, _, parts, _, named⟩ := found
@@ -576,7 +579,7 @@ private theorem definition_scope {env : MetadataEnv} {position fuel token : Nat}
 def ResolvedType.DefinesMethod (owner : ResolvedType) (env : MetadataEnv)
     (position token : Nat) : Prop :=
   ∃ head index row, owner.head = some head ∧ env.slices.find? position = some index ∧
-    index.identity = head.scope ∧ index.methodDef token = .ok row
+    head.assembly = some index.identity ∧ index.methodDef token = .ok row
 
 /-- A successful slice lookup returns the entry at that position, independently of the token. -/
 private theorem slice_found {env : MetadataEnv} {position token} {index : MetadataIndex}
@@ -615,7 +618,8 @@ private theorem member_definition {env : MetadataEnv} {operand position token : 
       have same := (slice_found ownerSlice).symm.trans lookup
       cases Option.some.inj same
       simp only [Bool.or_eq_true, bne_iff_ne, not_or] at agrees
-      exact ⟨owner, index, row, rfl, lookup, scopeEq.trans (by simpa using agrees.1), rowRead⟩
+      have sameAssembly : declaring.assembly = owner.assembly := by simpa using agrees.1
+      exact ⟨owner, index, row, rfl, lookup, sameAssembly ▸ scopeEq, rowRead⟩
   · contradiction
 
 #print axioms member_definition
@@ -623,7 +627,7 @@ private theorem member_definition {env : MetadataEnv} {operand position token : 
 /-- The owner of a local MethodDef has the scope of the slice containing its row. -/
 private theorem plain_owner_scope {env : MetadataEnv} {token : Nat} {owner : NamedType}
     (found : env.plainOwnerOf token = .ok owner) :
-    ∃ index, env.slices.find? 0 = some index ∧ index.identity = owner.scope := by
+    ∃ index, env.slices.find? 0 = some index ∧ owner.assembly = some index.identity := by
   unfold MetadataEnv.plainOwnerOf at found
   simp only [metadataBind_ok] at found
   obtain ⟨_, _, selected, named, _, _, same⟩ := found
@@ -786,7 +790,7 @@ def checkCallReference (env : MetadataEnv) (frame : Frame) (token : Nat) (site :
       call.method.methodArguments != siteMethodArguments call then
     throw (.genericMismatch token)
   -- The full flat identity is checked by located.admits below.
-  if call.declaringType.headScope.any (bytesOf · != head.scope) then
+  if call.declaringType.headScope.any fun scope => !head.assembly.any (·.spelledAs scope) then
     throw (.scopeMismatch token)
   let located := { frame with anchor := head.scope }
   if head.kind == .importedOwner then
@@ -808,7 +812,7 @@ def checkCallReference (env : MetadataEnv) (frame : Frame) (token : Nat) (site :
       if position == 0 || site.genericArity != 0 || !ownerList.isEmpty then pure located
       else do
         let index ← env.slice position definition
-        pure { located with corlib := ← index.corlibIdentity }
+        pure { located with corlib := (← index.corlibIdentity).map (·.spelling) }
     | none => pure located
   let some returned := siteReturn site.methodArguments ownerArguments site.result
     | throw (.operandMismatch token)
@@ -824,12 +828,19 @@ theorem checkCallReference_scope {env : MetadataEnv} {frame : Frame} {token : Na
     {site : MethodSite} {call : CallSite} {head : NamedType} {scope : String}
     (checked : checkCallReference env frame token site call = .ok ())
     (declared : site.owner.head = some head)
-    (named : call.declaringType.headScope = some scope) : bytesOf scope = head.scope := by
-  by_cases different : bytesOf scope = head.scope
-  · exact different
+    (named : call.declaringType.headScope = some scope) :
+    ∃ assembly, head.assembly = some assembly ∧ assembly.spelling = bytesOf scope := by
+  cases spelled : head.assembly.any (·.spelledAs scope) with
+  | true =>
+    cases found : head.assembly with
+    | none => simp [found] at spelled
+    | some assembly =>
+      simp only [found, Option.any_some, AssemblyName.spelledAs, Bool.and_eq_true,
+        beq_iff_eq] at spelled
+      exact ⟨assembly, rfl, spelled.2⟩
+  | false =>
   exfalso
-  have bad : (bytesOf scope != head.scope) = true := by simpa using different
-  simp [checkCallReference, declared, named, bad, throw, throwThe, MonadExceptOf.throw,
+  simp [checkCallReference, declared, named, spelled, throw, throwThe, MonadExceptOf.throw,
     Bind.bind, Except.bind, pure, Except.pure] at checked
   repeat first | contradiction | split at checked
 #print axioms checkCallReference_scope
@@ -1008,6 +1019,9 @@ def flagsAgree (rows : List GenericParamRow) (claimed : List GenericConstraint) 
 /-- The owner and signature bytes of a method definition, with the assembly scope and physical
     namespace and name columns of each base class, nearest first. -/
 structure MethodNames where
+  /-- The assembly whose slice holds the owner's `TypeDef` row, as Lean reads it there;
+      `AttributionValid` compares it with the body's pin. -/
+  assembly : Option AssemblyName := none
   owner : List Nat := []
   bases : List (List Nat × ClassName) := []
   /-- Cecil's full name of the extracted method: the instance's, for a generic instance. -/
@@ -1191,9 +1205,9 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
     let names ← bases.mapM fun base => do
       let some name := ClassName.ofParts? base.parts | throw (.methodMismatch method.token)
       pure (base.scope, name)
-    .ok { owner := ownerName, bases := names,
+    .ok { assembly := owner.assembly, owner := ownerName, bases := names,
           signature := selected }
   else if method.objectFieldCount != 0 then throw (.methodMismatch method.token)
-  else .ok { owner := ownerName, signature := selected }
+  else .ok { assembly := owner.assembly, owner := ownerName, signature := selected }
 
 end CIL.Extraction

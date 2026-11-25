@@ -275,7 +275,7 @@ private def parentGraph (prepared : List PreparedImage) : Reading ParentGraph :=
         guard (coded % 4 == 1)
         let token ← physical (checkedTokenOf Table.typeRef (coded / 4) .rowOverflow)
         let (image, base) ← testDefinition prepared group.image token
-        let some target := ranges.find? (·.image.identity == image.identity) | failure
+        let some target := ranges.find? (·.image.assembly == image.assembly) | failure
         let _ ← className image base
         parents := parents.push (target.offset + base)
   for row in [1:parents.size] do
@@ -300,13 +300,13 @@ private def readClass (prepared : List PreparedImage) (image : PreparedImage)
   guard owned.Nodup
   return {
     identity := ← className image row, valueType := false, interfaceType := false,
-    assembly := {identity := image.identity}, base, abstractType := flags &&& 0x80 != 0,
+    assembly := ⟨image.assembly⟩, base, abstractType := flags &&& 0x80 != 0,
     interfaces := owned, methods := methods.toList }
 
 /-- Select the declaring class and its descendants across the physically resolved graph. -/
 private def hierarchy (graph : ParentGraph) (prepared : List PreparedImage)
     (home : PreparedImage) (owner : Nat) (includeDerived : Bool) : Reading (List DispatchType) := do
-  let some origin := graph.modules.find? (·.image.identity == home.identity) | failure
+  let some origin := graph.modules.find? (·.image.assembly == home.assembly) | failure
   guard (owner > 0 && owner ≤ origin.count)
   let root := origin.offset + owner
   let mut types := #[]
@@ -355,7 +355,7 @@ private def testedClass (graph : ParentGraph) (prepared : List PreparedImage) (h
     Live sites must dispatch through the exact target table validated against that hierarchy. -/
 private def selected (graph : ParentGraph) (prepared : List PreparedImage) (image : PreparedImage) (item : MethodEvidence)
     (methods : List SpecializedMethod) : Reading (List DispatchType) := do
-  guard (item.assembly.identity == image.identity)
+  guard (item.assembly.identity == image.assembly)
   let mut code := #[]
   if item.original.code.any (fun i => i.opcode == 0x74 || i.opcode == 0x75) then
     let bytes := item.body.bytes
@@ -435,21 +435,21 @@ private theorem bound_of_checkItem {graph prepared image methods item}
 private def checkHome (graph : ParentGraph) (prepared : List PreparedImage)
     (methods : List SpecializedMethod) (items : List MethodEvidence) (home : PreparedImage) :
     Except AuditError Bool := do
-  let localItems := items.filter (fun item => item.assembly.identity == home.identity)
+  let localItems := items.filter (fun item => item.assembly.identity == home.assembly)
   if localItems.isEmpty then return true
-  if prepared.any (·.identity != home.identity) then
+  if prepared.any (·.assembly != home.assembly) then
     if ← platformAssembly home then return false
   return (← localItems.mapM (checkItem graph prepared home methods)).all id
 
 /-- An accepted method has its physical catalog and a resolved parent graph over all pins. -/
 private theorem bound_of_checkHome {graph prepared methods items home item}
     (parents : (parentGraph prepared).run = .ok (some graph))
-    (mem : item ∈ items) (same : item.assembly.identity == home.identity)
+    (mem : item ∈ items) (same : item.assembly.identity == home.assembly)
     (checked : checkHome graph prepared methods items home = .ok true) :
     CatalogBound prepared home item methods ∧
-      ∀ other ∈ prepared, other.identity ≠ home.identity →
+      ∀ other ∈ prepared, other.assembly ≠ home.assembly →
         platformAssembly home = .ok false ∧ ParentsBound prepared := by
-  have localMem : item ∈ items.filter (fun i => i.assembly.identity == home.identity) :=
+  have localMem : item ∈ items.filter (fun i => i.assembly.identity == home.assembly) :=
     List.mem_filter.mpr ⟨mem, same⟩
   unfold checkHome at checked
   dsimp only at checked
@@ -457,7 +457,7 @@ private theorem bound_of_checkHome {graph prepared methods items home item}
   · rename_i empty
     simp_all
   have finish {bits : List Bool}
-      (read : (items.filter (fun i => i.assembly.identity == home.identity)).mapM
+      (read : (items.filter (fun i => i.assembly.identity == home.assembly)).mapM
         (checkItem graph prepared home methods) = .ok bits)
       (all : bits.all id = true) : CatalogBound prepared home item methods := by
     obtain ⟨bit, member, result⟩ := read_member localMem read
@@ -481,11 +481,11 @@ private theorem bound_of_checkHome {graph prepared methods items home item}
     method must have a closed hierarchy relative to every other supplied pin. -/
 def check (images : List PinnedImage) (pins : List AssemblyPin) (items : List MethodEvidence)
     (imports : List ImportSlot) : Except AuditError Bool := do
-  unless (images.map (·.identity)).Perm (pins.map (·.identity)) do return false
-  if items.isEmpty then return false
   let prepared ← prepare images
-  unless items.all (fun item => prepared.any (fun image => item.assembly.identity == image.identity))
-    do return false
+  unless (prepared.map (·.assembly)).Perm (pins.map (·.identity)) do return false
+  if items.isEmpty then return false
+  unless items.all (fun item =>
+      prepared.any (fun image => item.assembly.identity == image.assembly)) do return false
   let some graph ← (parentGraph prepared).run | return false
   let covered ← prepared.mapM (checkHome graph prepared (specializationTable items) items)
   return covered.all id && imports.isEmpty && items.any (fun item => !item.dispatchTypes.isEmpty)
@@ -494,15 +494,15 @@ def check (images : List PinnedImage) (pins : List AssemblyPin) (items : List Me
 theorem bound_of_check {images pins items imports}
     (checked : check images pins items imports = .ok true) :
     ∃ prepared, prepare images = .ok prepared ∧
-      (images.map (·.identity)).Perm (pins.map (·.identity)) ∧
-      ∀ item ∈ items, ∃ home ∈ prepared, item.assembly.identity = home.identity ∧
+      (prepared.map (·.assembly)).Perm (pins.map (·.identity)) ∧
+      ∀ item ∈ items, ∃ home ∈ prepared, item.assembly.identity = home.assembly ∧
         CatalogBound prepared home item (specializationTable items) ∧
-        ∀ other ∈ prepared, other.identity ≠ home.identity →
+        ∀ other ∈ prepared, other.assembly ≠ home.assembly →
           platformAssembly home = .ok false ∧ ParentsBound prepared := by
   unfold check at checked
-  split at checked <;> try cases checked
-  split at checked <;> try cases checked
   obtain ⟨prepared, preparedEq, rest⟩ := CIL.Safety.except_bind_ok checked
+  split at rest <;> try cases rest
+  split at rest <;> try cases rest
   split at rest <;> try cases rest
   rename_i present
   obtain ⟨graph, parents, found⟩ := CIL.Safety.except_bind_ok rest
@@ -541,10 +541,10 @@ instance (images : List PinnedImage) (pins : List AssemblyPin) (items : List Met
 theorem DispatchCatalogsChecked.physical {images pins items imports}
     (checked : DispatchCatalogsChecked images pins items imports true) :
     ∃ prepared, prepare images = .ok prepared ∧
-      (images.map (·.identity)).Perm (pins.map (·.identity)) ∧
-      ∀ item ∈ items, ∃ home ∈ prepared, item.assembly.identity = home.identity ∧
+      (prepared.map (·.assembly)).Perm (pins.map (·.identity)) ∧
+      ∀ item ∈ items, ∃ home ∈ prepared, item.assembly.identity = home.assembly ∧
         ClassDispatch.CatalogBound prepared home item (specializationTable items) ∧
-        ∀ other ∈ prepared, other.identity ≠ home.identity →
+        ∀ other ∈ prepared, other.assembly ≠ home.assembly →
           platformAssembly home = .ok false ∧ ClassDispatch.ParentsBound prepared := by
   apply ClassDispatch.bound_of_check (pins := pins) (imports := imports)
   cases result : ClassDispatch.check images pins items imports with

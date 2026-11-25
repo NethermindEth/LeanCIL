@@ -175,6 +175,9 @@ static partial class StrictBindingFacts
         var identity = Read(file).Last().Text;
         text.Append("/-- The identity of the assembly the image holds. -/\ndef identity : String :=\n")
             .Append($"  \"{identity}\"\n\n");
+        var name = NameFields(file);
+        text.Append("/-- The assembly the image's `Assembly` row names, which `identity` displays. -/\n")
+            .Append($"def assembly : CIL.AssemblyName :=\n  {{ {string.Join(", ", name[..3])},\n    {name[3]} }}\n\n");
         text.Append("/-- What System.Reflection.Metadata reads from the image. -/\n");
         text.Append("def expectedFacts : List StrictBinding.Fact :=\n  [");
         text.Append(string.Join(",\n   ", Read(file).Select(fact => fact.Lean()))).Append("]\n\n");
@@ -249,11 +252,9 @@ static partial class StrictBindingFacts
             column += width;
         }
         var token = KeyToken(reader, assembly);
-        var keyToken = token is null ? ""
-            : $"keyToken := {Packed(Encoding.ASCII.GetBytes(token), "      ")},\n    ";
+        var keyToken = token is null ? "" : $"publicKeyToken := some 0x{token},\n    ";
         return $$"""
-            { identity := "{{Identity(reader, assembly)}}",
-                {{keyToken}}tableHeader :=
+            { {{keyToken}}tableHeader :=
                   {{Packed(header, "      ")}},
                 header := .ofCounts {{heapSizes}}
                   {{Packed(counts, "      ")}},
@@ -450,6 +451,22 @@ static partial class StrictBindingFacts
         return $"{reader.GetString(assembly.Name)}, Version={assembly.Version}, " +
             $"Culture={(culture.Length == 0 ? "neutral" : culture)}, PublicKeyToken={token}";
     }
+
+    /// <summary>The fields of the <c>CIL.AssemblyName</c> literal of the assembly an image defines.</summary>
+    static string[] NameFields(byte[] file)
+    {
+        using PEReader pe = new(ImmutableArray.Create(file));
+        var reader = pe.GetMetadataReader();
+        var assembly = reader.GetAssemblyDefinition();
+        var version = assembly.Version;
+        var token = KeyToken(reader, assembly) is { } hex ? $"some 0x{hex}" : "none";
+        return [$"name := name!\"{reader.GetString(assembly.Name)}\"",
+            $"version := ⟨{version.Major}, {version.Minor}, {version.Build}, {version.Revision}⟩",
+            $"culture := name!\"{reader.GetString(assembly.Culture)}\"", $"publicKeyToken := {token}"];
+    }
+
+    /// <summary>The <c>CIL.AssemblyName</c> literal of the assembly an image defines.</summary>
+    internal static string Name(byte[] file) => "{ " + string.Join(", ", NameFields(file)) + " }";
 
     /// <summary>The identity of the assembly an image defines, as Lean spells it.</summary>
     internal static string Identity(byte[] file)

@@ -37,7 +37,6 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             strings[reader.GetHeapOffset(handle)] = image.StringEntry(reader.GetHeapOffset(handle));
         blobs[reader.GetHeapOffset(assembly.PublicKey)] =
             image.SizedEntry(HeapIndex.Blob, reader.GetHeapOffset(assembly.PublicKey));
-        var identity = pinned.Original(module).Assembly.Name.FullName;
         // Numbered by rank in bytes, as the slices' heaps are, so the block does not move with the image's offsets.
         var row = image.Row(0x20000001);
         var textWidth = image.HeapIndexWidth(HeapIndex.String);
@@ -64,15 +63,13 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             at += width;
         }
         // The token is the SHA-1 of the public key, which Lean does not compute: it is stated, and checked only
-        // to be sixteen hexadecimal digits when the row has a key.
-        const string TokenMarker = "PublicKeyToken=";
-        var token = identity[(identity.LastIndexOf(TokenMarker, StringComparison.Ordinal) + TokenMarker.Length)..];
-        var hasKey = !assembly.PublicKey.IsNil && reader.GetBlobBytes(assembly.PublicKey).Length > 0;
-        var keyToken = !hasKey ? ""
-            : $"keyToken := {ByteLiterals.Of(System.Text.Encoding.ASCII.GetBytes(token))}, ";
+        // to fit eight bytes when the row has a key.
+        var identity = AssemblyName.Of(module.Assembly.Name, pinned.IdentityMetadata(module)) ??
+            throw new InvalidDataException($"Invalid assembly row in {module.Assembly.Name.Name}");
+        var keyToken = identity.PublicKeyToken is { } token ? $"publicKeyToken := some 0x{token:x16}, " : "";
         var headers = $"tableHeader := {ByteLiterals.Of(image.TableHeader())}, header := {image.DecodedHeader()}";
         var tables = $"assemblyRow := {ByteLiterals.Of(row)}, strings := {Entries(ranked[0])}, blobs := {Entries(ranked[1])}";
-        return $$"""{ identity := {{IdentityText.Quote(identity)}}, {{keyToken}}{{headers}}, {{tables}} }""";
+        return $$"""{ {{keyToken}}{{headers}}, {{tables}} }""";
     }
 
     /// <summary>

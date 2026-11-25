@@ -31,7 +31,7 @@ cil_resolution_facts addMethod
 def addSite : CallSite := {
   declared := { convention := 0, returnType := uint64, parameters := [uint64, uint64] },
   method := {
-    owner := .object ownIdentity "Program", name := name!"Main", hasThis := false,
+    owner := .object ownScope "Program", name := name!"Main", hasThis := false,
     genericArity := 0, returnType := uint64, parameters := [uint64, uint64] },
   name := "Main", target := .managed tokens.main, typeArguments := [], parameterCount := 2,
   returnsValue := true }
@@ -58,13 +58,16 @@ def addItem : MethodEvidence := { item addArgumentsRaw addBody with
 theorem add_body_bound : addItem.BodyBound := ⟨[], by decide +kernel⟩
 #print axioms add_body_bound
 
+/-- An assembly other than the one whose rows hold the adder. -/
+private def elsewhere : AssemblyName := Tests.unsignedAssembly name!"Elsewhere"
+
 /-- A different assembly label cannot reuse the adder's unchanged bytes and metadata. -/
 theorem rejects_substituted_assembly :
-    ¬ DecodedAt [addMethod] [{ addItem with assembly := ⟨"Elsewhere"⟩ }]
-      testProfile testEnvironment 0 ⟨"Elsewhere"⟩ tokens.main [] := by
+    ¬ DecodedAt [addMethod] [{ addItem with assembly := ⟨elsewhere⟩ }]
+      testProfile testEnvironment 0 ⟨elsewhere⟩ tokens.main [] := by
   rintro ⟨record, found, _, _, _, _, ⟨_, body⟩, _⟩
   cases found
-  exact (by decide : addBody.metadata.own.assembly.identity ≠ "Elsewhere") body.2.2.1
+  exact (by decide +kernel : addBody.identities.head? ≠ some elsewhere) body.2.2.1
 #print axioms rejects_substituted_assembly
 
 /-- The records of `program`; the caller's carries the adder's bytes, so only the adder's record

@@ -21,7 +21,7 @@ namespace StrictBinding
 structure PreparedImage where
   identity : String
   /-- Name, version, culture and publisher read from the defining Assembly row. -/
-  assembly : CIL.Extraction.AssemblyColumns
+  assembly : CIL.AssemblyName
   view : ImageView
   layout : MetadataLayout
   /-- The offset and width of the RVA column of a MethodDef row, computed once. -/
@@ -82,19 +82,19 @@ def coreAssemblyAt (image : PreparedImage) (row first : Nat) : Except AuditError
   let key ← image.layout.blobAt image.view (← cell (first + 5))
   return (← rowKeyToken row flags key) == some publisher
 
-/-- The prepared image that is pinned under `identity`. -/
-def located (prepared : List PreparedImage) (identity : String) :
+/-- The prepared image whose Assembly row names `identity`. -/
+def located (prepared : List PreparedImage) (identity : CIL.AssemblyName) :
     Except AuditError PreparedImage :=
-  match prepared.find? (·.identity == identity) with
+  match prepared.find? (·.assembly == identity) with
   | some image => pure image
   | none => throw (.unpinned identity)
 
 /-- The image `located` selects is one of the prepared images. -/
-theorem mem_of_located {prepared : List PreparedImage} {identity : String}
+theorem mem_of_located {prepared : List PreparedImage} {identity : CIL.AssemblyName}
     {image : PreparedImage} (found : located prepared identity = .ok image) :
     image ∈ prepared := by
   unfold located at found
-  cases selected : prepared.find? (·.identity == identity) with
+  cases selected : prepared.find? (·.assembly == identity) with
   | none => simp [selected] at found
   | some selectedImage =>
     have same : selectedImage = image := by
@@ -104,10 +104,33 @@ theorem mem_of_located {prepared : List PreparedImage} {identity : String}
 
 #print axioms mem_of_located
 
+/-- The display name of the assembly a carried block's row names, for error messages. -/
+def blockDisplay (assembly : CIL.Extraction.AssemblyMetadata) : String :=
+  match assembly.name with
+  | .ok identity => identity.display
+  | .error _ => ""
+
+/-- The prepared image whose Assembly row names the assembly a carried block's row names. -/
+def locatedBlock (prepared : List PreparedImage) (assembly : CIL.Extraction.AssemblyMetadata) :
+    Except AuditError PreparedImage := do
+  let .ok identity := assembly.name | throw .unnamedAssembly
+  located prepared identity
+
+/-- The image `locatedBlock` selects is one of the prepared images. -/
+theorem mem_of_locatedBlock {prepared : List PreparedImage}
+    {assembly : CIL.Extraction.AssemblyMetadata} {image : PreparedImage}
+    (found : locatedBlock prepared assembly = .ok image) : image ∈ prepared := by
+  unfold locatedBlock at found
+  split at found
+  · exact mem_of_located found
+  · cases found
+
+#print axioms mem_of_locatedBlock
+
 /-- A claim that the bytes of a method body, its header and its code, belong to the assembly
     `identity`, as the body of the method that `token` names. -/
 structure BodyClaim where
-  identity : String
+  identity : CIL.AssemblyName
   /-- A MethodDef token. -/
   token : Nat
   bytes : List Nat

@@ -121,9 +121,9 @@ def names : MethodNames := {
   signature := bytesOf "System.Void System.ArgumentException::.ctor(System.String,System.String,System.Exception)" }
 
 /-- The checked body and signature resolve to this MethodDef. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     { body with names } definition [] "System.Void System.ArgumentException::.ctor(System.String,System.String,System.Exception)" :=
-  ⟨.cons ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩ .nil, by decide +kernel,
+  ⟨.cons ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩ .nil, by decide +kernel,
     by cil_kernel_rfl, by decide +kernel, rfl, by cil_kernel_rfl, by cil_kernel_rfl,
     by cil_body_decodes⟩
 #print axioms bound
@@ -232,9 +232,9 @@ def names : MethodNames := {
   signature := bytesOf "System.Void System.SystemException::.ctor(System.String,System.Exception)" }
 
 /-- The checked body and signature resolve to this MethodDef. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     { body with names } definition [] "System.Void System.SystemException::.ctor(System.String,System.Exception)" :=
-  ⟨.cons ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩ .nil, by decide +kernel,
+  ⟨.cons ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩ .nil, by decide +kernel,
     by cil_kernel_rfl, by decide +kernel, rfl, by cil_kernel_rfl, by cil_kernel_rfl,
     by cil_body_decodes⟩
 #print axioms bound
@@ -327,9 +327,9 @@ def names : MethodNames := {
   signature := bytesOf "System.Void System.Exception::.ctor(System.String,System.Exception)" }
 
 /-- The checked body and signature resolve to this MethodDef. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     { body with names } definition [] "System.Void System.Exception::.ctor(System.String,System.Exception)" :=
-  ⟨.cons ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩ .nil, by decide +kernel,
+  ⟨.cons ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩ .nil, by decide +kernel,
     by cil_kernel_rfl, by decide +kernel, rfl, by cil_kernel_rfl, by cil_kernel_rfl,
     by cil_body_decodes⟩
 #print axioms bound
@@ -472,6 +472,7 @@ def definition : RawMethod :=
 
 /-- Raw owner, base classes and constructor signature. -/
 def names : MethodNames := {
+  assembly := some coreLibraryAssembly,
   owner := bytesOf (coreLibraryScope ++ "::System.InvalidOperationException"),
   bases := [(bytesOf coreLibraryScope, "System.SystemException"),
     (bytesOf coreLibraryScope, "System.Exception")],
@@ -479,10 +480,10 @@ def names : MethodNames := {
     bytesOf "System.Void System.InvalidOperationException::.ctor(System.String,System.Exception)" }
 
 /-- The checked body and signature resolve to this MethodDef. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     { body with names } definition []
       "System.Void System.InvalidOperationException::.ctor(System.String,System.Exception)" :=
-  ⟨.cons ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩ .nil, by decide +kernel,
+  ⟨.cons ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩ .nil, by decide +kernel,
     by cil_kernel_rfl, by decide +kernel, rfl, by cil_kernel_rfl, by cil_kernel_rfl,
     by cil_body_decodes⟩
 #print axioms bound

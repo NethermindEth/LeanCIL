@@ -4,13 +4,19 @@ import Lean
 /-! Package pin construction and independent method checks have separate cost bounds. -/
 
 namespace Tests.PinnedIndexScaling
-open CIL.Extraction
+open CIL CIL.Extraction
 set_option maxHeartbeats 0
 set_option maxRecDepth 32768
 
-/-- Fixed-width identities keep total pin bytes proportional to the pin count. -/
-private def identities (count : Nat) : List (List Nat) :=
-  (List.range count).map fun position => [65, position / 256, position % 256, 44]
+/-- The pin at `position`: an unsigned assembly whose three-byte name is `A` and two nonzero
+    bytes of the position, so total pin size is proportional to the pin count. -/
+private def pin (position : Nat) : AssemblyName :=
+  { name := ⟨(321 * 256 + position / 255 + 1) * 256 + position % 255 + 1⟩,
+    version := ⟨1, 0, 0, 0⟩, culture := name!"", publicKeyToken := none }
+
+/-- The pins of a package of `count` assemblies. -/
+private def identities (count : Nat) : List AssemblyName :=
+  (List.range count).map pin
 
 /-- One checked package index shared by every small-package method. -/
 private def small : PinnedIndex := cil_pin_index identities 128
@@ -26,8 +32,7 @@ private def large : PinnedIndex := cil_pin_index identities 2048
 
 /-- The same unsigned Assembly row and heap entries accompany each method. -/
 private def assembly : AssemblyMetadata :=
-  { identity := "X, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-    header := .ofCounts 0 [(32, 1)]
+  { header := .ofCounts 0 [(32, 1)]
     tableHeader := fixedBytes 28 0x00000000020000010000000001000000000000000000000001000000
     assemblyRow := fixedBytes 22 0x04800000010000000000000000000000000001000000
     strings := [(0, [0]), (1, [88, 0])], blobs := [(0, [0])] }
@@ -39,11 +44,13 @@ private def methodCheck (pinned : PinnedIndex) (position : Nat) : Bool :=
     { rows := .leaf, strings := .leaf, blobs := .leaf,
       userStrings := .leaf, links := .leaf, instanceBefore := .leaf, instanceTotal := .leaf,
       genericOwners := .leaf }
-  match metadata.environmentWith [bytesOf assembly.identity] [tables] pinned {} with
+  let own : AssemblyName :=
+    { name := name!"X", version := ⟨1, 0, 0, 0⟩, culture := name!"", publicKeyToken := none }
+  match metadata.environmentWith [own] [tables] pinned {} with
   | .error _ => false
   | .ok env =>
-    env.pinned.matches [65, 0, 0, 44, 99] && env.exactPins.contains [65, 0, 0, 44] &&
-      !env.exactPins.contains [65, 0, 0, 44, 99]
+    env.pinned.contains (pin 0).name && env.exactPins.contains (pin 0) &&
+      !env.exactPins.contains { pin 0 with version := ⟨2, 0, 0, 0⟩ }
 
 /-- Each batch repeats complete package construction and independent method checks. -/
 private def runtimeCost (pinCount methodCount repetitions : Nat) : IO (Nat × Nat) := do
@@ -139,19 +146,18 @@ run_cmd do
           throwError "package pin checks grew faster than package size"
         previousTotal := total
 
-/-- Materialized indexes retain every complete identity's prefix. -/
-theorem materialized_pin_present : small.prefixes.matches [65, 0, 0, 44, 99] = true := by
+/-- Materialized indexes retain every pin's name and complete identity. -/
+theorem materialized_pin_present :
+    small.names.contains (pin 127).name = true ∧ small.exact.contains (pin 127) = true := by
   decide +kernel
 #print axioms materialized_pin_present
 
-/-- An empty trie cannot certify a package containing a nonempty pin. -/
-theorem omitted_prefix_rejected :
-    ({} : AssemblyPrefixes) ≠ ([([65] : List Nat)].map assemblyStem).foldl
-      AssemblyPrefixes.insert {} := by
+/-- An empty name table cannot certify a package containing a pin. -/
+theorem omitted_name_rejected : ({} : PinnedNames) ≠ indexPinNames [pin 0] := by
   intro same
-  have query := congrArg (fun trie => trie.matches [65]) same
+  have query := congrArg (fun names => names.contains (pin 0).name) same
   have impossible : false = true := query
   cases impossible
-#print axioms omitted_prefix_rejected
+#print axioms omitted_name_rejected
 
 end Tests.PinnedIndexScaling

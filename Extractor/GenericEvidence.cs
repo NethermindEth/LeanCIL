@@ -587,9 +587,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $"""theorem method{number}_specialization_validated : Extraction.SpecializationValid rawLayouts""",
             $"""method{number}Original method{number}TypeArgumentsRaw method{number}Closed""",
             $"""method{number}RawArguments := by constructor <;> cil_kernel_rfl"""));
-        var assembly = $"\u27e8{Quote(PinIdentity(method.Module))}\u27e9";
+        var assembly = $"assembly{Pinned.Index(method.Module)}";
         var proofs = string.Join(", ", body.Identified, body.TablesValid, "by cil_kernel_rfl",
-            "pinned_identities_spelled", "rfl", "by cil_kernel_rfl", "by cil_kernel_rfl", "by cil_body_decodes");
+            "pinned_identities_listed", "rfl", "by cil_kernel_rfl", "by cil_kernel_rfl", "by cil_body_decodes");
         // The bound body carries the dependency slices, so the kernel decides it whole.
         lean.AppendLine(string.Join(" ",
             $"""theorem method{number}_body_validated : Extraction.BodyDecodes {pinTable} platformDefinitions""",
@@ -787,7 +787,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // The kernel decides once that the literal tables are the decoder's; the body check reads them by name.
         var slices = $"def method{number}Metadata : Extraction.MethodMetadata := {rows}\n" +
             $"def method{number}Tables : List Extraction.IndexTables := {tables}\n" +
-            $"def method{number}Names : Extraction.MethodNames := {Names(original, classOwner, admitted.FullName)}\n" +
+            $"def method{number}Names : Extraction.MethodNames := " +
+            $"{Names(original, classOwner, admitted.FullName, Pinned.Index(Pinned.Working(original.Module)))}\n" +
             $"theorem method{number}_tables_valid : Extraction.tablesMatch method{number}Metadata " +
             $"method{number}Tables = true := by decide +kernel";
         var table = List(operands.Select(entry => $"({entry.Token}, {entry.Operand})"));
@@ -815,13 +816,14 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// as UTF-8 bytes: Lean reads the same names from the carried rows and proves by <c>cil_kernel_rfl</c> that they
     /// spell the strings the evidence states.
     /// </summary>
-    static string Names(MethodDefinition original, bool classOwner, string signature)
+    static string Names(MethodDefinition original, bool classOwner, string signature, int assembly)
     {
         var bases = classOwner
             ? ObjectTypes.Bases(original.DeclaringType)
                 .Select(type => $"({Utf8(LayoutEvidence.Scope(type))}, {ClassName(type)})")
             : [];
-        return $"{{ owner := {Utf8(LayoutEvidence.Identity(original.DeclaringType))}, bases := {List(bases)}, " +
+        return $"{{ assembly := some assembly{assembly}Identity, " +
+            $"owner := {Utf8(LayoutEvidence.Identity(original.DeclaringType))}, bases := {List(bases)}, " +
             $"signature := {Utf8(signature)} }}";
     }
 
@@ -849,10 +851,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     {
         var assembly = AssemblyName.Of(reference, Pinned.IdentityMetadata(module)) ??
             throw new InvalidDataException($"Invalid assembly scope for {reference.Name}");
-        var name = ByteLiterals.Of(assembly.Name.Bytes.ToArray());
-        var culture = ByteLiterals.Of(assembly.Culture.Bytes.ToArray());
-        var token = assembly.PublicKeyToken is ulong key ? Utf8(key.ToString("x16", CultureInfo.InvariantCulture)) : "[]";
-        return $"{{ name := {name}, version := {assembly.Version.ToLean()}, culture := {culture}, token := {token} }}";
+        return assembly.ToLean();
     }
 
     string ArgumentHead(TypeReference type, HashSet<TypeDefinition> definitions)
@@ -887,37 +886,42 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             throw new InvalidOperationException("Method evidence requires the pinned assemblies.");
         foreach (var (module, index) in Pinned.Modules.Select((module, index) => (module, index)))
         {
-            var identity = Pinned.Original(module).Assembly.Name.FullName;
+            var identity = AssemblyName.Of(module.Assembly.Name, Pinned.IdentityMetadata(module)) ??
+                throw new InvalidDataException($"Invalid assembly row in {module.Assembly.Name.Name}");
             lean.AppendLine($"def assembly{index}Metadata : Extraction.AssemblyMetadata := " +
                 slices.AssemblyBlock(module));
-            lean.AppendLine($"def assembly{index}Identity : List Nat := " +
-                ByteLiterals.Of(Encoding.UTF8.GetBytes(identity)));
-            // The assembly's header bytes decode to the stated header, its bytes spell this identity, and it is the
-            // string the block states: one proof for every method of the assembly.
+            lean.AppendLine($"def assembly{index}Identity : CIL.AssemblyName := {identity.ToLean()}");
+            // The assembly's header bytes decode to the stated header and its row names this identity: one proof for
+            // every method of the assembly.
             lean.AppendLine($"theorem assembly{index}_identified : Extraction.AssemblyIdentified " +
                 $"assembly{index}Metadata assembly{index}Identity := " +
-                "⟨by cil_kernel_rfl, by first | cil_kernel_rfl | decide +kernel, by cil_kernel_rfl⟩");
+                "⟨by cil_kernel_rfl, by first | cil_kernel_rfl | decide +kernel⟩");
         }
         // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
         var pins = Pinned.Pins.ToArray();
         for (var k = 0; k < pins.Length; k++)
-            lean.AppendLine(
-                $"def assembly{k} : Extraction.AssemblyPin := {{ identity := {Quote(pins[k].Identity)} }}");
+        {
+            lean.AppendLine($"def assembly{k} : Extraction.AssemblyPin := ⟨assembly{k}Identity⟩");
+            // Type expressions still scope types by display text; this is the pin's, checked against its identity.
+            lean.AppendLine($"def assembly{k}Scope : String := {Quote(pins[k].Identity)}");
+            lean.AppendLine($"theorem assembly{k}_scope : assembly{k}Identity.spelling = " +
+                $"Extraction.bytesOf assembly{k}Scope := by cil_kernel_rfl");
+        }
         lean.AppendLine($"def {assemblyTable} : List Extraction.AssemblyPin := [" +
             string.Join(", ", Enumerable.Range(0, pins.Length).Select(k => $"assembly{k}")) + "]");
-        // Every body lists these identities; one proof that they spell the pins serves them all.
+        // Every body lists these identities; one proof that they are the pins' serves them all.
         if (packagePins)
             lean.AppendLine(
                 $"def assemblies : List Extraction.AssemblyPin := Runtime.Net11WinX64.packagePins {assemblyTable}");
-        lean.AppendLine("def pinnedIdentities : List (List Nat) := " + List(Pinned.Modules
+        lean.AppendLine("def pinnedIdentities : List CIL.AssemblyName := " + List(Pinned.Modules
             .Select((_, index) => $"assembly{index}Identity")
             .Concat(packagePins ? ["Runtime.Net11WinX64.coreIdentity"] : [])));
         lean.AppendLine("def pinnedIndex : Extraction.PinnedIndex := cil_pin_index pinnedIdentities");
         lean.AppendLine("#print axioms pinnedIndex");
         // The platform definitions go here once every method's slices are known; see InsertPlatformDefinitions.
         platformAt = lean.Length;
-        lean.AppendLine("theorem pinned_identities_spelled : pinnedIdentities.mapM Extraction.spelled? = " +
-            $"some ({pinTable}.map (·.identity)) := by cil_kernel_rfl");
+        lean.AppendLine("theorem pinned_identities_listed : pinnedIndex.identities = " +
+            $"{pinTable}.map (·.identity) := rfl");
     }
 
     /// <summary>
@@ -988,7 +992,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 $"interfaces := {List(original.Interfaces.Select(implementation =>
                     Type(GenericStructs.Substitute(implementation.InterfaceType, owner))))}, " +
                 $"methods := {List(original.Methods.Select(member => DispatchMethod(member, owner)))}, " +
-                $"assembly := {{ identity := {Quote(PinIdentity(module))} }}" + ClassEvidence(original) + " }";
+                $"assembly := assembly{Pinned.Index(module)}" + ClassEvidence(original) + " }";
         }));
     }
 
@@ -1001,11 +1005,6 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             ? $", base := {ObjectType(baseType)}" : "";
         return parent + (type.IsAbstract ? ", abstractType := true" : "");
     }
-
-    // The pin whose metadata supplied a catalog entry; Lean requires it to scope the entry's type.
-    string PinIdentity(ModuleDefinition module) =>
-        (pinned ?? throw new InvalidOperationException("Dispatch evidence requires the pinned assemblies."))
-            .Pins.ElementAt(pinned.Index(module)).Identity;
 
     string DispatchMethod(MethodDefinition method, GenericInstanceType? owner)
     {

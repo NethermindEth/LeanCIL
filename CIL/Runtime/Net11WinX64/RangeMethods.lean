@@ -10,12 +10,12 @@ set_option maxRecDepth 32768
 set_option maxHeartbeats 6000000
 
 /-- Runtime identity bound to the CoreLib metadata and signature rows. -/
-private def identity := bytesOf coreLibraryScope
+private def identity : AssemblyName := coreLibraryAssembly
 
 /-- The runtime assembly identity is justified by its table row and heaps. -/
 private theorem identified :
-    AssemblyIdentified CIL.Runtime.Net11WinX64.CoreLib.assembly (bytesOf coreLibraryScope) :=
-  ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+    AssemblyIdentified CIL.Runtime.Net11WinX64.CoreLib.assembly coreLibraryAssembly :=
+  ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
 #print axioms identified
 
 namespace RangeCtor
@@ -162,6 +162,7 @@ def raw (decoded : DecodedBody) : RawMethod := {
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names : MethodNames := {
+  assembly := some coreLibraryAssembly,
   owner := bytesOf (coreLibraryScope ++ "::System.ArgumentOutOfRangeException"),
   bases := [(bytesOf coreLibraryScope, "System.ArgumentException"),
     (bytesOf coreLibraryScope, "System.SystemException"),
@@ -174,7 +175,7 @@ def definition := raw (checked.toOption.getD {
   localSignature := 0, code := [], statics := [] })
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     {body with names} definition [] "System.Void System.ArgumentOutOfRangeException::.ctor(System.String,System.String)" :=
   ⟨AllIdentified.cons identified AllIdentified.nil,tables_valid, by cil_kernel_rfl,
    by decide +kernel,rfl,by cil_kernel_rfl, by cil_kernel_rfl,by cil_body_decodes⟩
@@ -297,6 +298,7 @@ def raw (decoded : DecodedBody) : RawMethod := {
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names : MethodNames := {
+  assembly := some coreLibraryAssembly,
   owner := bytesOf (coreLibraryScope ++ "::System.ArgumentException"),
   bases := [(bytesOf coreLibraryScope, "System.SystemException"),
     (bytesOf coreLibraryScope, "System.Exception")],
@@ -308,7 +310,7 @@ def definition := raw (checked.toOption.getD {
   localSignature := 0, code := [], statics := [] })
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     {body with names} definition [] "System.Void System.ArgumentException::.ctor(System.String,System.String)" :=
   ⟨AllIdentified.cons identified AllIdentified.nil,tables_valid, by cil_kernel_rfl,
    by decide +kernel,rfl,by cil_kernel_rfl, by cil_kernel_rfl,by cil_body_decodes⟩
@@ -424,6 +426,7 @@ def raw (decoded : DecodedBody) : RawMethod := {
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names : MethodNames := {
+  assembly := some coreLibraryAssembly,
   owner := bytesOf (coreLibraryScope ++ "::System.SystemException"),
   bases := [(bytesOf coreLibraryScope, "System.Exception")],
   signature := bytesOf "System.Void System.SystemException::.ctor(System.String)" }
@@ -434,7 +437,7 @@ def definition := raw (checked.toOption.getD {
   localSignature := 0, code := [], statics := [] })
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     {body with names} definition [] "System.Void System.SystemException::.ctor(System.String)" :=
   ⟨AllIdentified.cons identified AllIdentified.nil,tables_valid, by cil_kernel_rfl,
    by decide +kernel,rfl,by cil_kernel_rfl, by cil_kernel_rfl,by cil_body_decodes⟩
@@ -527,6 +530,7 @@ def raw (decoded : DecodedBody) : RawMethod := {
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names : MethodNames := {
+  assembly := some coreLibraryAssembly,
   owner := bytesOf (coreLibraryScope ++ "::System.Exception"), bases := [],
   signature := bytesOf "System.Void System.Exception::.ctor(System.String)" }
 
@@ -536,7 +540,7 @@ def definition := raw (checked.toOption.getD {
   localSignature := 0, code := [], statics := [] })
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     {body with names} definition [] "System.Void System.Exception::.ctor(System.String)" :=
   ⟨AllIdentified.cons identified AllIdentified.nil,tables_valid, by cil_kernel_rfl,
    by decide +kernel,rfl,by cil_kernel_rfl, by cil_kernel_rfl,by cil_body_decodes⟩
@@ -630,6 +634,7 @@ def raw (decoded : DecodedBody) : RawMethod := {
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names : MethodNames := {
+  assembly := some coreLibraryAssembly,
   owner := bytesOf (coreLibraryScope ++ "::System.Exception"), bases := [],
   signature := bytesOf "System.Void System.Exception::.ctor()" }
 
@@ -639,7 +644,7 @@ def definition := raw (checked.toOption.getD {
   localSignature := 0, code := [], statics := [] })
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     {body with names} definition [] "System.Void System.Exception::.ctor()" :=
   ⟨AllIdentified.cons identified AllIdentified.nil,tables_valid, by cil_kernel_rfl,
    by decide +kernel,rfl,by cil_kernel_rfl, by cil_kernel_rfl,by cil_body_decodes⟩
@@ -700,6 +705,7 @@ def raw (decoded : DecodedBody) : RawMethod := {
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names : MethodNames := {
+  assembly := some coreLibraryAssembly,
   owner := bytesOf (coreLibraryScope ++ "::System.Object"), bases := [],
   signature := bytesOf "System.Void System.Object::.ctor()" }
 
@@ -709,7 +715,7 @@ def definition := raw (checked.toOption.getD {
   localSignature := 0, code := [], statics := [] })
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     {body with names} definition [] "System.Void System.Object::.ctor()" :=
   ⟨AllIdentified.cons identified AllIdentified.nil,tables_valid, by cil_kernel_rfl,
    by decide +kernel,rfl,by cil_kernel_rfl, by cil_kernel_rfl,by cil_body_decodes⟩
@@ -781,6 +787,7 @@ def raw (decoded : DecodedBody) : RawMethod := {
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names : MethodNames := {
+  assembly := some coreLibraryAssembly,
   owner := bytesOf (coreLibraryScope ++ "::System.Exception"), bases := [],
   signature := bytesOf "System.Void System.Exception::set_HResult(System.Int32)" }
 
@@ -790,7 +797,7 @@ def definition := raw (checked.toOption.getD {
   localSignature := 0, code := [], statics := [] })
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     {body with names} definition [] "System.Void System.Exception::set_HResult(System.Int32)" :=
   ⟨AllIdentified.cons identified AllIdentified.nil,tables_valid, by cil_kernel_rfl,
    by decide +kernel,rfl,by cil_kernel_rfl, by cil_kernel_rfl,by cil_body_decodes⟩
@@ -880,6 +887,7 @@ def signature (getter : ResourceGetter) : String :=
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names (getter : ResourceGetter) : MethodNames := {
+  assembly := some coreLibraryAssembly,
   owner := bytesOf (coreLibraryScope ++ "::System.SR"), signature := bytesOf getter.signature }
 
 end ResourceGetter
@@ -898,7 +906,7 @@ theorem rangeResource_tables :
 #print axioms rangeResource_tables
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
-theorem rangeResource_bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem rangeResource_bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     {rangeResource.body with names := rangeResource.names} rangeResource.raw []
       "System.String System.SR::get_Arg_ArgumentOutOfRangeException()" :=
   ⟨.cons identified .nil, rangeResource_tables, by cil_kernel_rfl, by decide +kernel, rfl,
@@ -919,7 +927,8 @@ theorem invalidOperationResource_tables :
 #print axioms invalidOperationResource_tables
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
-theorem invalidOperationResource_bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem invalidOperationResource_bound :
+    BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     {invalidOperationResource.body with names := invalidOperationResource.names}
       invalidOperationResource.raw []
       "System.String System.SR::get_Arg_InvalidOperationException()" :=

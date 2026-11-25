@@ -6,11 +6,11 @@ import CIL.Safety.HeapObjects
 namespace ExampleProof
 open CIL CIL.Safety CIL.Extraction
 
-private def base : TypeExpr := .object Extracted.assembly0.identity "Rows.Parent"
+private def base : TypeExpr := .object Extracted.assembly0Scope "Rows.Parent"
 private def qualified : TypeExpr :=
-  .object Extracted.assembly0.identity ⟨[⟨name!"Rows", name!"Widget"⟩]⟩
+  .object Extracted.assembly0Scope ⟨[⟨name!"Rows", name!"Widget"⟩]⟩
 private def dotted : TypeExpr :=
-  .object Extracted.assembly0.identity ⟨[⟨name!"", name!"Rows.Widget"⟩]⟩
+  .object Extracted.assembly0Scope ⟨[⟨name!"", name!"Rows.Widget"⟩]⟩
 
 /-- The first two allocations have different derived classes and the same immediate base. -/
 private def heap : Safety.Memory :=

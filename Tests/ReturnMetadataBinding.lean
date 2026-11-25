@@ -40,7 +40,6 @@ private def acceptsSignature (result : List Nat) (claimed : TypeExpr)
   (do
     let fixture := build (signatureWorld result parameters modifierNamespace modifierName)
       (bytesOf "T")
-      "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
     let method : RawMethod :=
       { token := fixture.2, owner := "T::Program", hasThis := false,
         explicitThis := false, callingConvention := 0, attributes := 0x96,
@@ -130,7 +129,7 @@ private def enumWorld (code : Nat) : MetadataSlice :=
     let signature ← blob [0x06, code]
     let field ← row Table.field [0x606, fieldName, signature]
     link linkDeclaring field 0 owner)
-    (bytesOf "T") "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null").1
+    (bytesOf "T")).1
 
 /-- Enum storage is read through the actual metadata index and field signature decoder. -/
 private def acceptsEnum (code : Nat) : Bool :=

@@ -138,10 +138,10 @@ def names : MethodNames := {
   signature := bytesOf "System.Void System.InvalidOperationException::.ctor(System.String)" }
 
 /-- The checked body and signature resolve to this MethodDef. -/
-theorem bound : BodyDecodes [⟨coreLibraryScope⟩] {} ⟨coreLibraryScope⟩
+theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
     { body with names } definition []
       "System.Void System.InvalidOperationException::.ctor(System.String)" :=
-  ⟨.cons ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩ .nil, by decide +kernel,
+  ⟨.cons ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩ .nil, by decide +kernel,
     by cil_kernel_rfl, by decide +kernel, rfl, by cil_kernel_rfl, by cil_kernel_rfl,
     by cil_body_decodes⟩
 #print axioms bound

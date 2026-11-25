@@ -44,6 +44,11 @@ def runtimeAssembly : AssemblyName :=
   { name := name!"System.Runtime", version := ⟨11, 0, 0, 0⟩, culture := name!"",
     publicKeyToken := some 0xb03f5f7f11d50a3a }
 
+/-- The .NET 11 CoreLib implementation assembly; `coreLibraryScope` is its display name. -/
+def coreLibraryAssembly : AssemblyName :=
+  { name := name!"System.Private.CoreLib", version := ⟨11, 0, 0, 0⟩, culture := name!"",
+    publicKeyToken := some 0x7cec85d7bea7798e }
+
 /-- The physical namespace and simple name of each declaring type, outermost first. -/
 structure ClassName where
   levels : List TypeLevel

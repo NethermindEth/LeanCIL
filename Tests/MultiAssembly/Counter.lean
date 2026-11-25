@@ -17,10 +17,11 @@ theorem correctness :
 theorem counter_callee {pin : AssemblyPin} {token : Nat} {arguments : List TypeExpr}
     (bound : DecodedAt Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment 1 pin token arguments) :
-    pin.identity = Extracted.assembly0.identity ∧ token = Extracted.method1Original.token ∧
-      arguments = [] :=
-  bound.direct_site Extracted.method0_calls_validated
+    pin.identity.spelling = Extracted.assembly0.identity.spelling ∧
+      token = Extracted.method1Original.token ∧ arguments = [] := by
+  obtain ⟨spelled, tokenEq, argumentsEq⟩ := bound.direct_site Extracted.method0_calls_validated
     (pc := 1) rfl rfl rfl rfl rfl rfl rfl
+  exact ⟨spelled.trans (by cil_kernel_rfl), tokenEq, argumentsEq⟩
 
 #print axioms counter_callee
 
@@ -29,7 +30,8 @@ theorem foreign_pin_refused {token : Nat} {arguments : List TypeExpr} :
     ¬ DecodedAt Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment 1 Extracted.assembly1 token arguments := by
   intro bound
-  exact (by decide : Extracted.assembly1.identity ≠ Extracted.assembly0.identity)
+  exact (by decide +kernel :
+    Extracted.assembly1.identity.spelling ≠ Extracted.assembly0.identity.spelling)
     (counter_callee bound).1
 
 #print axioms foreign_pin_refused

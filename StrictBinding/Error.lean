@@ -1,10 +1,12 @@
+import CIL.Identity
+
 /-!
 # Audit errors
 
 The reasons a strict binding check can fail. Every check in `StrictBinding` returns
 `Except AuditError`, so a rejected image, container or body names the fact that did not hold.
-Payloads are numbers (offsets, tokens, relative virtual addresses) so a test can compare an
-error exactly.
+Payloads are numbers (offsets, tokens, relative virtual addresses), assemblies and the text an
+image is pinned under, so a test can compare an error exactly.
 -/
 
 namespace StrictBinding
@@ -111,8 +113,8 @@ inductive AuditError where
   | fieldDataMismatch (token rva offset : Nat)
   /-- The Assembly row does not spell the identity the image is pinned under. -/
   | identityMismatch (identity : String)
-  /-- No pinned image has this identity. -/
-  | unpinned (identity : String)
+  /-- No pinned image is this assembly. -/
+  | unpinned (assembly : CIL.AssemblyName)
   /-- Two pinned images have the same identity. -/
   | duplicateImage (identity : String)
   /-- The carried table stream header of the assembly pinned under `identity` is not the image's
@@ -142,6 +144,8 @@ inductive AuditError where
   | unsortedTable (table row : Nat)
   /-- A carried Assembly block names another identity than the image it is checked against. -/
   | ownIdentityMismatch (identity : String)
+  /-- A carried Assembly block's row and heaps do not name an assembly. -/
+  | unnamedAssembly
   /-- A carried Assembly block states another public key token than the image's key gives. -/
   | ownTokenMismatch (identity : String)
   /-- A slice's core-library AssemblyRef row does not name a core library with its publisher's
@@ -149,7 +153,7 @@ inductive AuditError where
   | corlibMismatch (identity : String) (row : Nat)
   /-- A MemberRef of the image links to a definition with another owner, name, kind or
       signature, or to a member a MemberRef cannot bind. -/
-  | memberLinkMismatch (identity : String) (token : Nat)
+  | memberLinkMismatch (assembly : CIL.AssemblyName) (token : Nat)
   deriving DecidableEq, Repr
 
 /-- Whether a check succeeded; the proposition of each audited theorem is `ok check = true`. -/

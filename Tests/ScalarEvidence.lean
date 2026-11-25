@@ -27,10 +27,11 @@ private def intType : TypeExpr := .primitive .int32
 private def nativeType : TypeExpr := .primitive .intPtr
 private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction := ⟨0, opcode, operand⟩
 /-- The pinned assembly owning `Scope::Fixture`; every certificate attributes its bodies to it. -/
-private def scope : AssemblyPin :=
-  { identity := "Scope, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" }
+private def scope : AssemblyPin := ⟨unsignedAssembly name!"Scope"⟩
+/-- The scope text of `scope`'s types. -/
+private def scopeText : String := "Scope, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 private def raw (code : List RawInstruction) (parameters : List TypeExpr := [word, word]) : RawMethod := {
-  token := 0x06000001, owner := scope.identity ++ "::Fixture", hasThis := false,
+  token := 0x06000001, owner := scopeText ++ "::Fixture", hasThis := false,
   explicitThis := false, callingConvention := 0, attributes := 0, implementation := 0,
   returnType := word, parameters, locals := [], initLocals := true, maxStack := 2,
   genericParameters := [], code }
@@ -387,14 +388,14 @@ example : ¬ ScalarFlowValid { mixedRaw with parameters := [nativeType, word] } 
 private def site : CallSite := {
   declared := { convention := 0, returnType := word, parameters := [word, word] },
   method := {
-    owner := .atom scope.identity "Fixture", name := name!"", hasThis := false, genericArity := 0,
+    owner := .atom scopeText "Fixture", name := name!"", hasThis := false, genericArity := 0,
     returnType := word, parameters := [word, word] },
   target := .managed 0x06000001, typeArguments := [], parameterCount := 2, returnsValue := true }
 /-- The call linked to method 0 that names `site`'s method, as the extractor emits it. -/
 private def emittedCall (site : CallSite) : Instruction := .call site.method
 private def linkedZero : Option Link := some (.direct 0)
 example : validateManagedCall [⟨[], addRaw, scope⟩] [] (i 40 (.call site)) true linkedZero
-    (emittedCall site) = true := by decide
+    (emittedCall site) = true := by decide +kernel
 example : validateManagedCall [⟨[], addRaw, scope⟩] [] (i 40
     (.call { site with method.returnType := intType }))
     true linkedZero (emittedCall { site with method.returnType := intType }) = false := by decide
@@ -1291,7 +1292,8 @@ example : scalarEmissionMatches none none (i 125 samplesField) [.object, .object
 /-- `Scope.Pair`, a struct at layout 0, with fields of each kind the step resolves: an integer,
     an enum, a vector, a nested struct and a generic struct instance. -/
 private def pairType : TypeExpr := .aggregate "Scope::Scope.Pair" 0
-private def modeType : TypeExpr := .enum (Tests.enumIdentity "Scope.Mode" (Tests.enumAssembly name!"Scope")) .signed32
+private def modeType : TypeExpr :=
+  .enum (Tests.enumIdentity "Scope.Mode" (Tests.unsignedAssembly name!"Scope")) .signed32
 private def laneType : TypeExpr :=
   .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1") word
 private def innerType : TypeExpr := .aggregate "Scope::Scope.Inner" 1

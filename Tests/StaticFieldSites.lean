@@ -23,8 +23,9 @@ namespace Tests.StaticFieldSites
 
 open CIL CIL.Extraction Tests.MetadataBuilder Tests.BodyEncoding
 
-private def pin : AssemblyPin :=
-  { identity := "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" }
+private def pin : AssemblyPin := ⟨unsignedAssembly name!"T"⟩
+/-- The scope text of `pin`'s types. -/
+private def pinScope : String := "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 private def extScope : String := "Ext, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 private def int32 : TypeExpr := .primitive .int32
 
@@ -36,7 +37,7 @@ private def ldtoken : Nat := 0xD0
 
 /-- The owner of `X` and `Y`: `T`'s `Fixture` when `carried`, else `Ext.Point`. -/
 private def owner (carried : Bool) : TypeExpr :=
-  if carried then .atom pin.identity "Fixture" else .object extScope "Ext.Point"
+  if carried then .atom pinScope "Fixture" else .object extScope "Ext.Point"
 
 /-- `X` and `Y` as the instruction names them; a carried static counts from its owner's first
     field. -/
@@ -118,7 +119,7 @@ private def world (carried : Bool) (result : List Nat) : Step Tokens := do
   pure { y := fields.getLast?.getD yRef, endian, x := fields.headD xRef, boxed }
 
 private def slice (carried : Bool) (result : List Nat) : MetadataSlice × Tokens :=
-  build (world carried result) (bytesOf "T") pin.identity
+  build (world carried result) (bytesOf "T")
 
 /-- The platform definitions the world names: `Ext.Point` as a class and `BitConverter`, whose
     `IsLittleEndian` is the platform's byte order. -/
@@ -133,7 +134,7 @@ private def operandOf (field : FieldRef) : RawOperand :=
 /-- The raw body `opcode field; ret`, with `ldc.i4.1` before a store and `pop` after a token. -/
 private def raw (opcode : Nat) (field : FieldRef) (returnType : TypeExpr) : RawMethod :=
   let access := operandOf field
-  { token := 0x06000001, owner := pin.identity ++ "::Fixture", hasThis := false,
+  { token := 0x06000001, owner := pinScope ++ "::Fixture", hasThis := false,
     explicitThis := false, callingConvention := 0, attributes := 0, implementation := 0,
     returnType, parameters := [], locals := [], initLocals := false, maxStack := 8,
     genericParameters := [],
@@ -348,7 +349,7 @@ theorem endian_field_as_static_load_rejected :
 
 /-- `V` of `Box<int>` as an instruction names it. -/
 private def boxedField : FieldRef :=
-  { owner := .apply (.objectConstructor pin.identity "Box`1") int32, index := 0, type := int32,
+  { owner := .apply (.objectConstructor pinScope "Box`1") int32, index := 0, type := int32,
     name := name!"V" }
 
 /-- Whether decoding the body accessing `V` of `Box<int>` with `opcode` fails on the refusal of

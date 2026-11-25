@@ -314,6 +314,21 @@ theorem instantiateMethod_token {layouts : List RawLayout} {original closed : Ra
 
 #print axioms instantiateMethod_token
 
+/-- Instantiation keeps the owner, so a closed body is attributed with its definition. -/
+theorem instantiateMethod_owner {layouts : List RawLayout} {original closed : RawMethod}
+    {arguments : List TypeExpr}
+    (instantiated : instantiateMethod layouts original arguments = some closed) :
+    closed.owner = original.owner := by
+  unfold instantiateMethod at instantiated
+  split at instantiated
+  · cases instantiated
+  · simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      Option.some.injEq] at instantiated
+    obtain ⟨_, _, _, _, _, _, _, _, _, _, rfl⟩ := instantiated
+    rfl
+
+#print axioms instantiateMethod_owner
+
 /-- A closed method retains its definition's local initialization flag. -/
 theorem instantiateMethod_initLocals {layouts : List RawLayout} {original closed : RawMethod}
     {arguments : List TypeExpr}
@@ -531,7 +546,7 @@ def calleeMatchesSite (site : CallSite) (token : Nat) (callee : SpecializedMetho
   (callee.closed.returnType != .void) == site.returnsValue &&
   callee.closed.returnType == site.returnType &&
   callee.closed.parameters == site.parameterTypes &&
-  site.declaringType.headScope == some callee.assembly.identity
+  site.declaringType.headScope.any callee.assembly.identity.spelledAs
 
 /-- What a live `newobj` of `constructor` may be linked to. Its raw instruction is `newobj` (115)
     of a managed site naming `constructor`, and the linked method is the one the site names. A
@@ -621,7 +636,7 @@ def managedAddressMatches (methods : Nat → Option SpecializedMethod)
   match raw.operand with
   | .call site => site.target == .managed target.identity.token &&
     (match methods target.method with
-      | some callee => site.declaringType.headScope == some callee.assembly.identity &&
+      | some callee => site.declaringType.headScope.any callee.assembly.identity.spelledAs &&
         managedOwnerMatches site target.identity.owner callee.closed.ownerArgumentCount &&
         site.typeArguments == callee.arguments &&
         site.returnType == callee.closed.returnType && site.parameterTypes == callee.closed.parameters

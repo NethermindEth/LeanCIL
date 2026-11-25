@@ -17,12 +17,13 @@ namespace Tests.OpaqueClassFields
 
 open CIL CIL.Extraction Tests.MetadataBuilder
 
-private def pin : AssemblyPin :=
-  { identity := "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" }
+private def pin : AssemblyPin := ⟨unsignedAssembly name!"T"⟩
+/-- The scope text of `pin`'s types. -/
+private def pinScope : String := "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 private def int32 : TypeExpr := .primitive .int32
 private def int64 : TypeExpr := .primitive .int64
-private def fixture : TypeExpr := .object pin.identity "Fixture"
-private def holder : TypeExpr := .object pin.identity "Holder"
+private def fixture : TypeExpr := .object pinScope "Fixture"
+private def holder : TypeExpr := .object pinScope "Holder"
 private def systemObject : TypeExpr := .object runtimeScope "System.Object"
 
 /-- A generic class instance of the primitive assembly, `name` closed at `arguments`. -/
@@ -87,7 +88,7 @@ private def world : Step Tokens := do
   link linkDeclaring static 0 holderType
   pure { object, list, interfaceList, function, tuple, parameter, modified, catalog, static }
 
-private def slice : MetadataSlice × Tokens := build world (bytesOf "T") pin.identity
+private def slice : MetadataSlice × Tokens := build world (bytesOf "T")
 
 /-- A type of `System.Runtime`'s `System.Collections.Generic` namespace of this kind. -/
 private def collectionType (name : String) (kind : PlatformKind) : PlatformDefinition :=
@@ -156,7 +157,7 @@ private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction :=
 
 /-- An instance method of `Fixture` taking a `Fixture`, with `code`. -/
 private def method (code : List RawInstruction) : RawMethod :=
-  { token := 0x06000001, owner := pin.identity ++ "::Fixture", hasThis := true,
+  { token := 0x06000001, owner := pinScope ++ "::Fixture", hasThis := true,
     receiverClass := some fixture, explicitThis := false, callingConvention := 0, attributes := 0,
     implementation := 0, returnType := .void, parameters := [fixture], locals := [],
     initLocals := false, maxStack := 2, genericParameters := [], code }

@@ -42,11 +42,11 @@ private def original : RawMethod := {
 
 private def body : BodyEvidence := {
   bytes := [0x12,0x02,0x1a,0x59,0x2a], tokens := { operands := [] }
-  metadata, tables := metadata.tables.toOption.getD [], identities := [bytesOf coreLibraryScope]
-  names := { owner := bytesOf original.owner
+  metadata, tables := metadata.tables.toOption.getD [], identities := [coreLibraryAssembly]
+  names := { assembly := some coreLibraryAssembly, owner := bytesOf original.owner
              signature := bytesOf ("System.Int32* System.Threading.ObjectHeader::" ++
                "GetHeaderPtr(System.IntPtr*)") }
-  pinned := PinnedIndex.ofIdentities [bytesOf coreLibraryScope] }
+  pinned := PinnedIndex.ofIdentities [coreLibraryAssembly] }
 
 private def method : Method := {
   declared := { parameters := [pointerTo "System.IntPtr"], returnType := pointerTo "System.Int32"

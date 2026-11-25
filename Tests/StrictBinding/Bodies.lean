@@ -45,7 +45,7 @@ private def pinned : List PinnedImage :=
 
 /-- A claim about the fixture's assembly. -/
 private def claim (token : Nat) (bytes : List Nat) : BodyClaim :=
-  { identity := StrictFixture.identity, token, bytes }
+  { identity := StrictFixture.assembly, token, bytes }
 
 /-- The pinned fixture with its bytes changed. -/
 private def pinnedWith (image : ImageBytes) : List PinnedImage :=
@@ -168,12 +168,15 @@ theorem rejects_an_identity_the_file_does_not_spell :
   decide +kernel
 #print axioms rejects_an_identity_the_file_does_not_spell
 
+/-- An assembly no image is pinned for. -/
+private def unpinnedAssembly : CIL.AssemblyName :=
+  { StrictFixture.assembly with name := name!"Other", version := ⟨1, 0, 0, 0⟩ }
+
 /-- A claim about an assembly that no image is pinned for is rejected. -/
 theorem rejects_a_claim_about_an_unpinned_assembly :
     failsWith (checkAll bodyClaimBound pinned
-        [{ identity := "Other, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
-           token := tokenOfRow 1, bytes := bodyBytes 0 }])
-      (.unpinned "Other, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null") = true := by
+        [{ identity := unpinnedAssembly, token := tokenOfRow 1, bytes := bodyBytes 0 }])
+      (.unpinned unpinnedAssembly) = true := by
   decide +kernel
 #print axioms rejects_a_claim_about_an_unpinned_assembly
 
@@ -201,6 +204,10 @@ private def otherImage : ImageBytes :=
 private def otherIdentity : String :=
   "StrictFixture, Version=2.2.3.4, Culture=neutral, PublicKeyToken=null"
 
+/-- The assembly the changed fixture's Assembly row names. -/
+private def otherAssembly : CIL.AssemblyName :=
+  { StrictFixture.assembly with version := ⟨2, 2, 3, 4⟩ }
+
 /-- The fixture and its changed copy pinned under their own identities, in either order. -/
 private def bothPinned (otherFirst : Bool) : List PinnedImage :=
   let images := [{ identity := StrictFixture.identity, image := StrictFixture.image },
@@ -212,7 +219,7 @@ private def bothPinned (otherFirst : Bool) : List PinnedImage :=
 theorem finds_the_image_a_claim_names : ∀ otherFirst : Bool,
     ClaimsHold bodyClaimBound (bothPinned otherFirst) claims ∧
       failsWith (checkAll bodyClaimBound (bothPinned otherFirst)
-          [{ identity := otherIdentity, token := tokenOfRow 1, bytes := bodyBytes 0 }])
+          [{ identity := otherAssembly, token := tokenOfRow 1, bytes := bodyBytes 0 }])
         (.bodyMismatch (tokenOfRow 1) (position 1).1 (position 1).2) = true := by
   decide +kernel
 #print axioms finds_the_image_a_claim_names

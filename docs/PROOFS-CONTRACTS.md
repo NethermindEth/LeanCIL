@@ -546,8 +546,8 @@ For example, the compiled `Bump` updates a live account's balance and raises
 | `DecodedSummary.listed` | The `ModelsListed` fact that `models` covers every modelled call the method can run |
 | `DecodedSummary.reprofile` | Reuses the contract and method identity at an agreeing profile once the same evidence decodes to the reprofiled program |
 | `DecodedSummary.site` | At a live direct managed call, identifies the summary's MethodDef token and type arguments. |
-| `DecodedAt.direct_site` | For a declaring type with an explicit assembly scope, identifies the callee's pin, MethodDef token and type arguments using the assembly pin of the linked program entry. Apply it to the `bound` field of a method or outcome summary. |
-| `TranslationValid.direct_definition` | At a live direct call, identifies the physical MethodDef row and assembly of the linked body after generic instantiation. The site must retain its operand through constrained dispatch. |
+| `DecodedAt.direct_site` | For a declaring type with an explicit assembly scope, shows that the callee's pin spells that scope and identifies its MethodDef token and type arguments, using the assembly pin of the linked program entry. Apply it to the `bound` field of a method or outcome summary. |
+| `TranslationValid.direct_definition` | At a live direct call, identifies the physical MethodDef row of the linked body after generic instantiation and shows that the slice holding it spells the same assembly as the body's pin. The site must retain its operand through constrained dispatch. |
 | `BodyDecodes.callManagedTarget` | Resolves the caller's operand through its checked metadata to a MethodDef token and slice position. The caller's MemberRef and the target MethodDef can have different token values. |
 
 For an extracted method, `DecodedSummary.of_translation` takes `Extracted.translation_valid`, the
@@ -572,8 +572,8 @@ for a method defined from its decoder, and `site` its `ManagedCallsValid` premis
 `Extracted.method{n}_calls_validated` of the caller and its instruction and link premises from a
 `bind_call` site's `call` and `link` facts. For a call into a referenced assembly,
 supply the declaring type's `headScope` to `DecodedAt.direct_site`. The linker compares that
-scope with the assembly pin of the selected callee. Two assemblies may use the same MethodDef
-token. For an aggregate, the assembly scope precedes the first `::` in its layout identity.
+scope text with the spelling of the selected callee's `AssemblyName` pin; `Extracted.assembly{k}Scope`
+is that spelling for pin `k`. Two assemblies may use the same MethodDef token. For an aggregate, the assembly scope precedes the first `::` in its layout identity.
 
 The proof of `decodedProgram?_eq_some` adds one
 constructor per record, so its cost is linear in the methods of the extraction

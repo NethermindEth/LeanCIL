@@ -375,8 +375,8 @@ private def emitting (emitted : CIL.Instruction) (links : List (Nat × CIL.Link)
 example :
     ManagedCallsValid [] [] (callModelled body) (method (site objectConstructorMethod)) [true]
     (emitting (.call objectConstructorMethod {}) []) := by decide +kernel
-example : ¬ ManagedCallsValid [⟨[], method (site bigMul), ⟨runtimeScope⟩⟩] [] (callModelled body)
-    (method (site objectConstructorMethod)) [true]
+example : ¬ ManagedCallsValid [⟨[], method (site bigMul), ⟨runtimeAssembly⟩⟩] []
+    (callModelled body) (method (site objectConstructorMethod)) [true]
     (emitting (.call objectConstructorMethod {}) [(0, .direct 0)]) := by decide +kernel
 example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site objectConstructorMethod))
     [true] (emitting .pop []) := by decide +kernel

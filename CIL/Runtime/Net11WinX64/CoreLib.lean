@@ -8,8 +8,7 @@ open CIL CIL.Extraction
 
 /-- The assembly row and the heaps and table header used for its identity and indexes. -/
 def assembly : AssemblyMetadata := {
-  identity := coreLibraryScope
-  keyToken := bytesOf "7cec85d7bea7798e"
+  publicKeyToken := some 0x7cec85d7bea7798e
   tableHeader := fixedBytes 20 0x000000000200050A55BFB73F011F000000FA0133 ++
       fixedBytes 20 0x0016C40001000000CB0B00007425000029B20000 ++
       fixedBytes 20 0xC620010042090000152600004D0F000006760000 ++

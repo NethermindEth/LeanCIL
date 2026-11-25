@@ -503,13 +503,14 @@ static string InEntry(string source, string identity, string from, string to)
 var most = mostSpecificSources["Most"];
 var mostOverride = Regex.Match(most[most.IndexOf("\"Examples.IScaleMost\", valueType :=", StringComparison.Ordinal)..],
     @"overrides := \[\(\d+, [^\]]+\]");
-var examplesPin = Regex.Match(most, @"assembly := \{ identity := ""Examples, [^""]+"" \}");
+var examplesPin = Regex.Match(most, @"assembly := assembly\d+");
 if (!mostOverride.Success || !examplesPin.Success) throw new Exception("Missing most specific mutation targets");
 foreach (var (mutation, forgedSource) in new[]
 {
     ("hidden-override", InEntry(most, "Examples.IScaleMost", mostOverride.Value, "overrides := []")),
     ("unpinned-interface", InEntry(most, "Examples.IScaleMost", examplesPin.Value,
-        "assembly := { identity := \"Other, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null\" }"))
+        "assembly := ⟨{ name := name!\"Other\", version := ⟨1, 0, 0, 0⟩, culture := name!\"\", " +
+        "publicKeyToken := none }⟩"))
 })
 {
     var forged = Path.Combine(root, "MostSpecific-" + mutation + ".lean");

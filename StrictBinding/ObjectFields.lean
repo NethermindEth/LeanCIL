@@ -24,17 +24,17 @@ private def objectFields (image : PreparedImage) (row : Nat) : Except AuditError
 /-- The exact identities of the core scopes retained in one slice, including its primitive
     type scope. The identity includes version, culture and publisher. -/
 private def objectScopes (slice : MetadataSlice) (ownCore : Bool) :
-    Except MetadataError (List (List Nat)) := do
+    Except MetadataError (List CIL.AssemblyName) := do
   let index ← slice.index
   let identity ← match ← index.corlibIdentity with
     | some name => pure name
-    | none => if ownCore then pure (asciiOf slice.assembly.identity)
+    | none => if ownCore then slice.assembly.name
               else throw (.unsupportedAssemblyRef 0)
   let mut scopes := [identity]
   for (token, _) in slice.rows do
     if CIL.Extraction.metadataTableOf token == Table.assemblyRef then
       if ← index.coreAssemblyRef token then
-        let scope ← index.assemblyRefIdentity token
+        let scope ← index.referenceName token
         unless scopes.contains scope do scopes := scope :: scopes
   return scopes
 
@@ -42,21 +42,20 @@ private def objectScopes (slice : MetadataSlice) (ownCore : Bool) :
 def checkObjectFields (images : List PinnedImage) (evidence : List MethodEvidence) :
     Except AuditError Bool := do
   let prepared ← prepare images
-  let mut scopes : Std.TreeSet (List Nat) := {}
+  let mut scopes : Std.TreeSet CIL.AssemblyName := {}
   for item in evidence do
     for slice in item.body.metadata.slices do
       let ownCore ←
         if slice.corlib != 0 then pure false
         else do
-          let source ← located prepared slice.assembly.identity
+          let source ← locatedBlock prepared slice.assembly
           platformAssembly source
       let .ok names := objectScopes slice ownCore
-        | throw (.invalidObjectScope slice.assembly.identity)
+        | throw (.invalidObjectScope (blockDisplay slice.assembly))
       for name in names do scopes := scopes.insert name
   if scopes.isEmpty then throw (.invalidObjectScope "")
   let mut complete := true
-  for name in scopes do
-    let identity := String.ofList (name.map Char.ofNat)
+  for identity in scopes do
     let covered ← resolvePlatformType prepared "Object" .invalidObjectDefinition objectFields
       identity (prepared.length + 1)
     complete := complete && covered

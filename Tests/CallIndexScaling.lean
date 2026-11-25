@@ -6,9 +6,13 @@ set_option maxRecDepth 16384
 set_option maxHeartbeats 0
 open CIL CIL.Extraction
 namespace CallIndexScaling
+/-- The assembly every table position belongs to. -/
+def pin : AssemblyPin := ⟨⟨name!"Tests", ⟨1, 0, 0, 0⟩, name!"", none⟩⟩
+/-- The scope text of `pin` in the fixture's type names. -/
+def scope : String := "Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 /-- A well-formed raw shell with the supplied instruction stream. -/
 def raw (code : List RawInstruction) : RawMethod := {
-  token := 1, owner := "Tests::Scaling", hasThis := false, explicitThis := false,
+  token := 1, owner := scope ++ "::Scaling", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
   returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
   genericParameters := [], code := code }
@@ -21,7 +25,7 @@ def emitted (code : List Instruction) : Method :=
 def site : CallSite := {
   declared := { convention := 0 },
   method := {
-    owner := .atom "Tests" "Scaling", name := name!"", hasThis := false, genericArity := 0,
+    owner := .atom scope "Scaling", name := name!"", hasThis := false, genericArity := 0,
     returnType := .void, parameters := [] },
   target := .managed 1, typeArguments := [], parameterCount := 0, returnsValue := false }
 /-- A managed call of `site`; the emitted link chooses the table index. -/
@@ -29,7 +33,7 @@ def call : RawInstruction := ⟨0, 40, .call site⟩
 /-- Each instruction calls a distinct table position. -/
 def calls (count : Nat) := raw (List.replicate count call)
 /-- Equal signatures at distinct positions isolate positional lookup costs. -/
-def methods (count : Nat) : List SpecializedMethod := List.replicate count ⟨[], raw [], ⟨"Tests"⟩⟩
+def methods (count : Nat) : List SpecializedMethod := List.replicate count ⟨[], raw [], pin⟩
 /-- Every table position is exercised once, through the link at the pc of the same index. -/
 def callCode (count : Nat) : Method :=
   { emitted (List.replicate count (.call site.method)) with

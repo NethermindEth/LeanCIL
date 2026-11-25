@@ -189,11 +189,11 @@ def ownWorld : Step OwnTokens := do
 
 /-- The own slice and its tokens. -/
 def own : MetadataSlice × OwnTokens :=
-  build ownWorld (bytesOf "T") "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+  build ownWorld (bytesOf "T")
 
 /-- The `Lib` slice. -/
 def lib : MetadataSlice :=
-  (build libWorld (bytesOf "Lib") "Lib, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null").1
+  (build libWorld (bytesOf "Lib")).1
 
 def tokens : OwnTokens := own.2
 
@@ -211,10 +211,6 @@ def worldPlatform : PlatformTable := platform_table%
 def int32 : TypeExpr := .primitive .int32
 def uint32 : TypeExpr := .primitive .uint32
 def uint64 : TypeExpr := .primitive .uint64
-
-/-- The platform AssemblyRef columns used by the fixture signatures. -/
-def runtimeColumns : AssemblyColumns :=
-  ⟨bytesOf "System.Runtime", ⟨11, 0, 0, 0⟩, [], bytesOf "b03f5f7f11d50a3a"⟩
 
 def libScope : String := "Lib, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 
@@ -260,8 +256,13 @@ def idSite : CallSite :=
 def countOperand : RawOperand := .field (.atom "T, Version=1.0.0.0, Culture=neutral, \
   PublicKeyToken=null" "Program") 0 int32 name!"count" false
 
-/-- The identity of the assembly `T`. -/
-def ownIdentity : String :=
-  "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+/-- The assembly `T` that `own`'s `Assembly` row names. -/
+def ownAssembly : AssemblyName := Tests.unsignedAssembly name!"T"
+
+/-- The scope text of `T`'s types. -/
+def ownScope : String := "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+
+/-- The assembly `Lib` that `lib`'s `Assembly` row names. -/
+def libAssembly : AssemblyName := Tests.unsignedAssembly name!"Lib"
 
 end Tests.MetadataWorld

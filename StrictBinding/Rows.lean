@@ -198,11 +198,12 @@ def HeaderAt (image : PreparedImage) (tableHeader : List Nat) : Prop :=
     image.view.bytes image.layout.pe.tables.start tableHeader.length = .ok tableHeader
 
 /-- The assembly block is the image's: it states the public key token the image records for its
-    own Assembly row (`prepareOne_keyToken` derives it from the row's key) and the identity the
-    image is pinned under, and holds the image's header bytes, the header they decode to, and its
+    own Assembly row (`prepareOne_keyToken` derives it from the row's key), names the assembly
+    the image's row names, and holds the image's header bytes, the header they decode to, and its
     `Assembly` row and entries under a numbering of their own. -/
 def AssemblyMatches (image : PreparedImage) (assembly : AssemblyMetadata) : Prop :=
-  assembly.keyToken = image.assembly.token ∧ assembly.identity = image.identity ∧
+  assembly.publicKeyToken = image.assembly.publicKeyToken ∧
+  assembly.name.toOption = some image.assembly ∧
   HeaderAt image assembly.tableHeader ∧
     decodeTableHeader assembly.tableHeader = .ok assembly.header ∧
     RowsMatch image [(assemblyToken, assembly.assemblyRow)] assembly.strings assembly.blobs
@@ -373,12 +374,14 @@ def rowsBound (image : PreparedImage) (rows strings blobs : List ByteEntry) :
   joinBound stringsHeap (stringFound image) stringKeys strings
   joinBound blobHeap (sizedFound image image.layout.pe.blobs) blobKeys blobs
 
-/-- The carried block states the token computed from the image's own key and the identity the
-    image is pinned under. The token is compared first, so a forged token is refused as such. -/
+/-- The carried block states the token computed from the image's own key and names the assembly
+    the image's row names. The token is compared first, so a forged token is refused as such. -/
 def identityBound (image : PreparedImage) (assembly : AssemblyMetadata) :
     Except AuditError Unit :=
-  if assembly.keyToken != image.assembly.token then throw (.ownTokenMismatch image.identity)
-  else if assembly.identity != image.identity then throw (.ownIdentityMismatch image.identity)
+  if assembly.publicKeyToken != image.assembly.publicKeyToken then
+    throw (.ownTokenMismatch image.identity)
+  else if assembly.name.toOption != some image.assembly then
+    throw (.ownIdentityMismatch image.identity)
   else pure ()
 
 /-- The assembly block is the image's: header, decoded header, the `Assembly` row with its
@@ -401,7 +404,8 @@ theorem throw_ne_ok {α : Type} {error : AuditError} {value : α} :
 /-- A successful identity check means the block states the image's token and identity. -/
 theorem identity_of_identityBound {image : PreparedImage} {assembly : AssemblyMetadata}
     (bound : identityBound image assembly = .ok ()) :
-    assembly.keyToken = image.assembly.token ∧ assembly.identity = image.identity := by
+    assembly.publicKeyToken = image.assembly.publicKeyToken ∧
+      assembly.name.toOption = some image.assembly := by
   unfold identityBound at bound
   split at bound
   · exact absurd bound throw_ne_ok
@@ -1133,11 +1137,11 @@ theorem prepareOne_bounded {pinned : PinnedImage} {image : PreparedImage}
     row's own key blob: the low eight bytes of its SHA-1, reversed, or no token for an empty
     key. -/
 theorem namedAssembly_keyToken {view : ImageView} {layout : MetadataLayout}
-    {named : CIL.Extraction.AssemblyColumns × List Nat}
+    {named : CIL.AssemblyName × List Nat}
     (read : namedAssemblyAt view layout assemblyToken 1 = .ok named) :
     ∃ offset key, layout.cell view assemblyToken 6 = .ok offset ∧
       layout.blobAt view offset = .ok key ∧
-      named.1.token = ((publisherToken key).map (hexDigits 16)).getD [] := by
+      named.1.publicKeyToken = publisherToken key := by
   unfold namedAssemblyAt at read
   obtain ⟨columns, columnsRead, read⟩ := except_bind_ok read
   have same : named.1 = columns := by
@@ -1163,8 +1167,12 @@ theorem namedAssembly_keyToken {view : ImageView} {layout : MetadataLayout}
   refine ⟨offset, key, offsetRead, keyRead, ?_⟩
   simp only [rowKeyToken, assemblyToken, beq_self_eq_true, ite_true, Except.ok.injEq]
     at tokenRead
-  simp only [pure, Except.pure, Except.ok.injEq] at columnsRead
-  rw [← columnsRead, ← tokenRead]
+  split at columnsRead
+  · split at columnsRead
+    · simp only [pure, Except.pure, Except.ok.injEq] at columnsRead
+      rw [← columnsRead, ← tokenRead]
+    · exact absurd columnsRead throw_ne_ok
+  · exact absurd columnsRead throw_ne_ok
 
 #print axioms namedAssembly_keyToken
 
@@ -1175,7 +1183,7 @@ theorem prepareOne_keyToken {pinned : PinnedImage} {image : PreparedImage}
     (prepared : prepareOne pinned = .ok image) :
     ∃ offset key, image.layout.cell image.view assemblyToken 6 = .ok offset ∧
       image.layout.blobAt image.view offset = .ok key ∧
-      image.assembly.token = ((publisherToken key).map (hexDigits 16)).getD [] := by
+      image.assembly.publicKeyToken = publisherToken key := by
   unfold prepareOne at prepared
   obtain ⟨view, _, prepared⟩ := except_bind_ok prepared
   obtain ⟨layout, _, prepared⟩ := except_bind_ok prepared

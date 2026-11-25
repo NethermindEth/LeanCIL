@@ -53,7 +53,7 @@ private def memberFixture (namespace_ owner name : String) (signature : List Nat
   match instantiation with
   | none => pure member
   | some arguments => row Table.methodSpec [tokenRow member * 2 + 1, ← blob arguments]
-  ) (bytesOf "T") ownIdentity
+  ) (bytesOf "T")
 
 /-- A static external call whose closed arguments and open declaration are checked separately. -/
 private def memberCall (owner : TypeExpr) (name : MetadataName) (text identity : String)
@@ -306,20 +306,20 @@ theorem rejects_an_owner_scope_with_another_version :
 
 theorem rejects_a_field_index_the_metadata_does_not_give :
     rejects own.1 lib tokens.countField
-      (.field (.atom ownIdentity "Program") 1 int32 name!"count" false)
+      (.field (.atom ownScope "Program") 1 int32 name!"count" false)
       (.fieldIndexMismatch tokens.countField 1 0) = true := by decide +kernel
 #print axioms rejects_a_field_index_the_metadata_does_not_give
 
 /-- The count field's token with the operand naming `total`, the static field after it. -/
 theorem rejects_a_field_operand_named_for_another_row :
     rejects own.1 lib tokens.countField
-      (.field (.atom ownIdentity "Program") 0 int32 name!"total" false)
+      (.field (.atom ownScope "Program") 0 int32 name!"total" false)
       (.operandMismatch tokens.countField) = true := by decide +kernel
 #print axioms rejects_a_field_operand_named_for_another_row
 
 theorem rejects_a_static_field_claimed_as_an_instance_field :
     rejects own.1 lib tokens.totalField
-      (.field (.atom ownIdentity "Program") 1 int32 name!"total" false)
+      (.field (.atom ownScope "Program") 1 int32 name!"total" false)
       (.operandMismatch tokens.totalField) = true := by decide +kernel
 #print axioms rejects_a_static_field_claimed_as_an_instance_field
 
@@ -399,7 +399,7 @@ private def externalAggregateRows (reference : String) : Step Nat := do
   row Table.standAloneSig [sig]
 
 private def externalAggregateLocal (reference argument : String) : Except MetadataError Unit := do
-  let (slice, sig) := build (externalAggregateRows reference) (bytesOf "Caller") (externalScope "Caller")
+  let (slice, sig) := build (externalAggregateRows reference) (bytesOf "Caller")
   let env := MetadataEnv.ofSlices [← slice.index] (platform := externalValues)
   checkLocals env 0 sig [.aggregate (externalScope "Outer" ++ "::N.Wrap`1<" ++ argument ++ ">") 0]
 
@@ -496,7 +496,7 @@ private def fieldsHolding (held : List Nat) : MetadataSlice :=
 
 /-- The instance field `count` of the class `T.Program`, holding `held`. -/
 private def countHolding (held : TypeExpr) : RawOperand :=
-  .field (.object ownIdentity "Program") 0 held name!"count" false
+  .field (.object ownScope "Program") 0 held name!"count" false
 
 /-- A class instance field keeps a reference it never reads through, so it may hold an
     interface or an external class as an object; an array it holds still holds carried classes,
@@ -510,7 +510,7 @@ theorem holds_opaque_objects_only_in_class_instance_fields :
       (countHolding (.array (.object runtimeScope "System.Object")))
       (.operandMismatch tokens.countField) = true ∧
     rejects (fieldsHolding [0x12, typeRefCoded tokens.shapeRef]) lib tokens.totalField
-      (.field (.atom ownIdentity "Program") 1 (.object libScope "Lib.IShape") name!"total" true)
+      (.field (.atom ownScope "Program") 1 (.object libScope "Lib.IShape") name!"total" true)
       (.operandMismatch tokens.totalField) = true := by decide +kernel
 #print axioms holds_opaque_objects_only_in_class_instance_fields
 
@@ -641,7 +641,7 @@ private def rejectsWithoutLibSlice (token : Nat) (operand : RawOperand) (error :
     Bool :=
   match (do
     let env := MetadataEnv.ofSlices [← own.1.index] (platform := worldPlatform)
-      (({} : AssemblyPrefixes).insert (bytesOf libScope))
+      (indexPinNames [libAssembly])
     checkEntry env 0 token operand) with
   | .error found => found == error
   | .ok _ => false
@@ -675,7 +675,7 @@ private def coreReference (family culture : String) (publisher : List Nat) : Boo
     let name ← string family
     let language ← string culture
     let key ← blob publisher
-    row Table.assemblyRef [4, 0, 0, 0, 0, key, name, language, 0]) (bytesOf "T") ownIdentity
+    row Table.assemblyRef [4, 0, 0, 0, 0, key, name, language, 0]) (bytesOf "T")
   (slice.index >>= (·.coreAssemblyRef reference)).toOption == some true
 
 /-- Each core-library family retains its own publisher. An unsigned reference, a different
@@ -744,7 +744,7 @@ theorem checks_each_claim_of_a_struct_field :
       (pairFieldOf (.aggregate (libScope ++ "::Lib.Box") 0) 0 int32 name!"first")
       (.operandMismatch tokens.firstRef) = true ∧
     rejects own.1 lib tokens.countField
-      (pairFieldOf (.aggregate (ownIdentity ++ "::Program") 0) 0 int32 name!"count")
+      (pairFieldOf (.aggregate (ownScope ++ "::Program") 0) 0 int32 name!"count")
       (.operandMismatch tokens.countField) = true ∧
     rejects own.1 lib tokens.firstRef (pairFieldOf pairOwner 0 uint32 name!"first")
       (.operandMismatch tokens.firstRef) = true ∧
@@ -785,13 +785,13 @@ private def genericPairWorld : Step (Nat × Nat) := do
 
 /-- The generic pair's slice, with its references through `Pair<int>` and `Pair<int, int>`. -/
 private def genericPair : MetadataSlice × Nat × Nat :=
-  build genericPairWorld (bytesOf "T") ownIdentity
+  build genericPairWorld (bytesOf "T")
 
 /-- `Pair<int>` as the extractor names it, and as an owner with one argument too many. -/
 private def pairOfInt : TypeExpr :=
-  .aggregate (ownIdentity ++ "::Pair`1<" ++ runtimeScope ++ "::System.Int32>") 0
+  .aggregate (ownScope ++ "::Pair`1<" ++ runtimeScope ++ "::System.Int32>") 0
 private def pairOfTwoInts : TypeExpr := .aggregate
-  (ownIdentity ++ "::Pair`1<" ++ runtimeScope ++ "::System.Int32," ++ runtimeScope ++
+  (ownScope ++ "::Pair`1<" ++ runtimeScope ++ "::System.Int32," ++ runtimeScope ++
     "::System.Int32>") 0
 
 /-- A field of a generic struct instance holds its argument, read through the instance; a
@@ -870,9 +870,9 @@ private def ownWithGappedFields : MetadataSlice :=
     the token is refused, not read as the first instance field. -/
 theorem rejects_a_field_after_a_gap_in_the_carried_field_rows :
     passes own.1 lib tokens.secondField
-      (.field (.atom ownIdentity "Program") 1 int32 name!"second" false) = true ∧
+      (.field (.atom ownScope "Program") 1 int32 name!"second" false) = true ∧
     rejects ownWithGappedFields lib tokens.secondField
-      (.field (.atom ownIdentity "Program") 1 int32 name!"second" false)
+      (.field (.atom ownScope "Program") 1 int32 name!"second" false)
       (.unresolvedMember tokens.secondField) = true := by decide +kernel
 #print axioms rejects_a_field_after_a_gap_in_the_carried_field_rows
 
@@ -883,9 +883,9 @@ theorem rejects_a_field_access_that_disagrees_with_the_field_row :
     checkSite 0x7B { staticField := some true } countOperand = false ∧
     checkSite 0x7B { staticField := some false } countOperand = true ∧
     checkSite 0x7B { staticField := some false }
-      (.field (.atom ownIdentity "Program") 0 int32 name!"count" false) = true ∧
+      (.field (.atom ownScope "Program") 0 int32 name!"count" false) = true ∧
     checkSite 0x7E { staticField := some true }
-      (.field (.atom ownIdentity "Program") 1 int32 name!"total" true) = true := by decide +kernel
+      (.field (.atom ownScope "Program") 1 int32 name!"total" true) = true := by decide +kernel
 #print axioms rejects_a_field_access_that_disagrees_with_the_field_row
 
 /-! ## The method definition -/
@@ -926,20 +926,20 @@ private def receiverIdentity (baseName : String) (interfaceType hasThis objectRe
     (platform := worldPlatform) :
     Except MetadataError MethodNames := do
   let fixture := build (receiverWorld baseName interfaceType hasThis generic)
-    (bytesOf "T") ownIdentity
+    (bytesOf "T")
   let method : RawMethod :=
-    { token := fixture.2, owner := ownIdentity ++ "::Program", hasThis := hasThis,
+    { token := fixture.2, owner := ownScope ++ "::Program", hasThis := hasThis,
       explicitThis := false, callingConvention := 0, attributes := if hasThis then 0x86 else 0x96,
       implementation := 0, returnType := .void, parameters := [], locals := [],
       initLocals := false, maxStack := 8, genericParameters := [], code := [],
       ownerParameters := if generic && !omitParameters then [{ flags := 0, types := [] }] else [],
       receiverClass := if objectReceiver then
-        some (.object ownIdentity ⟨[⟨name!"", name!"Program"⟩]⟩) else none }
+        some (.object ownScope ⟨[⟨name!"", name!"Program"⟩]⟩) else none }
   let metadata := if omitLink then
       { fixture.1 with links := fixture.1.links.filter (·.kind != linkGenericParams) }
     else fixture.1
   let env := MetadataEnv.ofSlices [← metadata.index, ← lib.index] (platform := platform)
-    (exactPins := indexPins [bytesOf ownIdentity, bytesOf libScope])
+    (exactPins := indexPins [ownAssembly, libAssembly])
   methodIdentityValid env method (if generic && !omitParameters then [argument] else [])
     (if generic && !omitParameters then [claimed] else [])
 
@@ -948,17 +948,18 @@ theorem binds_generic_owner_without_link :
     (receiverIdentity "Object" false false false true true false).isOk = true ∧
     (receiverIdentity "Object" false false false true true true).isOk = false := by
   decide +kernel
-/-- info: 'Tests.MetadataBinding.binds_generic_owner_without_link' depends on axioms: [propext] -/
+/-- info: 'Tests.MetadataBinding.binds_generic_owner_without_link' depends on axioms:
+[propext, Quot.sound] -/
 #guard_msgs in
 #print axioms binds_generic_owner_without_link
 
 /-- The carried class admits object storage. The carried interface refuses that same storage. -/
 theorem instantiates_owners_with_only_carried_classes_as_objects :
     (receiverIdentity "Object" false false false true
-      (argument := .named (.definition ⟨bytesOf "Lib", ⟨1, 0, 0, 0⟩, [], []⟩ 0x02000002))
+      (argument := .named (.definition libAssembly 0x02000002))
       (claimed := .object libScope "Lib.Box")).isOk = true ∧
     (receiverIdentity "Object" false false false true
-      (argument := .named (.definition ⟨bytesOf "Lib", ⟨1, 0, 0, 0⟩, [], []⟩ 0x02000005))
+      (argument := .named (.definition libAssembly 0x02000005))
       (claimed := .object libScope "Lib.IShape")).isOk = false := by
   decide +kernel
 #print axioms instantiates_owners_with_only_carried_classes_as_objects
@@ -966,7 +967,7 @@ theorem instantiates_owners_with_only_carried_classes_as_objects :
 /-- A closed owner argument names a platform enum with the storage its entry supplies. -/
 theorem binds_closed_enum_argument :
     (receiverIdentity "Object" false false false true
-      (argument := .named (.platform runtimeColumns [systemNamespace, bytesOf "DayOfWeek"]))
+      (argument := .named (.platform runtimeAssembly [systemNamespace, bytesOf "DayOfWeek"]))
       (claimed := .enum (Tests.enumIdentity "System.DayOfWeek" runtimeAssembly) .signed32)
       (platform := platform_table%
         [runtimeType "Object" .objectRoot, runtimeType "DayOfWeek" (.enumType 8)])).isOk =
@@ -976,7 +977,7 @@ theorem binds_closed_enum_argument :
 /-- A parameter table whose entries give a parameter number and its coded owner. -/
 private def parameterWorld (parameters : List (Nat × Nat)) : MetadataSlice :=
   (build (parameters.mapM fun (number, owner) =>
-    row Table.genericParam [number, 0, owner, 0]) (bytesOf "T") ownIdentity).1
+    row Table.genericParam [number, 0, owner, 0]) (bytesOf "T")).1
 
 /-- Read the first type's parameters after changing the carried rows or their optional link. -/
 private def parameterResult (parameters : List (Nat × Nat))
@@ -988,7 +989,7 @@ private def parameterResult (parameters : List (Nat × Nat))
     links := match linkTarget with
       | none => []
       | some (position, target) => [⟨linkGenericParams, 0x02000001, position, target⟩] }
-  let index ← metadata.indexWith (← metadata.tables) []
+  let index := metadata.indexWith (← metadata.tables) ownAssembly
   index.genericParameters 0 0x02000001
 
 /-- Generic owners accept complete zero-based runs and reject conflicting or incomplete rows. -/
@@ -1006,7 +1007,7 @@ theorem checks_all_carried_generic_parameters :
     (parameterResult [(0, 2), (0, 4), (1, 2)]).isOk = false ∧
     (parameterResult [(0, 2), (2, 2)]).isOk = false := by decide +kernel
 /-- info: 'Tests.MetadataBinding.checks_all_carried_generic_parameters' depends on axioms:
-[propext] -/
+[propext, Quot.sound] -/
 #guard_msgs in
 #print axioms checks_all_carried_generic_parameters
 
@@ -1020,7 +1021,7 @@ private def ownerResult (parameters : List (Nat × Nat)) (owner : Nat) (omitted 
     let metadata := { metadata with
       rows := metadata.rows.filter fun (token, _) =>
         !(metadataTableOf token == Table.genericParam && omitted.contains (tokenRow token)) }
-    let index ← metadata.indexWith (← metadata.tables) []
+    let index := metadata.indexWith (← metadata.tables) ownAssembly
     if absentOnly then do index.noGenericParameters owner; pure 0
     else match declared with
       | some count => do pure (← index.methodGenericParameters 0 owner count).length
@@ -1090,7 +1091,7 @@ private def arityWorld : Step (Nat × Nat × Nat × Nat) := do
   pure (holder, held, plain, value)
 
 private def arity : MetadataSlice × Nat × Nat × Nat × Nat :=
-  build arityWorld (bytesOf "T") ownIdentity
+  build arityWorld (bytesOf "T")
 
 private def holder : Nat := arity.2.1
 private def held : Nat := arity.2.2.1
@@ -1130,7 +1131,8 @@ theorem accepts_matching_receivers :
     (receiverIdentity "Enum" false true false).isOk = true ∧
     (receiverIdentity "ValueType" false true false true).isOk = true ∧
     (receiverIdentity "Object" false false false).isOk = true := by decide +kernel
-/-- info: 'Tests.MetadataBinding.accepts_matching_receivers' depends on axioms: [propext] -/
+/-- info: 'Tests.MetadataBinding.accepts_matching_receivers' depends on axioms:
+[propext, Quot.sound] -/
 #guard_msgs in
 #print axioms accepts_matching_receivers
 
@@ -1148,13 +1150,14 @@ theorem rejects_mismatched_receivers :
     receiverMismatch (receiverIdentity "Object" true true false) = true ∧
     receiverMismatch (receiverIdentity "Object" true true true) = true ∧
     receiverMismatch (receiverIdentity "Object" false false true) = true := by decide +kernel
-/-- info: 'Tests.MetadataBinding.rejects_mismatched_receivers' depends on axioms: [propext] -/
+/-- info: 'Tests.MetadataBinding.rejects_mismatched_receivers' depends on axioms:
+[propext, Quot.sound] -/
 #guard_msgs in
 #print axioms rejects_mismatched_receivers
 
 /-- `T.Program.Main`, a public static method with no parameters. -/
 private def mainMethod : RawMethod :=
-  { token := tokens.main, owner := ownIdentity ++ "::Program", hasThis := false,
+  { token := tokens.main, owner := ownScope ++ "::Program", hasThis := false,
     explicitThis := false, callingConvention := 0, attributes := 0x96, implementation := 0,
     returnType := .void, parameters := [], locals := [], initLocals := false, maxStack := 8,
     genericParameters := [], code := [] }
@@ -1294,10 +1297,10 @@ private def int32Atom : TypeExpr := .atom "C" "System.Int32"
 private def enumRow (kind : Extraction.TypeKind) (pinned := false) : NamedType :=
   { scope := bytesOf "L, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
     name := bytesOf "E", parts := [[], bytesOf "E"], kind, pinned,
-    assembly := some ⟨bytesOf "L", ⟨1, 0, 0, 0⟩, [], []⟩ }
+    assembly := some (Tests.unsignedAssembly name!"L") }
 
 /-- The physical type proposed for this enum row. -/
-private def enumE : TypeIdentity := Tests.enumIdentity "E" (Tests.enumAssembly name!"L")
+private def enumE : TypeIdentity := Tests.enumIdentity "E" (Tests.unsignedAssembly name!"L")
 /-- The resolved platform enum `L::E` has 32-bit signed storage. -/
 private def platformEnum : NamedType :=
   enumRow (.enumType 8)
@@ -1480,7 +1483,9 @@ private def refusedPairings : List (ResolvedType × TypeExpr) := [
   (.primitive 8, .void), (.primitive 1, .atom "C" "System.Void"),
   (.primitive 8, .atom "D" "System.Int32"), (.primitive 8, .atom "C" "System.UInt32"),
   (.primitive 0x0E, .object "C" "System.Object"), (.primitive 0x1C, .object "C" "System.Object"),
-  (.primitive 8, .object "C" "System.Int32"), (.primitive 8, .enum (Tests.enumIdentity "System.Int32" (Tests.enumAssembly name!"C")) .signed32),
+  (.primitive 8, .object "C" "System.Int32"),
+  (.primitive 8,
+    .enum (Tests.enumIdentity "System.Int32" (Tests.unsignedAssembly name!"C")) .signed32),
   -- Named types.
   (.named (namedIn "L" "N" .valueType), .atom "L" "M"),
   (.named (namedIn "L" "N" .valueType), .atom "K" "N"),
@@ -1585,7 +1590,7 @@ private def tupleWorld : Step (Nat × Nat) := tupleWorldWith [0x13, 0x00] [0x13,
 
 /-- The tuple world's slice with the given core-library number, and its field tokens. -/
 private def tupleSlice (corlib : Nat) : MetadataSlice × Nat × Nat :=
-  let (slice, fields) := build tupleWorld (bytesOf "T") ownIdentity
+  let (slice, fields) := build tupleWorld (bytesOf "T")
   ({ slice with corlib := corlib }, fields)
 
 /-- The pair as the extractor names it. -/
@@ -1612,11 +1617,11 @@ theorem reads_the_pair_from_its_own_reference :
 
 /-- The tuple world with `Item1` declared `int64`, and its field tokens. -/
 private def wideTuple : MetadataSlice × Nat × Nat :=
-  build (tupleWorldWith [0x0A] [0x13, 0x01]) (bytesOf "T") ownIdentity
+  build (tupleWorldWith [0x0A] [0x13, 0x01]) (bytesOf "T")
 
 /-- The tuple world with `Item1` declared `!1`, and its field tokens. -/
 private def swappedTuple : MetadataSlice × Nat × Nat :=
-  build (tupleWorldWith [0x13, 0x01] [0x13, 0x01]) (bytesOf "T") ownIdentity
+  build (tupleWorldWith [0x13, 0x01] [0x13, 0x01]) (bytesOf "T")
 
 /-- With no carried row a reference's signature is the item's only declaration, so `Item1`
     declared `int64` or `!1` is refused although the operand holds the pair's first argument. -/
@@ -1658,7 +1663,7 @@ private def nestedLibWorld : Step Unit := do
 
 /-- The nested `Lib` slice. -/
 private def nestedLib : MetadataSlice :=
-  (build nestedLibWorld (bytesOf "Lib") libScope).1
+  (build nestedLibWorld (bytesOf "Lib")).1
 
 /-- A modifier in this module is identified through its enclosing TypeDef rows. -/
 private def modifierClaim (name : String) : Bool :=
@@ -1697,7 +1702,7 @@ private def nestedOwnWorld (leaf inner : Nat) : Step (Nat × Nat) := do
 
 /-- The nested own slice with the given links, and its two reference tokens. -/
 private def nestedOwn (leaf inner : Nat) : MetadataSlice × Nat × Nat :=
-  build (nestedOwnWorld leaf inner) (bytesOf "T") ownIdentity
+  build (nestedOwnWorld leaf inner) (bytesOf "T")
 
 /-- A nested type is the type of its namespace column at every level: a reference through `A`
     resolves to the definitions through `A`, and a link to the type that differs only in its own
@@ -1823,7 +1828,7 @@ private def programExtends (coded : Nat) : MetadataSlice :=
     bytes.take 8 ++ [coded, 0] ++ bytes.drop 10
 
 private def objectFieldOperand : RawOperand :=
-  .field (.object ownIdentity "Program") 0 int32 name!"count" false
+  .field (.object ownScope "Program") 0 int32 name!"count" false
 
 theorem refuses_a_base_class_chain_that_does_not_end_at_object :
     passes own.1 lib tokens.countField objectFieldOperand = true ∧
@@ -1908,7 +1913,7 @@ private def libOwnerText : String := byteString
 
 /-- Each stored string is the literal it spells. -/
 theorem stored_strings_are_their_literals :
-    objectText = "System.Object" ∧ ownerText = ownIdentity ++ "::Program" ∧
+    objectText = "System.Object" ∧ ownerText = ownScope ++ "::Program" ∧
       olderRuntimeText = "System.Runtime, Version=9.0.0.0, Culture=neutral, \
         PublicKeyToken=b03f5f7f11d50a3a" :=
   ⟨byteString_eq _, byteString_eq _, byteString_eq _⟩
@@ -1942,7 +1947,7 @@ theorem field_operand_check_reads_stored_strings :
     rejects own.1 lib tokens.totalField (.field (.atom ownText boxText) 1 int32 name!"total" true)
       (.operandMismatch tokens.totalField) = true ∧
     rejects own.1 lib tokens.totalField
-      (.field (.atom ownIdentity "Lib.Box") 1 int32 name!"total" true)
+      (.field (.atom ownScope "Lib.Box") 1 int32 name!"total" true)
       (.operandMismatch tokens.totalField) = true := by decide +kernel
 #print axioms field_operand_check_reads_stored_strings
 

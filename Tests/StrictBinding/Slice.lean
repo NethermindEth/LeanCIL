@@ -138,7 +138,6 @@ private def otherImage : Except AuditError PreparedImage :=
 /-- The Assembly block copied from that second image, with its own heap numbering. -/
 private def otherAssembly : CIL.Extraction.AssemblyMetadata :=
   { StrictFixture.assemblyBlock with
-    identity := "StrictFixture, Version=0.2.3.4, Culture=neutral, PublicKeyToken=null",
     assemblyRow := flipAt StrictFixture.assemblyBlock.assemblyRow 4 1 }
 
 /-- The second block belongs to its own image. -/
