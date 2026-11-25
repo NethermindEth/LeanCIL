@@ -24,7 +24,10 @@ properties with execution. Valid initial storage, references and authority are c
 | Buffer contents | Checked write/readback, sequence predicates and confinement | Readability and write authority are separate. |
 
 `RaisesCLR` and `OutcomeContract.HoldsCLR` also name arithmetic overflow and divide-by-zero.
-Handlers, exception-object identity, unwinding and post-throw memory are outside the model.
+Typed catch and finally clauses run in the checked model, which unwinds a fault through the
+enclosing clauses of each frame innermost first, as [Throws](OPCODES.md#throws) describes. Filter
+and fault clauses are refused at extraction. A folded `throw new E(...)` raises a named fault
+without an exception object; only an operand-free `throw` gives a catch an object identity.
 Outcome loop rules require preservation and decrease only for continuing iterations; exits must
 establish the specified normal or exceptional outcome from the initial state.
 
@@ -112,7 +115,8 @@ confinement follows from execution. See [binding and transport](PROOFS-BINDING.m
 
 ## Shared proof contracts and reduction
 
-`RunTrace`, `FrameSetup` and instruction contracts expose proved execution and preservation facts.
+`OutcomeTrace`, `RunTrace`, `FrameSetup` and instruction contracts expose proved execution and
+preservation facts.
 Checked stepping, `rfl`, simplification and optional proved summaries produce kernel-checked terms.
 Failed summaries install no declarations. A `VC` does not discover invariants or specifications.
 [Loop scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding) supplies checked

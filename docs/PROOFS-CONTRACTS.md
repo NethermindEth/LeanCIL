@@ -1305,6 +1305,9 @@ relocates it into a linked program:
 - `Closed lib` says every callee of every link-table entry in `lib` is one of its methods
   (`Closed.of_check` decides it).
 - `RelocatesInto lib linked f` says method `i` sits at `f i` relocated by `f`.
+- `HandlerFree lib` says no library method has an exception clause; the `handler_free` tactic
+  decides it. Relocation requires it, because a pending handler resumption records the located
+  fault with its method index.
 - `run_relocate` and `invoke_relocate` then give exactly the same result: the same memory and
   values on return, and on a fault the same pc and fault with only its method index renamed to
   `f method`.
@@ -1323,8 +1326,8 @@ theorem root_composed : rootContract.Holds (link Extracted.program [addLib]) roo
     closed free proved
 ```
 
-Here `closed`, `free` and `proved` are each library's `Closed`, `HandlerFree` and `Holds` facts. `Imports app specs` names
-one `Relocatable` property per slot, so libraries may export contracts of different types. Each
+Here `closed`, `free` and `proved` are each library's `Closed`, `HandlerFree` and `Holds` facts.
+`Imports app specs` names one `Relocatable` property per slot, so libraries may export contracts of different types. Each
 library exports only its index-0 method. Static identities are not renamed: two linked libraries
 that use the same identity for different bytes fault `invalidState` at the second static access, so
 a collision can make a proof fail and cannot prove a false statement.
@@ -1368,7 +1371,8 @@ traversal proof. Names in this table are in `CIL.Safety`, except the base relabe
 
 | API | Reusable information | Source |
 | --- | --- | --- |
-| `RunTrace` | Successful execution through next, return, call and construction cases | [ExecutionTrace](../CIL/Safety/ExecutionTrace.lean) |
+| `OutcomeTrace` | Every execution, through catch and finally handlers, ending in a result or a fault state | [OutcomeTrace](../CIL/Safety/OutcomeTrace.lean) |
+| `RunTrace` | Successful execution of a `HandlerFree` program through next, return, call and construction cases | [ExecutionTrace](../CIL/Safety/ExecutionTrace.lean) |
 | `FrameSetup` | Fresh ownership, frame allocations, preservation below the allocation boundary, static bindings and conditional validity | [FrameSetupLemmas](../CIL/Safety/FrameSetupLemmas.lean) |
 | `InstructionContract` | Memory effects and conditional output-value validity from one instruction analysis | [InstructionMemoryLemmas](../CIL/Safety/InstructionMemoryLemmas.lean) |
 | `StaticInstructionContract` | Corresponding contract for static-memory instructions | [StaticMemoryLemmas](../CIL/Safety/StaticMemoryLemmas.lean) |
@@ -1376,5 +1380,7 @@ traversal proof. Names in this table are in `CIL.Safety`, except the base relabe
 | `Fallthrough`, `Branching` | Shared relabeling proofs for base instruction families | [BaseStep](../CIL/Embedding/BaseStep.lean) |
 
 These contracts retain their hypotheses: `InstructionContract.values` requires well-formed input
-memory and valid input values, while its memory-effect field does not. `RunTrace` describes
-successful execution; fault-preservation proofs need the appropriate equivalence lemmas.
+memory and valid input values, while its memory-effect field does not. `OutcomeTrace.preserves`
+carries a memory property through every run: on a fault it holds of the memory where the fault
+arose and of the memory after the faulting frame is left, which is the memory a handler resumes
+with. `RunTrace` needs a `HandlerFree` program and describes successful execution only.
