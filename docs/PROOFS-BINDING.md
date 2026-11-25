@@ -780,8 +780,12 @@ The first fact of an environment names suffixes of its layout lists,
 `Extracted.environment_rawLayoutSuffix{start}` and `Extracted.environment_layoutSuffix{start}`
 with their `_placed` lemmas, as `cil_instruction_equations` does for code. A struct field, a
 class field holding an array of a struct and a struct type operand are then checked from their
-layout entries alone, read from the suffix that starts the entry's block, so the facts of an
-extraction cost time linear in its layouts and distinct operands. The compiled resolver proposes
+layout entries alone, read from the suffix that starts the entry's block. The first field fact of
+a struct also names its two layout entries, `Extracted.environment_rawLayoutSuffixEntry{k}` and
+`Extracted.environment_layoutSuffixEntry{k}` with their `_found` lemmas, and suffixes of their
+field lists, so a field fact reads one block of fields and refers to the entries without
+restating them. The facts of an extraction then cost time linear in its layouts, fields and
+distinct operands. The compiled resolver proposes
 each shape and the kernel checks it; a fact that misstates a shape fails to elaborate.
 
 ### Methods defined from their decoder
