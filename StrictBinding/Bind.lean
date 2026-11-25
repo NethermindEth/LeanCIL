@@ -69,6 +69,19 @@ def checkedReferenceScope (images : List PreparedImage) (source : PreparedImage)
     unless target.assembly == columns do throw (.referenceScopeMismatch source.identity token)
   return scope
 
+/-- Whether the Assembly or AssemblyRef row names a neutral core library with its publisher's
+    token. Both tables have the same identity columns after the Assembly's hash-algorithm
+    column. -/
+def coreAssemblyAt (image : PreparedImage) (row first : Nat) : Except AuditError Bool := do
+  let cell := image.layout.cell image.view row
+  let name ← image.layout.stringAt image.view (← cell (first + 6))
+  let some name := CIL.MetadataName.ofBytes? name | return false
+  let some publisher := CIL.Extraction.coreLibraryKey? name | return false
+  if !(← image.layout.stringAt image.view (← cell (first + 7))).isEmpty then return false
+  let flags ← cell (first + 4)
+  let key ← image.layout.blobAt image.view (← cell (first + 5))
+  return (← rowKeyToken row flags key) == some publisher
+
 /-- The prepared image that is pinned under `identity`. -/
 def located (prepared : List PreparedImage) (identity : String) :
     Except AuditError PreparedImage :=

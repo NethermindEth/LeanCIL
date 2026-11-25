@@ -4462,7 +4462,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     /// <summary>The version of the certificate `verified.json` holds; every reader rejects any other.</summary>
-    internal const int CertificateSchema = 8;
+    internal const int CertificateSchema = 9;
 
     /// <summary>
     /// A fact the default verification trusts about the assembly images, which a deep check reconfirms from them.
@@ -4476,10 +4476,16 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         /// <summary>
         /// Each carried metadata block's table header, Assembly row, table rows and heap entries are the image's,
         /// with MethodDef RVAs zeroed, under one numbering of the #Strings and #Blob offsets per heap for the table
-        /// rows and another for the Assembly row. The identity, key token, corlib, links, #GUID, the Module table
-        /// and the RVAs of MethodDefs outside the evidence are not part of it.
+        /// rows and another for the Assembly row. The block's identity is its image's, its key token is computed
+        /// from the image's public key, and its core library is a core-named AssemblyRef row of the image. Links,
+        /// #GUID, the Module table and the RVAs of MethodDefs outside the evidence are not part of it.
         /// </summary>
         MetadataRows,
+        /// <summary>
+        /// Each carried MemberRef link names the definition its row resolves to: same kind, name and signature,
+        /// declared by the parent type's definition in the pinned images.
+        /// </summary>
+        MemberLinks,
         /// <summary>Each platform type relied on is the value type, class or enum the extraction took it for.
         /// </summary>
         PlatformTypeKinds,
@@ -4546,6 +4552,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     sealed class BindingFactNames() : ExactNames<BindingFact>(
         (BindingFact.BodyBytes, "body-bytes"), (BindingFact.MetadataRows, "metadata-rows"),
+        (BindingFact.MemberLinks, "member-links"),
         (BindingFact.PlatformTypeKinds, "platform-type-kinds"),
         (BindingFact.EnumUnderlyingTypes, "enum-underlying-types"),
         (BindingFact.ValueTupleFieldOrder, "value-tuple-field-order"), (BindingFact.ObjectFields, "object-fields"),

@@ -70,9 +70,9 @@ void Verified(params string[] options)
     var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
     string[] bindingFacts =
     [
-        "body-bytes", "metadata-rows", "platform-type-kinds", "enum-underlying-types", "value-tuple-field-order",
-        "object-fields", "layout-content", "dispatch-catalogs", "static-data", "generic-constraints",
-        "public-key-tokens", "import-identities", "imported-layouts"
+        "body-bytes", "metadata-rows", "member-links", "platform-type-kinds", "enum-underlying-types",
+        "value-tuple-field-order", "object-fields", "layout-content", "dispatch-catalogs", "static-data",
+        "generic-constraints", "public-key-tokens", "import-identities", "imported-layouts"
     ];
     var binding = report.GetProperty("binding");
     var facts = binding.GetProperty("facts").EnumerateArray().ToArray();
@@ -84,7 +84,7 @@ void Verified(params string[] options)
         facts.Any(fact => fact.GetProperty("status").GetString() != "trusted" ||
             fact.GetProperty("theorem").ValueKind != JsonValueKind.Null ||
             fact.GetProperty("reason").ValueKind != JsonValueKind.Null))
-        throw new InvalidOperationException("The certificate does not list the 13 binding facts as trusted: " +
+        throw new InvalidOperationException("The certificate does not list the 14 binding facts as trusted: " +
             binding.GetRawText());
 
     if (report.GetProperty("schema").GetInt32() != CertificateSchema ||
@@ -588,7 +588,7 @@ if (batch.Code != 1 || WithoutStageProgress(batch.Stderr).Length != 0 ||
     batchRequests[1]!["report"]!["failures"]?[0]?["source"]?["file"]?.GetValue<string>() !=
         Path.GetFullPath(unfinishedProof) ||
     // The verified request's report carries its certificate's binding section; the failing one issued none.
-    batchRequests[0]!["report"]!["binding"]?["facts"] is not JsonArray { Count: 13 } batchFacts ||
+    batchRequests[0]!["report"]!["binding"]?["facts"] is not JsonArray { Count: 14 } batchFacts ||
     batchFacts.Any(fact => fact!["status"]!.GetValue<string>() != "trusted") ||
     batchRequests[1]!["report"]!["binding"] is not null)
     throw new InvalidOperationException("verify-batch --format json --trace did not print one report per request: " +

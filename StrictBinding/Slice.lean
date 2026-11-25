@@ -7,7 +7,7 @@ Assembly entries and row entries have separate numberings, as the extractor emit
 
 namespace StrictBinding
 
-open CIL.Extraction (ByteEntry MetadataSlice userStringHeap)
+open CIL.Extraction (ByteEntry MetadataSlice checkedTokenOf userStringHeap)
 open CIL.Safety (except_bind_ok)
 
 /-- Each keyed offset has the image's prefix and exact payload inside the heap.
@@ -39,19 +39,53 @@ theorem userStringsMatch_of_userStringsBound {image : PreparedImage}
 
 #print axioms userStringsMatch_of_userStringsBound
 
-/-- Assembly and row heaps have separate numberings; user-string keys are image offsets.
-    Identity, key tokens, corlib and links are outside this claim. -/
+/-- The core-library AssemblyRef a slice names, when it names one, is a row of the image that
+    names a core library with its publisher's token. -/
+def CoreReferenceAt (image : PreparedImage) (corlib : Nat) : Prop :=
+  corlib = 0 ∨ ∃ token,
+    checkedTokenOf CIL.Extraction.Table.assemblyRef corlib AuditError.rowOverflow = .ok token ∧
+      coreAssemblyAt image token 0 = .ok true
+
+/-- The core-library AssemblyRef row of a slice, if any, names a core library in the image. One
+    row read, so the cost does not grow with the slice. -/
+def corlibBound (image : PreparedImage) (corlib : Nat) : Except AuditError Unit := do
+  if corlib == 0 then return
+  let token ← checkedTokenOf CIL.Extraction.Table.assemblyRef corlib .rowOverflow
+  unless ← coreAssemblyAt image token 0 do throw (.corlibMismatch image.identity corlib)
+
+/-- A successful core-library check means `CoreReferenceAt`. -/
+theorem coreReferenceAt_of_corlibBound {image : PreparedImage} {corlib : Nat}
+    (bound : corlibBound image corlib = .ok ()) : CoreReferenceAt image corlib := by
+  unfold corlibBound at bound
+  unfold CoreReferenceAt
+  by_cases none : corlib = 0
+  · exact Or.inl none
+  · right
+    simp only [none, beq_iff_eq, if_false] at bound
+    obtain ⟨token, tokenRead, bound⟩ := except_bind_ok bound
+    obtain ⟨core, coreRead, bound⟩ := except_bind_ok bound
+    refine ⟨token, tokenRead, ?_⟩
+    cases core
+    · exact absurd bound throw_ne_ok
+    · exact coreRead
+
+#print axioms coreReferenceAt_of_corlibBound
+
+/-- Assembly and row heaps have separate numberings; user-string keys are image offsets. The
+    core-library AssemblyRef names a core library. Links are outside this claim. -/
 def SliceMatches (image : PreparedImage) (slice : MetadataSlice) : Prop :=
   And (AssemblyMatches image slice.assembly)
     (And (RowsMatch image slice.rows slice.strings slice.blobs)
-      (UserStringsMatch image slice.userStrings))
+      (And (UserStringsMatch image slice.userStrings) (CoreReferenceAt image slice.corlib)))
 
-/-- The rows and carried heaps of a slice checked against one prepared image, without its
-    Assembly block. Cost is the row check plus the user-string entries and bytes compared. -/
+/-- The rows, carried heaps and core-library AssemblyRef of a slice checked against one prepared
+    image, without its Assembly block. Cost is the row check plus the user-string entries and
+    bytes compared, plus one AssemblyRef row. -/
 def sliceContentsBound (image : PreparedImage) (slice : MetadataSlice) :
     Except AuditError Unit := do
   rowsBound image slice.rows slice.strings slice.blobs
   userStringsBound image slice.userStrings
+  corlibBound image slice.corlib
 
 /-- The Assembly block, rows and carried heaps checked against one prepared image.
     Cost is the assembly check plus the cost of `sliceContentsBound`. -/
@@ -63,11 +97,13 @@ def sliceBound (image : PreparedImage) (slice : MetadataSlice) : Except AuditErr
 theorem sliceMatches_of_bounds {image : PreparedImage} {slice : MetadataSlice}
     (bounded : image.view.Bounded) (assembly : assemblyBound image slice.assembly = .ok ())
     (contents : sliceContentsBound image slice = .ok ()) : SliceMatches image slice := by
-  cases except_bind_ok contents with
-  | intro value checks =>
-    exact And.intro (assemblyMatches_of_assemblyBound bounded assembly)
-      (And.intro (rowsMatch_of_rowsBound bounded checks.1)
-        (userStringsMatch_of_userStringsBound bounded checks.2))
+  unfold sliceContentsBound at contents
+  obtain ⟨_, rowsChecked, contents⟩ := except_bind_ok contents
+  obtain ⟨_, userStringsChecked, corlibChecked⟩ := except_bind_ok contents
+  exact And.intro (assemblyMatches_of_assemblyBound bounded assembly)
+    (And.intro (rowsMatch_of_rowsBound bounded rowsChecked)
+      (And.intro (userStringsMatch_of_userStringsBound bounded userStringsChecked)
+        (coreReferenceAt_of_corlibBound corlibChecked)))
 
 #print axioms sliceMatches_of_bounds
 

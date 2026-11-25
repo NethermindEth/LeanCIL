@@ -27,16 +27,17 @@ instance (images : List PinnedImage) (evidence : List CIL.Extraction.MethodEvide
     Decidable (BodiesBound images evidence) :=
   inferInstanceAs (Decidable (ClaimsHold _ _ _))
 
-/-- The rows and heaps of each carried slice are checked against the image selected by its
-    assembly's identity. Cost is one lookup and one contents check per carried slice; the
-    Assembly blocks are checked by `assemblyBlockBound`. -/
+/-- The rows, heaps and core-library AssemblyRef of each carried slice are checked against the
+    image selected by its assembly's identity. Cost is one lookup and one contents check per
+    carried slice; the Assembly blocks are checked by `assemblyBlockBound`. -/
 def methodMetadataBound (prepared : List PreparedImage)
     (metadata : CIL.Extraction.MethodMetadata) : Except AuditError Unit :=
   metadata.slices.forM fun slice => do
     let image <- located prepared slice.assembly.identity
     sliceContentsBound image slice
 
-/-- A carried Assembly block is checked against the image selected by its identity. -/
+/-- A carried Assembly block, with the identity and key token it states, is checked against the
+    image selected by its identity. -/
 def assemblyBlockBound (prepared : List PreparedImage)
     (assembly : CIL.Extraction.AssemblyMetadata) : Except AuditError Unit := do
   let image <- located prepared assembly.identity
@@ -53,7 +54,8 @@ def assemblyBlocks (claims : List CIL.Extraction.MethodMetadata) :
   (claims.flatMap fun metadata => metadata.slices.map fun slice => slice.assembly).eraseDups
 
 /-- Every carried metadata block belongs to its named pinned image, modulo heap numbering: each
-    distinct Assembly block is checked once, and the rows and heaps of every slice. -/
+    distinct Assembly block, with its identity and the key token the image's key gives, is
+    checked once, and the rows, heaps and core-library AssemblyRef of every slice. -/
 def MetadataRowsBound (images : List PinnedImage) (evidence : List CIL.Extraction.MethodEvidence) :
     Prop :=
   And (ClaimsHold assemblyBlockBound images (assemblyBlocks (metadataClaims evidence)))

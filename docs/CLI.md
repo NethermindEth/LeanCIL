@@ -340,7 +340,8 @@ deep-check input. Batch verification, gates, watch and workspace reject the opti
 
 The report lists thirteen binding facts. Default verification lists them as `trusted` and performs
 no image binding work. Deep verification reconfirms `body-bytes`, `metadata-rows`, `static-data` and the
-digests of pinned images. For RVA fields the audit reads the field signature, packing, class
+digests of pinned images, and `member-links` when the evidence carries MemberRef links into supplied
+images. For RVA fields the audit reads the field signature, packing, class
 size and relative virtual address, then compares the entire byte range in the mapped section.
 Constructor-initialized fields must have no RVA.
 
@@ -434,6 +435,15 @@ in the referenced image. The name, version and culture must also match the defin
 target leaves the fact `not covered`. The report records additional images
 used for this check with role `reference`.
 
+For `member-links`, Lean resolves each MemberRef link the evidence carries again from the images.
+It reads the MemberRef row in the source image and follows its parent TypeRef, TypeDef or generic
+TypeSpec through the pinned AssemblyRefs and forwarders to the defining TypeDef. The linked MethodDef
+or Field row must be a member of that TypeDef, must not be compiler-controlled, and must have the
+MemberRef's name, kind and signature. Signature types are compared by their defining TypeDef, or by
+their scoped name when no supplied image defines them. A conflicting link fails the check. An
+extraction without MemberRef links, a link into an assembly without a supplied image, or a
+signature the audit does not read, such as a function pointer, leaves the fact `not covered`.
+
 A fact is reconfirmed exactly when a theorem stating it passed the joint audit. Supplied images that no
 pin or checked claim uses are listed as unused and not covered. Successful reports include the
 digest file hash, StrictBinding source key and Lean toolchain. Unchecked facts remain assumptions.
@@ -448,8 +458,11 @@ bytes at the offsets decoded from the PE container and MethodDef rows.
 pinned image its identity names: its table header, Assembly row, table rows and `#Strings`,
 `#Blob` and `#US` entries are the image's, with MethodDef RVAs zeroed, under one numbering of the
 `#Strings` and `#Blob` offsets per heap for the table rows and another for the Assembly row. The
-assembly identity, key token, core library, links, the `#GUID` heap, the `Module` table and the
-RVAs of MethodDefs outside the evidence are not part of that check. Both facts are checked in pages
+block's identity must be the image's, its key token must be the token Lean computes with SHA-1 from
+the public key in the image's Assembly row (none for an unsigned assembly), and the core library a
+slice names must be an AssemblyRef row of a neutral core library with its publisher's token. The
+links, the `#GUID` heap, the `Module` table and the RVAs of MethodDefs outside the evidence are not
+part of that check. Both facts are checked in pages
 of about 250 methods, capped at eight pages, and each page decodes the pinned images again; the
 metadata check also checks each distinct Assembly block once, in one more lemma. These
 theorems join the extraction certificate and the selected proof for kernel replay, expected-type
@@ -1113,10 +1126,10 @@ Verified: ExampleProof.addTwo_holds
   its arguments or recurses is printed as Lean elaborates it, in terms of the auxiliary
   definitions it compiles to, and the field accessors of a structure the proof declares are not
   listed. Definitions of modules the proof imports are named in the statement and not printed.
-- `verified.json` is the certificate, schema 8. Its `binding` section has the run's `mode`, the
+- `verified.json` is the certificate, schema 9. Its `binding` section has the run's `mode`, the
   `digests` file, statement `sources` and `images` the run read, and, as `facts`, every fact about
   the assembly image that verification trusts, each with its `id`, `status`, `theorem` and
-  `reason`, in this order: `body-bytes`, `metadata-rows`, `platform-type-kinds`,
+  `reason`, in this order: `body-bytes`, `metadata-rows`, `member-links`, `platform-type-kinds`,
   `enum-underlying-types`, `value-tuple-field-order`, `object-fields`, `layout-content`,
   `dispatch-catalogs`, `static-data`, `generic-constraints`, `public-key-tokens`,
   `import-identities` and `imported-layouts`. `verify` writes `mode` `default`, reads no digest file, sources or image,

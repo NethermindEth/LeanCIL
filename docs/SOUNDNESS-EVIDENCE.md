@@ -415,8 +415,11 @@ canonical closure and compares it with that digest. For supported static generic
 deep audit also checks the producer's MethodDef and the selected export against the slot.
 [Deep verification](CLI.md#deep-verification) reconfirms each body at its RVA and each carried
 row and heap entry, under one numbering of the `#Strings` and `#Blob` offsets per heap and with
-MethodDef RVAs zeroed; the assembly identity, key token, core library, links, `#GUID` heap,
-`Module` table and the RVAs of MethodDefs outside the evidence are not part of that check. The audit also
+MethodDef RVAs zeroed, together with each block's assembly identity, its key token, which Lean
+computes with SHA-1 from the image's public key, and the core-library AssemblyRef a slice names;
+the links, `#GUID` heap, `Module` table and the RVAs of MethodDefs outside the evidence are not
+part of that check. The `member-links` check resolves each carried MemberRef link from the images
+to the definition it names, by parent type, name, kind and signature. The audit also
 reconfirms the initial bytes of RVA fields by checking the physical field signature, class size,
 packing and mapped file range. When supplied with the matching platform images, it resolves
 `System.Object` through the core AssemblyRef and any forwarding rows, checks the publisher token

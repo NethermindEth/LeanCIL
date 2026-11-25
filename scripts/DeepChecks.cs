@@ -561,6 +561,8 @@ partial class Program
         BindingFact.BodyBytes => "no checked theorem binds the method bodies to the pinned images",
         BindingFact.MetadataRows =>
             "no checked theorem binds the carried metadata rows and heap entries to the pinned images",
+        BindingFact.MemberLinks =>
+            "the extraction carries no MemberRef link, or a link's target lacks physical coverage",
         BindingFact.PlatformTypeKinds => "the extraction selects no platform type or a defining or forwarding image is missing",
         BindingFact.EnumUnderlyingTypes => "the extraction selects no enum or a defining or forwarding image is missing",
         BindingFact.ValueTupleFieldOrder => "the supplied images do not cover a selected System.ValueTuple pair",
@@ -601,6 +603,8 @@ partial class Program
     const string StaticDataModule = "BindingAudit.StaticData";
     const string BodiesModule = "BindingAudit.Bodies";
     const string MetadataRowsModule = "BindingAudit.MetadataRows";
+    const string MemberLinksModule = "BindingAudit.MemberLinks";
+    const string MemberLinksTheorem = "BindingAudit.memberLinks";
 
     /// <summary>The facts proved page by page over the method evidence, in the order their modules build.</summary>
     static readonly BindingFact[] PagedFacts = [BindingFact.BodyBytes, BindingFact.MetadataRows];
@@ -803,6 +807,9 @@ partial class Program
         File.WriteAllText(ModuleSource(plan.Output, GenericConstraintsModule), CoverageSource(
             "checkGenericConstraints", "GenericConstraintsChecked", "genericConstraints", "constraintCoverage",
             "GenericConstraints", "Extracted.methodEvidence Extracted.rawLayouts Extracted.imports"));
+        File.WriteAllText(ModuleSource(plan.Output, MemberLinksModule), CoverageSource(
+            "MemberLinks.checkMemberLinks", "MemberLinksChecked", "memberLinks", "linkCoverage",
+            "MemberLinks", "Extracted.methodEvidence"));
         File.WriteAllText(ModuleSource(plan.Output, PlatformKindsModule), CoverageSource(
             "checkPlatformKinds", "PlatformKindsChecked", "platformKinds", "kindCoverage", "PlatformKinds"));
         if (plan.EvidenceFacts.Contains(BindingFact.StaticData))
@@ -1252,6 +1259,8 @@ partial class Program
                 BindingFact.DispatchCatalogs, "assemblies", "methodEvidence", "imports"),
             Coverage(GenericConstraintsModule, GenericConstraintsTheorem, "GenericConstraintsChecked",
                 BindingFact.GenericConstraints, "methodEvidence", "rawLayouts", "imports"),
+            Coverage(MemberLinksModule, MemberLinksTheorem, "MemberLinksChecked", BindingFact.MemberLinks,
+                "methodEvidence"),
             Coverage(PlatformKindsModule, PlatformKindsTheorem, "PlatformKindsChecked", BindingFact.PlatformTypeKinds,
                 "platformDefinitions", "methodEvidence"),
             Coverage(EnumStorageModule, EnumStorageTheorem, "EnumStorageChecked", BindingFact.EnumUnderlyingTypes,
@@ -1293,7 +1302,8 @@ partial class Program
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
         var facts = plan.EvidenceFacts.Select(fact => fact == BindingFact.StaticData ? StaticDataModule
                 : PagedFact(fact).Module).Append(EnumStorageModule).Append(PlatformKindsModule)
-            .Append(GenericConstraintsModule).Append(LayoutContentModule).Append(DispatchCatalogsModule);
+            .Append(GenericConstraintsModule).Append(LayoutContentModule).Append(DispatchCatalogsModule)
+            .Append(MemberLinksModule);
         if (plan.Imports is not null) facts = facts.Append(ImportsModule);
         if (plan.ImportedLayouts) facts = facts.Append(ImportedLayoutsModule);
         if (plan.ObjectFields.HasValue) facts = facts.Append(ObjectFieldsModule);

@@ -1,4 +1,5 @@
 import StrictBinding.Rows
+import StrictBinding.MemberLinks
 import Tests.StrictBinding.Fixture
 import Tests.StrictBinding.Mutation
 
@@ -17,6 +18,17 @@ entry no row cell holds is refused by the check and by the proposition.
 The rows and entries of `StrictFixture.slice`, every row of the carried tables with the entries
 only its Field rows name omitted, are the image's under `rowsMatch_of_rowsBound`. A changed row,
 token, key or entry is refused, and an image changed only in a MethodDef RVA is accepted.
+
+A carried block states the identity and public key token of its assembly. The audit compares
+them with the identity the image is pinned under and the token `prepareOne` computes from the
+image's own key, so a forged token, a token for an unsigned assembly and another identity are
+each refused.
+
+The fixture's `Object::.ctor` MemberRef is redirected, in a variant image, to the fixture's own
+`Shape` class through a self-referencing AssemblyRef. Its link to `Shape::.ctor` resolves in that
+image; a link to `Triangle::.ctor`, which has the same name and signature in another class, to
+`Shape::Sides` or to a Field row is refused, and in the original image, whose AssemblyRef names
+an assembly without a supplied image, the link is uncovered.
 -/
 
 namespace Tests.StrictBinding.Rows
@@ -218,7 +230,7 @@ private theorem fixture_string_keys :
 /-- No numbering makes the suffix block the fixture's, since its key 2 is held by no row cell. -/
 theorem the_suffix_block_does_not_match {image : PreparedImage} (prepared : fixture = .ok image) :
     ¬ AssemblyMatches image suffixBlock := by
-  rintro ⟨_, _, _, _, _, _, _, entries, _, _, _, held, _⟩
+  rintro ⟨_, _, _, _, _, _, _, _, _, entries, _, _, _, held, _⟩
   obtain ⟨offset, named, _⟩ := entries (2, suffixBytes) (by simp [suffixBlock])
   rcases named with ⟨two, _⟩ | given
   · cases two
@@ -242,10 +254,13 @@ private def culturedImage (offset : Nat) : ImageBytes :=
     | .error _ => StrictFixture.image
   | .error _ => StrictFixture.image
 
+/-- The identity of the fixture variant whose culture is `culture`. -/
+private def culturedIdentity (culture : String) : String :=
+  "StrictFixture, Version=1.2.3.4, Culture=" ++ culture ++ ", PublicKeyToken=null"
+
 /-- The variant whose culture is `culture`, at `offset`, prepared under the identity it spells. -/
 private def cultured (offset : Nat) (culture : String) : Except AuditError PreparedImage :=
-  prepareOne { image := culturedImage offset, identity :=
-    "StrictFixture, Version=1.2.3.4, Culture=" ++ culture ++ ", PublicKeyToken=null" }
+  prepareOne { image := culturedImage offset, identity := culturedIdentity culture }
 
 /-- The fixture's carried row with name key `name` and culture key `culture`. -/
 private def rowWithNames (name culture : Nat) : List Nat :=
@@ -255,7 +270,7 @@ private def rowWithNames (name culture : Nat) : List Nat :=
     bytes. -/
 theorem accepts_a_culture_at_a_suffix_of_the_name :
     ok (checked (cultured suffixOffset "Fixture")
-      { block with assemblyRow := rowWithNames 2 1,
+      { block with identity := culturedIdentity "Fixture", assemblyRow := rowWithNames 2 1,
                    strings := [(0, [0]), (1, suffixBytes), (2, nameBytes)] }) = true := by
   decide +kernel
 #print axioms accepts_a_culture_at_a_suffix_of_the_name
@@ -295,14 +310,21 @@ private def keyedImage : ImageBytes :=
     | .error _ => StrictFixture.image
   | .error _ => StrictFixture.image
 
+/-- The public key token of `keyBytes`: the low eight bytes of its SHA-1, reversed. -/
+private def keyedToken : String := "4705f121e18edfe3"
+
+/-- The identity the variant's key spells. -/
+private def keyedIdentity : String :=
+  "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=" ++ keyedToken
+
 /-- The variant, prepared under the identity its key spells. -/
 private def keyed : Except AuditError PreparedImage :=
-  prepareOne { image := keyedImage, identity :=
-    "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=4705f121e18edfe3" }
+  prepareOne { image := keyedImage, identity := keyedIdentity }
 
 /-- The block an extraction carries for the variant: its key is the only blob, ranked 1. -/
 private def keyedBlock : AssemblyMetadata :=
-  { block with assemblyRow := rowWithKey publicKeyAt 1,
+  { block with identity := keyedIdentity, keyToken := CIL.Extraction.bytesOf keyedToken,
+               assemblyRow := rowWithKey publicKeyAt 1,
                blobs := [(1, keyBytes.length :: keyBytes)] }
 
 /-- The variant's carried block, with its key at `#Blob` offset 1, passes the check. -/
@@ -629,5 +651,150 @@ theorem rejects_a_marker_beside_a_key :
       (.heapNumbering stringsHeap 1) = true := by
   decide +kernel
 #print axioms rejects_a_marker_beside_a_key
+
+
+/-! ## Identity and public key token -/
+
+/-- The token the audit records for the variant is computed from its key, and is the token the
+    variant's identity states. -/
+theorem the_keyed_token_is_computed_from_the_key :
+    hexDigits 16 (CIL.Crypto.Sha1.keyToken keyBytes) = CIL.Extraction.bytesOf keyedToken ∧
+      (keyed.toOption.map (·.assembly.token)) = some (CIL.Extraction.bytesOf keyedToken) := by
+  decide +kernel
+#print axioms the_keyed_token_is_computed_from_the_key
+
+/-- A carried token other than the one the image's key gives is refused, though the identity is
+    right. -/
+theorem rejects_a_forged_own_token :
+    failsWith
+      (checked keyed { keyedBlock with keyToken := CIL.Extraction.bytesOf "0123456789abcdef" })
+      (.ownTokenMismatch keyedIdentity) = true := by
+  decide +kernel
+#print axioms rejects_a_forged_own_token
+
+/-- A signed assembly's block that states no token is refused. -/
+theorem rejects_no_token_for_a_signed_assembly :
+    failsWith (checked keyed { keyedBlock with keyToken := [] })
+      (.ownTokenMismatch keyedIdentity) = true := by
+  decide +kernel
+#print axioms rejects_no_token_for_a_signed_assembly
+
+/-- An unsigned assembly's block that states a token is refused. -/
+theorem rejects_a_token_for_an_unsigned_assembly :
+    failsWith (checked fixture { block with keyToken := CIL.Extraction.bytesOf keyedToken })
+      (.ownTokenMismatch StrictFixture.identity) = true := by
+  decide +kernel
+#print axioms rejects_a_token_for_an_unsigned_assembly
+
+/-- A block naming another identity is refused, though its rows and token are the image's. -/
+theorem rejects_another_identity :
+    failsWith (checked fixture { block with identity := culturedIdentity "Fixture" })
+      (.ownIdentityMismatch StrictFixture.identity) = true := by
+  decide +kernel
+#print axioms rejects_another_identity
+
+/-! ## MemberRef links -/
+
+/-- The MemberRef of `System.Object::.ctor`, which `Shape::.ctor` calls. -/
+private def objectConstructorRef : Nat := 0x0A000008
+
+/-- The TypeRef of `System.Object`, the MemberRef's parent. -/
+private def objectTypeRef : Nat := 0x01000009
+
+/-- `Shape::.ctor`, `Triangle::.ctor` and `Shape::Sides`. -/
+private def shapeConstructor : Nat := 0x06000006
+private def triangleConstructor : Nat := 0x06000008
+private def shapeSides : Nat := 0x06000004
+
+/-- The `Shape` TypeDef, whose name and namespace the variant's TypeRef takes. -/
+private def shapeType : Nat := 0x02000005
+
+/-- The fixture with its one AssemblyRef naming the fixture itself and its `System.Object`
+    TypeRef naming `StrictFixture.Shape`, so the MemberRef resolves into the fixture. -/
+private def linkedImage : ImageBytes :=
+  let rewritten : Except AuditError ImageBytes := do
+    let image ← fixture
+    let definition := assemblyToken
+    let reference := tokenOf 0x23 1
+    let mut bytes := imageBytes StrictFixture.image
+    for i in [:4] do
+      let (offset, width) ← image.layout.cellAt reference i
+      bytes := writeLittle bytes offset width (← image.layout.cell image.view definition (i + 1))
+    for (column, value) in [(4, 0), (5, 0), (6, ← image.layout.cell image.view definition 7),
+        (7, 0)] do
+      let (offset, width) ← image.layout.cellAt reference column
+      bytes := writeLittle bytes offset width value
+    for column in [1, 2] do
+      let (offset, width) ← image.layout.cellAt objectTypeRef column
+      bytes := writeLittle bytes offset width (← image.layout.cell image.view shapeType column)
+    return ImageBytes.ofBytes bytes
+  match rewritten with
+  | .ok image => image
+  | .error _ => StrictFixture.image
+
+/-- The pinned variant. -/
+private def linkedPin : PinnedImage := { identity := StrictFixture.identity, image := linkedImage }
+
+/-- The link from the MemberRef to `definition`, checked in the variant. -/
+private def linkChecked (definition : Nat) : Except AuditError (Option Unit) := do
+  let image ← prepareOne linkedPin
+  MemberLinks.memberListsAscend image
+  (MemberLinks.memberLinkBound [image] image image objectConstructorRef definition).run
+
+/-- The link to the constructor of the class the MemberRef's parent names resolves. -/
+theorem accepts_a_link_to_its_definition :
+    (linkChecked shapeConstructor).toOption = some (some ()) := by
+  decide +kernel
+#print axioms accepts_a_link_to_its_definition
+
+/-- `Triangle::.ctor` has the MemberRef's name and signature but belongs to another class. -/
+theorem rejects_a_link_to_another_method :
+    failsWith (linkChecked triangleConstructor)
+      (.memberLinkMismatch StrictFixture.identity objectConstructorRef) = true := by
+  decide +kernel
+#print axioms rejects_a_link_to_another_method
+
+/-- `Shape::Sides` belongs to the class but has another name. -/
+theorem rejects_a_link_to_another_name :
+    failsWith (linkChecked shapeSides)
+      (.memberLinkMismatch StrictFixture.identity objectConstructorRef) = true := by
+  decide +kernel
+#print axioms rejects_a_link_to_another_name
+
+/-- A method signature cannot link to a Field row. -/
+theorem rejects_a_link_to_a_field :
+    failsWith (linkChecked 0x04000001)
+      (.memberLinkMismatch StrictFixture.identity objectConstructorRef) = true := by
+  decide +kernel
+#print axioms rejects_a_link_to_a_field
+
+/-- A method whose body carries the link, in the fixture's slice. -/
+private def linkedMethod (definition : Nat) : CIL.Extraction.MethodMetadata :=
+  { own := { StrictFixture.slice with
+      links := [⟨CIL.Extraction.linkDefinition, objectConstructorRef, 0, definition⟩] } }
+
+/-- The unchanged fixture, whose AssemblyRef names `System.Runtime`. -/
+private def originalPin : PinnedImage :=
+  { identity := StrictFixture.identity, image := StrictFixture.image }
+
+/-- A method that links the MemberRef into a slice it does not carry. -/
+private def danglingMethod : CIL.Extraction.MethodMetadata :=
+  { own := { StrictFixture.slice with
+      links := [⟨CIL.Extraction.linkDefinition, objectConstructorRef, 1, shapeConstructor⟩] } }
+
+/-- The whole check: complete in the variant, uncovered in the original image, whose
+    AssemblyRef names `System.Runtime`, refused for a link to another class's method, and
+    refused for a link into a slice the method does not carry. -/
+theorem checks_the_links_of_the_evidence :
+    (MemberLinks.checkMetadataLinks [linkedPin] [linkedMethod shapeConstructor]).toOption =
+      some true ∧
+    (MemberLinks.checkMetadataLinks [originalPin] [linkedMethod shapeConstructor]).toOption =
+      some false ∧
+    failsWith (MemberLinks.checkMetadataLinks [linkedPin] [linkedMethod triangleConstructor])
+      (.memberLinkMismatch StrictFixture.identity objectConstructorRef) = true ∧
+    failsWith (MemberLinks.checkMetadataLinks [linkedPin] [danglingMethod])
+      (.memberLinkMismatch StrictFixture.identity objectConstructorRef) = true := by
+  decide +kernel
+#print axioms checks_the_links_of_the_evidence
 
 end Tests.StrictBinding.Rows

@@ -50,6 +50,7 @@ Verified: ExampleProof.correctness
   Binding: default
   body-bytes: trusted
   metadata-rows: trusted
+  member-links: trusted
   platform-type-kinds: trusted
   enum-underlying-types: trusted
   value-tuple-field-order: trusted
@@ -78,8 +79,9 @@ Verified: ExampleProof.correctness
 ```
 
 `Binding:` lists the facts this run trusts about the assembly image. With the assembly digests,
-`verify --deep-checks` reconfirms `body-bytes`, `metadata-rows` and `static-data`. Supplying the
-matching platform reference images also checks `object-fields`. See [deep verification](CLI.md#deep-verification).
+`verify --deep-checks` reconfirms `body-bytes`, `metadata-rows` and `static-data`, and
+`member-links` for MemberRef links between supplied images. Supplying the matching platform
+reference images also checks `object-fields`. See [deep verification](CLI.md#deep-verification).
 
 `Subject:` is the method the theorem's conclusion is about and `Extraction entry:` the method the
 extraction started from; see [reading the report](CLI.md#reading-the-report).

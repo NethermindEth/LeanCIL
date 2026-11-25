@@ -127,18 +127,6 @@ def enumName : List Nat := asciiOf "Enum"
 /-- The name `ValueType`. -/
 def valueTypeName : List Nat := asciiOf "ValueType"
 
-/-- Whether the Assembly or AssemblyRef row names a neutral core library with its publisher's
-    token. Both tables have the same identity columns after the Assembly's hash-algorithm column. -/
-def coreAssemblyAt (image : PreparedImage) (row first : Nat) : Except AuditError Bool := do
-  let cell := image.layout.cell image.view row
-  let name ← image.layout.stringAt image.view (← cell (first + 6))
-  let some name := CIL.MetadataName.ofBytes? name | return false
-  let some publisher := CIL.Extraction.coreLibraryKey? name | return false
-  if !(← image.layout.stringAt image.view (← cell (first + 7))).isEmpty then return false
-  let flags ← cell (first + 4)
-  let key ← image.layout.blobAt image.view (← cell (first + 5))
-  return (← rowKeyToken row flags key) == some publisher
-
 /-- A local base uses the defining image's Assembly row. A referenced base must point directly
     to an AssemblyRef through its ResolutionScope column (II.24.2.6). -/
 private def coreBaseScope (image : PreparedImage) (token : Nat) : Except AuditError Bool := do

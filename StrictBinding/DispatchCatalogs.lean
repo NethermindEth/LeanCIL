@@ -6,10 +6,10 @@ namespace StrictBinding.ClassDispatch
 open CIL CIL.Extraction
 
 /-- Unsupported metadata leaves coverage partial. A conflicting supported claim is an error. -/
-private abbrev Reading := OptionT (Except AuditError)
+abbrev Reading := OptionT (Except AuditError)
 
 /-- Structural PE errors retain the token, heap offset or column that failed. -/
-private def physical (action : Except AuditError α) : Reading α := liftM action
+def physical (action : Except AuditError α) : Reading α := liftM action
 
 /-- An unsupported signature leaves the catalog partial. Structural errors retain their cause. -/
 private def signatureValue (read : Except AuditError α) : Reading α :=
@@ -202,13 +202,13 @@ private def localOverrides (prepared : List PreparedImage) (image : PreparedImag
   return bindings.map List.reverse
 
 /-- File rows with metadata introduce classes in other modules of the same assembly. -/
-private def singleModule (image : PreparedImage) : Reading Unit := do
+def singleModule (image : PreparedImage) : Reading Unit := do
   for i in [:image.layout.rowCount 0x26] do
     guard ((← physical (image.layout.cellOfRow image.view 0x26 (i+1) 0)) == 1)
 
 /-- Read the namespace, outer name and nested names from the TypeRef chain, ending at
     the physical AssemblyRef. A cyclic or module-scoped reference is uncovered. -/
-private def referencedClass (images : List PreparedImage) (image : PreparedImage) :
+def referencedClass (images : List PreparedImage) (image : PreparedImage) :
     Nat → Nat → List (List Nat) → Reading (List Nat × List (List Nat))
   | 0, _, _ => failure
   | fuel + 1, token, nested => do
@@ -228,7 +228,7 @@ private def referencedClass (images : List PreparedImage) (image : PreparedImage
 
 /-- Locate a class at its TypeDef or through an AssemblyRef in the body that tests it.
     Every forwarded declaration requires the full chain of pinned images. -/
-private def testDefinition (prepared : List PreparedImage) (home : PreparedImage) (token : Nat) :
+def testDefinition (prepared : List PreparedImage) (home : PreparedImage) (token : Nat) :
     Reading (PreparedImage × Nat) := do
   let _ ← physical (home.layout.rowAt token)
   if tableOf token == Table.typeDef then return (home, token % 2^24)

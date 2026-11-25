@@ -896,19 +896,19 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
 
     var ordinary = Execute(verify);
     if (ordinary.Code != 0 || !ordinary.Stdout.Contains("Binding: default", StringComparison.Ordinal) ||
-        ordinary.Stdout.Split(": trusted", StringSplitOptions.None).Length != 14 ||
+        ordinary.Stdout.Split(": trusted", StringSplitOptions.None).Length != 15 ||
         ordinary.Output.Contains("BindingAudit", StringComparison.Ordinal))
         throw new InvalidOperationException("Default binding output or work changed: " + ordinary.Output);
     var deep = Execute([.. verify, "--deep-checks", digestFile]);
-    string[] reconfirmed = ["body-bytes", "metadata-rows", "static-data"];
+    string[] reconfirmed = ["body-bytes", "metadata-rows", "member-links", "static-data"];
     if (deep.Code != 0 || !deep.Stdout.Contains("StrictBinding sources:", StringComparison.Ordinal) ||
         deep.Stdout.Split(": not covered", StringSplitOptions.None).Length != 11)
         throw new InvalidOperationException("Deep binding text is incomplete: " + deep.Output);
     string[] factNames =
     [
-        "body-bytes", "metadata-rows", "platform-type-kinds", "enum-underlying-types", "value-tuple-field-order",
-        "object-fields", "layout-content", "dispatch-catalogs", "static-data", "generic-constraints",
-        "public-key-tokens", "import-identities", "imported-layouts"
+        "body-bytes", "metadata-rows", "member-links", "platform-type-kinds", "enum-underlying-types",
+        "value-tuple-field-order", "object-fields", "layout-content", "dispatch-catalogs", "static-data",
+        "generic-constraints", "public-key-tokens", "import-identities", "imported-layouts"
     ];
     foreach (var fact in factNames)
         if (!ordinary.Stdout.Contains(fact + ": trusted", StringComparison.Ordinal) ||
@@ -1020,7 +1020,7 @@ if (args is not (["--mutations"] or ["--controls"] or ["--final-mutations"]))
     var consumerReport = JsonSerializer.Deserialize<JsonElement>(checkedConsumer.Stdout);
     var binding = consumerReport.GetProperty("binding");
     if (binding.GetProperty("mode").GetString() != "deep" ||
-        binding.GetProperty("facts").GetArrayLength() != 13 ||
+        binding.GetProperty("facts").GetArrayLength() != 14 ||
         binding.GetProperty("facts")[0].GetProperty("status").GetString() != "reconfirmed")
         throw new InvalidOperationException("Consumer CLI did not retain deep binding");
     Console.WriteLine("PASS proof-root CLI deep verification");
@@ -1034,7 +1034,7 @@ if (args is not (["--mutations"] or ["--controls"] or ["--final-mutations"]))
     var failedFile = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "failed.json")));
     var failureBinding = failed.GetProperty("binding");
     if (!JsonElement.DeepEquals(failureBinding, failedFile.GetProperty("binding")) ||
-        failureBinding.GetProperty("facts").GetArrayLength() != 13 ||
+        failureBinding.GetProperty("facts").GetArrayLength() != 14 ||
         failureBinding.GetProperty("facts").EnumerateArray().Any(fact =>
             fact.GetProperty("status").GetString() != "not covered"))
         throw new InvalidOperationException("Failed consumer binding payload is inconsistent: " + rejected.Output);

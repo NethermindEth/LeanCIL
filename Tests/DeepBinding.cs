@@ -17,10 +17,10 @@ partial class Program
             var report = JsonSerializer.Deserialize<JsonElement>(result.Stdout);
             var binding = report.GetProperty("binding");
             if (binding.GetProperty("mode").GetString() != "deep" ||
-                binding.GetProperty("facts").GetArrayLength() != 13 ||
+                binding.GetProperty("facts").GetArrayLength() != 14 ||
                 binding.GetProperty("images").GetArrayLength() != 2 ||
                 binding.GetProperty("facts").EnumerateArray().Count(fact =>
-                    fact.GetProperty("status").GetString() == "reconfirmed") != 3)
+                    fact.GetProperty("status").GetString() == "reconfirmed") != 4)
                 throw new InvalidOperationException("Unexpected joint binding report: " + result.Stdout);
             Console.WriteLine("PASS joint CLI verification reports image digests and all thirteen facts");
         }

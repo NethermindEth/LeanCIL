@@ -140,6 +140,16 @@ inductive AuditError where
   | typeDefMismatch (row : Nat) (part : TypeDefPart)
   /-- Row `row` of `table` has a key below the key of the row before it. -/
   | unsortedTable (table row : Nat)
+  /-- A carried Assembly block names another identity than the image it is checked against. -/
+  | ownIdentityMismatch (identity : String)
+  /-- A carried Assembly block states another public key token than the image's key gives. -/
+  | ownTokenMismatch (identity : String)
+  /-- A slice's core-library AssemblyRef row does not name a core library with its publisher's
+      token in the image. -/
+  | corlibMismatch (identity : String) (row : Nat)
+  /-- A MemberRef of the image links to a definition with another owner, name, kind or
+      signature, or to a member a MemberRef cannot bind. -/
+  | memberLinkMismatch (identity : String) (token : Nat)
   deriving DecidableEq, Repr
 
 /-- Whether a check succeeded; the proposition of each audited theorem is `ok check = true`. -/

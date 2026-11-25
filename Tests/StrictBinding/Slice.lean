@@ -2,7 +2,8 @@ import StrictBinding.Slice
 import Tests.StrictBinding.Fixture
 import Tests.StrictBinding.Mutation
 
-/-! Whole metadata checks and user-string offsets, payloads, prefixes and heap bounds. -/
+/-! Whole metadata checks, user-string offsets, payloads, prefixes and heap bounds, and the
+    slice's core-library AssemblyRef. -/
 
 namespace Tests.StrictBinding.Slice
 
@@ -150,5 +151,36 @@ theorem rejects_other_assembly :
     failsWith (checked { carried with assembly := otherAssembly })
       (.rowMismatch assemblyToken) = true := by decide +kernel
 #print axioms rejects_other_assembly
+
+/-! ## Core-library reference -/
+
+/-- The fixture's one AssemblyRef, `System.Runtime` with its publisher's token, as the core
+    library of the slice. -/
+theorem accepts_the_core_reference : ok (checked { carried with corlib := 1 }) = true := by
+  decide +kernel
+#print axioms accepts_the_core_reference
+
+/-- AssemblyRef 2, which the tables do not have, is refused. -/
+theorem rejects_a_core_reference_the_tables_do_not_have :
+    failsWith (checked { carried with corlib := 2 })
+      (.tokenOutOfScope (tokenOf 0x23 2)) = true := by
+  decide +kernel
+#print axioms rejects_a_core_reference_the_tables_do_not_have
+
+/-- The fixture with its AssemblyRef naming the fixture itself, a library without a core name. -/
+private def selfReferencing : Except AuditError PreparedImage := do
+  let image ← fixture
+  let (offset, width) ← image.layout.cellAt (tokenOf 0x23 1) 6
+  let name ← image.layout.cell image.view (tokenOf 0x20 1) 7
+  let bytes := imageBytes (flipByte StrictFixture.image 2021 1)
+  prepareOne { identity := StrictFixture.identity,
+               image := ImageBytes.ofBytes (writeLittle bytes offset width name) }
+
+/-- A slice that names a library without a core name as its core library is refused. -/
+theorem rejects_a_core_reference_to_another_library :
+    failsWith (selfReferencing >>= fun image => corlibBound image 1)
+      (.corlibMismatch StrictFixture.identity 1) = true := by
+  decide +kernel
+#print axioms rejects_a_core_reference_to_another_library
 
 end Tests.StrictBinding.Slice
