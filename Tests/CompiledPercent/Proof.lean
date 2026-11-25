@@ -29,7 +29,8 @@ def pinnedCaller : Option BodyEvidence :=
 /-- The neighboring throw, a missing defining image, the facade with the same MethodDef
 number, a different MethodDef and a mismatched constructor signature are all refused. -/
 theorem rejectsInvalidBindings :
-    let bindCtor := Extracted.method0Body.bindConstructor? Extracted.method0Original 5
+    let bindCtor := fun dependencies callee =>
+      Extracted.method0Body.bindConstructors? Extracted.method0Original [(5, callee)] dependencies
     let callee : SpecializedMethod := ⟨[], Core.RangeCtor.definition, ⟨coreLibraryScope⟩⟩
     (Extracted.method0Body.constructorTokenAt? 0 0 6).isNone ∧
     (bindCtor [] callee).isNone ∧

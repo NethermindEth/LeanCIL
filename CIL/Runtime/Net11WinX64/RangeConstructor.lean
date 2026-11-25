@@ -177,10 +177,13 @@ private def invalidOperationMessageDependencies : List MetadataSlice := [{
     links := [] }, {
     assembly := CoreLib.assembly,
     rows := [(33554594, (fixedBytes 18 0x0120100003000000040000000000FE021C07)),
+      (33554595, (fixedBytes 18 0x09011000FFFFFFFF040000003003FE022507)),
       (33554816, (fixedBytes 18 0x012010000200000004000000A4078205631B)),
       (33554817, (fixedBytes 18 0x01211000FFFFFFFF04000000A4078205671B)),
       (33554921, (fixedBytes 18 0x01201000050000000400000040022F067826)),
       (100670308, (fixedBytes 20 0x00000000000086180100000001000000DE310000)),
+      (704643081, (fixedBytes 12 0x0000180016010000FFFFFFFF)),
+      (704643082, (fixedBytes 12 0x000004006A010000FFFFFFFF)),
       (704643390, (fixedBytes 12 0x00001800E6020000FFFFFFFF)),
       (704643391, (fixedBytes 12 0x0000010006030000FFFFFFFF))],
     strings := [(1, (fixedBytes 6 0x2E63746F7200)),
@@ -418,59 +421,123 @@ private def boundOverloads : List (ExceptionType × List TypeExpr × BoundOverlo
 /-- Select the bound overload from the exception owner and its exact parameter types, as the
 extractor's selector does. Binding then checks that the MemberRef resolves to the head method's
 MethodDef. -/
-private def boundOverload? (constructor : CallSite) : Option BoundOverload := do
-  let raised ← exceptionConstructor? constructor
-  let (_, _, image) ← boundOverloads.find? fun (owner, parameters, _) =>
-    owner == raised && parameters == constructor.parameterTypes
+private def selectOverload? (raised : ExceptionType) (parameters : List TypeExpr) :
+    Option BoundOverload := do
+  let (_, _, image) ← boundOverloads.find? fun (owner, declared, _) =>
+    owner == raised && declared == parameters
   return image
+
+/-- The bound overload a live external exception constructor selects. -/
+private def boundOverload? (constructor : CallSite) : Option BoundOverload := do
+  selectOverload? (← exceptionConstructor? constructor) constructor.parameterTypes
+
+/-- The items of `items` with a distinct `key`, each first occurrence in order. -/
+private def firstByKey (key : α → Nat) (items : List α) : List α :=
+  items.foldl (fun kept item => if kept.any (key · == key item) then kept else kept ++ [item]) []
+
+/-- The runtime definitions, declared getters and dependency slices bound for a set of
+constructor overloads. A definition or getter shared between overloads appears once, at its
+first use, so each call in the image selects a unique slot. -/
+structure ConstructorImage where
+  dependencies : List MetadataSlice
+  methods : List (BodyEvidence × RawMethod)
+  getters : List ResourceGetter
+
+/-- The image of the overloads named by exception owner and exact parameter types. Every overload
+must resolve through the same dependency slices. -/
+def ConstructorImage.of? (overloads : List (ExceptionType × List TypeExpr)) :
+    Option ConstructorImage := do
+  let selected ← overloads.mapM fun (raised, parameters) => selectOverload? raised parameters
+  -- Comparing the first slices with themselves would make `decide` over the program evaluate them.
+  let first :: rest := selected | none
+  guard (rest.all fun overload => overload.dependencies == first.dependencies)
+  return {
+    dependencies := first.dependencies,
+    methods := firstByKey (·.2.token) (selected.flatMap (·.methods)),
+    getters := firstByKey (·.token) (selected.flatMap (·.getter.toList)) }
+
+/-- A caller rebound to an image: its body carrying the dependency rows and member links, its
+method decoded from that body, and the construction link of each bound site. -/
+structure BoundCaller where
+  body : BodyEvidence
+  original : RawMethod
+  links : List (Nat × Link)
+
+/-- Bind the live exception constructions at `pcs` in a caller whose program places the image's
+methods from slot `base`. Each site selects an overload of the image, and every entry to its
+`newobj` runs that overload's literal loads, so a declared getter is never reached. -/
+def ConstructorImage.bindCaller? (image : ConstructorImage) (base : Nat) (body : BodyEvidence)
+    (source : RawMethod) (pcs : List Nat) : Option BoundCaller := do
+  let sites ← pcs.mapM fun pc => do
+    let site ← source.code[pc]?
+    let .call constructor := site.operand | none
+    let overload ← boundOverload? constructor
+    guard (overload.methods.all fun (_, method) =>
+      image.methods.any (·.2.token == method.token))
+    guard (overload.getter.all fun getter => image.getters.any (·.token == getter.token))
+    let (_, callee) ← overload.methods.head?
+    let ordinal ← image.methods.findIdx? (·.2.token == callee.token)
+    return (pc, overload.loads, callee, base + ordinal)
+  let bound ← body.bindConstructors? source
+    (sites.map fun (pc, _, callee, _) => (pc, ⟨[], callee, ⟨coreLibraryScope⟩⟩))
+    image.dependencies
+  let code ← (checkBody bound source []).toOption
+  let raw := { source with
+    code := code.code, initLocals := code.initLocals, handlers := code.handlers }
+  let targets := branchTargets raw.code
+  -- Every entry to each newobj runs its loads, so the message is a string literal.
+  guard (sites.all fun (pc, loads, _, _) =>
+    let start := pc - loads.length
+    pc ≥ loads.length && !targets.contains pc &&
+      loads.zipIdx.all fun (opcode, offset) =>
+        (raw.code[start + offset]?.map (·.opcode)) == some opcode &&
+          !targets.contains (start + offset + 1))
+  let links := sites.map fun (pc, _, callee, ordinal) =>
+    (pc, Link.object ordinal callee.objectBases (objectFieldOffset callee.objectFieldCount))
+  return ⟨bound, raw, links⟩
+
+/-- The image's executable definitions and getter declarations, in the program that places
+`locals` first. Each definition uses the pins, platform and layouts of `caller`. -/
+def ConstructorImage.rows? (image : ConstructorImage) (locals : List SpecializedMethod)
+    (caller : BodyEvidence) (profile : FeatureProfile) (environment : LayoutEnvironment) :
+    Option (List (MethodEvidence × Method) × List MethodEvidence) := do
+  let runtime := image.methods.map Prod.snd ++ image.getters.map (·.raw)
+  let table := locals ++ runtime.map (⟨[], ·, ⟨coreLibraryScope⟩⟩)
+  let definitions ← image.methods.mapM (runtimeRow? table caller profile environment)
+  let declarations ← image.getters.mapM (resourceDeclaration? caller environment)
+  return (definitions, declarations)
 
 /-- Decode a single entry method and the framework methods reached with a non-null message.
 The caller must resolve its constructor through the two pinned runtime slices. -/
 def constructorImage? (item : ConstructorSource) (pc : Nat)
     (profile : FeatureProfile) (environment : LayoutEnvironment) : Option ManagedPackage := do
   guard (supportsProfile profile && item.arguments.isEmpty)
-  let original := item.body
-  let source := item.original
-  let site ← source.code[pc]?
+  let site ← item.original.code[pc]?
   let .call constructor := site.operand | none
-  let image ← boundOverload? constructor
-  let (_, callee) ← image.methods.head?
-  let body ← original.bindConstructor? source pc image.dependencies
-    ⟨[], callee, ⟨coreLibraryScope⟩⟩
-  let code ← (checkBody body source []).toOption
-  let raw := { source with
-    code := code.code, initLocals := code.initLocals, handlers := code.handlers }
-  -- Every entry to this newobj runs these loads, so the message is a string literal.
-  let start := pc - image.loads.length
-  let targets := branchTargets raw.code
-  guard (pc ≥ image.loads.length && !targets.contains pc &&
-    (image.loads.zipIdx.all fun (opcode, offset) =>
-      (raw.code[start + offset]?.map (·.opcode)) == some opcode &&
-        !targets.contains (start + offset + 1)))
+  let image ← ConstructorImage.of?
+    [(← exceptionConstructor? constructor, constructor.parameterTypes)]
+  let bound ← image.bindCaller? 1 item.body item.original [pc]
+  let raw := bound.original
   -- This single-entry image supplies only the constructor at the selected call site.
   guard (raw.code.zipIdx.all fun (site, index) =>
     match site.operand with | .call _ => index == pc | _ => true)
-  let runtime := image.methods.map Prod.snd
-  let getter := image.getter.toList.map (·.raw)
-  let table : List SpecializedMethod := ⟨[], raw, ⟨original.metadata.own.assembly.identity⟩⟩ ::
-    (runtime ++ getter).map (⟨[], ·, ⟨coreLibraryScope⟩⟩)
-  let boundLinks := links table raw
-  let entry ← Method.ofBody? profile environment boundLinks item.reachable body raw []
+  let entry ← Method.ofBody? profile environment bound.links item.reachable bound.body raw []
   let closed ← instantiateMethod environment.rawLayouts raw []
   let storage ← closedArguments environment.rawLayouts closed
   let (_, scalars) ← inferFlow? closed entry (some item.featureStates)
   let caller : MethodEvidence := {
-    original := raw, body, closed, parameterInput := storage, links := boundLinks,
+    original := raw, body := bound.body, closed, parameterInput := storage, links := bound.links,
     scalarStates := scalars, arguments := item.arguments, reachable := item.reachable,
     featureStates := item.featureStates, layoutUses := item.layoutUses,
     dispatchTypes := item.dispatchTypes, assembly := item.assembly, signature := item.signature }
-  let definitions ← image.methods.mapM (runtimeRow? table body profile environment)
-  let declarations ← image.getter.toList.mapM (resourceDeclaration? body environment)
+  let own : SpecializedMethod := ⟨[], raw, ⟨bound.body.metadata.own.assembly.identity⟩⟩
+  let (definitions, declarations) ← image.rows? [own] bound.body profile environment
   return ⟨(caller, entry), definitions, declarations⟩
 
-/-- The caller, runtime definitions and declared getter share the same physical pin table. -/
+/-- The pins every package body shares: the source assemblies and CoreLib. The forwarding facade
+is carried as a slice of each bound caller and stays unpinned. -/
 def packagePins (source : List AssemblyPin) : List AssemblyPin :=
-  source ++ [⟨runtimeScope⟩, ⟨coreLibraryScope⟩]
+  source ++ [⟨coreLibraryScope⟩]
 
 /-- Bind the unique live exception constructor in a closed single-caller extraction. -/
 def constructorPackage? (source : ConstructorSource) (imports : List ImportSlot)

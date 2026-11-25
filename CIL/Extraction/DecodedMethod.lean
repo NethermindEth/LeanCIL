@@ -82,57 +82,78 @@ private def insertConstructorLink (link : MetadataLink) : List MetadataLink → 
       link :: head :: tail
     else head :: insertConstructorLink link tail
 
-/-- Bind an external class constructor in the original caller to a managed definition.
-The added rows resolve the original MemberRef. Its defining assembly, MethodDef and signature
-must match the supplied callee. The caller retains its own bytes, rows and declared signature. -/
-def BodyEvidence.bindConstructor? (body : BodyEvidence) (source : RawMethod) (pc : Nat)
-    (dependencies : List MetadataSlice)
-    (callee : SpecializedMethod) : Option BodyEvidence := do
-  let token ← body.constructorTokenAt? source.genericParameters.length source.ownerParameters.length pc
-  let .call external ← body.tokens.operands.lookup token | none
-  let .external _ := external.target | none
-  guard (external.method.name == name!".ctor" && callee.arguments.isEmpty &&
-    callee.closed.genericParameters.isEmpty && callee.closed.ownerParameters.isEmpty)
+/-- Bind external class constructors in the original caller to managed definitions. For each
+`(pc, callee)` the added rows resolve the MemberRef of the `newobj` at `pc`; its defining
+assembly, MethodDef and signature must match `callee`. A MemberRef several sites name binds once,
+to one callee. The caller retains its own bytes, rows and declared signature, and its pins gain
+each defining assembly they lack; a carried facade stays unpinned. -/
+def BodyEvidence.bindConstructors? (body : BodyEvidence) (source : RawMethod)
+    (sites : List (Nat × SpecializedMethod)) (dependencies : List MetadataSlice) :
+    Option BodyEvidence := do
+  let arity := source.genericParameters.length
+  let ownerArity := source.ownerParameters.length
+  let resolved ← sites.mapM fun (pc, callee) => do
+    let token ← body.constructorTokenAt? arity ownerArity pc
+    let .call external ← body.tokens.operands.lookup token | none
+    let .external _ := external.target | none
+    guard (external.method.name == name!".ctor" && callee.arguments.isEmpty &&
+      callee.closed.genericParameters.isEmpty && callee.closed.ownerParameters.isEmpty)
+    return (token, external, callee)
+  let distinct := resolved.foldl (fun kept entry =>
+    if kept.any (·.1 == entry.1) then kept else kept ++ [entry]) []
+  guard (resolved.all fun (token, _, callee) =>
+    distinct.any fun (other, _, bound) => other == token && bound == callee)
+  let (first, _, _) ← distinct.head?
   let slices := body.metadata.others ++ dependencies
   let initial := { body.metadata with others := slices }
   let added := dependencies.map (fun slice => bytesOf slice.assembly.identity)
   let identities := body.identities ++ added
-  let pins := PinnedIndex.ofIdentities (body.pinned.identities ++ added)
+  let defining := distinct.foldl (fun kept (_, _, callee) =>
+    let identity := bytesOf callee.assembly.identity
+    if body.pinned.identities.contains identity || kept.contains identity then kept
+    else kept ++ [identity]) []
+  let pins := PinnedIndex.ofIdentities (body.pinned.identities ++ defining)
   let tables ← initial.tables.toOption
   let base := { body with metadata := initial, identities, tables, pinned := pins }
   let env ← base.environment.toOption
-  let [position] := identities.zipIdx.filterMap (fun (id, i) =>
-      if id == bytesOf callee.assembly.identity then some i else none) | none
-  let index ← (env.slice 0 token).toOption
+  let members ← distinct.mapM fun (token, _, callee) => do
+    let [position] := identities.zipIdx.filterMap (fun (id, i) =>
+        if id == bytesOf callee.assembly.identity then some i else none) | none
+    return (⟨linkDefinition, token, position, callee.closed.token⟩ : MetadataLink)
+  let index ← (env.slice 0 first).toOption
   let links := body.metadata.own.rows.flatMap fun (key, _) =>
     if metadataTableOf key == Table.typeRef && (index.link linkDefinition key).isNone then
       (constructorTypeLinks env initial.slices key).getD []
     else []
-  let member : MetadataLink := ⟨linkDefinition, token, position, callee.closed.token⟩
-  let ordered := (member :: links).foldr insertConstructorLink body.metadata.own.links
+  let ordered := (members ++ links).foldr insertConstructorLink body.metadata.own.links
   let own := { body.metadata.own with links := ordered }
   let metadata := { initial with own }
   let tables ← metadata.tables.toOption
   let linked := { body with metadata, identities, tables, pinned := pins }
   let env ← linked.environment.toOption
-  let site ← (env.methodSite token).toOption
-  let (position, definition) ← site.definition
-  guard (identities[position]? == some (bytesOf callee.assembly.identity) &&
-    definition == callee.closed.token)
-  let owner ← callee.closed.receiverClass
-  let method := { external.method with
-    owner, hasThis := callee.closed.hasThis, parameters := callee.closed.parameters,
-    returnType := callee.closed.returnType }
-  -- Primitive MemberRef elements keep the caller's primitive scope. A named class element
-  -- resolves through its TypeRef, including a forwarder to the defining assembly.
-  let parameters := (site.parameters.zip (external.declared.parameters.zip method.parameters)).map
-    fun (resolved, original, bound) =>
-      match resolved with | .primitive _ => original | _ => bound
-  let managed := { external with method, target := .managed definition, declared.parameters := parameters }
-  let frame ← (env.frame source.genericParameters.length source.ownerParameters.length).toOption
-  let _ ← (checkCallOperand env frame token managed).toOption
+  let frame ← (env.frame arity ownerArity).toOption
+  let bound ← distinct.mapM fun (token, external, callee) => do
+    let site ← (env.methodSite token).toOption
+    let (position, definition) ← site.definition
+    guard (identities[position]? == some (bytesOf callee.assembly.identity) &&
+      definition == callee.closed.token)
+    let owner ← callee.closed.receiverClass
+    let method := { external.method with
+      owner, hasThis := callee.closed.hasThis, parameters := callee.closed.parameters,
+      returnType := callee.closed.returnType }
+    -- Primitive MemberRef elements keep the caller's primitive scope. A named class element
+    -- resolves through its TypeRef, including a forwarder to the defining assembly.
+    let parameters := (site.parameters.zip
+      (external.declared.parameters.zip method.parameters)).map fun (resolved, original, bound) =>
+        match resolved with | .primitive _ => original | _ => bound
+    let managed := { external with
+      method, target := .managed definition, declared.parameters := parameters }
+    let _ ← (checkCallOperand env frame token managed).toOption
+    return (token, managed)
   let operands := body.tokens.operands.map fun entry =>
-    if entry.1 == token then (token, .call managed) else entry
+    match bound.lookup entry.1 with
+    | some managed => (entry.1, .call managed)
+    | none => entry
   return { linked with tokens := { operands } }
 
 /-- The feature certificate checks this method's mask and code against its pinned body's
