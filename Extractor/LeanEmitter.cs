@@ -238,8 +238,14 @@ internal static class LeanEmitter
         IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
         var constructor = ManagedConstructorPackage.Site(methods, profile, importBindings.Count);
         var managed = constructor is not null;
+        var package = ManagedConstructorPackage.Bind(methods, profile, importBindings.Count);
+        if (package is not null && templateInputs)
+            throw new InvalidDataException(
+                "Profile templates and gate decoder inputs do not support bound exception constructors");
+        IReadOnlySet<Instruction>? BoundSites(MethodDefinition method) =>
+            constructor is not null ? new HashSet<Instruction> { constructor } : package?.Of(method);
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution,
-            managed ? "sourceAssemblies" : "assemblies");
+            managed || package is not null ? "sourceAssemblies" : "assemblies", packagePins: package is not null);
         var importNames = importBindings.Select(binding =>
             genericEvidence.ExternalIdentities.Reference(binding.Identity, reachable: true)).ToArray();
         genericEvidence.ExternalIdentities.Emit(lean, inputs);
@@ -253,13 +259,15 @@ internal static class LeanEmitter
         var shapeFactsAt = lean.Length;
         var operandShapes = new OperandShapes(layoutEvidence);
         genericEvidence.EmitAssemblyMetadata(lean);
+        if (package is not null) ManagedConstructorPackage.EmitImage(lean, package);
         var fieldAccesses = new List<ClassViews.Access>();
         for (int n = 0; n < methods.Length; n++)
         {
             MethodDefinition m = methods[n];
-            var featureCertificate = Reachability.Certify(m, profile, constructor);
+            var boundSites = BoundSites(m);
+            var featureCertificate = Reachability.Certify(m, profile, boundSites);
             var reachable = featureCertificate.Keys.ToHashSet();
-            var scalarCertificate = NativeOperands.Certify(m, reachable, profile, constructor);
+            var scalarCertificate = NativeOperands.Certify(m, reachable, profile, boundSites);
             var parameterIndices = ParameterStorage.Analyze(m, reachable);
             var dispatch = NativeDispatch.For(m);
             LocalKind KindOf(TypeReference type, int? local = null) => dispatch.Kind(type, local) ??
@@ -284,6 +292,9 @@ internal static class LeanEmitter
             SortedSet<int>? linkedMethods = templateInputs ? [] : null;
             var linkEntries = callSites.Links(m, reachable, methodIndices, importResolution,
                 layoutContext, linkedMethods);
+            var binding = package?.Of(m) is { } packaged
+                ? ManagedConstructorPackage.Binding(m, packaged, methods.Length) : null;
+            if (binding is not null) linkEntries = [.. linkEntries.Concat(binding.Links).OrderBy(entry => entry.Pc)];
             lean.AppendLine($"def method{n}Signature : String := {IdentityText.Quote(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)
             {
@@ -326,9 +337,11 @@ internal static class LeanEmitter
                 staticInput = $"staticFields := {table}, ";
             }
             inputs?.Append(lean, inputStart, lean.Length - inputStart);
-            genericEvidence.EmitMethod(lean, m, n, reachable, methods.Length, staticInput, inputs, compareOriginal);
+            genericEvidence.EmitMethod(lean, m, n, reachable, methods.Length, staticInput, inputs, compareOriginal,
+                binding?.Evidence);
             var (naming, objectProof) = operandShapes.RecordMethod(m, n, reachable, genericEvidence);
-            if (GenericEvidence.FirstDecodeRefusal(m, reachable, callSites, importResolution, constructor) is { } refusal)
+            if (GenericEvidence.FirstDecodeRefusal(m, reachable, callSites, importResolution, boundSites) is
+                { } refusal)
                 throw new GenericEvidence.UndecodedInstruction(m, refusal);
             if (templateInputs)
             {
@@ -379,13 +392,22 @@ internal static class LeanEmitter
         if (managed)
         {
             ManagedConstructorPackage.Emit(lean, pinned.Index(methods[0].Module));
-            return Finish("program.length");
+            return Finish("program.length", methods.Length);
         }
-        lean.AppendLine("def managedDeclarations : List Extraction.MethodEvidence := []");
         var specialized = Enumerable.Range(0, methods.Length).Select(n =>
             $"⟨method{n}TypeArgumentsRaw, method{n}Closed, assembly{pinned.Index(methods[n].Module)}⟩");
-        lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" +
-            string.Join(", ", specialized) + "]");
+        // A package appends the image's CoreLib rows, so every per-method check reads the callable table.
+        var callTable = package is null ? "methodEvidence" : "callableMethods";
+        var runtimeCount = package?.Overload.Definitions ?? 0;
+        if (package is null)
+        {
+            lean.AppendLine("def managedDeclarations : List Extraction.MethodEvidence := []");
+            lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" +
+                string.Join(", ", specialized) + "]");
+        }
+        else
+            ManagedConstructorPackage.EmitRows(lean, string.Join(", ", specialized),
+                methods.Select((method, n) => (method, n)).First(entry => package.Of(entry.method) is not null).n);
         // Whole-program data, so it stays after the `specializedMethods` boundary of per-method components;
         // feature obligations read callee certificates through it.
         var records = Enumerable.Range(0, methods.Length).Select(n =>
@@ -401,10 +423,20 @@ internal static class LeanEmitter
                 $"assembly := assembly{pinned.Index(methods[n].Module)}", $"signature := {method}Signature");
             return $$"""{ {{fields}} }""";
         });
-        lean.AppendLine($"""def methodEvidence : List Extraction.MethodEvidence := [{string.Join(", ", records)}]""");
+        var runtimeEvidence = package is null ? "" : " ++ runtimeRows.1.map Prod.fst";
+        lean.AppendLine($"""def methodEvidence : List Extraction.MethodEvidence := [{string.Join(", ", records)}]""" +
+            runtimeEvidence);
+        if (package is not null)
+            lean.AppendLine("""
+                /-- The call-resolution table: the executable rows, then the getter declarations. -/
+                def callableMethods : List Extraction.MethodEvidence :=
+                  Extraction.callableEvidence methodEvidence managedDeclarations
+                def specializedMethods : List Extraction.SpecializedMethod :=
+                  Extraction.specializationTable callableMethods
+                """);
         for (var n = 0; n < methods.Length; n++)
         {
-            FeatureEvidence.EmitTheorem(lean, n);
+            FeatureEvidence.EmitTheorem(lean, n, callTable);
             lean.AppendLine($"theorem method{n}_models_validated : " +
                 $"Extraction.RuntimeModelsAgree method{n}Closed method{n}Reachable method{n} := " +
                 $"Extraction.RuntimeModelsAgree.of_closed method{n}_decoder_eq method{n}_features_validated");
@@ -415,11 +447,17 @@ internal static class LeanEmitter
         }
         if (methods.Length == 1 && methods[0].Body.Instructions.Any(i => i.OpCode.Code == Code.Newobj))
             ManagedConstructorPackage.EmitSource(lean, pinned.Index(methods[0].Module));
-        lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
+        if (package is not null) ManagedConstructorPackage.EmitRuntimeMethods(lean, methods.Length, runtimeCount);
+        var methodCount = methods.Length + runtimeCount;
+        lean.AppendLine("def program : Program := [" +
+            string.Join(", ", Enumerable.Range(0, methodCount).Select(n => $"method{n}")) + "]");
         // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them. Each
         // entry is its evidence record's, which the body check equates with the full name its metadata row spells.
-        lean.AppendLine("def signatures : List String := methodEvidence.map Extraction.MethodEvidence.signature");
-        lean.AppendLine("theorem signatures_length : signatures.length = program.length := rfl");
+        // Runtime rows are computed by the image, so their signatures are written as an evaluated literal.
+        lean.AppendLine((package is null ? "def" : "cil_evaluated") +
+            " signatures : List String := methodEvidence.map Extraction.MethodEvidence.signature");
+        lean.AppendLine("theorem signatures_length : signatures.length = program.length := " +
+            (package is null ? "rfl" : "by cil_kernel_rfl"));
         var signatures = string.Join(", ", importNames);
         lean.AppendLine($"def importSignatures : List String := [{signatures}]");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
@@ -439,7 +477,7 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_declared_validated : " +
                 $"Extraction.DeclaredValid method{n}Closed method{n} := rfl");
             lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts " +
-                $"computedLayouts assemblies platformDefinitions methodEvidence imports methodEvidence[{n}] " +
+                $"computedLayouts assemblies platformDefinitions {callTable} imports methodEvidence[{n}] " +
                 $"method{n} :=");
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, " +
                 $"method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, " +
@@ -447,31 +485,42 @@ internal static class LeanEmitter
                 $"method{n}_decoder_eq, method{n}_opaque_validated, " +
                 $"method{n}_object_operands_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
-            lean.AppendLine($"    method{n}_environment_validated, method{n}_declared_validated, rfl, rfl\u27e9");
+            // A bound body is computed by its binding, which only the kernel evaluates.
+            string bodyFact = package?.Of(methods[n]) is null ? "rfl" : "by cil_kernel_rfl";
+            lean.AppendLine(
+                $"    method{n}_environment_validated, method{n}_declared_validated, {bodyFact}, {bodyFact}\u27e9");
         }
         lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
         lean.AppendLine("#print axioms import_layouts_validated");
         lean.AppendLine("theorem imported_locals_validated : " +
             "Extraction.ImportedLocalLayoutsBound rawLayouts computedLayouts imports := " + Decide);
         lean.AppendLine("theorem attribution_validated : " +
-            "Extraction.AttributionValid (Extraction.bodyOwners methodEvidence) = true := " + Decide);
-        lean.AppendLine("theorem dispatch_pins_validated : " +
-            "Extraction.DispatchPinsValid assemblies methodEvidence = true := " + Decide);
+            $"Extraction.AttributionValid (Extraction.bodyOwners {callTable}) = true := " + Decide);
+        // Getter declarations need their bodies checked as well as the dispatch pins.
+        var catalog = package is null ? "dispatch_pins_validated" : "catalog_validated";
+        lean.AppendLine(package is null
+            ? "theorem dispatch_pins_validated : Extraction.DispatchPinsValid assemblies methodEvidence = true := " +
+                Decide
+            : "theorem catalog_validated : Extraction.callCatalogValid rawLayouts assemblies platformDefinitions " +
+                "methodEvidence managedDeclarations = true := " + Decide);
         lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
             "assemblies platformDefinitions methodEvidence imports program managedDeclarations := by");
         lean.AppendLine("  apply Extraction.translation_of_methods (program := program) (declarations := managedDeclarations) layouts_validated");
         lean.AppendLine("    statics_validated static_identities_validated import_layouts_validated");
-        lean.AppendLine("    imported_locals_validated attribution_validated dispatch_pins_validated");
+        lean.AppendLine($"    imported_locals_validated attribution_validated {catalog}");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"  refine Extraction.MethodsChecked.cons method{n}_evidence_validated ?_");
-        lean.AppendLine("  exact Extraction.MethodsChecked.nil");
-        return Finish(methods.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        lean.AppendLine(package is null ? "  exact Extraction.MethodsChecked.nil" : """
+              rw [← runtime_methods]
+              exact Extraction.MethodsChecked.of_rows runtimeRows.1 runtime_validated
+            """);
+        return Finish(methodCount.ToString(System.Globalization.CultureInfo.InvariantCulture), methodCount);
 
-        Emission Finish(string methodCount)
+        Emission Finish(string programLength, int lookups)
         {
             // One index of the program, checked once, serves every closure and run that reads it.
             lean.AppendLine("/-- The number of methods in the extracted program. -/");
-            lean.AppendLine($"def programLength : Nat := {methodCount}");
+            lean.AppendLine($"def programLength : Nat := {programLength}");
             lean.AppendLine("theorem programLength_eq : programLength = program.length := by cil_kernel_rfl");
             lean.AppendLine("/-- The balanced index of the extracted methods in program order. -/");
             var index = managed ? "Extraction.FlowIndex.ofList program" : "program_index% program";
@@ -481,7 +530,7 @@ internal static class LeanEmitter
                 """);
             lean.AppendLine("theorem programIndex_get? (index : Nat) : programIndex.get? index = program[index]? := by");
             lean.AppendLine("  rw [programIndex_eq]; exact Extraction.FlowIndex.get?_ofList program index");
-            ProgramLookupFacts.Append(lean, "program", "method", methods.Length);
+            ProgramLookupFacts.Append(lean, "program", "method", lookups);
             var classViews = ClassViews.Views(fieldAccesses);
             var views = ClassViews.Emit(fieldAccesses, classViews);
             if (views.Length > 0)

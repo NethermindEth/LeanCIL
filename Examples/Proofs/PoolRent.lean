@@ -124,7 +124,8 @@ theorem rent_reuses (memory : Memory) (pool head : Reference) (wellFormed : memo
 #print axioms rent_reuses
 
 /-- The classes the extraction's methods declare, with their admitted bases: `ItemPool` and
-    `PooledItem`, each deriving from `System.Object` directly. -/
+    `PooledItem`, each deriving from `System.Object` directly, and the CoreLib exception classes
+    whose constructors `Rent` runs. -/
 abbrev poolClasses : List RuntimeType := declaredClasses Extracted.methodEvidence
 
 /-- In memory whose objects agree with the extraction's classes, a pool and an item are different
@@ -355,14 +356,48 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
 
 #print axioms rent_creates
 
-/-- With an empty free list and every item the capacity allows alive, `Rent` throws
-    `InvalidOperationException` at its `throw`, pc 12, before writing anything. -/
+/-- The defining assembly of the CoreLib constructors `Rent` runs, as its decoded code names it. -/
+abbrev coreLibrary : String :=
+  "System.Private.CoreLib, Version=11.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e"
+
+/-- `System.Exception`, the CoreLib class that declares the fields its constructors write. -/
+abbrev exceptionClass : CIL.Extraction.TypeExpr := .object coreLibrary (.ofText "System.Exception")
+
+/-- The runtime type of an `InvalidOperationException`, with its CoreLib bases below
+    `System.Object`. -/
+abbrev exceptionType : RuntimeType :=
+  ⟨.object coreLibrary (.ofText "System.InvalidOperationException"),
+    [.object coreLibrary (.ofText "System.SystemException"), exceptionClass]⟩
+
+/-- The model size of an `InvalidOperationException`: one 8-byte slot for each of its fourteen
+    fields. -/
+abbrev exceptionSize : Nat := 112
+
+/-- `System.String System.Exception::_message`, at model offset 8. -/
+abbrev exceptionMessage : ReferenceField := ⟨exceptionClass, 8⟩
+
+/-- `System.Int32 System.Exception::_xcode`, at model offset 96. -/
+abbrev exceptionCode : WordField 4 := ⟨exceptionClass, 96⟩
+
+/-- `System.Int32 System.Exception::_HResult`, at model offset 104. -/
+abbrev exceptionResult : WordField 4 := ⟨exceptionClass, 104⟩
+
+/-- The message `Rent` loads for the exception, the operand of its `ldstr` at pc 10. -/
+abbrev exhaustedMessage : String := ldstrOperand Extracted.method0_instruction10
+
+/-- With an empty free list and every item the capacity allows alive, `Rent` constructs an
+    `InvalidOperationException` through the CoreLib constructors and throws it at its `throw`,
+    pc 12, when the loader has bound its message literal and the heap has room for the
+    exception. -/
 theorem rent_exhausted_throws (memory : Memory) (pool : Reference)
     (wellFormed : memory.WellFormed)
     (free : ItemPool._free.Readable memory pool) (empty : ItemPool._free.of memory pool = .null)
     (live : ItemPool._live.Readable memory pool)
     (capacity : ItemPool._capacity.Readable memory pool)
-    (full : ItemPool._live.of memory pool = ItemPool._capacity.of memory pool) :
+    (full : ItemPool._live.of memory pool = ItemPool._capacity.of memory pool)
+    (literal : Reference) (bound : memory.literals.lookup exhaustedMessage = some literal)
+    (formed : formObject memory (.address literal) = .ok (.object (.address literal)))
+    (budget : exceptionSize ≤ memory.heapBudget.getD exceptionSize) :
     ∃ fuel, invoke Extracted.program fuel rent [.object (.address pool)] memory =
       .error ⟨rent, 12, .thrown .invalidOperation⟩ := by
   obtain ⟨home, entered, enter⟩ :=
@@ -375,7 +410,68 @@ theorem rent_exhausted_throws (memory : Memory) (pool : Reference)
   have emptyLoad := free0.1.load_null (free0.2.trans empty)
   have liveFacts := live0.2 ▸ live0.1.facts
   have capacityFacts := capacity0.2 ▸ capacity0.1.facts
-  cil_checked_steps [enter.setup, entry.frame, emptyLoad, liveFacts, capacityFacts, full]
+  -- The loader's literal stays bound and live across frame entry.
+  have message := LiveObject.of_formed wellFormed formed
+  have message0 := message.after_below keep message.old grown
+  have boundEntered : entered.literals.lookup exhaustedMessage = some literal := by
+    rw [(enterFrame_setup _ _ _ _ _ enter.setup).literals]
+    exact bound
+  have loadMessage := literalObject_of_lookup boundEntered
+  have enteredBudget : exceptionSize ≤ entered.heapBudget.getD exceptionSize := by
+    rw [enterFrame_heapBudget enter.setup]
+    exact budget
+  -- `newobj` creates the exception above everything the caller and the frame hold.
+  have allocated := allocateObject_ok enter.entryMemory.wellFormed exceptionType enteredBudget
+    (by decide)
+  have created := objectMemory_formObject entered exceptionType exceptionSize
+  have allocatedKept := (allocateObject_effect allocated).below
+  have allocatedNext : entered.nextIdentity ≤
+      (objectMemory entered exceptionType exceptionSize).nextIdentity := by
+    simp [objectMemory]
+  have message1 := message0.after_below allocatedKept message0.old allocatedNext
+  have declared : exceptionClass ∈ exceptionType.lineage := by decide
+  -- `Exception()` writes `_xcode` and `_HResult`; `Exception(string)` writes `_message`.
+  have codeOwned := WordField.fresh_owned (field := exceptionCode) (size := exceptionSize)
+    entered exceptionType declared (by decide) (by decide) (by decide)
+  obtain ⟨coded, codeWritten, codeFramed, codeHeld⟩ := codeOwned.store 0xE0434352
+  have resultOwned := (WordField.fresh_owned (field := exceptionResult) (size := exceptionSize)
+    entered exceptionType declared (by decide) (by decide) (by decide)).after_confined codeFramed
+    (apart_of_entries rfl)
+  obtain ⟨resulted, resultWritten, resultFramed, resultHeld⟩ := resultOwned.store 0x80131500
+  have message3 := (message1.after_confined codeFramed).after_confined resultFramed
+  have messageOwned := (((ReferenceField.fresh_holds_null (field := exceptionMessage)
+    (size := exceptionSize) entered exceptionType declared (by decide) (by decide)).after_confined
+    codeFramed (apart_of_entries rfl)).after_confined resultFramed (apart_of_entries rfl)).1
+  obtain ⟨messageStored, messageFramed, messageHeld⟩ := messageOwned.store message3
+  -- `SystemException(string)` and `InvalidOperationException(string)` each set `HResult`.
+  have systemOwned := resultHeld.1.after_confined messageFramed (apart_of_entries rfl)
+  obtain ⟨system, systemWritten, systemFramed, systemHeld⟩ := systemOwned.store 0x80131501
+  have raisedOwned := systemHeld.1
+  obtain ⟨raised, raisedWritten, raisedFramed, raisedHeld⟩ := raisedOwned.store 0x80131509
+  have exceptionCoded := codeHeld.1.live
+  have exceptionResulted := resultHeld.1.live
+  have exceptionNamed := messageHeld.1.live
+  have exceptionSystem := systemHeld.1.live
+  have exceptionRaised := raisedHeld.1.live
+  -- The constructors write fields only, so the thrown object keeps the class `newobj` gave it.
+  have typed : runtimeTypeOf raised ⟨entered.nextIdentity, 0⟩ = .ok exceptionType := by
+    have fresh : entered.nextIdentity <
+        (objectMemory entered exceptionType exceptionSize).nextIdentity := by
+      simp [objectMemory]
+    have recorded := objectMemory_runtimeTypeOf entered exceptionType exceptionSize
+    simp only [runtimeTypeOf, liveAllocation] at recorded ⊢
+    rw [raisedFramed.allocations _ exceptionSystem.old,
+      systemFramed.allocations _ exceptionNamed.old,
+      messageFramed.allocations _ exceptionResulted.old,
+      resultFramed.allocations _ exceptionCoded.old, codeFramed.allocations _ fresh]
+    exact recorded
+  have thrown : throwFault raised [.object (.address ⟨entered.nextIdentity, 0⟩)] =
+      .thrown .invalidOperation := by
+    simp only [throwFault, typed]
+    decide
+  cil_checked_steps [enter.setup, entry.frame, emptyLoad, liveFacts, capacityFacts, full,
+    loadMessage, message0.formed, allocated, created, message1.formed, codeWritten,
+    resultWritten, messageStored, message3.formed, systemWritten, raisedWritten, thrown]
 
 #print axioms rent_exhausted_throws
 

@@ -232,5 +232,5 @@ internal static class ObjectTypes
     }
 
     // Matches `CIL.objectFieldSlot`, which Lean uses to recheck every emitted offset.
-    const int FieldSlot = 8;
+    internal const int FieldSlot = 8;
 }

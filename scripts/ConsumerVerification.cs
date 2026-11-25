@@ -1012,7 +1012,9 @@ partial class Program
     static ExtractionComponents SplitExtractionComponents(string source)
     {
         var methods = Regex.Matches(source, @"(?m)^def method[0-9]+Signature : String := ");
-        var aggregate = source.IndexOf("def specializedMethods :", StringComparison.Ordinal);
+        // A bound package's whole-program data starts at its local methods, before its specialized methods.
+        var aggregate = source.IndexOf("def localMethods :", StringComparison.Ordinal) is var local and >= 0
+            ? local : source.IndexOf("def specializedMethods :", StringComparison.Ordinal);
         var context = ExtractionComponentContext(source);
         if (methods.Count < 2 || aggregate <= methods[^1].Index)
             return new(ContentKey(source), source, new(StringComparer.Ordinal));
@@ -1046,9 +1048,9 @@ partial class Program
             var name = Component(string.Join("\n", imports.Select(module => "import " + module)) +
                 "\n\n" + context + body + "\nend Extracted\n");
             modules.Add(name);
-            // A decoded method is declared by `cil_decoded_method`, so later components that name it import it.
+            // Decoded and evaluated definitions are declared by their commands, so components naming them import them.
             foreach (Match declaration in Regex.Matches(body,
-                @"(?m)^(?:@\[[^\r\n]*\]\s+)?(?:def|theorem|cil_decoded_method) ([A-Za-z_][A-Za-z0-9_]*)"))
+                @"(?m)^(?:@\[[^\r\n]*\]\s+)?(?:def|theorem|cil_decoded_method|cil_evaluated) ([A-Za-z_][A-Za-z0-9_]*)"))
                 declarations.Add(declaration.Groups[1].Value, modules.Count - 1);
         }
         return new(ContentKey(source), string.Join("\n", modules.Select(module => "import " + module)) +

@@ -143,7 +143,7 @@ internal static class NativeOperands
         Code.Blt or Code.Blt_S or Code.Blt_Un or Code.Blt_Un_S or Code.Ble or Code.Ble_S or Code.Ble_Un or Code.Ble_Un_S;
 
     internal static Certificate Certify(MethodDefinition method, IReadOnlySet<Instruction> reachable,
-        FeatureProfile profile, Instruction? managedConstructor = null)
+        FeatureProfile profile, IReadOnlySet<Instruction>? boundConstructors = null)
     {
         var dispatch = NativeDispatch.For(method);
         StackType Slot(TypeReference type, int? local = null) => dispatch.Kind(type, local) is { } kind
@@ -283,14 +283,14 @@ internal static class NativeOperands
                     throw new InvalidDataException(
                         $"Unsupported ThrowIfNull argument that is not a class instance: {method.FullName}");
                 if (code == Code.Newobj || InitAccessors.Return(callee.ReturnType).MetadataType != MetadataType.Void)
-                    stack.Add(instruction == managedConstructor ? Kind.Object :
+                    stack.Add(boundConstructors?.Contains(instruction) == true ? Kind.Object :
                         code == Code.Newobj ? Type(callee.DeclaringType) : CallType(callee, profile));
             }
             else if (code == Code.Throw)
             {
                 var value = Pop();
                 if (value.Kind is not (Kind.Object or Kind.NullObject) &&
-                    !Throws.Analyze(method, managedConstructor).Raises.ContainsKey(instruction))
+                    !Throws.Analyze(method, boundConstructors).Raises.ContainsKey(instruction))
                     throw new InvalidDataException(
                         $"Throw requires an object on the evaluation stack: {method.FullName}");
             }
@@ -357,7 +357,8 @@ internal static class NativeOperands
                         Code.Ldnull => Kind.NullObject,
                         Code.Ldelem_Ref when popped[1].Kind is Kind.Object or Kind.NullObject => Kind.Object,
                         // A folded throw's message is never a value; any other literal is a string object.
-                        Code.Ldstr => Throws.Analyze(method, managedConstructor).Operands.Contains(instruction) ? Kind.Other : Kind.Object,
+                        Code.Ldstr => Throws.Analyze(method, boundConstructors).Operands.Contains(instruction)
+                            ? Kind.Other : Kind.Object,
                         Code.Neg or Code.Not => popped[0],
                         // All remaining supported pushi encodings produce int32 (constants,
                         // narrow conversions, sizeof and narrow indirect loads).

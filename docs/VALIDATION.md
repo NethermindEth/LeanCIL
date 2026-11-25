@@ -119,7 +119,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |
 | `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, snapshot, faulting, arguments, homes, array-allocation, calls, table-calls, class-field-load, statics, construction, object-constructor and array-element bodies with per-instruction heartbeat and proof-size budgets and a per-hypothesis heartbeat limit |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, the strict binding library and audit, and the checked-in strict binding fixture module |
-| `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
+| `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs, the mutations they reject, and a null exception message that keeps the throw folded |
 | `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal, self-admission, the admitted hole corpus and the self-admitted, example and fixture methods defined from their decoder |
 | `audit` | theorem audits of replayed oleans, deep certificate reuse, and rejection of changed images, proofs, replay inputs and auditors |
 | `docs` | documentation Lean snippets, cited library names and documented commands against the library and tool |

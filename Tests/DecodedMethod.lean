@@ -981,4 +981,25 @@ theorem prefixStructureRefused :
 
 #print axioms prefixStructureRefused
 
+/-- Names computed from a list, which `cil_evaluated` writes as a literal. -/
+def computedNames : List String := ["Add", "Sub"].map (· ++ "()")
+
+cil_evaluated writtenNames : List String := computedNames
+
+/-- The evaluated definition is the list its term computes, as a literal. -/
+theorem writtenNamesLiteral : writtenNames = ["Add()", "Sub()"] := rfl
+
+#print axioms writtenNamesLiteral
+
+/-- warning: declaration uses `sorry` -/
+#guard_msgs in
+/-- A raw method whose value is `sorry`, as a declaration that failed to elaborate leaves it. -/
+def failedRaw : Extraction.RawMethod := sorry
+
+-- Compiled code never runs a failed declaration's `sorry`, which can crash the process.
+/-- error: cil_evaluated: Tests.DecodedMethod.failedRaw depends on `sorryAx`, so its value is
+  not evaluated -/
+#guard_msgs (whitespace := lax) in
+cil_evaluated failedCopy : Extraction.RawMethod := failedRaw
+
 end Tests.DecodedMethod

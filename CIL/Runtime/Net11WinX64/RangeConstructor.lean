@@ -56,10 +56,13 @@ private def rangeMemberDependencies (token : Nat) (methodRow signature : List Na
       links := []}, {
       assembly := coreAssembly,
       rows := [(33554594, (fixedBytes 18 0x0120100004000000050000000000FE021C07)),
+        (33554595, (fixedBytes 18 0x09011000FFFFFFFF050000003003FE022507)),
         (33554673, (fixedBytes 18 0x012010000200000005000000A407B603E00C)),
         (33554675, (fixedBytes 18 0x012010000300000005000000C403B703F80C)),
         (33554676, (fixedBytes 18 0x01201000FFFFFFFF05000000A407B803130D)),
         (token, methodRow),
+        (704643081, (fixedBytes 12 0x0000180016010000FFFFFFFF)),
+        (704643082, (fixedBytes 12 0x000004006A010000FFFFFFFF)),
         (704643224, (fixedBytes 12 0x00002200D0010000FFFFFFFF)),
         (704643225, (fixedBytes 12 0x00000000EE010000FFFFFFFF))],
       strings := [(1, (fixedBytes 6 0x2E63746F7200)), (2, (fixedBytes 18 0x417267756D656E74457863657074696F6E00)),
@@ -99,6 +102,7 @@ private def argumentInnerDependencies : List MetadataSlice := [{
     rows := [(33554576, (fixedBytes 18 0x0120100003000000050000008802A802E505)),
       (33554577, (fixedBytes 18 0x05010000FFFFFFFF000000002402B8021A06)),
       (33554594, (fixedBytes 18 0x0120100004000000050000000000FE021C07)),
+      (33554595, (fixedBytes 18 0x09011000FFFFFFFF050000003003FE022507)),
       (33554673, (fixedBytes 18 0x012010000200000005000000A407B603E00C)),
       (33554674, (fixedBytes 18 0x01201000FFFFFFFF05000000C403B703EE0C)),
       (33554921, (fixedBytes 18 0x01201000060000000500000040022F067826)),
@@ -140,6 +144,7 @@ private def invalidOperationInnerDependencies : List MetadataSlice := [{
     rows := [(33554576, (fixedBytes 18 0x0120100002000000050000008802A802E505)),
       (33554577, (fixedBytes 18 0x05010000FFFFFFFF000000002402B8021A06)),
       (33554594, (fixedBytes 18 0x0120100004000000050000000000FE021C07)),
+      (33554595, (fixedBytes 18 0x09011000FFFFFFFF050000003003FE022507)),
       (33554816, (fixedBytes 18 0x012010000300000005000000A4078205631B)),
       (33554817, (fixedBytes 18 0x01211000FFFFFFFF05000000A4078205671B)),
       (33554921, (fixedBytes 18 0x01201000060000000500000040022F067826)),
@@ -214,10 +219,13 @@ private def argumentNameDependencies : List MetadataSlice := [{
     links := [] }, {
     assembly := CoreLib.assembly,
     rows := [(33554594, (fixedBytes 18 0x0120100003000000040000000000FE021C07)),
+      (33554595, (fixedBytes 18 0x09011000FFFFFFFF040000003003FE022507)),
       (33554673, (fixedBytes 18 0x012010000200000004000000A407B603E00C)),
       (33554674, (fixedBytes 18 0x01201000FFFFFFFF04000000C403B703EE0C)),
       (33554921, (fixedBytes 18 0x01201000050000000400000040022F067826)),
       (100666596, (fixedBytes 20 0x0000000000008618010000000100000010190000)),
+      (704643081, (fixedBytes 12 0x0000180016010000FFFFFFFF)),
+      (704643082, (fixedBytes 12 0x000004006A010000FFFFFFFF)),
       (704643224, (fixedBytes 12 0x00002200D0010000FFFFFFFF)),
       (704643225, (fixedBytes 12 0x00000000EE010000FFFFFFFF))],
     strings := [(1, (fixedBytes 6 0x2E63746F7200)),
@@ -496,16 +504,34 @@ def ConstructorImage.bindCaller? (image : ConstructorImage) (base : Nat) (body :
     (pc, Link.object ordinal callee.objectBases (objectFieldOffset callee.objectFieldCount))
   return ⟨bound, raw, links⟩
 
+/-- The call table of a program that places `locals` first, then the image's definitions and
+its getter declarations. -/
+def ConstructorImage.table (image : ConstructorImage) (locals : List SpecializedMethod) :
+    List SpecializedMethod :=
+  locals ++ (image.methods.map Prod.snd ++ image.getters.map (·.raw)).map
+    (⟨[], ·, ⟨coreLibraryScope⟩⟩)
+
 /-- The image's executable definitions and getter declarations, in the program that places
 `locals` first. Each definition uses the pins, platform and layouts of `caller`. -/
 def ConstructorImage.rows? (image : ConstructorImage) (locals : List SpecializedMethod)
     (caller : BodyEvidence) (profile : FeatureProfile) (environment : LayoutEnvironment) :
     Option (List (MethodEvidence × Method) × List MethodEvidence) := do
-  let runtime := image.methods.map Prod.snd ++ image.getters.map (·.raw)
-  let table := locals ++ runtime.map (⟨[], ·, ⟨coreLibraryScope⟩⟩)
+  let table := image.table locals
   let definitions ← image.methods.mapM (runtimeRow? table caller profile environment)
   let declarations ← image.getters.mapM (resourceDeclaration? caller environment)
   return (definitions, declarations)
+
+/-- The method of the image's definition at `index`, decoded from its closed definition in the
+program that places `locals` first. A checked row's body decodes to this method. -/
+def ConstructorImage.rowMethod? (image : ConstructorImage) (locals : List SpecializedMethod)
+    (profile : FeatureProfile) (environment : LayoutEnvironment) (index : Nat) :
+    Option Method := do
+  let (_, original) ← image.methods[index]?
+  let closed ← instantiateMethod environment.rawLayouts original []
+  let storage ← closedArguments environment.rawLayouts closed
+  let live := List.replicate original.code.length true
+  (Method.ofClosed? profile environment (links (image.table locals) closed) live closed
+    storage).toOption
 
 /-- Decode a single entry method and the framework methods reached with a non-null message.
 The caller must resolve its constructor through the two pinned runtime slices. -/

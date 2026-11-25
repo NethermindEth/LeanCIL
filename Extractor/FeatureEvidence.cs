@@ -30,10 +30,10 @@ internal static class FeatureEvidence
 
     // Follows `methodEvidence`, whose callee certificates supply the words constant calls push. The obligation
     // therefore depends on the whole program and must stay out of any per-method component.
-    internal static void EmitTheorem(StringBuilder lean, int number) =>
+    internal static void EmitTheorem(StringBuilder lean, int number, string table = "methodEvidence") =>
         lean.AppendLine($"theorem method{number}_features_validated : Extraction.FeatureFlowValid rawLayouts.toArray " +
             // `MethodEvidenceValid` reads links by `linkIndex`; another reader makes its proof unfold the whole body.
-            $"(Extraction.evidenceConstants methodEvidence) (Extraction.linkIndex method{number}) " +
+            $"(Extraction.evidenceConstants {table}) (Extraction.linkIndex method{number}) " +
             $"method{number}Closed profile method{number}FeatureStates " +
             $"method{number}Reachable method{number}.code := {LeanEmitter.Decide}");
 }

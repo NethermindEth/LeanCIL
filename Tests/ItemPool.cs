@@ -104,6 +104,39 @@ foreach (var (mutation, theorems) in new[]
     Console.WriteLine($"PASS {mutation} mutation fails {string.Join(" and ", theorems)}");
 }
 
+// A null message could reach the exception's resource getter, so the site stays folded: the throw raises the
+// folded exception and no CoreLib constructor joins the program's three local methods.
+var unbound = Path.Combine(root, "Mutated-null-message");
+Directory.CreateDirectory(unbound);
+var unboundDll = Path.Combine(unbound, "Examples.dll");
+int foldedPc;
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var instructions = module.GetType("Examples.ItemPool").Methods.Single(candidate => candidate.Name == "Rent")
+        .Body.Instructions;
+    var message = instructions.Single(instruction => instruction.OpCode == OpCodes.Ldstr);
+    message.OpCode = OpCodes.Ldnull;
+    message.Operand = null;
+    var raised = message.Next.Next;
+    if (raised.OpCode != OpCodes.Throw)
+        throw new InvalidOperationException("The exhausted message does not reach a throw: " + raised);
+    foldedPc = instructions.IndexOf(raised);
+    module.Write(unboundDll);
+}
+var foldedProof = Path.Combine(unbound, "Folded.lean");
+File.WriteAllText(foldedProof, $$"""
+    import Extracted
+    namespace ExampleProof
+    /-- The throw raises the folded exception, and the program holds only the local methods. -/
+    theorem correctness : Extracted.method0.code[{{foldedPc}}]? = some (.throw (some .invalidOperation)) ∧
+        Extracted.program.length = 3 :=
+      ⟨Extracted.method0_instruction{{foldedPc}}, by cil_kernel_rfl⟩
+    #print axioms correctness
+    end ExampleProof
+    """);
+verification.Verify(unboundDll, "Examples", Rent, foldedProof, unbound);
+Console.WriteLine("PASS a null exception message keeps Rent's throw folded");
+
 // IsIdle walks the free list through an object local; answering false on a match must break its contract.
 const string IsIdle = "ItemPool::IsIdle(Examples.PooledItem)";
 var idleProof = At("Examples/Proofs/PoolIdle.lean");

@@ -48,22 +48,27 @@ def ManagedPackage.checked (package : ManagedPackage) (environment : LayoutEnvir
     callCatalogValid environment.rawLayouts pins platform (package.rows.map Prod.fst)
       package.declarations)
 
+/-- Rows that each pass `rowValid` against `table` are checked methods for that table. -/
+theorem MethodsChecked.of_rows {environment : LayoutEnvironment} {pins platform}
+    {table : List MethodEvidence} (rows : List (MethodEvidence × Method))
+    (checked : rows.all (ManagedPackage.rowValid environment pins platform table) = true) :
+    MethodsChecked environment.rawLayouts environment.layouts pins platform table []
+      (rows.map Prod.fst) (rows.map Prod.snd) := by
+  induction rows with
+  | nil => exact .nil
+  | cons head tail ih =>
+    obtain ⟨first, rest⟩ := Bool.and_eq_true_iff.mp checked
+    exact .cons (of_decide_eq_true first) (ih rest)
+
+#print axioms MethodsChecked.of_rows
+
 /-- A successful package check supplies the usual per-method translation proof, with every
 executable slot checked against the exact table that includes the declared call targets. -/
 theorem ManagedPackage.methodsChecked {package : ManagedPackage} {environment pins platform}
     (valid : package.checked environment pins platform = true) :
     MethodsChecked environment.rawLayouts environment.layouts pins platform package.lookup []
-      (package.rows.map Prod.fst) package.methods := by
-  have compose (rows : List (MethodEvidence × Method))
-      (checked : rows.all (rowValid environment pins platform package.lookup) = true) :
-      MethodsChecked environment.rawLayouts environment.layouts pins platform package.lookup []
-        (rows.map Prod.fst) (rows.map Prod.snd) := by
-    induction rows with
-    | nil => exact .nil
-    | cons head tail ih =>
-      obtain ⟨first, rest⟩ := Bool.and_eq_true_iff.mp checked
-      exact .cons (of_decide_eq_true first) (ih rest)
-  exact compose package.rows (Bool.and_eq_true_iff.mp valid).1
+      (package.rows.map Prod.fst) package.methods :=
+  MethodsChecked.of_rows package.rows (Bool.and_eq_true_iff.mp valid).1
 
 #print axioms ManagedPackage.methodsChecked
 

@@ -27,7 +27,9 @@ properties with execution. Valid initial storage, references and authority are c
 Typed catch and finally clauses run in the checked model, which unwinds a fault through the
 enclosing clauses of each frame innermost first, as [Throws](OPCODES.md#throws) describes. Filter
 and fault clauses are refused at extraction. A folded `throw new E(...)` raises a named fault
-without an exception object; only an operand-free `throw` gives a catch an object identity.
+without an exception object; only an operand-free `throw` gives a catch an object identity. A
+construction bound to its CoreLib constructor is not folded, so its `throw` raises the object the
+constructor builds; see [bound constructors](SOUNDNESS-EVIDENCE.md#folded-instruction-patterns).
 Outcome loop rules require preservation and decrease only for continuing iterations; exits must
 establish the specified normal or exceptional outcome from the initial state.
 

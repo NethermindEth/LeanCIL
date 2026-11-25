@@ -121,9 +121,11 @@ changed in the example therefore rejects a refutation of the contract it replace
   returns that head, advances the list past it, clears its link, decrements the idle count and
   marks it rented, writing no other field, and under the class catalog premise leaves the live
   count unchanged; with an empty list and room under the capacity it creates an item owned by the
-  pool, numbered with the next id and marked rented; an exhausted pool throws
-  `InvalidOperationException` and a null pool `NullReferenceException`. Its object sites agree
-  with the catalog, so the premise stated at entry holds after any invocation of the program.
+  pool, numbered with the next id and marked rented; an exhausted pool runs the CoreLib
+  `InvalidOperationException(string)` constructor on its bound message literal, given heap room
+  for the exception, and throws it, and a null pool throws `NullReferenceException`. Its object
+  sites agree with the catalog, so the premise stated at entry holds after any invocation of the
+  program.
 - `ItemPool.IsIdle` walks the free list through an object local. `PoolIdle.lean` takes the list
   as a `Segment` to null visiting `nodes`, whose length is the loop's measure, and proves that
   the method answers whether the item is one of `nodes`, for a null or any live item, and writes

@@ -508,7 +508,7 @@ output can lose admission without invalidating a theorem over an already admitte
 | Pattern | Required binding | Limit |
 | --- | --- | --- |
 | Closed `typeof` equality/inequality calls, reference `ceq` and comparison branches | Exact type handles, runtime helper identities, substituted types, result and selected target; all encoded targets validated and no branch into the interior | Forwarding/scoped identity ambiguities, decorated names and arbitrary runtime `System.Type` use remain unsupported. Reference comparison relies on [CoreCLR runtime type equality](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Type.cs) and [GetTypeFromHandle](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/System.Private.CoreLib/src/System/Type.CoreCLR.cs). |
-| `throw new E(...)` | Allowlisted type/constructor, permitted literal/null arguments and final throw; no branch into the interior | No exception object, observable constructor effects or resource-exhaustion model; a protected throw is refused rather than folded. |
+| `throw new E(...)` | Allowlisted type/constructor, permitted literal/null arguments and final throw; no branch into the interior | No exception object, observable constructor effects or resource-exhaustion model; a protected throw is refused rather than folded. A construction bound to its CoreLib constructor, described below, is not folded. |
 | `throw` | Operand-free opcode and the top object reference. Null raises `System.NullReferenceException`. A live object raises its supported runtime exception class, checked against the platform reference or defining CoreLib scope. | An unknown class is inconclusive. Handler execution and rethrow are unsupported. |
 
 For a recognized exception constructor, the contract identifies the exception type on the throwing
@@ -553,6 +553,17 @@ the range constructors and `InvalidOperationException(string)`, and `ldstr; ldnu
 `ArgumentOutOfRangeException(string)` calls its getter on every path, since its argument is the
 parameter name, so it has no binding. Open packages and constructors without a checked runtime
 binding produce `none` at this entry.
+
+An extraction of several methods with no imports binds each method's constructions of these
+overloads under the same literal-message rule, where a construction need not be the method's only
+call. The first such construction in program and code order selects the overload; constructions of
+another overload keep their fold, as do all constructions of a method whose metadata names a
+System.Runtime type other than the constructor's owner and parameter types, since the dependency
+slices define no other. Lean rebinds each caller with `ConstructorImage.bindCaller?`, which links
+its constructions to the CoreLib definitions placed once after the local methods, and adds the
+getter declarations to `managedDeclarations`. Each appended row passes
+`ManagedPackage.rowValid` against the callable table, and a bound caller's body is checked
+against the source pins with CoreLib appended.
 
 `Extracted.translation_valid.invoke target fuel args budget` starts from empty caller storage
 and reports binding, image loading and execution separately. The pinned .NET 11.0.0 Windows

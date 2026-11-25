@@ -822,6 +822,12 @@ evaluated method. Admission checks the instructions at live positions. The form
 operand as its listed constant. The method can then use the facts from `cil_field_shape` or
 `cil_value_shape`. The command rejects a listed constant that names no operand.
 
+`cil_evaluated name : type := term` defines `name` as the value of a closed `Extraction.RawMethod`
+or `List String` term, written as a literal, and the kernel checks `name_eq : term = name` by
+reduction. The command refuses a term that depends on `sorryAx`. The extractor writes a bound
+caller's original and the signatures of a program with appended CoreLib rows this way, so tactics
+read them without evaluating the binding.
+
 The extractor defines every method this way. It refuses a method with a live instruction that does
 not decode, or with a live call or construction whose operation differs from the one its decoder
 gives, and names that instruction's IL offset, opcode and pc. A constrained prefix decodes with its
@@ -829,10 +835,11 @@ adjacent instance `callvirt` or static `call`. A bare `ldstr` decodes to a strin
 the text bound to its metadata token. Lean checks the exact UTF-16 code units of the `#US` entry,
 including both units of a supplementary character. For U+0080 through U+00FF, Lean accepts
 both the ECMA-335 terminal flag and the flag emitted by the .NET metadata writer. A recognized throw erases its message and constructor,
-then raises the constructed exception at the raw `throw` pc. A folded type test over closed
-type arguments produces its decided word or branch. A branch or switch into a fold's interior
-disables that fold. A direct managed tail call retains its prefix and target. An indirect call
-requires a callable catalog, and a field token requires the method's static site.
+then raises the constructed exception at the raw `throw` pc, unless its construction is bound to its
+CoreLib constructor; see [bound constructors](SOUNDNESS-EVIDENCE.md#folded-instruction-patterns). A
+folded type test over closed type arguments produces its decided word or branch. A branch or switch
+into a fold's interior disables that fold. A direct managed tail call retains its prefix and target.
+An indirect call requires a callable catalog, and a field token requires the method's static site.
 
 Each dead pc carries `.unadmitted` with its raw opcode. Argument homes use the same certified
 mask. The generated definition has this form

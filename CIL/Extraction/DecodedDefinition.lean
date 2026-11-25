@@ -18,6 +18,7 @@ and type operands as their listed `FieldRef` and `TypeExpr` constants. Stepping 
 their `cil_field_shape` and `cil_value_shape` facts. Decoded operands share their raw layouts'
 identity expressions, and a closed decoder keeps the raw type expressions
 in the declared signature. The kernel checks `name_decoder_eq` and every fact.
+`cil_evaluated name : type := term` writes a computed raw method or string list the same way.
 -/
 
 namespace CIL.Extraction.DecodedDefinition
@@ -164,6 +165,14 @@ deriving instance ToExpr for DeclaredSignature
 deriving instance ToExpr for Link
 deriving instance ToExpr for HandlerKind
 deriving instance ToExpr for ExceptionClause
+deriving instance ToExpr for Extraction.MethodId
+deriving instance ToExpr for Extraction.OpenSignature
+deriving instance ToExpr for Extraction.CallSite
+deriving instance ToExpr for Extraction.RawOperand
+deriving instance ToExpr for Extraction.RawInstruction
+deriving instance ToExpr for Extraction.GenericConstraint
+deriving instance ToExpr for Extraction.StaticFieldSite
+deriving instance ToExpr for Extraction.RawMethod
 
 /-- The value of the closed term `decoder`, computed by compiled code. -/
 unsafe def evaluateUnsafe (decoder : Expr) : MetaM (Option Method) :=
@@ -190,6 +199,19 @@ unsafe def operandLiteralUnsafe (operand : Expr) : MetaM Expr := do
   if type.isConstOf ``Extraction.TypeExpr then
     return toExpr (← evalExpr Extraction.TypeExpr type operand)
   throwError "cil_decoded_method: {operand} must be a field reference or type operand"
+
+/-- The literal of the closed term `term` of type `type`, computed by compiled code: a raw
+    method or a list of strings. -/
+private unsafe def evaluatedLiteralUnsafe (type term : Expr) : MetaM Expr := do
+  if type.isConstOf ``Extraction.RawMethod then
+    return toExpr (← evalExpr Extraction.RawMethod type term)
+  if ← isDefEq type (mkApp (mkConst ``List [.zero]) (mkConst ``String)) then
+    return toExpr (← evalExpr (List String) type term)
+  throwError "cil_evaluated: no literal is written for the type {type}"
+
+/-- The literal of the closed term `term` of type `type`, computed by compiled code. -/
+@[implemented_by evaluatedLiteralUnsafe]
+private opaque evaluatedLiteral (type term : Expr) : MetaM Expr
 
 /-- The closed constructor term for an extraction's named field or type operand. -/
 @[implemented_by operandLiteralUnsafe]
@@ -375,5 +397,34 @@ elab_rules : command
       proveByReduction fact s!"The {field} of `{name}`."
         (← mkEq (mkApp (mkConst (``CIL.Method ++ field)) method) value.getAppArgs[position]!)
       addSimpTheorem simpSet fact (post := true) (inv := false) .global (eval_prio default)
+
+/-- `cil_evaluated name : type := term` defines `name` as the value the closed term evaluates to,
+    a raw method or a list of strings, written as a literal so tactics that walk it read it
+    without evaluating `term`, and proves `name_eq : term = name` in the kernel. A term that
+    depends on `sorryAx` is refused. -/
+syntax (name := evaluatedDefinition) "cil_evaluated " ident " : " term " := " term : command
+
+elab_rules : command
+  | `(cil_evaluated $nameSyntax:ident : $typeSyntax := $termSyntax) => liftTermElabM do
+    let type ← Term.elabType typeSyntax
+    let term ← Term.elabTerm termSyntax (some type)
+    Term.synthesizeSyntheticMVarsNoPostponing
+    let type ← instantiateMVars type
+    let term ← instantiateMVars term
+    if term.hasMVar || term.hasFVar then
+      throwError "cil_evaluated: the term must be closed{indentExpr term}"
+    -- Compiled code would run a failed declaration's `sorry`, which can crash the process.
+    for constant in term.getUsedConstants do
+      if (← collectAxioms constant).contains ``sorryAx then
+        throwError "cil_evaluated: {constant} depends on `sorryAx`, so its value is not evaluated"
+    let name := (← getCurrNamespace) ++ nameSyntax.getId
+    let value ← evaluatedLiteral type term
+    addAndCompile <| .defnDecl {
+      name, levelParams := [], type, value,
+      hints := .regular (getMaxHeight (← getEnv) value + 1), safety := .safe }
+    addDeclarationRangesFromSyntax name (← getRef) nameSyntax
+    addDocStringCore name s!"The value of `{termSyntax}`."
+    proveByReduction (name.appendAfter "_eq") s!"`{name}` is the value of `{termSyntax}`."
+      (← mkEq term (mkConst name))
 
 end CIL.Extraction.DecodedDefinition

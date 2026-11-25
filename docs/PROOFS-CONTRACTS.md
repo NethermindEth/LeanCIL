@@ -1126,6 +1126,14 @@ resource getter. The five fixtures use the original 64-fuel bound. A `Percent` v
 `ArgumentException(string, string)` instead raises that object, which refutes the range contract
 at entry.
 
+In an extraction of several methods, a bound construction calls the CoreLib constructor bodies
+appended after the local methods, and `cil_checked_steps` steps them like any managed call. The
+caller states the facts the constructors need over its own memory: the message literal's binding
+in `memory.literals` and its `formObject`, and heap budget for the exception's size.
+[PoolRent](../Examples/Proofs/PoolRent.lean) proves that an exhausted `ItemPool.Rent` raises
+`InvalidOperationException` this way, deriving `Owned` facts for the fresh exception's message,
+`_xcode` and `_HResult` fields and its `runtimeTypeOf` for `throwFault`.
+
 For a wide-integer `Divide` or `Mod` contract, select `some .divideByZero` in
 `raises` when its divisor is zero and prove `HoldsCLR`. Both an explicit throw and the mapped
 arithmetic failure can establish this exact outcome. The proof must reach that fault through the

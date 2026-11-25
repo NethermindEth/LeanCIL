@@ -70,18 +70,21 @@ internal static class Throws
 
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, Analysis> cache = new();
 
-    static readonly Analysis NoFolds = new([], [], [], []);
-
     /// <summary>The refusal of an instruction of a recognized throw that a clause protects.</summary>
     internal static InvalidDataException ProtectedRefusal(Instruction site) => new($"""
         Unsupported throw inside a protected range: {site}
           A recognized exception constructor is folded into a fault without an object, which no catch can test.
         """.ReplaceLineEndings("\n"));
 
-    internal static Analysis Analyze(MethodDefinition method, Instruction? managedConstructor = null) =>
-        managedConstructor is null ? cache.GetValue(method, Compute) : NoFolds;
+    /// <summary>
+    /// The folds of <paramref name="method"/>, except those whose constructor is one of <paramref name="bound"/>:
+    /// a bound construction runs the CoreLib constructor and throws the object it builds.
+    /// </summary>
+    internal static Analysis Analyze(MethodDefinition method, IReadOnlySet<Instruction>? bound = null) =>
+        bound is null || bound.Count == 0 ? cache.GetValue(method, method => Compute(method, null))
+            : Compute(method, bound);
 
-    static Analysis Compute(MethodDefinition method)
+    static Analysis Compute(MethodDefinition method, IReadOnlySet<Instruction>? bound)
     {
         var code = method.Body.Instructions;
         var analysis = new Analysis([], [], [], []);
@@ -93,7 +96,8 @@ internal static class Throws
                 code[at + count].OpCode.Code is Code.Ldstr or Code.Ldnull) count++;
             int raise = at + count + 1;
             if (count == ArgumentLimit || raise >= code.Count || code[raise].OpCode.Code != Code.Throw ||
-                Raised(code[at + count], code, at, count) is not ExceptionType raised)
+                Raised(code[at + count], code, at, count) is not ExceptionType raised ||
+                bound?.Contains(code[at + count]) == true)
                 continue;
             if (clauses.Any(clause => clause.TryStart <= raise && raise < clause.TryEnd))
             {

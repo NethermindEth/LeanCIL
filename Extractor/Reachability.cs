@@ -6,11 +6,11 @@ namespace Nethermind.LeanCIL;
 internal static class Reachability
 {
     internal static HashSet<Instruction> Analyze(MethodDefinition method, FeatureProfile? selectedProfile = null,
-        Instruction? managedConstructor = null)
-        => Certify(method, selectedProfile, managedConstructor).Keys.ToHashSet();
+        IReadOnlySet<Instruction>? boundConstructors = null)
+        => Certify(method, selectedProfile, boundConstructors).Keys.ToHashSet();
 
     internal static Dictionary<Instruction, FeatureConstants> Certify(MethodDefinition method, FeatureProfile? selectedProfile = null,
-        Instruction? managedConstructor = null)
+        IReadOnlySet<Instruction>? boundConstructors = null)
     {
         FeatureProfile profile = selectedProfile ?? FeatureProfile.Scalar;
         profile.Validate();
@@ -49,7 +49,7 @@ internal static class Reachability
         // Revisit successors when a backedge or join weakens a constant fact.
         // Facts only move from a constant to unknown, so this reaches a fixed point.
         var typeTests = TypeTests.Analyze(method);
-        var throws = Throws.Analyze(method, managedConstructor);
+        var throws = Throws.Analyze(method, boundConstructors);
         foreach (var handler in method.Body.ExceptionHandlers)
             if (typeTests.Interior.Contains(handler.HandlerStart) || throws.Interior.Contains(handler.HandlerStart) ||
                 TailCalls.IsInterior(handler.HandlerStart))

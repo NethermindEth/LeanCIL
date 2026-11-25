@@ -11,8 +11,10 @@ namespace Nethermind.LeanCIL;
 // Read original definitions from a separate, untouched module over the same assembly
 // bytes. The call-graph walk rewrites call operands in the working module.
 internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence layouts,
-    ImportResolution? imports = null, string assemblyTable = "assemblies")
+    ImportResolution? imports = null, string assemblyTable = "assemblies", bool packagePins = false)
 {
+    // A package's bodies also pin CoreLib, whose rows the bound callers and appended definitions carry.
+    readonly string pinTable = packagePins ? "assemblies" : assemblyTable;
     // Closed instantiations share their definition's bytes; the first method to use a body names them.
     internal ExternalIdentityEvidence ExternalIdentities { get; } = new();
     readonly MetadataSlices? metadata = pinned is null ? null : new(pinned);
@@ -531,10 +533,15 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         return $"{{ {receiver}parameters := {parameters}, returnType := {returnType}{initLocals} }}";
     }
 
+    /// <summary>The constructions of a caller bound to a constructor image whose rows start at <c>Base</c>.</summary>
+    internal sealed record Binding(int Base, IReadOnlyList<int> Pcs);
+
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,
         IReadOnlySet<Instruction> reachable, int methodCount, string staticInput, StringBuilder? decoderInputs = null,
-        bool compareOriginal = false)
+        bool compareOriginal = false, Binding? binding = null)
     {
+        // A bound caller's original and body are the binder's, derived from the source definitions.
+        var source = binding is null ? "" : "Source";
         var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
         var originalEvidence = Method(original, original, method, reachable, staticInput);
         // Token operands are spelled in the original's generic context, as its code is.
@@ -542,7 +549,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         closedTypes.Clear();
         var closedEvidence = Method(method, original, method, reachable, staticInput, closedTypes);
         ExternalIdentities.Emit(lean, decoderInputs);
-        var originalInput = $"def method{number}Original : Extraction.RawMethod := {originalEvidence}";
+        var originalInput = $"def method{number}{source}Original : Extraction.RawMethod := {originalEvidence}";
         lean.AppendLine(originalInput);
         if (compareOriginal) decoderInputs!.AppendLine(originalInput);
         lean.AppendLine(body.Bytes);
@@ -556,9 +563,22 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 def method{number}BodyImports : Extraction.BodyImports :=
                   importIndex.forLinks {methodCount} method{number}Links
                 """);
-        lean.AppendLine(body.Definition);
+        lean.AppendLine(binding is null ? body.Definition
+            : body.Definition.Replace($"def method{number}Body ", $"def method{number}SourceBody ",
+                StringComparison.Ordinal));
+        if (binding is not null)
+            lean.AppendLine($"""
+                /-- This caller with its constructions bound to the image's CoreLib definitions. -/
+                def method{number}Binding : Runtime.Net11WinX64.BoundCaller :=
+                  (constructorImage.bindCaller? {binding.Base} method{number}SourceBody method{number}SourceOriginal
+                    [{string.Join(", ", binding.Pcs)}]).get (by cil_kernel_rfl)
+                cil_evaluated method{number}Original : Extraction.RawMethod := method{number}Binding.original
+                def method{number}Body : Extraction.BodyEvidence := method{number}Binding.body
+                """);
         lean.AppendLine($"def method{number}TypeArgumentsRaw : List Extraction.TypeExpr := {List(MethodSpecialization.Arguments(method).Select(Type))}");
-        var closed = $"def method{number}Closed : Extraction.RawMethod := {closedEvidence}";
+        // A bound caller is not generic, so its closed definition is its original.
+        var closed = binding is null ? $"def method{number}Closed : Extraction.RawMethod := {closedEvidence}"
+            : $"def method{number}Closed : Extraction.RawMethod := method{number}Original";
         lean.AppendLine(closed);
         decoderInputs?.AppendLine(closed);
         lean.AppendLine($"def method{number}DispatchTypes : List Extraction.DispatchType := {DispatchTypes(method)}");
@@ -570,10 +590,12 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var assembly = $"\u27e8{Quote(PinIdentity(method.Module))}\u27e9";
         var proofs = string.Join(", ", body.Identified, body.TablesValid, "by cil_kernel_rfl",
             "pinned_identities_spelled", "rfl", "by cil_kernel_rfl", "by cil_kernel_rfl", "by cil_body_decodes");
+        // The bound body carries the dependency slices, so the kernel decides it whole.
         lean.AppendLine(string.Join(" ",
-            $"""theorem method{number}_body_validated : Extraction.BodyDecodes {assemblyTable} platformDefinitions""",
+            $"""theorem method{number}_body_validated : Extraction.BodyDecodes {pinTable} platformDefinitions""",
             $"""{assembly} method{number}Body method{number}Original method{number}TypeArgumentsRaw""",
-            $"""method{number}Signature{bodyImports} :=""", $"\u27e8{proofs}\u27e9"));
+            $"""method{number}Signature{bodyImports} :=""",
+            binding is null ? $"\u27e8{proofs}\u27e9" : "by decide +kernel"));
     }
 
     /// <summary>The decoded value opcodes whose operands need no storage, model or target resolution.</summary>
@@ -657,15 +679,16 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// The first live instruction without an admitted opcode, field or call binding. Dead sites keep their raw opcode.
     /// </summary>
     internal static DecodeRefusal? FirstDecodeRefusal(MethodDefinition method, IReadOnlySet<Instruction> reachable,
-        ResolvedCallSites calls, ImportResolution? imports, Instruction? managedConstructor = null)
+        ResolvedCallSites calls, ImportResolution? imports, IReadOnlySet<Instruction>? boundConstructors = null)
     {
         var instructions = method.Body.Instructions;
-        var throws = Throws.Analyze(method, managedConstructor);
+        var throws = Throws.Analyze(method, boundConstructors);
         for (var pc = 0; pc < instructions.Count; pc++)
         {
             var instruction = instructions[pc];
             if (!reachable.Contains(instruction)) continue;
-            if (instruction == managedConstructor || throws.Operands.Contains(instruction) || throws.Raises.ContainsKey(instruction))
+            if (boundConstructors?.Contains(instruction) == true || throws.Operands.Contains(instruction) ||
+                throws.Raises.ContainsKey(instruction))
                 continue;
             if (instruction.OpCode.Code == Code.Tail && instruction.Next?.OpCode.Code is Code.Call or Code.Calli)
                 continue;
@@ -883,14 +906,18 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         lean.AppendLine($"def {assemblyTable} : List Extraction.AssemblyPin := [" +
             string.Join(", ", Enumerable.Range(0, pins.Length).Select(k => $"assembly{k}")) + "]");
         // Every body lists these identities; one proof that they spell the pins serves them all.
-        lean.AppendLine("def pinnedIdentities : List (List Nat) := " +
-            List(Pinned.Modules.Select((_, index) => $"assembly{index}Identity")));
+        if (packagePins)
+            lean.AppendLine(
+                $"def assemblies : List Extraction.AssemblyPin := Runtime.Net11WinX64.packagePins {assemblyTable}");
+        lean.AppendLine("def pinnedIdentities : List (List Nat) := " + List(Pinned.Modules
+            .Select((_, index) => $"assembly{index}Identity")
+            .Concat(packagePins ? ["Runtime.Net11WinX64.coreIdentity"] : [])));
         lean.AppendLine("def pinnedIndex : Extraction.PinnedIndex := cil_pin_index pinnedIdentities");
         lean.AppendLine("#print axioms pinnedIndex");
         // The platform definitions go here once every method's slices are known; see InsertPlatformDefinitions.
         platformAt = lean.Length;
         lean.AppendLine("theorem pinned_identities_spelled : pinnedIdentities.mapM Extraction.spelled? = " +
-            $"some ({assemblyTable}.map (·.identity)) := by cil_kernel_rfl");
+            $"some ({pinTable}.map (·.identity)) := by cil_kernel_rfl");
     }
 
     /// <summary>
