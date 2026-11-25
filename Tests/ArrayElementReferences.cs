@@ -54,7 +54,7 @@ foreach (var name in new[] { "Element", "Read", "Write" })
     // stack states bind.
     if (!source.Contains("cil_decoded_method method0 ", StringComparison.Ordinal))
         throw new Exception("Element address is not decoded from its body");
-    const string target = """opcode := 143, operand := .type (.primitive .int32""";
+    const string target = """opcode := 143, operand := .type (.primitive .int32)""";
     var scalars = NarrowEvidence(source, "method0_scalars_validated");
     if (!scalars.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing address mutation target");
     var forged = Path.Combine(root, "ForgedElement.lean");

@@ -1523,7 +1523,7 @@ static void CheckShuffleReadWidth(string proof, MethodDefinition method)
               match raw.operand with
               | .call site =>
                 let vector := TypeExpr.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
-                  (.primitive .byte
+                  (.primitive .byte)
                 let narrow := { site.method with
                   owner := .atom intrinsicsScope "System.Runtime.Intrinsics.Vector128", returnType := vector }
                 let emitted := { method0 with code := [.call narrow {}], links := [] }

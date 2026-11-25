@@ -361,7 +361,7 @@ var wideBaseline = File.ReadAllText(Path.Combine(root, "PortableCall512/Extracte
 const string narrowHead = """
     (.constructor CIL.Extraction.intrinsicsScope "System.Runtime.Intrinsics.Vector256`1")
     """;
-const string byteElement = """(.primitive .byte""";
+const string byteElement = """(.primitive .byte)""";
 const string narrowOwner = $"""method.owner := .apply {narrowHead} {byteElement}""";
 RejectPortable(portableBaseline, "portable-width", narrowOwner);
 RejectPortable(wideBaseline, "portable512-width", narrowOwner);

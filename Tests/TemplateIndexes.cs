@@ -274,8 +274,9 @@ foreach (var (identity, different) in new[] { ("FieldIndex", Store(1, "word")), 
     if (!Rejected(() => Merge(identity, [".nop", store, ".ret"], [".nop", different, ".ret"]))
         .Contains($"Profiles with identical observed flags emit different instructions: {identity} at pc 1"))
         throw new Exception("A store to a different field shared the template body.");
-if (!Rejected(() => Merge("Rotate", [ScalarCall("Numerics.BitOperations", "RotateLeft", "UInt32", "UInt32", "Int32"), ".ret"],
-        [ScalarCall("Numerics.BitOperations", "RotateLeft", "UInt64", "UInt64", "Int32"), ".ret"]))
+if (!Rejected(() => Merge("Rotate",
+        [ScalarCall("Numerics.BitOperations", "RotateLeft", "uint32", "uint32", "int32"), ".ret"],
+        [ScalarCall("Numerics.BitOperations", "RotateLeft", "uint64", "uint64", "int32"), ".ret"]))
     .Contains("Profiles with identical observed flags emit different instructions: Rotate at pc 0"))
     throw new Exception("Profiles that render a rotate differently merged");
 Console.WriteLine("PASS template merge accepts what the Lean text equates and names the instruction that differs");

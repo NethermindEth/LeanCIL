@@ -1265,7 +1265,7 @@ void DecodedDefinitionCosts()
             def source : RawMethod :=
               { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
                 attributes := 0, implementation := 0, returnType := .void, parameters := [],
-                locals := List.replicate 4 (.primitive .uint32, initLocals := true,
+                locals := List.replicate 4 (.primitive .uint32), initLocals := true,
                 maxStack := 8, genericParameters := [],
                 code := (List.range {{instructions / SegmentLength}}).flatMap segment }
             #command_cost "decoded definition {{instructions}}"
@@ -1814,7 +1814,7 @@ void ClosedArgumentsCosts()
             def raw : RawMethod := {
               token := 0, owner := "Scaling", hasThis := false, explicitThis := false,
               callingConvention := 0, attributes := 150, implementation := 0, returnType := .void,
-              parameters := List.replicate {{parameters}} (.primitive .uint32,
+              parameters := List.replicate {{parameters}} (.primitive .uint32),
               locals := [], initLocals := false, maxStack := 1, genericParameters := [],
               code := [.mk 0 42 .none] }
             /-- Primitive argument storage does not inspect unrelated layouts. -/
@@ -2092,7 +2092,7 @@ void PlatformTableCosts()
               { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
             return frame.admits (.named head)
               (.enum { assembly := runtimeAssembly, typeNamespace := name!"", name := name!"Number" }
-                (.primitive .int32)).toOption = some true)
+                (.primitive .int32))).toOption = some true)
         #kernel_cost "platform pair {{size}}"
           ((env{{size}}.platformField 0
             { owner := .genericInst (named "System.ValueTuple`2" {{Parts("System", "ValueTuple`2")}})
