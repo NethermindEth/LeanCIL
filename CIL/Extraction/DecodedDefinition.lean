@@ -161,6 +161,8 @@ deriving instance ToExpr for LocalKind
 deriving instance ToExpr for StaticDescriptor
 deriving instance ToExpr for DeclaredSignature
 deriving instance ToExpr for Link
+deriving instance ToExpr for HandlerKind
+deriving instance ToExpr for ExceptionClause
 
 /-- The value of the closed term `decoder`, computed by compiled code. -/
 unsafe def evaluateUnsafe (decoder : Expr) : MetaM (Option Method) :=
@@ -224,7 +226,8 @@ def methodTerm (passed : Array Expr) (method : Method) : MetaM Expr := do
     (`staticSites, toExpr method.staticSites),
     (`opaqueVectorLocals, toExpr method.opaqueVectorLocals),
     (`parameterHomes, toExpr method.parameterHomes), (`declared, toExpr method.declared),
-    (`links, toExpr method.links), (`returnsValue, toExpr method.returnsValue)]
+    (`links, toExpr method.links), (`returnsValue, toExpr method.returnsValue),
+    (`handlers, toExpr method.handlers)]
   let mut fields := #[]
   for field in getStructureFields (← getEnv) ``CIL.Method do
     let fieldType := (← inferType (mkConst (``CIL.Method ++ field))).bindingBody!

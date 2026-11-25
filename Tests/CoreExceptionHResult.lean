@@ -105,7 +105,7 @@ theorem correctness (before after : Safety.Memory) (object field : Reference) (w
       .ok (after, []) := by
   have shape : setter.fieldShape resultField = .classSlot offset (.word 4 false) := by
     cil_kernel_rfl
-  let frame : Safety.Frame := ⟨before.nextIdentity, [], [], 0⟩
+  let frame : Safety.Frame := ⟨before.nextIdentity, [], [], 0, []⟩
   have store : step setter (.stfld resultField) 2
       [.object (.address object), .scalar (.i32 word)] frame
       [.scalar (.i32 word), .object (.address object)] before = .ok (.next 3 [] frame after) := by

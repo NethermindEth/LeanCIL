@@ -155,6 +155,18 @@ theorem stepTransport : StepTransport := by
     case ldflda.refl field =>
       exact memories.stepFieldAddress frames sourceFormed sourceBody targetBody metadata field pc
         arguments stack bounds observable
+    case leave.refl destination =>
+      refine ⟨mapping, .refl mapping, ?_⟩
+      dsimp only [LocalIndexMap.operation]
+      rw [step_leave_of_handlers_nil metadata.sourceHandlers,
+        step_leave_of_handlers_nil metadata.targetHandlers]
+      exact .ok (.next memories frames)
+    case endfinally.refl =>
+      refine ⟨mapping, .refl mapping, ?_⟩
+      dsimp only [LocalIndexMap.operation]
+      rw [step_endfinally_of_handlers_nil metadata.sourceHandlers,
+        step_endfinally_of_handlers_nil metadata.targetHandlers]
+      exact .error _
     all_goals dsimp only [LocalIndexMap.operation]
     all_goals first
     | exact memories.stepLocalloc frames sourceFormed targetFormed staticBounds

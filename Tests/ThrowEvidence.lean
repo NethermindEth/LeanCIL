@@ -342,7 +342,8 @@ theorem literal_constructor_throw (program : CIL.Program) (entry pc callee fuel 
     (returned : invoke program (fuel + 1) callee
       [.object (.address ⟨memory.nextIdentity, 0⟩), .object (.address nameRef),
        .object (.address messageRef)] (objectMemory memory ⟨method.owner, bases⟩ size) =
-        .ok (final, [])) :
+        .ok (final, []))
+        (free : HandlerFree program := by handler_free) :
     run program (fuel + 4) entry pc args frame [] memory =
       .error ⟨entry, pc + 3, .thrown raised⟩ := by
   let receiver : Reference := ⟨memory.nextIdentity, 0⟩
@@ -377,7 +378,7 @@ theorem literal_constructor_throw (program : CIL.Program) (entry pc callee fuel 
       bind, Except.bind, pure, Except.pure, Except.mapError]
   have fault := object.thrown []
   change run program (fuel + 1) entry (pc + 3) args frame [created] final = _
-  simp only [run_succ, found, throws]
+  simp only [run_succ _ _ _ _ _ _ _ _ (free.unprotected entry (pc + 3)), found, throws]
   change Except.error (α := Safety.Memory × List Safety.Value)
     (LocatedFault.mk entry (pc + 3) (throwFault final [created])) = _
   rw [fault]

@@ -66,8 +66,8 @@ theorem Memory.Renamed.enterFrameUnmodeled {mapping : AllocationRenaming}
     extension, sourceMade, targetMade, remains, slots, owned⟩ :=
     extended.makeLocalsUnmodeled sourceFormed targetFormed staticBounds source.nextIdentity
       target.nextIdentity (enterScopes_new _ _ _) selected targetReady.layouts
-  let sourceFrame : Frame := ⟨source.nextIdentity, sourceSlots, sourceOwned, 0⟩
-  let targetFrame : Frame := ⟨target.nextIdentity, targetSlots, targetOwned, 0⟩
+  let sourceFrame : Frame := ⟨source.nextIdentity, sourceSlots, sourceOwned, 0, []⟩
+  let targetFrame : Frame := ⟨target.nextIdentity, targetSlots, targetOwned, 0, []⟩
   refine ⟨later, sourceFrame, targetFrame, sourceAfter, targetAfter, extension,
     ?_, ?_, remains, ?_⟩
   · simp only [enterFrame_of_no_opaque _ _ _ sourceReady.noOpaque, sourceReady.initializers,
@@ -120,7 +120,7 @@ theorem Memory.Renamed.enterFrameInitialized {mapping : AllocationRenaming}
     remains, slots, owned⟩ :=
     extended.makeLocalsInitialized sourceFormed targetFormed staticBounds source.nextIdentity
       target.nextIdentity (enterScopes_new _ _ _) selected targetReady.layouts made
-  let targetFrame : Frame := ⟨target.nextIdentity, targetSlots, targetOwned, 0⟩
+  let targetFrame : Frame := ⟨target.nextIdentity, targetSlots, targetOwned, 0, []⟩
   refine ⟨later, _, targetFrame, sourceAfter, targetAfter, extension, originalEntry,
     ?_, remains, ?_⟩
   · simp only [enterFrame_of_no_opaque _ _ _ targetReady.noOpaque,

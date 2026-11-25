@@ -129,7 +129,8 @@ theorem runFaulting_mono (lookup : Nat → Option CIL.Method) (fuel extra method
               cases hr : runFaulting lookup fuel callee 0 arguments childFrame [] childMemory with
               | ok childResult =>
                 obtain ⟨final, values⟩ := childResult
-                rw [ih callee 0 arguments childFrame [] childMemory (.ok (final, values)) trivial hr]
+                rw [ih callee 0 arguments childFrame [] childMemory (.ok (final, values)) trivial
+                  hr]
                 simp only [hr] at entered
                 exact ih _ _ _ _ _ _ _ ready entered
               | error state =>
@@ -150,7 +151,8 @@ theorem runFaulting_mono (lookup : Nat → Option CIL.Method) (fuel extra method
               cases hr : runFaulting lookup fuel callee 0 arguments childFrame [] childMemory with
               | ok childResult =>
                 obtain ⟨final, values⟩ := childResult
-                rw [ih callee 0 arguments childFrame [] childMemory (.ok (final, values)) trivial hr]
+                rw [ih callee 0 arguments childFrame [] childMemory (.ok (final, values)) trivial
+                  hr]
                 simp only [hr] at entered ⊢
                 split
                 · simpa [*] using entered

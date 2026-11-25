@@ -290,7 +290,8 @@ theorem span_survives_consecutive_calls {program : CIL.Program} {fuel method : N
     (valid : view.validate memory = .ok ()) (contents : SpanContents memory view 8 values)
     (first : invoke program fuel method args memory = .ok (middle, results))
     (firstKept : MemoryBelow memory.nextIdentity memory middle)
-    (secondKept : MemoryBelow middle.nextIdentity middle final) :
+    (secondKept : MemoryBelow middle.nextIdentity middle final)
+    (free : HandlerFree program := by handler_free) :
     MemoryBelow memory.nextIdentity memory final ∧ view.validate final = .ok () ∧
       SpanContents final view 8 values := by
   have kept := firstKept.compose_invoke first secondKept

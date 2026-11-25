@@ -100,7 +100,7 @@ theorem Forwards.enterFrame {body calleeBody : CIL.Method}
     (forwards : Forwards body calleeBody loads method callee narrow)
     (args : List Value) (memory : Memory) :
     CIL.Safety.enterFrame body args memory =
-      .ok (⟨memory.nextIdentity, [], [], 0⟩, memory) := by
+      .ok (⟨memory.nextIdentity, [], [], 0, []⟩, memory) := by
   have noLocals : makeSelectedLocals memory.nextIdentity body.opaqueVectorLocals [] []
       memory = .ok ([], [], memory) := by
     unfold makeSelectedLocals
@@ -432,7 +432,7 @@ theorem ForwardsOut.enterFrame {body calleeBody : CIL.Method}
     (args : List Value) (memory : Memory) (wellFormed : memory.WellFormed) :
     ∃ home result,
       CIL.Safety.enterFrame body args memory =
-        .ok (⟨memory.nextIdentity, [.bytes kind home], [home.allocation], 0⟩, result) ∧
+        .ok (⟨memory.nextIdentity, [.bytes kind home], [home.allocation], 0, []⟩, result) ∧
       memory.nextIdentity ≤ home.allocation ∧
       access result home (localWidth kind) 1 true = .ok () ∧
       LocalHolds kind initial result home ∧
@@ -548,7 +548,7 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
       List.getElem?_append_left (by simpa using bound), List.getElem?_map, located]
     rfl
   rw [Nat.zero_add, List.append_nil]
-  let frame : Frame := ⟨memory.nextIdentity, [.bytes kind home], [home.allocation], 0⟩
+  let frame : Frame := ⟨memory.nextIdentity, [.bytes kind home], [home.allocation], 0, []⟩
   have addressed : step body (.ldloca 0) loads.length (outer.args input) frame
       loaded.reverse entered =
         .ok (.next (loads.length + 1) (.reference (.address home) :: loaded.reverse) frame

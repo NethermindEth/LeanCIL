@@ -1,4 +1,6 @@
 import CIL.Safety.ExecutionTrace
+import CIL.Safety.HandlerSteps
+import CIL.Safety.OutcomeTrace
 import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.StaticMemoryLemmas
 import CIL.Safety.StackAllocationLemmas
@@ -21,13 +23,13 @@ namespace CIL.Safety
 /-- The memory a step leaves behind, whatever it asks the driver to do next. -/
 def FrameAction.memory : FrameAction → Memory
   | .next _ _ _ m | .call _ _ _ m | .tailCall _ _ m
-  | .construct _ _ _ _ _ _ m | .returned _ m => m
+  | .construct _ _ _ _ _ _ m | .returned _ m | .raise _ _ _ m => m
 
 /-- Calls and returns keep the current frame until the run dispatcher acts;
     ordinary steps and constructor allocation supply their updated frame. -/
 def FrameAction.frameAfter (action : FrameAction) (current : Frame) : Frame :=
   match action with
-  | .next _ _ frame _ | .construct _ _ _ frame _ _ _ => frame
+  | .next _ _ frame _ | .construct _ _ _ frame _ _ _ | .raise _ _ frame _ => frame
   | .call _ _ _ _ | .tailCall _ _ _ | .returned _ _ => current
 
 /-- The runtime type of the instance an instruction at `pc` of `body` creates: `newobj` an
@@ -75,6 +77,9 @@ inductive StepEffect (body : CIL.Method) (site : Nat) (operation : CIL.Instructi
       (stored : storeLocal home slot value = .ok (final, result)) :
       StepEffect body site operation frame m { frame with owned := r.allocation :: frame.owned }
         result
+  /-- Leaving a protected range or finally handler changes only the pending resumptions. -/
+  | resume {resumptions : List (Nat × Resumption)} :
+      StepEffect body site operation frame m { frame with resumptions } m
 
 theorem StepEffect.wellFormed {body : CIL.Method} {site : Nat} {operation : CIL.Instruction}
     {frame final : Frame}
@@ -92,6 +97,7 @@ theorem StepEffect.wellFormed {body : CIL.Method} {site : Nat} {operation : CIL.
   | localHome allocated stored =>
     exact storeLocal_preserves_wellFormed _ _ _ _ _
       (allocateHome_preserves_wellFormed _ _ _ _ _ hm allocated) stored
+  | resume => exact hm
 
 theorem StepEffect.allocations {body : CIL.Method} {site : Nat} {operation : CIL.Instruction}
     {frame final : Frame}
@@ -109,6 +115,7 @@ theorem StepEffect.allocations {body : CIL.Method} {site : Nat} {operation : CIL
   | localHome allocated stored =>
     exact (allocateHome_fresh _ _ _ _ _ allocated).1.trans
       (storeLocal_extends_allocations _ _ _ _ _ stored)
+  | resume => exact .refl _
 
 /-- A value loaded from a local is valid in the memory it was loaded from. -/
 theorem loadLocal_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
@@ -324,6 +331,7 @@ def FrameAction.LiveValues (action : FrameAction) : Prop :=
     ValuesValid memory values
   | .call _ args rest memory | .construct _ args rest _ _ _ memory =>
     ValuesValid memory args ∧ ValuesValid memory rest
+  | .raise .. => True
 
 /-- One dispatcher proof supplies memory/frame effects and conditional value validity. -/
 structure StepContract (body : CIL.Method) (site : Nat) (operation : CIL.Instruction)
@@ -502,6 +510,15 @@ theorem StepContract.spanInPlace {body : CIL.Method} {site : Nat} {operation : C
 
 #print axioms StepContract.spanInPlace
 
+/-- A step that changes only the resumptions of its frame pushes nothing and keeps memory. -/
+theorem StepContract.resumes {body : CIL.Method} {site : Nat} {operation : CIL.Instruction}
+    {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
+    (resumes : action.Resumes frame m) : StepContract body site operation frame stack m action := by
+  obtain ⟨_, ⟨_, rfl⟩ | ⟨_, _, rfl⟩⟩ := resumes
+  · exact ⟨.resume, fun _ _ _ member => nomatch member⟩
+  · exact ⟨.resume, fun _ _ => trivial⟩
+#print axioms StepContract.resumes
+
 /-- Managed identities change no memory; dispatched arguments are checked before use. -/
 theorem calliStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
     (signature : CIL.ManagedSignature) (tail : Bool) (link : Option CIL.Link) (pc : Nat)
@@ -611,6 +628,8 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
   all_goals repeat' first
     | solve | exact modelStep_contract (by assumption)
     | solve | apply calliStep_contract; assumption
+    | solve | exact StepContract.resumes (leaveStep_resumes h)
+    | solve | exact StepContract.resumes (endFinallyStep_resumes h)
     | solve | exact StepContract.storeArgument (by assumption)
     | unfold returnFrom at h
     | unfold localAllocation at h
@@ -725,7 +744,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
 /-- No value `action` hands to another frame is a home: the arguments of a call, tail call or
     construction and the returned values. A `.next` keeps its stack in the same frame. -/
 def FrameAction.HomeFree : FrameAction → Prop
-  | .next .. => True
+  | .next .. | .raise .. => True
   | .call _ arguments _ _ | .tailCall _ arguments _ | .construct _ arguments _ _ _ _ _
   | .returned arguments _ => ∀ value ∈ arguments, value.isHome = false
 
@@ -747,6 +766,12 @@ local macro "home_free_close" : tactic => `(tactic| (
     | exact List.forall_mem_cons.2 ⟨rfl, callArguments_not_spanHome (by assumption)⟩
     | exact List.forall_mem_cons.2 ⟨rfl, fun _ member => nomatch member⟩))
 
+
+/-- A step that changes only the resumptions of its frame hands no value to another frame. -/
+theorem FrameAction.Resumes.homeFree {frame : Frame} {memory : Memory} {action : FrameAction}
+    (resumes : action.Resumes frame memory) : action.HomeFree := by
+  obtain ⟨_, ⟨_, rfl⟩ | ⟨_, _, rfl⟩⟩ := resumes <;> trivial
+#print axioms FrameAction.Resumes.homeFree
 
 /-- A managed pointer call hands its callee checked arguments, none of them a home. -/
 theorem calliStep_homeFree {signature : CIL.ManagedSignature} {tail : Bool} {link : Option CIL.Link}
@@ -775,6 +800,8 @@ theorem step_homeFree {body : CIL.Method} {operation : CIL.Instruction} {pc : Na
     | (cases h; home_free_close; done)
     | (cases h; done)
     | exact calliStep_homeFree h
+    | exact (leaveStep_resumes h).homeFree
+    | exact (endFinallyStep_resumes h).homeFree
     | unfold returnFrom at h
     | unfold localAllocation at h
     | unfold initializeSpanHome at h
@@ -809,7 +836,7 @@ theorem invokeWith_spanHome (lookup : Nat → Option CIL.Method) (fuel method : 
     {args : List Value} {m : Memory} {slot : Nat} (forged : Value.spanHome slot ∈ args) :
     ∃ fault, invokeWith lookup fuel method args m = .error ⟨method, 0, fault⟩ := by
   obtain ⟨fault, refused⟩ := mapM_error_of_mem (apply := checkedValue m) rfl forged
-  unfold invokeWith invokeReporting
+  unfold invokeWith invokeFaulting
   cases lookup method with
   | none => exact ⟨.invalidState, rfl⟩
   | some body =>
@@ -838,32 +865,96 @@ theorem programStep_preserves_wellFormed (program : CIL.Program) (method pc : Na
   obtain ⟨body, op, _, _, hs⟩ := hs
   exact step_preserves_wellFormed _ _ _ _ _ _ _ _ hm hs
 
-/-- A successful run, including all nested calls and frame teardowns, ends in well-formed
-    memory. -/
+
+/-- Every run, through caught faults and calls, keeps a memory property that each fetched step,
+    frame exit and frame entry keeps, in the memory it ends in and in both memories a fault
+    leaves. -/
+theorem OutcomeTrace.preserves {program : CIL.Program} {property : Memory → Prop}
+    (stepKeeps : ∀ {method pc : Nat} {body : CIL.Method} {op : CIL.Instruction}
+      {args : List Value} {frame : Frame} {stack : List Value} {memory : Memory}
+      {action : FrameAction},
+      program[method]? = some body → body.code[pc]? = some op →
+        step body op pc args frame stack memory = .ok action → property memory →
+          property action.memory)
+    (leaveKeeps : ∀ frame memory, property memory → property (leaveFrame frame memory))
+    (enterKeeps : ∀ {body args memory frame entered},
+      enterFrame body args memory = .ok (frame, entered) → property memory → property entered)
+    {fuel method pc : Nat} {args : List Value} {frame : Frame} {stack : List Value}
+    {memory : Memory} {outcome : Except FaultState (Memory × List Value)}
+    (trace : OutcomeTrace program fuel method pc args frame stack memory outcome)
+    (holds : property memory) : OutcomeHolds property outcome := by
+  induction trace with
+  | exhausted | missing => exact ⟨holds, leaveKeeps _ _ holds⟩
+  | faulted _ _ _ recovered =>
+    rcases recover_error_state recovered with rfl | ⟨same, unwound⟩
+    · exact ⟨holds, leaveKeeps _ _ holds⟩
+    · exact ⟨same ▸ holds, unwound ▸ leaveKeeps _ _ holds⟩
+  | caught _ _ _ _ _ ih => exact ih holds
+  | next found fetched stepped _ ih => exact ih (stepKeeps found fetched stepped holds)
+  | raised found fetched stepped recovered =>
+    have updated := stepKeeps found fetched stepped holds
+    rcases recover_error_state recovered with rfl | ⟨same, unwound⟩
+    · exact ⟨updated, leaveKeeps _ _ updated⟩
+    · exact ⟨same ▸ updated, unwound ▸ leaveKeeps _ _ updated⟩
+  | raiseCaught found fetched stepped _ _ ih =>
+    exact ih (stepKeeps found fetched stepped holds)
+  | callMissing found fetched stepped | callUnentered found fetched stepped
+  | tailMissing found fetched stepped | tailMismatched found fetched stepped
+  | constructMissing found fetched stepped | constructUnentered found fetched stepped =>
+    have updated := stepKeeps found fetched stepped holds
+    exact ⟨updated, leaveKeeps _ _ updated⟩
+  | tailUnchecked found fetched stepped | tailUnentered found fetched stepped
+  | returnUnchecked found fetched stepped =>
+    exact ⟨leaveKeeps _ _ (stepKeeps found fetched stepped holds),
+      leaveKeeps _ _ (stepKeeps found fetched stepped holds)⟩
+  | returned found fetched stepped =>
+    exact leaveKeeps _ _ (stepKeeps found fetched stepped holds)
+  | called found fetched stepped _ enter _ _ childIH ih
+  | constructed found fetched stepped _ enter _ _ _ childIH ih =>
+    exact ih (childIH (enterKeeps enter (stepKeeps found fetched stepped holds)))
+  | callFaulted found fetched stepped _ enter _ recovered childIH
+  | constructFaulted found fetched stepped _ enter _ recovered childIH =>
+    have child := childIH (enterKeeps enter (stepKeeps found fetched stepped holds))
+    rcases recover_error_state recovered with rfl | ⟨same, unwound⟩
+    · exact ⟨child.1, leaveKeeps _ _ child.2⟩
+    · exact ⟨same ▸ child.2, unwound ▸ leaveKeeps _ _ child.2⟩
+  | callCaught found fetched stepped _ enter _ _ _ childIH ih
+  | constructCaught found fetched stepped _ enter _ _ _ childIH ih =>
+    exact ih (childIH (enterKeeps enter (stepKeeps found fetched stepped holds))).2
+  | constructValued found fetched stepped _ enter _ _ childIH
+  | constructUnloaded found fetched stepped _ enter _ _ childIH =>
+    have child := childIH (enterKeeps enter (stepKeeps found fetched stepped holds))
+    exact ⟨child, leaveKeeps _ _ child⟩
+  | tailed found fetched stepped _ _ _ enter _ ih =>
+    exact ih (enterKeeps enter
+      (leaveKeeps _ _ (stepKeeps found fetched stepped holds)))
+#print axioms OutcomeTrace.preserves
+
+/-- Every run from well-formed memory, through caught faults and calls, ends in well-formed
+    memory, and a fault leaves well-formed memory and unwound memory. -/
+theorem OutcomeTrace.wellFormed {program : CIL.Program} {fuel method pc : Nat}
+    {args : List Value} {frame : Frame} {stack : List Value} {memory : Memory}
+    {outcome : Except FaultState (Memory × List Value)}
+    (trace : OutcomeTrace program fuel method pc args frame stack memory outcome)
+    (formed : memory.WellFormed) : OutcomeHolds Memory.WellFormed outcome :=
+  trace.preserves
+    (fun _ _ stepped formed => step_preserves_wellFormed _ _ _ _ _ _ _ _ formed stepped)
+    leaveFrame_preserves_wellFormed
+    (fun enter formed => enterFrame_preserves_wellFormed _ _ _ _ _ formed enter) formed
+#print axioms OutcomeTrace.wellFormed
+
+/-- A successful run, including all nested calls, caught faults and frame teardowns, ends in
+    well-formed memory. -/
 theorem run_preserves_wellFormed (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (values : List Value) (hm : m.WellFormed)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     final.WellFormed := by
-  have trace := run_success_trace program fuel method pc args frame stack m final values h
-  clear h
-  induction trace with
-  | next step _ ih =>
-    exact ih (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)
-  | returned step _ =>
-    exact leaveFrame_preserves_wellFormed _ _
-      (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)
-  | tailCall step _ _ _ _ enter _ _ ih =>
-    exact ih (enterFrame_preserves_wellFormed _ _ _ _ _
-      (leaveFrame_preserves_wellFormed _ _
-        (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)) enter)
-  | call step _ enter _ _ _ childIH ih
-  | construct step _ enter _ _ _ _ childIH ih =>
-    exact ih (childIH (enterFrame_preserves_wellFormed _ _ _ _ _
-      (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step) enter))
+  exact (run_ok_trace h).wellFormed hm
 
 #print axioms run_preserves_wellFormed
 
+/-- A successful invocation ends in well-formed memory. -/
 theorem invoke_preserves_wellFormed (program : CIL.Program) (fuel method : Nat)
     (args values : List Value) (m final : Memory) (hm : m.WellFormed)
     (h : invoke program fuel method args m = .ok (final, values)) : final.WellFormed := by

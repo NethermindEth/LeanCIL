@@ -1723,7 +1723,7 @@ example (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
     (inputs outputs : List ArgumentView) (valid : ValidCall memory inputs outputs)
     (word : BitVec 64) :
     WP (Execution (fun fuel => run [snapshotRecordBody] fuel 0 0 [.scalar (.i64 word)]
-      ⟨0, slots, [], 0⟩ [] memory)) (fun result => result.2 = [.scalar (.i64 word)]) := by
+      ⟨0, slots, [], 0, []⟩ [] memory)) (fun result => result.2 = [.scalar (.i64 word)]) := by
   have formed := valid.wellFormed
   have preserved := MemoryBelow.refl boundary memory
   have authority := (MemoryBelow.refl memory.nextIdentity memory).accessBelow
@@ -2049,7 +2049,7 @@ def fourContract : MethodContract Unit CIL.W32 where
 theorem contract_steps_linked_model_site (program : CIL.Program) (memory : Memory)
     (caller : program[0]? = some linkedModelCalls) (holds : fourContract.Holds program 1) :
     ∃ fuel final returned,
-      run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory = .ok (final, returned) ∧
+      run program fuel 0 0 [] ⟨0, [], [], 0, []⟩ [] memory = .ok (final, returned) ∧
         returned = [.scalar (.i32 4)] := by
   cil_contract_steps [caller, holds, fourContract]
   obtain rfl := call.post

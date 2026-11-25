@@ -15,8 +15,9 @@ live entry state, which checked frame entry establishes.
 namespace CIL.Safety
 
 /-- Evidence for the actual invocation, including nested running/suspended
-    states. Successful execution excludes checked faults and fuel exhaustion;
-    the visited-state clause additionally exposes reference/lifetime invariants. -/
+    states. Successful execution excludes uncaught faults and fuel exhaustion;
+    the visited-state clause exposes reference/lifetime invariants at the states
+    `RunningVisits` reaches, which stop at a fault a handler catches. -/
 def InvocationCertificate (program : CIL.Program) (method : Nat) (args : List Value)
     (initial : Memory) (fuel : Nat) (final : Memory) (values : List Value) : Prop :=
   invoke program fuel method args initial = .ok (final, values) ∧

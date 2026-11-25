@@ -211,10 +211,12 @@ theorem run_fault_raisesCLR {program : CIL.Program} {method pc : Nat}
     {fault : ExecutionFault} {exception : ExceptionType}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .error fault)
-    (named : fault.clrException = some exception) :
+    (named : fault.clrException = some exception)
+    (unprotected : body.unprotectedAt pc = true := by unprotected_at) :
     RunRaisesCLR program method pc args frame stack memory exception :=
   ⟨1, ⟨method, pc, fault⟩, by
-    simp only [run_succ, methodFound, instructionFound, stepped, Except.mapError, Bind.bind,
+    simp only [run_succ _ _ _ _ _ _ _ _ (unprotected_of_found methodFound unprotected), methodFound,
+      instructionFound, stepped, Except.mapError, Bind.bind,
       Except.bind], named⟩
 
 /-- Propagate the CLR exception a callee's contract names for this input. -/
@@ -228,7 +230,8 @@ theorem run_call_raisesCLR_of_contract {Input Output : Type} {c : OutcomeContrac
       .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input)
     (checked : arguments.mapM (checkedValue updated) = .ok arguments)
-    (permitted : c.pre input updated) (raised : c.raises input updated = some exception) :
+    (permitted : c.pre input updated) (raised : c.raises input updated = some exception)
+    (unprotected : body.unprotectedAt pc = true := by unprotected_at) :
     RunRaisesCLR program method pc args frame stack memory exception := by
   subst encoded
   obtain ⟨fuel, fault, invoked, named⟩ := holds.raising permitted raised

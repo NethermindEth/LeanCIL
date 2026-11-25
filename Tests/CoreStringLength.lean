@@ -110,7 +110,7 @@ theorem invoke_length (memory : Safety.Memory) (object : Reference)
   change objectFieldAddress memory (.address object) owner 0 = _ at located
   change loadValue memory (.address (lengthSlot.address object)) 4 = .ok (.i32 _) at loaded
   have shape : getter.fieldShape lengthField = .classSlot 0 (.word 4 false) := by cil_kernel_rfl
-  let frame : Safety.Frame := ⟨memory.nextIdentity, [], [], 0⟩
+  let frame : Safety.Frame := ⟨memory.nextIdentity, [], [], 0, []⟩
   apply invoke_of_run (body := getter) (frame := frame) (entered := memory) rfl
   · simp [List.mapM_cons, List.mapM_nil, checkedValue_object memory _ live,
       bind, Except.bind, pure, Except.pure]

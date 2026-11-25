@@ -58,24 +58,28 @@ private theorem AgreesOn.found {program other : CIL.Program} {region : Nat → N
 theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat → Prop}
     (closed : RegionClosed program region) (agrees : AgreesOn program other region)
     (fuel method pc : Nat) (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
-    (inside : region method pc) :
+    (inside : region method pc) (free : HandlerFree program := by handler_free) :
     run other fuel method pc args frame stack m =
       run program fuel method pc args frame stack m := by
   induction fuel generalizing method pc args frame stack m with
   | zero => rfl
   | succ fuel ih =>
     rcases agrees.found inside with ⟨hb, hb'⟩ | ⟨body, body', hb, hb', same, code⟩
-    · simp only [run_succ, hb, hb']
+    · simp only [run_succ _ _ _ _ _ _ _ _ (unprotected_of_none hb pc),
+        run_succ _ _ _ _ _ _ _ _ (unprotected_of_none hb' pc), hb, hb']
+    have freeBody : body.handlers = [] := free body (List.mem_of_getElem? hb)
     rw [same] at hb'
+    rw [run_succ _ _ _ _ _ _ _ _ (unprotected_of_handlers_nil hb freeBody pc),
+      run_succ _ _ _ _ _ _ _ _ (unprotected_of_handlers_nil hb' freeBody pc)]
     cases ho : body.code[pc]? with
-    | none => simp only [run_succ, hb, hb', ← same, code, ho]
+    | none => simp only [hb, hb', ← same, code, ho]
     | some op =>
       obtain ⟨continues, targets⟩ := closed.1 method pc body op inside hb ho
       -- A method the step enters is listed by a link entry at this region pc.
       have callees : ∀ callee ∈ body.calleesAt pc, region callee 0 := fun callee member => by
         obtain ⟨entry, listed, located, member⟩ := CIL.Method.calleesAt_mem member
         exact closed.2 method body hb entry listed (located ▸ inside) callee member
-      simp only [run_succ, hb, hb', ← same, code, ho]
+      simp only [hb, hb', ← same, code, ho]
       rw [same, show step { body with code := body'.code } op pc args frame stack m =
         step body op pc args frame stack m from rfl]
       cases hs : step body op pc args frame stack m with
@@ -84,10 +88,11 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
         simp only [Bind.bind, Except.bind, Except.mapError]
         cases action with
         | next target stack' frame' m' =>
-          rcases step_next_target hs with ⟨go, rfl⟩ | member
+          rcases step_next_target hs (fun _ => freeBody) with ⟨go, rfl⟩ | member
           · exact ih method _ args frame' stack' m' (continues go)
           · exact ih method _ args frame' stack' m' (targets target member)
         | returned result m' => rfl
+        | raise _ _ _ _ => exact (step_ne_raise freeBody hs).elim
         | call callee arguments rest m' =>
           obtain ⟨linked, entered⟩ := step_callee hs rfl
           have child := callees callee entered

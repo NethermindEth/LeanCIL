@@ -118,7 +118,8 @@ theorem runFaulting_extend {base linked : CIL.Program} (links : Links base linke
             | some child =>
               simp only [hc, links.found hc] at h ⊢
               refine resume_extend h fun ⟨childFrame, childMemory⟩ entered => ?_
-              cases hr : runFaulting (base[·]?) fuel callee 0 arguments childFrame [] childMemory with
+              cases hr :
+                  runFaulting (base[·]?) fuel callee 0 arguments childFrame [] childMemory with
               | ok childResult =>
                 obtain ⟨final, values⟩ := childResult
                 rw [ih callee 0 arguments childFrame [] childMemory (.ok (final, values))
@@ -129,7 +130,9 @@ theorem runFaulting_extend {base linked : CIL.Program} (links : Links base linke
                 simp only [hr] at entered
                 by_cases invalid : state.location.fault = .invalidState
                 · rw [recover_invalid (by simpa [FaultState.unwind] using invalid)] at entered
-                  exact absurd invalid (resolved _ entered.symm)
+                  simp only [Bind.bind, Except.bind] at entered
+                  exact absurd (by simpa [FaultState.unwind] using invalid)
+                    (resolved _ entered.symm)
                 · rw [ih callee 0 arguments childFrame [] childMemory (.error state)
                     (fun _ same => by cases same; exact invalid) hr]
                   exact resume_extend entered fun ⟨_, _, _, _⟩ resumed =>
@@ -142,7 +145,8 @@ theorem runFaulting_extend {base linked : CIL.Program} (links : Links base linke
             | some child =>
               simp only [hc, links.found hc] at h ⊢
               refine resume_extend h fun ⟨childFrame, childMemory⟩ entered => ?_
-              cases hr : runFaulting (base[·]?) fuel callee 0 arguments childFrame [] childMemory with
+              cases hr :
+                  runFaulting (base[·]?) fuel callee 0 arguments childFrame [] childMemory with
               | ok childResult =>
                 obtain ⟨final, values⟩ := childResult
                 rw [ih callee 0 arguments childFrame [] childMemory (.ok (final, values))
@@ -157,7 +161,9 @@ theorem runFaulting_extend {base linked : CIL.Program} (links : Links base linke
                 simp only [hr] at entered
                 by_cases invalid : state.location.fault = .invalidState
                 · rw [recover_invalid (by simpa [FaultState.unwind] using invalid)] at entered
-                  exact absurd invalid (resolved _ entered.symm)
+                  simp only [Bind.bind, Except.bind] at entered
+                  exact absurd (by simpa [FaultState.unwind] using invalid)
+                    (resolved _ entered.symm)
                 · rw [ih callee 0 arguments childFrame [] childMemory (.error state)
                     (fun _ same => by cases same; exact invalid) hr]
                   exact resume_extend entered fun ⟨_, _, _, _⟩ resumed =>

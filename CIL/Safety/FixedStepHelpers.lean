@@ -145,6 +145,7 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .ldelem_any _ | .stelem_any _ | .ldelema ..
   | .newobj _ | .ldfld _ | .ldflda _ | .stfld _ => .excluded
   | .cpblk _ | .initblk _ | .ldstr _ | .ldsfld _ | .ldsflda _ | .stsfld _ | .ldtoken _ => .excluded
+  | .leave _ | .endfinally => .excluded
   | .add | .sub => .reference
   | .clt_un | .cgt_un | .ceq => .reference
   | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference

@@ -56,7 +56,9 @@ theorem bodies_related (code : List CIL.Instruction) (links : List (Nat × CIL.L
       arguments := fun _ => Exists.intro _ (And.intro rfl rfl)
       declared := rfl
       environment := rfl
-      links := rfl }
+      links := rfl
+      sourceHandlers := rfl
+      targetHandlers := rfl }
     declarations :=
       .skip _ _ (by simp [InitializerFits]) (.keep _ _ (.skip _ _ (by simp [InitializerFits])
         (.keep _ _ (.skip _ _ (by simp [InitializerFits]) .nil))))
@@ -130,6 +132,7 @@ def targetProgram (code : List CIL.Instruction) : CIL.Program :=
 /-- The complete program satisfies the checked method correspondence, including its child. -/
 theorem programs_related (code : List CIL.Instruction) :
     ProgramRenaming (sourceProgram code) (targetProgram code) := by
+  refine ⟨by handler_free, ?_⟩
   intro method body found
   cases method with
   | zero =>
@@ -291,6 +294,7 @@ theorem inserted_ready (kind : CIL.LocalKind) (initial : CIL.Value)
 theorem inserted_related (kind : CIL.LocalKind) (initial : CIL.Value)
     (fits : InitializerFits kind initial) :
     ProgramRenaming [compact] [inserted kind initial] := by
+  refine ⟨by handler_free, ?_⟩
   intro method body found
   cases method with
   | zero =>
@@ -305,7 +309,9 @@ theorem inserted_related (kind : CIL.LocalKind) (initial : CIL.Value)
         arguments := fun _ => Exists.intro _ (And.intro rfl rfl)
         declared := rfl
         environment := rfl
-        links := rfl }
+        links := rfl
+        sourceHandlers := rfl
+        targetHandlers := rfl }
       declarations := .skip kind initial fits .nil
       sourceReady := ?_
       targetReady := inserted_ready kind initial fits

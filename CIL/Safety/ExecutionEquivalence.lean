@@ -1,6 +1,6 @@
 import CIL.Safety.StaticMemoryEquivalence
 import CIL.Safety.NativeMethodTableEquivalence
-import CIL.Safety.Execution
+import CIL.Safety.HandlerSteps
 import CIL.Safety.StackAllocationEquivalence
 
 /-!
@@ -118,6 +118,8 @@ inductive FrameActionEquivalent : FrameAction → FrameAction → Prop where
         (.construct callee args rest frame temporary kind n)
   | returned {m n : Memory} (same : m.Equivalent n) (values) :
       FrameActionEquivalent (.returned values m) (.returned values n)
+  | raise {m n : Memory} (same : m.Equivalent n) (location object frame) :
+      FrameActionEquivalent (.raise location object frame m) (.raise location object frame n)
 
 /-- Managed dispatch observes only stable identities and equivalent checked arguments. -/
 theorem Memory.Equivalent.calliStep {m n : Memory} (same : m.Equivalent n)
@@ -429,6 +431,30 @@ theorem Memory.Equivalent.modelStep {m n : Memory} (same : m.Equivalent n)
     | split
 #print axioms Memory.Equivalent.modelStep
 
+/-- `leave` reads only the clauses and frame, and carries memory unchanged. -/
+theorem Memory.Equivalent.leaveStep {m n : Memory} (same : m.Equivalent n) (body : CIL.Method)
+    (pc target : Nat) (frame : Frame) :
+    ResultEquivalent FrameActionEquivalent (leaveStep body pc target frame m)
+      (leaveStep body pc target frame n) := by
+  unfold CIL.Safety.leaveStep CIL.Safety.leaveFrom
+  repeat' first | exact .error _ | exact .ok (.next same _ _ _) | split
+
+#print axioms Memory.Equivalent.leaveStep
+
+/-- `endfinally` reads only the clauses and frame, and carries memory unchanged. -/
+theorem Memory.Equivalent.endFinallyStep {m n : Memory} (same : m.Equivalent n)
+    (body : CIL.Method) (pc : Nat) (frame : Frame) :
+    ResultEquivalent FrameActionEquivalent (endFinallyStep body pc frame m)
+      (endFinallyStep body pc frame n) := by
+  unfold CIL.Safety.endFinallyStep CIL.Safety.leaveFrom
+  repeat' first
+    | exact .error _
+    | exact .ok (.next same _ _ _)
+    | exact .ok (.raise same _ _ _)
+    | split
+
+#print axioms Memory.Equivalent.endFinallyStep
+
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -444,6 +470,8 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     same.objectAboveNull, same.virtualTarget, same.objectTest, same.throwFault]
   all_goals repeat' first
     | exact same.calliStep _ _ _ _ _
+    | with_reducible exact same.leaveStep _ _ _ _
+    | with_reducible exact same.endFinallyStep _ _ _
     | unfold returnFrom
     | unfold localAllocation
     | unfold initializeSpanHome
@@ -585,23 +613,24 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
          obtain ⟨rfl, stored⟩ := related
          exact .ok (.construct stored _ _ _ _ _ _))
 
-/-- Equivalent memories give the same run outcome: the same fault, or equivalent final
-    memory with the same returned values. -/
+/-- Equivalent memories give a program without exception clauses the same run outcome: the same
+    fault, or equivalent final memory with the same returned values. -/
 theorem Memory.Equivalent.run {m n : Memory} (same : m.Equivalent n)
     (program : CIL.Program) (fuel method pc : Nat) (args : List Value)
-    (frame : Frame) (stack : List Value) :
+    (frame : Frame) (stack : List Value) (free : HandlerFree program := by handler_free) :
     ResultEquivalent MemoryFirstEquivalent (run program fuel method pc args frame stack m)
       (run program fuel method pc args frame stack n) := by
   induction fuel generalizing m n method pc args frame stack with
   | zero => exact .error _
   | succ fuel ih =>
-    simp only [CIL.Safety.run_succ]
+    simp only [CIL.Safety.run_succ _ _ _ _ _ _ _ _ (free.unprotected _ _)]
     split <;> try exact .error _
     split <;> try exact .error _
     apply ResultEquivalent.bind ((same.step _ _ _ _ _ _).mapError _)
     intro left right related
     cases related with
     | next equivalent target values nextFrame => exact ih equivalent _ _ _ _ _
+    | raise equivalent location object raised => exact .error _
     | returned equivalent values =>
       have leftFrame := equivalent.leaveFrame frame
       simp only [leftFrame.checkedValues]
@@ -656,8 +685,11 @@ theorem Memory.Equivalent.run {m n : Memory} (same : m.Equivalent n)
         intro value
         exact ih finished _ _ _ _ _
 
+/-- Equivalent memories give an invocation of a program without exception clauses the same
+    outcome. -/
 theorem Memory.Equivalent.invoke {m n : Memory} (same : m.Equivalent n)
-    (program : CIL.Program) (fuel method : Nat) (args : List Value) :
+    (program : CIL.Program) (fuel method : Nat) (args : List Value)
+    (free : HandlerFree program := by handler_free) :
     ResultEquivalent MemoryFirstEquivalent (invoke program fuel method args m)
       (invoke program fuel method args n) := by
   rw [CIL.Safety.invoke_eq, CIL.Safety.invoke_eq]
@@ -673,11 +705,12 @@ theorem Memory.Equivalent.invoke {m n : Memory} (same : m.Equivalent n)
   exact entered.run _ _ _ _ _ _ _
 
 /-- Replacing the reference `writeAlwaysPrepend` by `write` preserves every subsequent
-    checked execution, including its exact located failure or returned values. -/
+    checked execution of a program without exception clauses, including its exact located
+    failure or returned values. -/
 theorem write_run_equivalent (memory : Memory) (reference : Reference)
     (bytes : List (BitVec 8)) (alignment : Nat) (locate : Fault → LocatedFault)
     (program : CIL.Program) (fuel method pc : Nat) (args : List Value)
-    (frame : Frame) (stack : List Value) :
+    (frame : Frame) (stack : List Value) (free : HandlerFree program := by handler_free) :
     ResultEquivalent MemoryFirstEquivalent
       (((write memory reference bytes alignment).mapError locate).bind fun updated =>
         run program fuel method pc args frame stack updated)

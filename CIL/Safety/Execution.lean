@@ -1243,6 +1243,17 @@ theorem HandlerFree.unprotected {program : CIL.Program} (free : HandlerFree prog
 
 #print axioms HandlerFree.unprotected
 
+/-- A found body that no clause protects at `pc` leaves a fault there to the caller. -/
+theorem unprotected_of_found {program : CIL.Program} {method pc : Nat} {body : CIL.Method}
+    (found : program[method]? = some body) (unprotected : body.unprotectedAt pc = true) :
+    (program[method]?).all (·.unprotectedAt pc) = true := by
+  simp [found, unprotected]
+
+#print axioms unprotected_of_found
+
+/-- Discharges `body.unprotectedAt pc = true` from a premise in scope or by evaluation. -/
+macro "unprotected_at" : tactic => `(tactic| first | assumption | rfl)
+
 /-- `runWith` takes one step at a pc of a method no exception clause protects. -/
 theorem runWith_succ (lookup : Nat → Option CIL.Method) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory : Memory)

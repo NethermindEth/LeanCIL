@@ -89,6 +89,8 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
          exact virtualTarget_mem ‹_›)
     | contradiction
     | solve | (obtain ⟨_, _, _, rfl, _⟩ := modelStep_frame h; cases enters)
+    | solve | (obtain ⟨_, ⟨_, rfl⟩ | ⟨_, _, rfl⟩⟩ := leaveStep_resumes h <;> cases enters)
+    | solve | (obtain ⟨_, ⟨_, rfl⟩ | ⟨_, _, rfl⟩⟩ := endFinallyStep_resumes h <;> cases enters)
     | (obtain ⟨_, _, h⟩ := except_bind_ok h)
     | split at h
 #print axioms step_callee
@@ -113,7 +115,9 @@ theorem step_managed_tail_action {body : CIL.Method} {signature : CIL.ManagedSig
 theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {target : Nat} {stack' : List Value}
     {frame' : Frame} {m' : Memory}
-    (h : step body op pc args frame stack m = .ok (.next target stack' frame' m')) :
+    (h : step body op pc args frame stack m = .ok (.next target stack' frame' m'))
+    (free : op.readsClauses = true → body.handlers = [] := by
+      first | assumption | (intro reads; cases reads)) :
     (op.continues = true ∧ target = pc + 1) ∨ target ∈ op.targets := by
   refine Decidable.byContradiction fun outside => ?_
   -- Moving only `target` fixes `op` and its fallthrough, so the same step would also resume
@@ -123,7 +127,8 @@ theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {
     ite_eq_right fun e => outside (.inr (by rw [← e]; exact member))
   have moved := step_relabel op body body r pc pc args frame stack m _
     ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl,
-      fun continues => ite_eq_right fun e => outside (.inl ⟨continues, e.symm⟩)⟩ h
+      fun continues => ite_eq_right fun e => outside (.inl ⟨continues, e.symm⟩),
+      fun reads => ⟨free reads, free reads⟩⟩ h
   rw [same, h] at moved
   simp only [FrameAction.relabel, Except.ok.injEq, FrameAction.next.injEq] at moved
   have : r target = target + 1 := ite_eq_left rfl

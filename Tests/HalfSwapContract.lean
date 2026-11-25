@@ -37,7 +37,7 @@ theorem unpack (data : Nat → BitVec 8) (start : Nat) :
 #print axioms unpack
 
 /-- After the destination reference is saved, the vector local owns allocation one. -/
-def saved : Frame := ⟨1, [.root (some (.address ⟨0, 0⟩)), .bytes .vector128 ⟨1, 0⟩], [1], 0⟩
+def saved : Frame := ⟨1, [.root (some (.address ⟨0, 0⟩)), .bytes .vector128 ⟨1, 0⟩], [1], 0, []⟩
 
 /-- Contents after a checked write into an already readable window. -/
 def put (m : Memory) (id offset : Nat) (block : List (BitVec 8)) : Memory :=

@@ -42,6 +42,7 @@ example : linked.map (fun body => body.links.flatMap (·.2.callees)) =
 theorem root_composed : rootContract.Holds linked root :=
   composed (specs := [addContract.relocatable]) (root_given.mono fun _ met => met 0 (by decide)) rfl
     (fun j bound => by cases j with | zero => exact addLib_closed | succ => simp at bound)
+    (fun j bound => by cases j with | zero => handler_free | succ => simp at bound)
     (fun j bound _ => by cases j with | zero => exact add_holds | succ => simp at bound)
 
 def relocatedCompletion : CIL.Program :=
@@ -121,6 +122,7 @@ example : linked.map (fun body => body.links.flatMap (·.2.callees)) =
 theorem root_composed : rootContract.Holds linked root :=
   composed (specs := [percentContract.relocatable]) (root_given.mono fun _ met => met 0 (by decide)) rfl
     (fun j bound => by cases j with | zero => exact percentLib_closed | succ => simp at bound)
+    (fun j bound => by cases j with | zero => handler_free | succ => simp at bound)
     (fun j bound _ => by cases j with | zero => exact percent_holds | succ => simp at bound)
 
 def relocatedCompletion : CIL.Program :=

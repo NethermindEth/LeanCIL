@@ -1,5 +1,6 @@
 import CIL.Safety.FuelLemmas
 import CIL.Safety.LiveValues
+import CIL.Safety.HandlerSteps
 
 /-!
 # Composing a call with its caller
@@ -38,8 +39,12 @@ theorem run_call_of_invoke {program : CIL.Program} {fuel method pc callee : Nat}
       | ok entered =>
         obtain ⟨childFrame, childMemory⟩ := entered
         simp only [invoke_eq, hb, ha, he, Except.mapError, Bind.bind, Except.bind] at child
-        simp only [run_succ, methodFound, instructionFound, stepped, hb, he, child,
-          continuation, Except.mapError, Bind.bind, Except.bind]
+        have childRun := runFaulting_of_run_ok child
+        unfold run runWith at continuation ⊢
+        rw [runFaulting]
+        simp only [methodFound, instructionFound, stepped, hb, he, childRun,
+          Except.mapError, Bind.bind, Except.bind]
+        exact continuation
 
 /-- Independently sufficient budgets combine without requiring equal proof fuel. -/
 theorem run_call_exists {program : CIL.Program} {method pc callee : Nat}

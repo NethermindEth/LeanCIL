@@ -65,6 +65,66 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.Fe
   all_goals try simp only [agreement]
   all_goals simp only [baseStep]
 
+/-- Handlers read the clauses of a body, never its profile. -/
+theorem recover_profile (method : Nat) (body : CIL.Method) (profile : CIL.FeatureProfile)
+    (pc : Nat) (frame : Frame) (memory : Memory) (state : FaultState) :
+    recover method { body with profile } pc frame memory state =
+      recover method body pc frame memory state := rfl
+
+#print axioms recover_profile
+
+/-- Running a reprofiled program stops in the same state or succeeds alike under any two
+    profiles the program agrees on. -/
+theorem runFaulting_reprofile_eq (program : CIL.Program) (p q : CIL.FeatureProfile)
+    (agreement : program.ProfileAgreement p q) (fuel method pc : Nat) (args : List Value)
+    (frame : Frame) (stack : List Value) (memory : Memory) :
+    runFaulting ((CIL.reprofile program p)[·]?) fuel method pc args frame stack memory =
+      runFaulting ((CIL.reprofile program q)[·]?) fuel method pc args frame stack memory := by
+  have lookup (profile : CIL.FeatureProfile) {index : Nat} {body : CIL.Method}
+      (found : program[index]? = some body) :
+      (CIL.reprofile program profile)[index]? = some { body with profile } := by
+    simp [CIL.reprofile_lookup, found]
+  have missing (profile : CIL.FeatureProfile) {index : Nat} (absent : program[index]? = none) :
+      (CIL.reprofile program profile)[index]? = none := by
+    simp [CIL.reprofile_lookup, absent]
+  induction fuel generalizing method pc args frame stack memory with
+  | zero => rfl
+  | succ fuel ih =>
+    cases hb : program[method]? with
+    | none => simp only [runFaulting, missing p hb, missing q hb]
+    | some body =>
+      cases ho : body.code[pc]? with
+      | none => simp only [runFaulting, lookup p hb, lookup q hb, ho]
+      | some op =>
+        have same := step_profile_eq body op p q
+          (agreement body (List.mem_of_getElem? hb) op (List.mem_of_getElem? ho))
+          pc args frame stack memory
+        simp only [runFaulting, lookup p hb, lookup q hb, ho, same, recover_profile]
+        cases haction : step { body with profile := q } op pc args frame stack memory with
+        | error fault => simp only [ih]
+        | ok action =>
+          cases action with
+          | next target values frame memory => simp only [ih]
+          | raise location object frame memory => simp only [ih]
+          | returned values memory => rfl
+          | tailCall callee arguments memory =>
+            cases child : program[callee]? with
+            | none => simp only [missing p child, missing q child]
+            | some childBody =>
+              simp only [lookup p child, lookup q child, enterFrame_profile, ih]
+          | call callee arguments rest memory =>
+            cases child : program[callee]? with
+            | none => simp only [missing p child, missing q child]
+            | some childBody =>
+              simp only [lookup p child, lookup q child, enterFrame_profile, ih]
+          | construct callee arguments rest frame temporary kind memory =>
+            cases child : program[callee]? with
+            | none => simp only [missing p child, missing q child]
+            | some childBody =>
+              simp only [lookup p child, lookup q child, enterFrame_profile, ih]
+
+#print axioms runFaulting_reprofile_eq
+
 /-- Running a reprofiled program gives the same result, fault or success, under any two
     profiles the program agrees on. -/
 theorem run_reprofile_eq (program : CIL.Program) (p q : CIL.FeatureProfile)
@@ -72,48 +132,8 @@ theorem run_reprofile_eq (program : CIL.Program) (p q : CIL.FeatureProfile)
     (frame : Frame) (stack : List Value) (memory : Memory) :
     run (CIL.reprofile program p) fuel method pc args frame stack memory =
       run (CIL.reprofile program q) fuel method pc args frame stack memory := by
-  induction fuel generalizing method pc args frame stack memory with
-  | zero => rfl
-  | succ fuel ih =>
-    cases hb : program[method]? with
-    | none => simp [run_succ, hb]
-    | some body =>
-      cases ho : body.code[pc]? with
-      | none => simp [run_succ, hb, ho]
-      | some op =>
-        have same := step_profile_eq body op p q
-          (agreement body (List.mem_of_getElem? hb) op (List.mem_of_getElem? ho))
-          pc args frame stack memory
-        simp only [run_succ, CIL.reprofile_lookup, hb, Option.map_some, ho]
-        rw [same]
-        cases haction : step { body with profile := q } op pc args frame stack memory with
-        | error fault => rfl
-        | ok action =>
-          cases action with
-          | next target values frame memory =>
-            simpa only [Except.mapError, Bind.bind, Except.bind] using
-              ih method target args frame values memory
-          | returned values memory => rfl
-          | tailCall callee arguments memory =>
-            cases child : program[callee]? with
-            | none => simp [Except.mapError, Bind.bind, Except.bind, child]
-            | some childBody =>
-              simp only [Except.mapError, Bind.bind, Except.bind, child, Option.map_some,
-                enterFrame_profile, ih]
-          | call callee arguments rest memory =>
-            cases child : program[callee]? with
-            | none => simp [Except.mapError, Bind.bind, Except.bind, child]
-            | some childBody =>
-              simp only [Except.mapError, Bind.bind, Except.bind, child, Option.map_some,
-                enterFrame_profile]
-              simp only [ih]
-          | construct callee arguments rest frame temporary kind memory =>
-            cases child : program[callee]? with
-            | none => simp [Except.mapError, Bind.bind, Except.bind, child]
-            | some childBody =>
-              simp only [Except.mapError, Bind.bind, Except.bind, child, Option.map_some,
-                enterFrame_profile]
-              simp only [ih]
+  unfold run runWith
+  rw [runFaulting_reprofile_eq program p q agreement]
 
 theorem invoke_reprofile_eq (program : CIL.Program) (p q : CIL.FeatureProfile)
     (agreement : program.ProfileAgreement p q) (fuel method : Nat)

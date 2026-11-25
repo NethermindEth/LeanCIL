@@ -26,12 +26,8 @@ theorem run_result_valid (program : CIL.Program) (fuel method pc : Nat)
     (values : List Value)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     ValuesValid final values := by
-  have trace := run_success_trace program fuel method pc args frame stack m final values h
-  clear h
-  induction trace with
-  | returned _ checked => exact (checkedValues_valid _ _ _ checked).2
-  | next _ _ ih | call _ _ _ _ _ _ _ ih | construct _ _ _ _ _ _ _ _ ih
-  | tailCall _ _ _ _ _ _ _ _ ih => exact ih
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, checked⟩ := (run_ok_trace h).returnedBy rfl
+  exact (checkedValues_valid _ _ _ checked).2
 
 theorem invoke_result_valid (program : CIL.Program) (fuel method : Nat)
     (args values : List Value) (m final : Memory)
@@ -48,12 +44,8 @@ theorem run_result_not_spanHome (program : CIL.Program) (fuel method pc : Nat)
     (values : List Value)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     ∀ value ∈ values, value.isHome = false := by
-  have trace := run_success_trace program fuel method pc args frame stack m final values h
-  clear h
-  induction trace with
-  | returned _ checked => exact checkedValues_not_spanHome checked
-  | next _ _ ih | call _ _ _ _ _ _ _ ih | construct _ _ _ _ _ _ _ _ ih
-  | tailCall _ _ _ _ _ _ _ _ ih => exact ih
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, checked⟩ := (run_ok_trace h).returnedBy rfl
+  exact checkedValues_not_spanHome checked
 
 #print axioms run_result_not_spanHome
 

@@ -418,8 +418,9 @@ theorem framed_opaque_call {program : CIL.Program} {memory : Memory} (value : CI
       { locals := [], returnsValue := true, code := [.call (Tests.callee 0) {}, .ret],
         links := [(0, .direct 1)] })
     (helper : WP (Execution (fun fuel => invoke program fuel 1 [] memory))
-      (fun result => result.2 = [.scalar (.i32 value)])) :
-    WP (Execution (fun fuel => run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory))
+      (fun result => result.2 = [.scalar (.i32 value)]))
+      (free : HandlerFree program := by handler_free) :
+    WP (Execution (fun fuel => run program fuel 0 0 [] ⟨0, [], [], 0, []⟩ [] memory))
       (fun result => FrameInvariants program memory result.1 ∧
         AllocationExtension memory result.1 ∧ result.2 = [.scalar (.i32 value)]) := by
   apply WP.call_framed found rfl (by cil_checked_step []) formed helper

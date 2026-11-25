@@ -1320,10 +1320,10 @@ caller's `HoldsGiven` for the concrete linked program from contracts proved on e
 ```lean extracted
 theorem root_composed : rootContract.Holds (link Extracted.program [addLib]) root :=
   composed (specs := [addContract.relocatable]) (root_given.mono fun _ met => met 0 (by decide)) rfl
-    closed proved
+    closed free proved
 ```
 
-Here `closed` and `proved` are each library's `Closed` and `Holds` facts. `Imports app specs` names
+Here `closed`, `free` and `proved` are each library's `Closed`, `HandlerFree` and `Holds` facts. `Imports app specs` names
 one `Relocatable` property per slot, so libraries may export contracts of different types. Each
 library exports only its index-0 method. Static identities are not renamed: two linked libraries
 that use the same identity for different bytes fault `invalidState` at the second static access, so

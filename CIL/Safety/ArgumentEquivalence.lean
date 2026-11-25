@@ -1,4 +1,4 @@
-import CIL.Safety.Execution
+import CIL.Safety.HandlerSteps
 
 /-!
 # Unobserved arguments
@@ -37,6 +37,28 @@ theorem step_arguments_eq (body : CIL.Method) (op : CIL.Instruction) (pc : Nat)
           first | rfl | (cases value <;> first | rfl | (cases next <;> rfl) |
             (rename_i reference; cases reference <;> first | rfl | (cases next <;> rfl)))
 
+/-- Changing unobserved arguments preserves every stopped state and result: handlers read the
+    clauses and memory, never the arguments. -/
+theorem runFaulting_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Method)
+    (lookup : program[method]? = some body) (args other : List Value)
+    (agreement : ∀ index, CIL.Instruction.ldarg index ∈ body.code → args[index]? = other[index]?)
+    (fuel pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
+    runFaulting (program[·]?) fuel method pc args frame stack memory =
+      runFaulting (program[·]?) fuel method pc other frame stack memory := by
+  induction fuel generalizing pc frame stack memory with
+  | zero => rfl
+  | succ fuel ih =>
+    cases fetched : body.code[pc]? with
+    | none => simp only [runFaulting, lookup, fetched]
+    | some op =>
+      have same := step_arguments_eq body op pc args other frame stack memory (by
+        intro index equal
+        subst op
+        exact agreement index (List.mem_of_getElem? fetched))
+      simp only [runFaulting, lookup, fetched, same, ih]
+
+#print axioms runFaulting_arguments_eq
+
 /-- Changing unobserved arguments preserves every checked execution step.
     Child calls receive the same evaluated stack arguments on both sides. -/
 theorem run_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Method)
@@ -45,30 +67,8 @@ theorem run_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Meth
     (fuel pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
     run program fuel method pc args frame stack memory =
       run program fuel method pc other frame stack memory := by
-  induction fuel generalizing pc frame stack memory with
-  | zero => rfl
-  | succ fuel ih =>
-    cases fetched : body.code[pc]? with
-    | none => simp [run_succ, lookup, fetched]
-    | some op =>
-      have same := step_arguments_eq body op pc args other frame stack memory (by
-        intro index equal
-        subst op
-        exact agreement index (List.mem_of_getElem? fetched))
-      simp only [run_succ, lookup, fetched]
-      rw [same]
-      cases haction : step body op pc other frame stack memory with
-      | error fault => rfl
-      | ok action =>
-        cases action with
-        | next target values frame memory =>
-          simpa only [Except.mapError, Bind.bind, Except.bind] using ih target frame values memory
-        | returned values memory => rfl
-        | tailCall callee arguments memory => rfl
-        | call callee arguments rest memory =>
-          simp only [Except.mapError, Bind.bind, Except.bind, ih]
-        | construct callee arguments rest frame temporary kind memory =>
-          simp only [Except.mapError, Bind.bind, Except.bind, ih]
+  unfold run runWith
+  rw [runFaulting_arguments_eq program method body lookup args other agreement]
 
 /-- `invoke` agrees on two argument lists that are both checked, agree where the body loads
     them, and set up the same frame. -/

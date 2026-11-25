@@ -161,6 +161,7 @@ theorem StepEffect.classesConsistent {catalog : List RuntimeType} {body : CIL.Me
   | localHome allocated stored =>
     exact consistent.kept ((allocateHome_objectsKept allocated).trans
       (storeLocal_objectsKept stored))
+  | resume => exact consistent
 
 #print axioms StepEffect.classesConsistent
 
@@ -192,27 +193,32 @@ theorem leaveFrame_preserves_classes {catalog : List RuntimeType} (frame : Frame
     (leaveFrame frame m).ClassesConsistent catalog :=
   consistent.kept (expireAll_objectsKept frame.owned m)
 
+/-- Every run of a program whose object sites agree with the catalog, through caught faults,
+    nested calls and frame exits, keeps agreement in the memory it ends in and in both memories
+    a fault leaves. -/
+theorem OutcomeTrace.classes {catalog : List RuntimeType} {program : CIL.Program}
+    {fuel method pc : Nat} {args : List Value} {frame : Frame} {stack : List Value}
+    {memory : Memory} {outcome : Except FaultState (Memory × List Value)}
+    (sites : ObjectSitesConsistent catalog program)
+    (trace : OutcomeTrace program fuel method pc args frame stack memory outcome)
+    (consistent : memory.ClassesConsistent catalog) :
+    OutcomeHolds (fun after => after.ClassesConsistent catalog) outcome :=
+  trace.preserves (fun found fetched stepped consistent =>
+    programStep_preserves_classes sites consistent ⟨_, _, found, fetched, stepped⟩)
+    (fun frame _ consistent => leaveFrame_preserves_classes frame consistent)
+    (fun enter consistent => consistent.kept (enterFrame_objectsKept enter)) consistent
+
+#print axioms OutcomeTrace.classes
+
 /-- A successful run of a program whose object sites agree with the catalog, including every
-    nested call and frame exit, keeps agreement from its starting memory. -/
+    nested call, caught fault and frame exit, keeps agreement from its starting memory. -/
 theorem run_preserves_classes {catalog : List RuntimeType} {program : CIL.Program}
     {fuel method pc : Nat} {args : List Value} {frame : Frame} {stack : List Value}
     {m final : Memory} {values : List Value} (sites : ObjectSitesConsistent catalog program)
     (consistent : m.ClassesConsistent catalog)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     final.ClassesConsistent catalog := by
-  have trace := run_success_trace program fuel method pc args frame stack m final values h
-  clear h
-  induction trace with
-  | next step _ ih => exact ih (programStep_preserves_classes sites consistent step)
-  | returned step _ =>
-    exact leaveFrame_preserves_classes _ (programStep_preserves_classes sites consistent step)
-  | tailCall step _ _ _ _ enter _ _ ih =>
-    exact ih ((leaveFrame_preserves_classes _
-      (programStep_preserves_classes sites consistent step)).kept (enterFrame_objectsKept enter))
-  | call step _ enter _ _ _ childIH ih
-  | construct step _ enter _ _ _ _ childIH ih =>
-    exact ih (childIH ((programStep_preserves_classes sites consistent step).kept
-      (enterFrame_objectsKept enter)))
+  exact (run_ok_trace h).classes sites consistent
 
 #print axioms run_preserves_classes
 

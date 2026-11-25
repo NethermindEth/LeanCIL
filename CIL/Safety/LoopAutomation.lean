@@ -324,7 +324,7 @@ def loopReadsReferences (op : Expr) (step : MVarId) : StateT LoopLocalIndex Meta
       let some literal ← literalNat? indexTerm | return true
       index := literal
     let frame ← whnfR frame
-    let some #[_, locals, _, _] := argumentsOf? frame ``Frame.mk 4 | return true
+    let some #[_, locals, _, _, _] := argumentsOf? frame ``Frame.mk 5 | return true
     let some slot ← loopLocalAt locals index | return true
     let slot ← whnfR slot
     let some #[kind, _] := argumentsOf? slot ``LocalSlot.bytes 2 | return true
@@ -350,7 +350,7 @@ def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) :
     let some index ← (if homed then loopHomeSlot? body indexTerm else literalNat? indexTerm)
       | return true
     let frame ← whnfR frame
-    let some #[_, locals, _, _] := argumentsOf? frame ``Frame.mk 4 | return true
+    let some #[_, locals, _, _, _] := argumentsOf? frame ``Frame.mk 5 | return true
     let some slot ← loopLocalAt locals index | return true
     unless (← whnfR slot).isAppOf ``LocalSlot.bytes do return true
   else unless

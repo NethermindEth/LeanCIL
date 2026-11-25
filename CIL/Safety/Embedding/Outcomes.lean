@@ -64,7 +64,8 @@ theorem MethodContract.Holds.of_refines {Input Output : Type} {c : MethodContrac
 theorem _root_.CIL.MethodEmbeds.method_holds {Input Output : Type}
     {c : MethodContract Input Output} {program : CIL.Program} {index : Nat} {expected : CIL.Method}
     (embeds : MethodEmbeds program index expected) {method : Nat}
-    (holds : c.Holds (program.set index expected) method) : c.Holds program method := by
+    (holds : c.Holds (program.set index expected) method)
+    (free : HandlerFree program := by handler_free) : c.Holds program method := by
   obtain ⟨_, refines⟩ := embeds.refines
   exact holds.of_refines refines
 
@@ -76,7 +77,8 @@ theorem _root_.CIL.MethodEmbeds.method_holds {Input Output : Type}
 theorem _root_.CIL.MethodEmbeds.raises {program : CIL.Program} {index : Nat}
     {expected : CIL.Method} (embeds : MethodEmbeds program index expected) {method : Nat}
     {args : List Value} {memory : Memory} {exception : ExceptionType}
-    (raised : Raises (program.set index expected) method args memory exception) :
+    (raised : Raises (program.set index expected) method args memory exception)
+    (free : HandlerFree program := by handler_free) :
     Raises program method args memory exception := by
   obtain ⟨_, refines⟩ := embeds.refines
   exact raised.of_refines refines
@@ -85,7 +87,8 @@ theorem _root_.CIL.MethodEmbeds.raises {program : CIL.Program} {index : Nat}
 theorem _root_.CIL.MethodEmbeds.holds {Input Output : Type} {c : OutcomeContract Input Output}
     {program : CIL.Program} {index : Nat} {expected : CIL.Method}
     (embeds : MethodEmbeds program index expected) {method : Nat}
-    (holds : c.Holds (program.set index expected) method) : c.Holds program method := by
+    (holds : c.Holds (program.set index expected) method)
+    (free : HandlerFree program := by handler_free) : c.Holds program method := by
   obtain ⟨_, refines⟩ := embeds.refines
   exact holds.of_refines refines
 

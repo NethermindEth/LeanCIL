@@ -67,7 +67,8 @@ theorem multiply_updates_mixed_frame {program : CIL.Program} {callee : Nat}
     {known : Nat → Option CIL.Value} {low : Reference}
     (context : LoopFrame [] caller current kinds slots known)
     (found : program[callee]? = some multiplyBody)
-    (slot : slots[0]? = some (.bytes .word64 low)) (left right : CIL.W64) :
+    (slot : slots[0]? = some (.bytes .word64 low)) (left right : CIL.W64)
+    (free : HandlerFree program := by handler_free) :
     WP (Execution (fun fuel => invoke program fuel callee
       [.scalar (.i64 left), .scalar (.i64 right), .reference (.address low)] current))
       (fun (final, values) => values = [.scalar (.i64 (CIL.WideMultiply.high64 left right))] ∧

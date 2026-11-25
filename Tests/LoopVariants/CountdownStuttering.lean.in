@@ -37,5 +37,6 @@ theorem correctness : countdownContract.Refuted Extracted.program 0 := by
       .ok (.bytes .word32 home, updated) from wrote]
     rfl
   have placed : Extracted.method0.code[6]? = some (.stloc 0) := rfl
-  simp only [run_succ, Extracted.program_method0, placed, last, Except.mapError,
-    Bind.bind, Except.bind]
+  simp only [run_succ _ _ _ _ _ _ _ _
+      (unprotected_of_handlers_nil Extracted.program_method0 rfl 6),
+    Extracted.program_method0, placed, last, Except.mapError, Bind.bind, Except.bind]

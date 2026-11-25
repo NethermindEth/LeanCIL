@@ -65,7 +65,8 @@ def Frame.OwnedAbove (frame : Frame) (watermark : Nat) : Prop :=
     frame and impose nothing. -/
 def FrameAction.OwnedAbove (action : FrameAction) (watermark : Nat) : Prop :=
   match action with
-  | .next _ _ frame _ | .construct _ _ _ frame _ _ _ => frame.OwnedAbove watermark
+  | .next _ _ frame _ | .construct _ _ _ frame _ _ _ | .raise _ _ frame _ =>
+    frame.OwnedAbove watermark
   | .call _ _ _ _ | .tailCall _ _ _ | .returned _ _ => True
 
 /-- A step keeps the current frame above a watermark that memory has already passed: any home
@@ -88,7 +89,7 @@ theorem step_ownedAbove (body : CIL.Method) (operation : CIL.Instruction) (pc : 
         rcases List.mem_cons.mp member with rfl | member
         · exact (allocateHome_fresh _ _ _ _ _ allocated).2.1 ▸ bound
         · exact old id member
-    | arrayAllocation | objectAllocation | memory | store => exact old
+    | arrayAllocation | objectAllocation | memory | store | resume => exact old
     | valueHome allocated _ | localHome allocated _ =>
       intro id member
       rcases List.mem_cons.mp member with rfl | member

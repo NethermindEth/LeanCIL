@@ -99,7 +99,7 @@ theorem headerDisplacement (before : Safety.Memory) (input output : ManagedRefer
     (moved : referenceSubtract before input (.i32 4) = .ok output)
     (valid : checkedValue before (.reference output) = .ok (.reference output)) :
     invoke [method] 5 0 [.reference input] before = .ok (before,[.reference output]) := by
-  let frame : Safety.Frame := ⟨before.nextIdentity,[],[],0⟩
+  let frame : Safety.Frame := ⟨before.nextIdentity,[],[],0,[]⟩
   apply invoke_of_run (body := method) (frame := frame) (entered := before) rfl
   · simp [List.mapM_cons, List.mapM_nil, live, bind, Except.bind, pure, Except.pure]
   · with_unfolding_all rfl

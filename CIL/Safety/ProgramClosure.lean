@@ -471,7 +471,8 @@ open CIL.Extraction
     the program runs the library's method exactly as the library does. -/
 theorem MethodContract.Holds.restrict {Input Output : Type} {c : MethodContract Input Output}
     {lib linked : CIL.Program} {f : Nat → Nat} {method : Nat} (holds : c.Holds linked (f method))
-    (closed : Closed lib) (relocates : RelocatesInto lib linked f) (bound : method < lib.length) :
+    (closed : Closed lib) (relocates : RelocatesInto lib linked f) (bound : method < lib.length)
+    (free : HandlerFree lib := by handler_free) :
     c.Holds lib method := by
   intro input initial permitted
   obtain ⟨fuel, ⟨final, values⟩, invoked, framed, returns⟩ := holds input initial permitted
@@ -573,7 +574,8 @@ theorem DecodedSummary.relocate {Input Output : Type} {contract : MethodContract
     (record : ∀ item, libEvidence[index]? = some item → ∃ moved,
       targetEvidence[f index]? = some moved ∧ moved.assembly = item.assembly ∧
         moved.original = item.original ∧ moved.arguments = item.arguments ∧
-        moved.closed = item.closed ∧ moved.BodyBound) :
+        moved.closed = item.closed ∧ moved.BodyBound)
+    (free : HandlerFree lib := by handler_free) :
     DecodedSummary target targetEvidence profile environment (f index) pin token arguments
       models contract := by
   have inside : index < lib.length := by

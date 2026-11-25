@@ -35,9 +35,9 @@ private theorem loadWithBudget (budget : Option Nat) (text : String) (m : Safety
 private theorem startAtBranch (name message : String) (value : W32) (m : Safety.Memory) :
     invoke (program name message) 66 0 [.scalar (.i32 value)] m =
     run (program name message) 63 0 (if value ≤ 100 then 7 else 3) [.scalar (.i32 value)]
-      ⟨m.nextIdentity, [], [], 0⟩ [] m := by
+      ⟨m.nextIdentity, [], [], 0, []⟩ [] m := by
   have first : invoke (program name message) 66 0 [.scalar (.i32 value)] m =
-      run (program name message) 64 0 2 [.scalar (.i32 value)] ⟨m.nextIdentity, [], [], 0⟩
+      run (program name message) 64 0 2 [.scalar (.i32 value)] ⟨m.nextIdentity, [], [], 0, []⟩
         [.scalar (.i32 100), .scalar (.i32 value)] m := by percent_rfl
   rw [first]
   apply run_next (body := caller name message) (op := .ble_un 7) rfl (by percent_rfl)
@@ -45,7 +45,7 @@ private theorem startAtBranch (name message : String) (value : W32) (m : Safety.
 #print axioms startAtBranch
 
 private theorem returned (name message : String) (value : W32) (m : Safety.Memory) :
-    run (program name message) 63 0 7 [.scalar (.i32 value)] ⟨m.nextIdentity, [], [], 0⟩
+    run (program name message) 63 0 7 [.scalar (.i32 value)] ⟨m.nextIdentity, [], [], 0, []⟩
       [] m = .ok (m, [.scalar (.i32 value)]) := by percent_rfl
 #print axioms returned
 
@@ -86,7 +86,7 @@ theorem initializedPercentAtBudget (budget : Option Nat) (name message : String)
     exact returned _ _ _ _
   simp only [within, ite_false]
   let args : List Safety.Value := [.scalar (.i32 value)]
-  let activation : Safety.Frame := ⟨final.nextIdentity, [], [], 0⟩
+  let activation : Safety.Frame := ⟨final.nextIdentity, [], [], 0, []⟩
   change run (program name message) 63 0 3 args activation [] (atBudget budget final) = _
   have load (pc : Nat) (stack : List Safety.Value) (text : String) (ref : Reference)
       (ok : literalObject (atBudget budget final) text = .ok (.object (.address ref))) :
@@ -104,7 +104,7 @@ theorem initializedPercentAtBudget (budget : Option Nat) (name message : String)
     have secondArg := checkedLiteralArgument _ activation message _
       (loadWithBudget budget _ _ _ messageLoad)
     apply run_fault (body := caller name message) (op := .newobj Source.member.method)
-      rfl (by percent_rfl)
+      (unprotected := by percent_rfl) rfl (by percent_rfl)
     let stack : List Safety.Value := [.object (.address ⟨if name = message then 0 else 1, 0⟩),
       .object (.address ⟨0, 0⟩)]
     have original : step (caller name message) (.newobj Source.member.method) 5 args activation

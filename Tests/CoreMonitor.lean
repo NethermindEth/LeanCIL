@@ -99,7 +99,7 @@ private def memory (flag : BitVec 8) : Safety.Memory := { Safety.Memory.empty wi
 private def gate : Safety.Value := .object (.address ⟨1,0⟩)
 private def flagRef : Safety.Value := .reference (.address ⟨0,0⟩)
 private def args := [gate,flagRef]
-private def frame : Safety.Frame := ⟨2,[],[],0⟩
+private def frame : Safety.Frame := ⟨2,[],[],0,[]⟩
 private def program (rejection acquire : Method) := [wrapper,rejection,acquire]
 
 /-- An initially clear flag reaches the object overload with the original object and memory. -/
@@ -132,7 +132,9 @@ theorem acquireCall (rejection acquire : Method) (fuel : Nat) (entered : Safety.
   have called : step wrapper callEnter 5 args frame [gate] (memory 0) =
       .ok (.call 2 [gate] [] (memory 0)) := by cil_kernel_rfl
   have target : (program rejection acquire)[2]? = some acquire := rfl
-  simp only [run_succ, lookup, fetched, called, target, setup, Except.mapError, Bind.bind,
+  simp only [run_succ _ _ _ _ _ _ _ _ (unprotected_of_handlers_nil lookup (by cil_kernel_rfl) 5),
+    lookup,
+    fetched, called, target, setup, Except.mapError, Bind.bind,
     Except.bind, List.append_nil]
 #print axioms acquireCall
 /-- Returning from the child may change unrelated memory. The original suffix only needs its

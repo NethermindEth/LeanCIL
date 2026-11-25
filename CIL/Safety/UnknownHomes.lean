@@ -184,7 +184,7 @@ theorem unknown_frame_setup (body : CIL.Method)
   obtain ⟨slots, owned, result, made, homes⟩ :=
     make_unknown_locals memory memory.nextIdentity body.localKinds wellFormed numeric notSpan notArray
       notPointer notTable notObject
-  let frame : Frame := ⟨memory.nextIdentity, slots, owned, 0⟩
+  let frame : Frame := ⟨memory.nextIdentity, slots, owned, 0, []⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
     simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true,
       initializers, made, parameters, makeParameterHomes,

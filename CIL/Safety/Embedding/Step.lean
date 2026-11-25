@@ -1,5 +1,5 @@
 import CIL.Embedding.BaseStep
-import CIL.Safety.Execution
+import CIL.Safety.HandlerSteps
 import CIL.TermAccess
 
 /-!
@@ -85,6 +85,9 @@ structure StepContext (expected actual : CIL.Method) (r : Nat → Nat) (op : CIL
   statics : actual.staticAt q = expected.staticAt pc
   link : actual.linkAt q = expected.linkAt pc
   next : op.continues = true → r (pc + 1) = q + 1
+  /-- Exception clauses name pcs, so an instruction that reads them is related only in bodies
+      without clauses. -/
+  handlers : op.readsClauses = true → expected.handlers = [] ∧ actual.handlers = []
 
 /-- A successful expected step is matched by the relabeled step at the renamed pc. -/
 def StepRelabel (op : CIL.Instruction) : Prop :=
@@ -808,6 +811,25 @@ theorem step_relabel_ble_un (target : Nat) : StepRelabel (.ble_un target) := by
 
 #print axioms step_relabel_ble_un
 
+/-- A `leave` in a body without exception clauses jumps to its relabeled target. -/
+theorem step_relabel_leave (target : Nat) : StepRelabel (.leave target) := by
+  explicit_intro
+  obtain ⟨expectedFree, actualFree⟩ := context.handlers rfl
+  rw [leaveStep_of_handlers_nil expectedFree] at h
+  rw [leaveStep_of_handlers_nil actualFree]
+  cases h
+  rfl
+
+#print axioms step_relabel_leave
+
+/-- An `endfinally` never succeeds in a body without exception clauses. -/
+theorem step_relabel_endfinally : StepRelabel .endfinally := by
+  explicit_intro
+  rw [endFinallyStep_of_handlers_nil (context.handlers rfl).1] at h
+  cases h
+
+#print axioms step_relabel_endfinally
+
 set_option maxHeartbeats 300000 in
 /-- Every instruction steps in lockstep with its relabeled form. Pure operations
     share the base-step contract; ordinary memory operations share an unchanged
@@ -879,6 +901,8 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case stsfld field => exact step_relabel_stsfld field
   case ret => exact step_relabel_ret
   case throw exception => exact step_relabel_throw exception
+  case leave target => exact step_relabel_leave target
+  case endfinally => exact step_relabel_endfinally
   case unadmitted opcode => exact step_relabel_unadmitted opcode
   case add => exact step_relabel_add
   case sub => exact step_relabel_sub
@@ -1503,6 +1527,14 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case throw =>
     explicit_intro
     exact h
+  case leave =>
+    explicit_intro
+    unfold leaveStep at h
+    split at h <;> cases h
+  case endfinally =>
+    explicit_intro
+    unfold endFinallyStep at h
+    repeat' first | (cases h; done) | split at h
   case unadmitted =>
     explicit_intro
     exact h

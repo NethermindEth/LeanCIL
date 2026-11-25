@@ -104,7 +104,8 @@ theorem ReachesRun.call {program : CIL.Program} {method pc callee : Nat}
     (calleeFound : program[callee]? = some child)
     (enter : enterFrame child values updated = .ok (childFrame, entered))
     (returned : run program calleeFuel callee 0 values childFrame [] entered =
-      .ok (final, results)) :
+      .ok (final, results))
+    (unprotected : body.unprotectedAt pc = true := by unprotected_at) :
     ReachesRun program method pc (pc + 1) 1 arguments
       { frame := frame, stack := stack, memory := memory }
       { frame := frame, stack := results ++ rest, memory := final } := by
@@ -117,8 +118,9 @@ theorem ReachesRun.call {program : CIL.Program} {method pc callee : Nat}
       subst outcome
       exact False.elim (settled rfl)
     | succ fuel =>
-      simp only [run_succ, found, instruction, stepped, calleeFound, enter,
-        Bind.bind, Except.bind, Except.mapError] at ran
+      simp only [run_succ _ _ _ _ _ _ _ _ (unprotected_of_found found unprotected), found,
+        instruction,
+        stepped, calleeFound, enter, Bind.bind, Except.bind, Except.mapError] at ran
       cases childRun : run program fuel callee 0 values childFrame [] entered with
       | error fault =>
         simp only [childRun] at ran
@@ -145,7 +147,8 @@ theorem ReachesRun.call {program : CIL.Program} {method pc callee : Nat}
     have continuation := run_mono program fuel calleeFuel method (pc + 1) arguments frame
       (results ++ rest) final outcome settled ran
     refine Exists.intro (calleeFuel + fuel + 1) ?_
-    simpa only [run_zero, run_succ, found, instruction, stepped, calleeFound, enter,
+    simpa only [run_zero, run_succ _ _ _ _ _ _ _ _ (unprotected_of_found found unprotected), found,
+      instruction, stepped, calleeFound, enter,
       Bind.bind, Except.bind, Except.mapError, childRun, Nat.add_comm fuel calleeFuel]
       using continuation
 
@@ -157,7 +160,8 @@ theorem ReachesRun.congr_region {program other : CIL.Program}
     {arguments : List Value} {before after : SegmentState}
     (closed : RegionClosed program region) (agrees : AgreesOn program other region)
     (entry : region method start) (continuation : region method finish)
-    (reached : ReachesRun program method start finish cost arguments before after) :
+    (reached : ReachesRun program method start finish cost arguments before after)
+    (free : HandlerFree program := by handler_free) :
     ReachesRun other method start finish cost arguments before after := by
   constructor
   next =>
@@ -627,8 +631,7 @@ theorem SegmentContract.branch {program : CIL.Program} {method pc target : Nat}
       (if taken arguments before then target else pc + 1) 1 arguments before
       { frame := before.frame, stack := popped arguments before, memory := before.memory } := by
     intro fuel
-    simp only [run_succ, found, instruction, stepped arguments before permitted,
-      Bind.bind, Except.bind, Except.mapError]
+    simp only [run, runWith, runFaulting, found, instruction, stepped arguments before permitted]
   exact Exists.intro (.reaches (if taken arguments before then target else pc + 1)
     { frame := before.frame, stack := popped arguments before, memory := before.memory })
     (And.intro (Exists.intro 1 (And.intro (by decide) exactRun.reaches))

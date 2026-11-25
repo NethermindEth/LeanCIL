@@ -1213,7 +1213,8 @@ theorem localReferenceClassification
       let instruction := mkApp (mkConst (if load then ``CIL.Instruction.ldloc
         else ``CIL.Instruction.ldloca)) (mkNatLit position)
       let frame ← mkAppM ``Frame.mk #[mkNatLit 0, locals,
-        ← mkListLit (mkConst ``AllocationId) [], mkNatLit 0]
+        ← mkListLit (mkConst ``AllocationId) [], mkNatLit 0,
+        ← mkListLit (← mkAppM ``Prod #[mkConst ``Nat, mkConst ``Resumption]) []]
       let values ← mkListLit (mkConst ``Value) []
       let result := mkAppN (mkConst ``step)
         #[body, instruction, mkNatLit 0, values, frame, values, memory]

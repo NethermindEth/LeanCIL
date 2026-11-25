@@ -10,19 +10,20 @@ live too, so contract proofs can reason about the last frame instead of the whol
 
 namespace CIL.Safety
 
-/-- Every normal interpreter result comes from an actual fetched return reached
-    through the running-prefix relation, followed by teardown and result checks.
+/-- Every normal result of a program without exception clauses comes from an actual fetched
+    return reached through the running-prefix relation, followed by teardown and result checks.
     Tail calls may change the terminal method and its arguments. -/
 theorem run_success_return_trace (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (values : List Value)
-    (h : run program fuel method pc args frame stack m = .ok (final, values)) :
+    (h : run program fuel method pc args frame stack m = .ok (final, values))
+    (free : HandlerFree program := by handler_free) :
     ∃ lastMethod lastArgs lastPc lastFrame lastStack before returned raw,
       RunningVisits program fuel method pc args frame stack m lastArgs lastFrame lastStack before ∧
       ProgramStep program lastMethod lastPc lastArgs lastFrame lastStack before
         (.returned raw returned) ∧
       final = leaveFrame lastFrame returned ∧ raw.mapM (checkedValue final) = .ok values := by
-  have trace := run_success_trace program fuel method pc args frame stack m final values h
+  have trace := run_success_trace program free fuel method pc args frame stack m final values h
   clear h
   induction trace with
   | returned step checked => exact ⟨_, _, _, _, _, _, _, _, .initial, step, rfl, checked⟩
@@ -42,13 +43,14 @@ theorem run_success_return_trace (program : CIL.Program) (fuel method pc : Nat)
     exact ⟨lm, la, lp, lf, ls, before, returned, raw,
       .constructContinue step lookup enter finish load visit, fetched, ended, checked⟩
 
-/-- The return trace of a run that starts live: the state at the final `ret` is live and the
-    returned memory and values form a `ReturnedState`. -/
+/-- The return trace of a run of a program without exception clauses that starts live: the state
+    at the final `ret` is live and the returned memory and values form a `ReturnedState`. -/
 theorem run_success_live_return_trace (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (values : List Value)
     (state : LiveState program args frame stack m)
-    (h : run program fuel method pc args frame stack m = .ok (final, values)) :
+    (h : run program fuel method pc args frame stack m = .ok (final, values))
+    (free : HandlerFree program := by handler_free) :
     ∃ lastMethod lastArgs lastPc lastFrame lastStack before returned raw,
       RunningVisits program fuel method pc args frame stack m lastArgs lastFrame lastStack before ∧
       LiveState program lastArgs lastFrame lastStack before ∧

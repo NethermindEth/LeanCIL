@@ -1,4 +1,5 @@
 import CIL.Safety.StepComposition
+import CIL.Safety.HandlerSteps
 
 namespace Tests.WrapperProofs
 
@@ -8,10 +9,12 @@ theorem run_fault {program : CIL.Program} {fuel method pc : Nat}
     {frame : CIL.Safety.Frame} {memory : CIL.Safety.Memory}
     {fault : CIL.Safety.ExecutionFault}
     (found : program[method]? = some body) (instruction : body.code[pc]? = some op)
-    (failed : CIL.Safety.step body op pc args frame stack memory = .error fault) :
+    (failed : CIL.Safety.step body op pc args frame stack memory = .error fault)
+    (free : CIL.Safety.HandlerFree program := by handler_free) :
     CIL.Safety.run program (fuel + 1) method pc args frame stack memory =
       .error ⟨method, pc, fault⟩ := by
-  simp only [CIL.Safety.run_succ, found, instruction, failed, Except.mapError,
+  simp only [CIL.Safety.run_succ _ _ _ _ _ _ _ _ (free.unprotected method pc), found,
+    instruction, failed, Except.mapError,
     Bind.bind, Except.bind]
 
 /-- Select the checked call model and simplify its arithmetic result. -/
@@ -42,8 +45,8 @@ private theorem minimumModel :
 theorem minimum_step (left right result : CIL.W32)
     (evaluated : CIL.evalIntegerMath .min 32 true [.i32 left, .i32 right] = .ok (.i32 result)) :
     CIL.Safety.step minimumMethod (.call minimumRef) 2 []
-        ⟨0, [], [], 0⟩ [.scalar (.i32 right), .scalar (.i32 left)] CIL.Safety.Memory.empty =
-      .ok (.next 3 [.scalar (.i32 result)] ⟨0, [], [], 0⟩ CIL.Safety.Memory.empty) := by
+        ⟨0, [], [], 0, []⟩ [.scalar (.i32 right), .scalar (.i32 left)] CIL.Safety.Memory.empty =
+      .ok (.next 3 [.scalar (.i32 result)] ⟨0, [], [], 0, []⟩ CIL.Safety.Memory.empty) := by
   math_wrapper_step minimumModel evaluated
 #print axioms minimum_step
 
@@ -51,7 +54,7 @@ theorem minimum_step (left right result : CIL.W32)
 theorem minimum_fault (left right : CIL.W32) (fault : CIL.ArithmeticFault)
     (evaluated : CIL.evalIntegerMath .min 32 true [.i32 left, .i32 right] = .error fault) :
     CIL.Safety.step minimumMethod (.call minimumRef) 2 []
-        ⟨0, [], [], 0⟩ [.scalar (.i32 right), .scalar (.i32 left)] CIL.Safety.Memory.empty =
+        ⟨0, [], [], 0, []⟩ [.scalar (.i32 right), .scalar (.i32 left)] CIL.Safety.Memory.empty =
       .error (.arithmetic fault) := by
   math_wrapper_step minimumModel evaluated
 #print axioms minimum_fault

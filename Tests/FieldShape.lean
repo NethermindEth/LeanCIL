@@ -506,7 +506,7 @@ def copiedPair (memory : Safety.Memory) : Bool :=
   | .error _ => false
 
 /-- A frame with no locals, for running steps on concrete memory. -/
-def emptyFrame : Safety.Frame := ⟨0, [], [], 0⟩
+def emptyFrame : Safety.Frame := ⟨0, [], [], 0, []⟩
 
 -- Loading the padded `Pair` through a reference pushes it as a snapshot with its flags, so
 -- `ldfld` followed by `pop` succeeds instead of faulting on the padding.

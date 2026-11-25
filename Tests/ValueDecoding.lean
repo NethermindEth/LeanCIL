@@ -148,6 +148,9 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 64, .target 64⟩, .bne_un 64), (⟨0, 65, .target 65⟩, .bge_un 65),
   (⟨0, 66, .target 66⟩, .bgt_un 66), (⟨0, 67, .target 67⟩, .ble_un 67),
   (⟨0, 68, .target 68⟩, .blt_un 68), (⟨0, 69, .targets [1, 2]⟩, .switch [1, 2]),
+  -- Protected-range exits.
+  (⟨0, 221, .target 221⟩, .leave 221), (⟨0, 222, .target 222⟩, .leave 222),
+  (⟨0, 220, .none⟩, .endfinally),
   -- Integer indirect loads and stores.
   (⟨0, 70, .none⟩, .ldind .i1), (⟨0, 71, .none⟩, .ldind .u1), (⟨0, 72, .none⟩, .ldind .i2),
   (⟨0, 73, .none⟩, .ldind .u2), (⟨0, 74, .none⟩, .ldind .i4), (⟨0, 75, .none⟩, .ldind .u4),
@@ -773,7 +776,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 100, undecoded 1 of 101 constructors -/
+/-- info: decoded 102, undecoded 1 of 103 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

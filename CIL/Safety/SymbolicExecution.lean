@@ -178,7 +178,7 @@ elab "cil_frame_exit" : tactic => withMainContext do
     unless leaves e do return .continue
     let #[frame, memory] := e.getAppArgs | return .continue
     let frame ← whnfR frame
-    let some #[_, _, owned, _] := argumentsOf? frame `CIL.Safety.Frame.mk 4
+    let some #[_, _, owned, _, _] := argumentsOf? frame `CIL.Safety.Frame.mk 5
       | return .continue
     unless (← whnfR owned).isAppOfArity ``List.nil 1 do return .continue
     return .visit memory)
@@ -1174,7 +1174,7 @@ def viewedStack (frame operation stack : Expr) : MetaM Expr := do
   if (stack.find? (·.isConstOf ``CIL.Safety.Value.spanHome)).isNone then return stack
   let count := mkApp (mkConst ``CIL.Safety.viewOperandCount) operation
   let some count ← evalNat (← whnfD count) | return stack
-  let some #[_, locals, _, _] := argumentsOf? (← whnfR frame) ``CIL.Safety.Frame.mk 4
+  let some #[_, locals, _, _, _] := argumentsOf? (← whnfR frame) ``CIL.Safety.Frame.mk 5
     | return stack
   viewedOperands (← listEntries locals) count stack
 

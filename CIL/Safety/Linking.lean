@@ -294,7 +294,8 @@ theorem Closed.callee {lib : CIL.Program} (closed : Closed lib) {method pc : Nat
     is renamed. -/
 theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Closed lib)
     (relocates : RelocatesInto lib linked f) (fuel method pc : Nat) (args : List Value)
-    (frame : Frame) (stack : List Value) (memory : Memory) (bound : method < lib.length) :
+    (frame : Frame) (stack : List Value) (memory : Memory) (bound : method < lib.length)
+    (free : HandlerFree lib := by handler_free) :
     run linked fuel (f method) pc args frame stack memory =
       (run lib fuel method pc args frame stack memory).mapError
         (LocatedFault.relocateMethod f) := by
@@ -303,26 +304,29 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
   | succ fuel ih =>
     have found : lib[method]? = some lib[method] := List.getElem?_eq_getElem bound
     have moved := relocates method bound
-    generalize lib[method] = body at found moved
+    have empty : lib[method].handlers = [] := free _ (List.getElem_mem bound)
+    generalize lib[method] = body at found moved empty
+    rw [run_succ _ _ _ _ _ _ _ _ (unprotected_of_handlers_nil moved empty pc),
+      run_succ _ _ _ _ _ _ _ _ (unprotected_of_handlers_nil found empty pc)]
     cases ho : body.code[pc]? with
     | none =>
       have lo : (body.relocate f).code[pc]? = none := ho
-      simp only [run_succ, found, moved, ho, lo, Except.mapError, LocatedFault.relocateMethod]
+      simp only [found, moved, ho, lo, Except.mapError, LocatedFault.relocateMethod]
     | some op =>
       have lo : (body.relocate f).code[pc]? = some op := ho
       have ls := step_relocate f body op pc args frame stack memory
       cases hs : step body op pc args frame stack memory with
       | error fault =>
-        simp only [run_succ, found, moved, ho, lo, ls, hs, Except.map, Bind.bind, Except.bind,
+        simp only [found, moved, ho, lo, ls, hs, Except.map, Bind.bind, Except.bind,
           Except.mapError, LocatedFault.relocateMethod]
       | ok action =>
         cases action with
         | next target values nextFrame updated =>
-          simp only [run_succ, found, moved, ho, lo, ls, hs, Except.map, FrameAction.relocate,
+          simp only [found, moved, ho, lo, ls, hs, Except.map, FrameAction.relocate,
             Bind.bind, Except.bind, Except.mapError]
           exact ih method target args nextFrame values updated bound
         | returned values updated =>
-          simp only [run_succ, found, moved, ho, lo, ls, hs, Except.map, FrameAction.relocate,
+          simp only [found, moved, ho, lo, ls, hs, Except.map, FrameAction.relocate,
             Bind.bind, Except.bind, Except.mapError]
           cases values.mapM (checkedValue (leaveFrame frame updated)) <;> rfl
         | call callee arguments rest updated =>
@@ -330,7 +334,7 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
           have child : lib[callee]? = some lib[callee] := List.getElem?_eq_getElem inside
           have childMoved := relocates callee inside
           generalize lib[callee] = callBody at child childMoved
-          simp only [run_succ, found, moved, ho, lo, ls, hs, child, childMoved,
+          simp only [found, moved, ho, lo, ls, hs, child, childMoved,
             enterFrame_relocate, Except.map, FrameAction.relocate, Bind.bind, Except.bind,
             Except.mapError]
           cases he : enterFrame callBody arguments updated with
@@ -349,7 +353,7 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
           have child : lib[callee]? = some lib[callee] := List.getElem?_eq_getElem inside
           have childMoved := relocates callee inside
           generalize lib[callee] = callBody at child childMoved
-          simp only [run_succ, found, moved, ho, lo, ls, hs, child, childMoved,
+          simp only [found, moved, ho, lo, ls, hs, child, childMoved,
             Except.map, FrameAction.relocate, Bind.bind, Except.bind, Except.mapError]
           change (if (callBody.returnsValue != body.returnsValue) then _ else _) = _
           cases returns : callBody.returnsValue != body.returnsValue with
@@ -368,7 +372,7 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
           have child : lib[callee]? = some lib[callee] := List.getElem?_eq_getElem inside
           have childMoved := relocates callee inside
           generalize lib[callee] = callBody at child childMoved
-          simp only [run_succ, found, moved, ho, lo, ls, hs, child, childMoved,
+          simp only [found, moved, ho, lo, ls, hs, child, childMoved,
             enterFrame_relocate, Except.map, FrameAction.relocate, Bind.bind, Except.bind,
             Except.mapError]
           cases he : enterFrame callBody arguments updated with
@@ -389,11 +393,13 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
                 cases loadLocal final (.bytes kind temporary) with
                 | error fault => rfl
                 | ok value => exact ih method (pc + 1) args nextFrame (value :: rest) final bound
+        | raise location object raised after => exact (step_ne_raise empty hs).elim
 
 /-- `run_relocate` from a method entry. -/
 theorem invoke_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Closed lib)
     (relocates : RelocatesInto lib linked f) (fuel method : Nat) (args : List Value)
-    (memory : Memory) (bound : method < lib.length) :
+    (memory : Memory) (bound : method < lib.length)
+    (free : HandlerFree lib := by handler_free) :
     invoke linked fuel (f method) args memory =
       (invoke lib fuel method args memory).mapError (LocatedFault.relocateMethod f) := by
   have found : lib[method]? = some lib[method] := List.getElem?_eq_getElem bound
@@ -423,7 +429,8 @@ theorem invoke_bound {lib : CIL.Program} {fuel method : Nat} {args : List Value}
 theorem Raises.relocate {lib linked : CIL.Program} {f : Nat → Nat} {method : Nat}
     {args : List Value} {memory : Memory} {exception : ExceptionType}
     (raised : Raises lib method args memory exception)
-    (closed : Closed lib) (relocates : RelocatesInto lib linked f) :
+    (closed : Closed lib) (relocates : RelocatesInto lib linked f)
+    (free : HandlerFree lib := by handler_free) :
     Raises linked (f method) args memory exception := by
   obtain ⟨fuel, fault, invoked, thrown⟩ := raised
   have bound := invoke_bound (fun located same => by cases same; rw [thrown]; exact nofun) invoked
@@ -434,7 +441,8 @@ theorem Raises.relocate {lib linked : CIL.Program} {f : Nat → Nat} {method : N
 /-- A contract proved on a closed library holds at the relocated index. -/
 theorem MethodContract.Holds.relocate {Input Output : Type} {c : MethodContract Input Output}
     {lib linked : CIL.Program} {f : Nat → Nat} {method : Nat} (holds : c.Holds lib method)
-    (closed : Closed lib) (relocates : RelocatesInto lib linked f) : c.Holds linked (f method) := by
+    (closed : Closed lib) (relocates : RelocatesInto lib linked f)
+    (free : HandlerFree lib := by handler_free) : c.Holds linked (f method) := by
   intro input initial permitted
   obtain ⟨fuel, ⟨final, values⟩, invoked, framed, returns⟩ := holds input initial permitted
   have bound := invoke_bound (outcome := .ok (final, values)) (fun _ h => nomatch h) invoked
@@ -447,7 +455,8 @@ theorem MethodContract.Holds.relocate {Input Output : Type} {c : MethodContract 
     `Raises.relocate`. -/
 theorem OutcomeContract.Holds.relocate {Input Output : Type} {c : OutcomeContract Input Output}
     {lib linked : CIL.Program} {f : Nat → Nat} {method : Nat} (holds : c.Holds lib method)
-    (closed : Closed lib) (relocates : RelocatesInto lib linked f) : c.Holds linked (f method) := by
+    (closed : Closed lib) (relocates : RelocatesInto lib linked f)
+    (free : HandlerFree lib := by handler_free) : c.Holds linked (f method) := by
   intro input initial permitted
   have outcome := holds input initial permitted
   revert outcome
@@ -467,7 +476,8 @@ theorem MethodContract.relocateGiven {Input Output : Type} {c : MethodContract I
     {f : Nat -> Nat}
     (given : HoldsGiven base imports (fun linked => c.Holds linked method))
     (linkedPrefix : Links base completion) (met : imports completion) (closed : Closed completion)
-    (relocates : RelocatesInto completion target f) : c.Holds target (f method) :=
+    (relocates : RelocatesInto completion target f)
+    (free : HandlerFree completion := by handler_free) : c.Holds target (f method) :=
   (given completion linkedPrefix met).relocate closed relocates
 
 /-- `MethodContract.relocateGiven` for outcome contracts. -/
@@ -476,7 +486,8 @@ theorem OutcomeContract.relocateGiven {Input Output : Type} {c : OutcomeContract
     {f : Nat -> Nat}
     (given : HoldsGiven base imports (fun linked => c.Holds linked method))
     (linkedPrefix : Links base completion) (met : imports completion) (closed : Closed completion)
-    (relocates : RelocatesInto completion target f) : c.Holds target (f method) :=
+    (relocates : RelocatesInto completion target f)
+    (free : HandlerFree completion := by handler_free) : c.Holds target (f method) :=
   (given completion linkedPrefix met).relocate closed relocates
 
 /-- A separately extracted library: its exported method at index 0, then its private helpers. -/
@@ -565,17 +576,18 @@ theorem link_relocates (app : CIL.Program) (libs : List Library) {j : Nat}
 structure Relocatable where
   holds : CIL.Program → Nat → Prop
   relocate : ∀ {lib linked : CIL.Program} {f : Nat → Nat} {method : Nat},
-    Closed lib → RelocatesInto lib linked f → holds lib method → holds linked (f method)
+    Closed lib → HandlerFree lib → RelocatesInto lib linked f → holds lib method →
+      holds linked (f method)
 
 /-- A method contract as an import specification. -/
 def MethodContract.relocatable {Input Output : Type} (c : MethodContract Input Output) :
     Relocatable :=
-  ⟨c.Holds, fun closed relocates holds => holds.relocate closed relocates⟩
+  ⟨c.Holds, fun closed free relocates holds => holds.relocate closed relocates free⟩
 
 /-- An outcome contract as an import specification. -/
 def OutcomeContract.relocatable {Input Output : Type} (c : OutcomeContract Input Output) :
     Relocatable :=
-  ⟨c.Holds, fun closed relocates holds => holds.relocate closed relocates⟩
+  ⟨c.Holds, fun closed free relocates holds => holds.relocate closed relocates free⟩
 
 /-- Import slot `j` of `app` meets `specs[j]`. -/
 def Imports (app : CIL.Program) (specs : List Relocatable) (linked : CIL.Program) : Prop :=
@@ -585,11 +597,12 @@ def Imports (app : CIL.Program) (specs : List Relocatable) (linked : CIL.Program
 theorem link_imports {app : CIL.Program} {libs : List Library} {specs : List Relocatable}
     (length : libs.length = specs.length)
     (closed : ∀ j (bound : j < libs.length), Closed libs[j].program)
+    (free : ∀ j (bound : j < libs.length), HandlerFree libs[j].program)
     (proved : ∀ j (bound : j < libs.length) (spec : j < specs.length),
       specs[j].holds libs[j].program 0) :
     Imports app specs (link app libs) := fun j spec =>
   have bound : j < libs.length := length ▸ spec
-  specs[j].relocate (f := linkSlot app libs j) (method := 0) (closed j bound)
+  specs[j].relocate (f := linkSlot app libs j) (method := 0) (closed j bound) (free j bound)
     (link_relocates app libs bound) (proved j bound spec)
 
 /-- A caller proved given its imports holds for the concrete program linking libraries proved
@@ -598,10 +611,11 @@ theorem composed {app : CIL.Program} {libs : List Library} {specs : List Relocat
     {claim : CIL.Program → Prop} (given : HoldsGiven app (Imports app specs) claim)
     (length : libs.length = specs.length)
     (closed : ∀ j (bound : j < libs.length), Closed libs[j].program)
+    (free : ∀ j (bound : j < libs.length), HandlerFree libs[j].program)
     (proved : ∀ j (bound : j < libs.length) (spec : j < specs.length),
       specs[j].holds libs[j].program 0) :
     claim (link app libs) :=
-  given.discharge (link_links app libs) (link_imports length closed proved)
+  given.discharge (link_links app libs) (link_imports length closed free proved)
 
 /-- A claim given stronger imports. -/
 theorem HoldsGiven.mono {base : CIL.Program} {weak strong claim : CIL.Program → Prop}

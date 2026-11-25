@@ -139,7 +139,8 @@ theorem loop_outcome_call_raises {Input Output : Type} {c : OutcomeContract Inpu
       step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input)
     (checked : arguments.mapM (checkedValue updated) = .ok arguments)
-    (permitted : c.pre input updated) (raised : c.raises input updated = some exception) :
+    (permitted : c.pre input updated) (raised : c.raises input updated = some exception)
+    (unprotected : body.unprotectedAt pc = true := by unprotected_at) :
     LoopOutcome program method args post (some exception) ⟨pc, frame, stack, memory⟩ :=
   run_call_raises_of_contract holds input methodFound instructionFound stepped encoded checked
     permitted raised
@@ -150,7 +151,8 @@ theorem loop_outcome_throw {program : CIL.Program} {method pc : Nat}
     {memory : Memory}
     {post : Memory → List Value → Prop} {exception : ExceptionType}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
-    (stepped : step body op pc args frame stack memory = .error (.thrown exception)) :
+    (stepped : step body op pc args frame stack memory = .error (.thrown exception))
+    (unprotected : body.unprotectedAt pc = true := by unprotected_at) :
     LoopOutcome program method args post (some exception) ⟨pc, frame, stack, memory⟩ :=
   run_throw_raises methodFound instructionFound stepped
 

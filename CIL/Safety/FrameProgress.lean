@@ -328,7 +328,7 @@ theorem enterFrame_succeeds (body : CIL.Method) (args : List Value) (m : Memory)
   obtain ⟨parameters, other, final, parametersMade⟩ := makeParameterHomes_succeeds memory
     m.nextIdentity body.parameterHomes args valid (validArgs.preserve wellFormed setup.fresh.1)
     fits.2.1
-  exact ⟨⟨m.nextIdentity, locals ++ parameters.map Prod.snd, owned ++ other, 0⟩, final, by
+  exact ⟨⟨m.nextIdentity, locals ++ parameters.map Prod.snd, owned ++ other, 0, []⟩, final, by
     simp [enterFrame, prepared, parametersMade, Bind.bind, Except.bind, Pure.pure,
       Except.pure]⟩
 

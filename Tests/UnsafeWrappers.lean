@@ -129,7 +129,7 @@ theorem size_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvi
     (invoke [sizeMethod method profile declared environment] 8 0 [] memory).map Prod.snd =
       .ok [.scalar (.i32 size)] := by
   let body := sizeMethod method profile declared environment
-  let frame : Frame := ⟨memory.nextIdentity, [], [], 0⟩
+  let frame : Frame := ⟨memory.nextIdentity, [], [], 0, []⟩
   let values := [Value.scalar (.i32 size)]
   have pushes : step body (.call method {}) 0 [] frame [] memory =
       .ok (.next 1 values frame memory) :=

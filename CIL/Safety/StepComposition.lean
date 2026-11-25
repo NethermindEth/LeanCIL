@@ -1200,10 +1200,11 @@ theorem run_fault {program : CIL.Program} {fuel method pc : Nat}
     (methodFound : program[method]? = some body)
     (instructionFound : body.code[pc]? = some op)
     (failed : step body op pc args frame stack memory = .error fault)
-    (unprotected : body.unprotectedAt pc = true := by rfl) :
+    (unprotected : body.unprotectedAt pc = true := by unprotected_at) :
     run program (fuel + 1) method pc args frame stack memory = .error ⟨method, pc, fault⟩ := by
-  simp only [run_succ program fuel method pc args frame stack memory (by simp [methodFound,
-    unprotected]), methodFound, instructionFound, failed, Except.mapError, Bind.bind, Except.bind]
+  simp only [run_succ program fuel method pc args frame stack memory
+    (unprotected_of_found methodFound unprotected), methodFound, instructionFound, failed,
+    Except.mapError, Bind.bind, Except.bind]
 
 #print axioms run_fault
 

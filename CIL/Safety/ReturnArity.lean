@@ -43,6 +43,9 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction)
     | unfold returnFrom at executed
     | unfold localAllocation at executed
     | solve | exact False.elim (calliStep_not_returned _ _ _ _ _ _ _ _ executed)
+    | solve | (obtain ⟨_, ⟨_, same⟩ | ⟨_, _, same⟩⟩ := leaveStep_resumes executed <;> cases same)
+    | solve |
+        (obtain ⟨_, ⟨_, same⟩ | ⟨_, _, same⟩⟩ := endFinallyStep_resumes executed <;> cases same)
     | solve | (obtain ⟨_, _, _, returned, _⟩ := modelStep_frame executed; cases returned)
     | solve |
         simp only [Bind.bind, Pure.pure, Except.pure, bind_success, Except.ok.injEq,
@@ -73,29 +76,37 @@ theorem step_return_length (body : CIL.Method) (operation : CIL.Instruction) (pc
     values.length = if body.returnsValue then 1 else 0 :=
   (step_return_properties body operation pc args frame stack memory final values executed).1
 
-/-- A successful run of `method` returns the arity its body declares. -/
+/-- A successful run of `method`, through caught faults and tail calls, returns the arity its
+    body declares. -/
 theorem run_return_length (program : CIL.Program) (fuel method pc : Nat) (body : CIL.Method)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
     (values : List Value)
     (lookup : program[method]? = some body)
     (executed : run program fuel method pc args frame stack memory = .ok (final, values)) :
     values.length = if body.returnsValue then 1 else 0 := by
-  have trace := run_success_trace _ _ _ _ _ _ _ _ _ _ executed
+  have trace := run_ok_trace executed
   clear executed
+  generalize ended : (Except.ok (final, values) : Except FaultState _) = outcome at trace
   induction trace generalizing body with
-  | returned step checked =>
-    obtain ⟨actualBody, operation, found, _, stepped⟩ := step
+  | returned found _ stepped checked =>
+    cases ended
     rw [lookup] at found
     cases found
     rw [(checkedValues_valid _ _ _ checked).1]
     exact step_return_length _ _ _ _ _ _ _ _ _ stepped
-  | next _ _ ih | call _ _ _ _ _ _ _ ih | construct _ _ _ _ _ _ _ _ ih =>
-    exact ih _ lookup
-  | tailCall _ bodyLookup childLookup returns _ _ _ _ ih =>
-    have same := Option.some.inj (lookup.symm.trans bodyLookup)
+  | caught _ _ _ _ _ ih | next _ _ _ _ ih | raiseCaught _ _ _ _ _ ih
+  | called _ _ _ _ _ _ _ _ ih | constructed _ _ _ _ _ _ _ _ _ ih
+  | callCaught _ _ _ _ _ _ _ _ _ ih | constructCaught _ _ _ _ _ _ _ _ _ ih =>
+    exact ih _ lookup ended
+  | tailed found _ _ childLookup returns _ _ _ ih =>
+    have same := Option.some.inj (lookup.symm.trans found)
     subst same
-    have result := ih _ childLookup
+    have result := ih _ childLookup ended
     simpa only [bne_eq_false_iff_eq.mp returns] using result
+  | exhausted | missing | faulted | raised | callMissing | callUnentered | tailMissing
+  | tailMismatched | constructMissing | constructUnentered | tailUnchecked | tailUnentered
+  | returnUnchecked | callFaulted | constructFaulted | constructValued | constructUnloaded =>
+    cases ended
 
 #print axioms step_return_length
 #print axioms run_return_length
@@ -116,12 +127,10 @@ theorem invoke_return_known {program : CIL.Program} {fuel method : Nat}
     (executed : invoke program fuel method args memory = .ok (final, values)) :
     values.any Value.hasUnspecified = false := by
   obtain ⟨_, arguments, frame, entered, _, _, _, ran⟩ := invoke_success_setup executed
-  obtain ⟨lastMethod, lastArgs, pc, lastFrame, stack, before, returned, raw,
-      _, fetched, _, checked⟩ :=
-    run_success_return_trace program fuel method 0 arguments frame [] entered final values ran
-  obtain ⟨body, operation, _, _, stepped⟩ := fetched
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, stepped, _, checked⟩ :=
+    (run_ok_trace ran).returnedBy rfl
   rw [(checkedValues_valid _ _ _ checked).1]
-  exact step_return_known body operation pc lastArgs lastFrame stack before returned raw stepped
+  exact step_return_known _ _ _ _ _ _ _ _ _ stepped
 
 #print axioms invoke_return_known
 

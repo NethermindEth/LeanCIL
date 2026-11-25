@@ -22,7 +22,8 @@ theorem SegmentContract.Holds.congr_region {contract : SegmentContract} {program
     (closed : RegionClosed program region) (agrees : AgreesOn program other region)
     (entry : region method start)
     (continues : ∀ args before pc after, contract.pre args before →
-      contract.post args before (.reaches pc after) → region method pc) :
+      contract.post args before (.reaches pc after) → region method pc)
+    (free : HandlerFree program := by handler_free) :
     contract.Holds other method start := by
   intro args before permitted
   obtain ⟨exit, ran, framed, post⟩ := holds args before permitted
@@ -81,7 +82,8 @@ theorem DecodedSegmentSummary.congr_region {program other : Program} {method sta
     (closed : RegionClosed program region) (agrees : AgreesOn program other region)
     (inside : ∀ i, i < (first :: rest).length → region method (start + i))
     (continues : ∀ args before pc after, contract.pre args before →
-      contract.post args before (.reaches pc after) → region method pc) :
+      contract.post args before (.reaches pc after) → region method pc)
+    (free : HandlerFree program := by handler_free) :
     DecodedSegmentSummary other otherEvidence otherProfile otherEnvironment method start
       otherPin otherToken otherArguments first rest models contract := by
   have entry : region method start := by simpa using inside 0 (by simp)

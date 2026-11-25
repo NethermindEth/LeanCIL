@@ -87,7 +87,7 @@ private def Stepped (width : Nat) : Prop :=
   let body : CIL.Method :=
     { code := [.stobj type, .ldobj type], locals := [], returnsValue := false
       environment := { rawLayouts := [raw], layouts := #[⟨{ size := width, fields := [] }, 1⟩] } }
-  let frame : Frame := Frame.mk 0 [] [] 0
+  let frame : Frame := Frame.mk 0 [] [] 0 []
   let address := Value.reference (.address target)
   let value := Value.scalar (.snapshot (.aggregate width) (payload width))
   let stored := (writeSnapshot (memory width) target (payload width) 1).toOption.getD Memory.empty

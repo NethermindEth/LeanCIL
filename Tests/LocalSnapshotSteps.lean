@@ -198,7 +198,7 @@ theorem mixed_homes_wp (memory : Memory) (slots : List LocalSlot) (boundary : Na
     (inputs outputs : List ArgumentView) (valid : ValidCall memory inputs outputs)
     (word : BitVec 64) (vector : BitVec 128) :
     WP (Execution (fun fuel => run [mixedHomes] fuel 0 0
-      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], 0⟩ [] memory))
+      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], 0, []⟩ [] memory))
       (fun result => result.2 = [.scalar (.i64 word)] ∧ ValidCall result.1 inputs outputs ∧
         MemoryBelow boundary memory result.1 ∧
         AccessBelow memory.nextIdentity memory result.1) := by
@@ -338,7 +338,7 @@ theorem entry_homes_wp (entered memory : Memory) (slots : List LocalSlot) (bound
     (retained : AccessBelow entered.nextIdentity entered memory)
     (word : BitVec 64) (vector : BitVec 128) :
     WP (Execution (fun fuel => run [mixedHomes] fuel 0 0
-      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], 0⟩ [] memory))
+      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], 0, []⟩ [] memory))
       (fun result => result.2 = [.scalar (.i64 word)] ∧
         AccessBelow entered.nextIdentity entered result.1 ∧
         MemoryBelow boundary memory result.1) := by
@@ -515,7 +515,7 @@ theorem store_evidence (memory : Memory) (slots : List LocalSlot) (boundary : Na
     (unrelated : read memory other 8 1 = .ok unknown) (room : Writable memory caller 8 0 2)
     (word : BitVec 64) :
     WP (Execution (fun fuel => run [wordStore] fuel 0 0 [.scalar (.i64 word)]
-      ⟨0, slots, [], 0⟩ [] memory))
+      ⟨0, slots, [], 0, []⟩ [] memory))
       (fun result => result.2 = [] ∧ read result.1 caller 8 1 = .ok bytes ∧
         Writable result.1 caller 8 0 2 ∧ result.1.WellFormed ∧
         MemoryBelow boundary memory result.1 ∧
@@ -566,7 +566,7 @@ theorem caller_reads_after_stores (memory : Memory) (slots : List LocalSlot) (bo
     WP (Execution (fun fuel => run [callerReads] fuel 0 0
       [.scalar (.i64 word), .reference (.address input), .reference (.address output),
         .reference (.address limb), .reference (.address other)]
-      ⟨0, slots, [], 0⟩ [] memory))
+      ⟨0, slots, [], 0, []⟩ [] memory))
       (fun result => result.2 = [.scalar (.i64 ((pair input).word memory 8 + first))]) := by
   have formed := valid.wellFormed
   have snapshots := LocalSnapshots.empty memory slots
@@ -590,7 +590,7 @@ theorem counted_walk (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
     (homes : CompleteWritableHomes memory boundary mixedHomes.localKinds slots)
     (formed : memory.WellFormed) (word : BitVec 64) (vector : BitVec 128) :
     WP (Execution (fun fuel => run [mixedHomes] fuel 0 0
-      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], 0⟩ [] memory))
+      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], 0, []⟩ [] memory))
       (fun result => result.2 = [.scalar (.i64 word)]) := by
   have snapshots := LocalSnapshots.empty memory slots
   cil_contract_steps (snapshots := snapshots) 2 []
@@ -664,14 +664,14 @@ theorem stores_across_a_memory_change (memory : Memory) (slots : List LocalSlot)
     (inputs outputs : List ArgumentView) (valid : ValidCall memory inputs outputs)
     (first second : BitVec 64) (bump : Memory → Memory)
     (change : ∀ current, step storesAroundChange (.ldarg 1) 2
-      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0⟩ [] current =
-        .ok (.next 3 [.scalar (.i64 second)] ⟨0, slots, [], 0⟩ (bump current)))
+      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0, []⟩ [] current =
+        .ok (.next 3 [.scalar (.i64 second)] ⟨0, slots, [], 0, []⟩ (bump current)))
     (bumpFormed : ∀ current, current.WellFormed → (bump current).WellFormed)
     (bumpBelow : ∀ current, AccessBelow current.nextIdentity current (bump current))
     (bumpSnapshots : ∀ current known, LocalSnapshots current slots known →
       LocalSnapshots (bump current) slots known) :
     WP (Execution (fun fuel => run [storesAroundChange] fuel 0 0
-      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0⟩ [] memory))
+      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0, []⟩ [] memory))
       (fun _ => True) := by
   have formed := valid.wellFormed
   have preserved := MemoryBelow.refl boundary memory
@@ -707,7 +707,7 @@ theorem entry_facts_stay (memory : Memory) (slots : List LocalSlot) (boundary : 
     (inputs outputs : List ArgumentView) (valid : ValidCall memory inputs outputs)
     (first second : BitVec 64) :
     WP (Execution (fun fuel => run [twoStores] fuel 0 0
-      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0⟩ [] memory))
+      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0, []⟩ [] memory))
       (fun _ => True) := by
   have formed := valid.wellFormed
   have preserved := MemoryBelow.refl boundary memory
@@ -747,7 +747,7 @@ theorem caller_memory_named_stored (stored : Memory) (slots : List LocalSlot) (b
     (inputs outputs : List ArgumentView) (valid : ValidCall stored inputs outputs)
     (first second : BitVec 64) :
     WP (Execution (fun fuel => run [twoStores] fuel 0 0
-      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0⟩ [] stored))
+      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0, []⟩ [] stored))
       (fun _ => True) := by
   have formed := valid.wellFormed
   have preserved := MemoryBelow.refl boundary stored

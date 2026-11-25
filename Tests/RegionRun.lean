@@ -41,7 +41,8 @@ theorem suffix_moves (fuel : Nat) (args stack : List Value) (frame : Frame) (m :
     (ran : run [expected, helper] fuel 0 3 args frame stack m = .ok result) :
     run [actual, helper] fuel 0 2 args frame stack m = .ok result := by
   rw [← run_congr_region suffix_closed suffix_agrees _ _ _ _ _ _ _ (by decide)] at ran
-  exact run_refines ((ProgramRefines.refl [actual, helper]).set (index := 0) rfl masked_embeds)
+  exact run_refines
+    ((ProgramRefines.refl [actual, helper] (by handler_free)).set (index := 0) rfl masked_embeds)
     fuel 0 3 args frame stack m result ran
 
 /-- A region may call into a whole method listed from pc 0. -/
@@ -98,7 +99,7 @@ theorem longExpected_links (profile : CIL.FeatureProfile) :
 theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
     CIL.Embedding.BodyRefines (longMasked profile) (longActual profile callee)
       (CIL.Embedding.suffixRename 3 2) := by
-  apply CIL.Embedding.BodyRefines.of_relocated_suffix
+  apply CIL.Embedding.BodyRefines.of_relocated_suffix (free := rfl)
   · rfl
   · rfl
   · omega
@@ -139,7 +140,7 @@ def callActual : Method :=
 
 theorem callSuffix_refines :
     CIL.Embedding.BodyRefines callMasked callActual (CIL.Embedding.suffixRename 3 2) := by
-  apply CIL.Embedding.BodyRefines.of_relocated_suffix
+  apply CIL.Embedding.BodyRefines.of_relocated_suffix (free := rfl)
   · rfl
   · rfl
   · omega
@@ -169,8 +170,8 @@ theorem longSuffix_moves (profile : CIL.FeatureProfile) (callee fuel : Nat) (arg
       code_agrees_of_drop (lower := 3) (by simp [longMasked, longExpected, Method.withCode])
         (by simpa [suffix, inStarts] using inside)
   rw [← run_congr_region closed agrees _ _ _ _ _ _ _ (by decide)] at ran
-  exact run_refines ((ProgramRefines.refl [longActual profile callee]).set_body (index := 0) rfl
-    (longSuffix_refines profile callee)) fuel 0 3 args frame stack m result ran
+  exact run_refines ((ProgramRefines.refl [longActual profile callee] (by handler_free)).set_body
+    (index := 0) rfl (longSuffix_refines profile callee)) fuel 0 3 args frame stack m result ran
 
 #print axioms CIL.Embedding.BodyRefines.of_relocated_suffix
 #print axioms longSuffix_refines

@@ -102,7 +102,8 @@ theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start 
       (expected.code.drop lower).map (Instruction.relabel (fun pc => pc - lower + start)))
     (targets : ∀ op ∈ expected.code.drop lower, ∀ target ∈ op.targets, lower ≤ target)
     (statics : ∀ pc, lower ≤ pc → actual.staticAt (pc - lower + start) = expected.staticAt pc)
-    (links : ∀ pc, lower ≤ pc → actual.linkAt (pc - lower + start) = expected.linkAt pc) :
+    (links : ∀ pc, lower ≤ pc → actual.linkAt (pc - lower + start) = expected.linkAt pc)
+    (free : expected.handlers = []) :
     BodyRefines expected actual (suffixRename lower start) := by
   refine ⟨by simpa only using congrArg Method.profile metadata,
     by simpa only using congrArg Method.returnsValue metadata,
@@ -111,7 +112,9 @@ theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start 
     by simpa only using congrArg Method.opaqueVectorLocals metadata,
     by simpa only using congrArg Method.parameterHomes metadata,
     by simpa only using congrArg Method.declared metadata,
-    by simpa only using congrArg Method.environment metadata, descriptors, ?_, ?_⟩
+    by simpa only using congrArg Method.environment metadata, descriptors, ?_, ?_, free,
+    (show actual.handlers = expected.handlers by
+      simpa only using congrArg Method.handlers metadata).trans free⟩
   · by_cases zero : lower = 0
     · simp [suffixRename, zero, entry zero]
     · simp [suffixRename, show 0 < lower by omega]

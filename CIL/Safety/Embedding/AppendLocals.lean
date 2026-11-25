@@ -26,6 +26,7 @@ def FrameAction.appendLocals (extra : List LocalSlot) : FrameAction → FrameAct
   | .next target stack frame memory => .next target stack (frame.appendLocals extra) memory
   | .construct callee args rest frame temporary kind memory =>
     .construct callee args rest (frame.appendLocals extra) temporary kind memory
+  | .raise location object frame memory => .raise location object (frame.appendLocals extra) memory
   | action => action
 
 /-- A step outcome the padded simulation carries: a success or a thrown exception. -/
@@ -1519,6 +1520,30 @@ theorem step_appendLocals_calli (signature : ManagedSignature) (tail : Bool) :
   padded_natural
 #print axioms step_appendLocals_calli
 
+/-- `leave` changes only the resumptions of the frame, so trailing slots carry through. -/
+theorem step_appendLocals_leave (target : Nat) : StepAppendLocals (.leave target) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  unfold leaveStep leaveFrom
+  frame_natural
+
+#print axioms step_appendLocals_leave
+
+/-- `endfinally` changes only the resumptions of the frame, so trailing slots carry through. -/
+theorem step_appendLocals_endfinally : StepAppendLocals .endfinally := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  unfold endFinallyStep leaveFrom
+  frame_natural
+
+#print axioms step_appendLocals_endfinally
+
 /-- Every instruction preserves successful and throwing steps under trailing local slots. -/
 theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (extra : List LocalSlot) (stack : List Value) (memory : Memory)
@@ -1674,6 +1699,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
     case call method prefixes =>
       exact step_appendLocals_call method prefixes
     case callvirt method => exact step_appendLocals_callvirt method
+    case leave target => exact step_appendLocals_leave target
+    case endfinally => exact step_appendLocals_endfinally
     case newobj constructor =>
       exact step_appendLocals_newobj constructor
     case cpblk | initblk | ldftn | ldstr =>

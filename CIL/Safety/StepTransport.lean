@@ -1,6 +1,7 @@
 import CIL.Safety.ActionRenaming
 import CIL.Safety.MemoryInstructionRenaming
 import CIL.Resolution
+import CIL.Safety.HandlerSteps
 
 /-!
 # Allocation-renaming obligation for a checked step
@@ -26,6 +27,10 @@ structure StepMetadata (source target : CIL.Method) : Prop where
   environment : target.environment = source.environment
   /-- Both bodies enter the same methods, since each call reads its target from this table. -/
   links : target.links = source.links
+  /-- Neither body has exception clauses, so `leave` jumps directly, `endfinally` is invalid and
+      no fault is caught. -/
+  sourceHandlers : source.handlers = []
+  targetHandlers : target.handlers = []
 
 /-- Related bodies give every call site the same link. -/
 theorem StepMetadata.linkAt {source target : CIL.Method} (metadata : StepMetadata source target)
