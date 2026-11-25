@@ -818,12 +818,10 @@ def declareLayoutSuffixes (owner : Body) : TermElabM Unit := do
     declareSuffixes owner entryType stem
       (fun start => s!"The layouts of `{owner.name}` from entry {start} on") list entries
 
-/-- The entry at `position` of the layout list with suffixes `stem`, and a proof that the list
-    has it there, which reads only the suffix that starts the position's block. -/
-def layoutEntry? (owner : Body) (stem : String) (position : Nat) :
+/-- The entry at `position` of `list`, whose suffixes `stem` are declared, and a proof that the
+    list has it there, which reads only the suffix that starts the position's block. -/
+def suffixEntry? (owner : Body) (stem : String) (entryType list : Expr) (position : Nat) :
     MetaM (Option (Expr × Expr)) := do
-  let some (_, entryType, list) := (layoutLists (mkConst owner.name)).find? (·.1 == stem)
-    | return none
   let offset := position % suffixBlock
   let start := position - offset
   let some (.defnInfo info) := (← getEnv).find? (owner.name.appendAfter s!"{stem}{start}")
@@ -838,14 +836,60 @@ def layoutEntry? (owner : Body) (stem : String) (position : Nat) :
     (owner.constant s!"{stem}{start}") (mkNatLit start) entry (mkNatLit offset)
     (owner.constant s!"{stem}{start}_placed") found)
 
-/-- The element at `index` of the list `list` reduces to, as written. -/
-def listEntry? (list : Expr) (index : Nat) : MetaM (Option Expr) := do
-  let (entries, _) ← listElements list
-  return entries[index]?
+/-- The entry at `position` of the layout list with suffixes `stem`, and a proof that the list
+    has it there, which reads only the suffix that starts the position's block. -/
+def layoutEntry? (owner : Body) (stem : String) (position : Nat) :
+    MetaM (Option (Expr × Expr)) := do
+  let some (_, entryType, list) := (layoutLists (mkConst owner.name)).find? (·.1 == stem)
+    | return none
+  suffixEntry? owner stem entryType list position
+
+/-- The entry at `position` of the layout list with suffixes `stem` as the constant
+    `{stem}Entry{position}`, with the fact that the list has it there; both are declared once,
+    so the facts of one struct refer to its entry instead of restating every field of it. -/
+def namedLayoutEntry? (owner : Body) (stem : String) (position : Nat) :
+    TermElabM (Option (Expr × Expr)) := do
+  let entryTail := s!"{stem}Entry{position}"
+  let entryName := owner.name.appendAfter entryTail
+  unless (← getEnv).contains entryName do
+    let some (_, entryType, _) := (layoutLists (mkConst owner.name)).find? (·.1 == stem)
+      | return none
+    let some (entry, found) ← layoutEntry? owner stem position | return none
+    owner.declare entryName s!"Entry {position} of the layouts of `{owner.name}`." <| .defnDecl {
+      name := entryName, levelParams := [], type := entryType, value := entry, safety := .safe
+      hints := .regular (getMaxHeight (← getEnv) entry + 1) }
+    modifyEnv (addNoncomputable · entryName)
+    let some (_, listed, _) := (← inferType found).eq? | return none
+    owner.prove s!"{entryTail}_found"
+      s!"Entry {position} of the layouts of `{owner.name}` is `{owner.name}{entryTail}`."
+      (← mkEq listed (← mkAppM ``Option.some #[owner.constant entryTail]))
+      found
+  return some (owner.constant entryTail, owner.constant s!"{entryTail}_found")
+
+/-- The declared and checked field lists of struct `parent`, whose layout entries are
+    `metadata` and `layout`, with their suffix stems and entry types. -/
+def fieldLists (parent : Nat) (metadata layout : Expr) : Array (String × Expr × Expr) :=
+  #[(s!"{rawLayoutStem}{parent}Field", mkConst ``CIL.Extraction.RawField,
+      mkApp (mkConst ``CIL.Extraction.RawLayout.fields) metadata),
+    (s!"{computedLayoutStem}{parent}Field", mkConst ``CIL.FieldLayout,
+      mkApp (mkConst ``CIL.AggregateLayout.fields)
+        (mkApp (mkConst ``CIL.Extraction.ComputedLayout.layout) layout))]
+
+/-- Names the suffixes of both field lists of struct `parent` once, so the field facts of one
+    struct walk each list once between them; a list that does not reduce gets no suffixes. -/
+def declareFieldSuffixes (owner : Body) (parent : Nat) (metadata layout : Expr) :
+    TermElabM Unit := do
+  for (stem, entryType, list) in fieldLists parent metadata layout do
+    if (← getEnv).contains (owner.name.appendAfter s!"{stem}0") then continue
+    let (entries, complete) ← listElements list
+    unless complete do continue
+    declareSuffixes owner entryType stem
+      (fun start => s!"The fields of layout {parent} of `{owner.name}` from field {start} on")
+      list entries
 
 /-- A proof that `environment.fieldShape field` is the checked entry of a struct field, read
     through the layout suffixes; `none` for any other field. -/
-def structFieldProof? (owner : Body) (field : Expr) : MetaM (Option Expr) := do
+def structFieldProof? (owner : Body) (field : Expr) : TermElabM (Option Expr) := do
   let environment := mkConst owner.name
   let (``CIL.Extraction.FieldRef.mk, #[ownerType, indexExpr, held, _]) :=
     (← whnf field).getAppFnArgs | return none
@@ -853,15 +897,18 @@ def structFieldProof? (owner : Body) (field : Expr) : MetaM (Option Expr) := do
     (← whnf ownerType).getAppFnArgs | return none
   let some index ← (Meta.evalNat indexExpr).run | return none
   let some parent ← (Meta.evalNat parentExpr).run | return none
-  let some (metadata, rawFound) ← layoutEntry? owner rawLayoutStem parent | return none
-  let some (layout, checked) ← layoutEntry? owner computedLayoutStem parent | return none
+  let some (metadata, rawFound) ← namedLayoutEntry? owner rawLayoutStem parent | return none
+  let some (layout, checked) ← namedLayoutEntry? owner computedLayoutStem parent | return none
   let raw := mkApp (mkConst ``CIL.LayoutEnvironment.rawLayouts) environment
   let ownerStorage := mkAppN (mkConst ``CIL.Extraction.typeStorage_aggregate)
     #[raw, metadata, identity, parentExpr, rawFound, ← mkEqRefl identity]
-  let some declared ← listEntry? (mkApp (mkConst ``CIL.Extraction.RawLayout.fields) metadata) index
+  declareFieldSuffixes owner parent metadata layout
+  let #[(rawStem, rawType, rawFields), (computedStem, computedType, computedFields)] :=
+    fieldLists parent metadata layout | return none
+  let some (declared, fieldFound) ← suffixEntry? owner rawStem rawType rawFields index
     | return none
-  let some computed ← listEntry? (mkApp (mkConst ``CIL.AggregateLayout.fields)
-      (mkApp (mkConst ``CIL.Extraction.ComputedLayout.layout) layout)) index | return none
+  let some (computed, entryFound) ← suffixEntry? owner computedStem computedType computedFields
+    index | return none
   let declaredType := mkApp (mkConst ``CIL.Extraction.RawField.type) declared
   let declaredKind := mkApp2 (mkConst ``Option.some [.zero])
     (mkConst ``CIL.Extraction.FieldType) declaredType
@@ -874,10 +921,6 @@ def structFieldProof? (owner : Body) (field : Expr) : MetaM (Option Expr) := do
       pure (mkAppN (mkConst ``CIL.Extraction.fieldKind?_aggregate)
         #[raw, heldMetadata, heldIdentity, heldIndexExpr, heldFound, ← mkEqRefl heldIdentity])
     | _ => mkEqRefl declaredKind
-  let fieldFound ← mkEqRefl (mkApp2 (mkConst ``Option.some [.zero])
-    (mkConst ``CIL.Extraction.RawField) declared)
-  let entryFound ← mkEqRefl (mkApp2 (mkConst ``Option.some [.zero])
-    (mkConst ``CIL.FieldLayout) computed)
   let structFound := mkAppN (mkConst ``CIL.LayoutEnvironment.structField?_eq)
     #[environment, parentExpr, indexExpr, held, metadata, declared, layout, computed, rawFound,
       fieldFound, heldKind, checked, entryFound]
@@ -972,7 +1015,7 @@ unsafe def evaluateShape (kind : ShapeOperand) (environmentName : Name) (operand
     the suffixes, for the struct shapes that have one; `none` for the shapes the resolver gives
     without reading the layouts and for refused operands. -/
 def ShapeOperand.entryProof? (kind : ShapeOperand) (owner : Body) (operand : Expr) :
-    MetaM (Option Expr) :=
+    TermElabM (Option Expr) :=
   match kind with
   | .field => do
     if let some proof ← structFieldProof? owner operand then return some proof
