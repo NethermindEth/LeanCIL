@@ -124,9 +124,8 @@ def Instruction.valueOpcode (opcode : Nat) : Bool :=
     (122 <= opcode && opcode <= 139) ||
     opcode == 141 || (142 <= opcode && opcode <= 151) ||
     (154 <= opcode && opcode <= 159) || (162 <= opcode && opcode <= 164) ||
-    (179 <= opcode && opcode <= 186) || (208 <= opcode && opcode <= 219) || opcode == 223 ||
-    opcode == 224 || (65025 <= opcode && opcode <= 65030) ||
-    (65033 <= opcode && opcode <= 65039) || opcode == 0xfe15 || opcode == 0xfe16 ||
+    (179 <= opcode && opcode <= 186) || (208 <= opcode && opcode <= 224) ||
+    (65025 <= opcode && opcode <= 65030) || (65033 <= opcode && opcode <= 65039) || opcode == 0xfe15 || opcode == 0xfe16 ||
     opcode == 0xfe1c || opcode == 0xfe1e || opcode == 0xfe12 || opcode == 0xfe17 ||
     opcode == 0xfe18
 
@@ -293,6 +292,9 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ble_un expected => match emitted with | .ble_un actual => expected == actual | _ => false
   | .blt_un expected => match emitted with | .blt_un actual => expected == actual | _ => false
   | .switch expected => match emitted with | .switch actual => expected == actual | _ => false
+  -- Protected-range exits compare their target; `endfinally` has no operand.
+  | .leave expected => match emitted with | .leave actual => expected == actual | _ => false
+  | .endfinally => (emitted matches .endfinally)
   -- Indirect loads and stores compare their kind.
   | .ldind expected => match emitted with | .ldind actual => expected == actual | _ => false
   | .stind expected => match emitted with | .stind actual => expected == actual | _ => false
@@ -454,6 +456,9 @@ private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction
   | 54, .target target | 67, .target target => emit (.ble_un target)
   | 55, .target target | 68, .target target => emit (.blt_un target)
   | 69, .targets targets => emit (.switch targets)
+  -- `leave` (long, then short) and `endfinally`.
+  | 221, .target target | 222, .target target => emit (.leave target)
+  | 220, .none => emit .endfinally
   -- Integer indirect loads and stores; the floating and reference kinds decode to nothing.
   | 70, .none => emit (.ldind .i1) | 71, .none => emit (.ldind .u1)
   | 72, .none => emit (.ldind .i2) | 73, .none => emit (.ldind .u2)
