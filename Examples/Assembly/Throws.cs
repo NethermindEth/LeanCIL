@@ -41,4 +41,41 @@ public static class Throws
 
     [DoesNotReturn]
     static void ThrowDivideByZero() => throw new DivideByZeroException();
+
+    // Input 1 is caught and returns 1, input 2 escapes the unrelated catch, and any other input returns 0;
+    // the finally counts each call once in counts[0], including the one that escapes.
+    public static uint Guarded(uint value, uint[] counts, FaultSlot slot)
+    {
+        slot.Error = new InvalidOperationException("invalid value", (Exception?)null);
+        try
+        {
+            try
+            {
+                if (value == 1) throw slot.Error;
+            }
+            catch (InvalidOperationException)
+            {
+                return 1;
+            }
+            try
+            {
+                if (value == 2) throw slot.Error;
+            }
+            catch (ArgumentException)
+            {
+                return 3;
+            }
+        }
+        finally
+        {
+            counts[0]++;
+        }
+        return 0;
+    }
+}
+
+/// <summary>Holds the one exception <see cref="Throws.Guarded"/> raises from both of its throw sites.</summary>
+public sealed class FaultSlot
+{
+    public Exception? Error;
 }
