@@ -31,7 +31,7 @@ def args (p : Placement) : List Value :=
   [.bufferSpan ⟨.address ⟨0, 24⟩, 32, 1, false⟩, .bufferSpan ⟨.address ⟨0, dest p⟩, 32, 1, true⟩]
 
 def saved (p : Placement) : Frame :=
-  ⟨1, [.root (some (.address ⟨0, dest p⟩)), .bytes .vector128 ⟨1, 0⟩], [1], 0⟩
+  ⟨1, [.root (some (.address ⟨0, dest p⟩)), .bytes .vector128 ⟨1, 0⟩], [1], 0, []⟩
 
 def entered (data : Nat → BitVec 8) : Memory :=
   let m := memory data

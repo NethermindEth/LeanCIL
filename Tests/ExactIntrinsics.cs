@@ -364,7 +364,7 @@ foreach (var (name, width, zero, highBit) in new (string, int, object, object)[]
             (left == right) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
           refine ⟨4, ?_⟩
           let args := equalVectors.args (left, right)
-          let frame : Frame := ⟨memory.nextIdentity, [], [], 0⟩
+          let frame : Frame := ⟨memory.nextIdentity, [], [], 0, []⟩
           let leftValue := Value.scalar (.v{{width}} left)
           let rightValue := Value.scalar (.v{{width}} right)
           let result := Value.scalar (.i32 (if left == right then 1 else 0))

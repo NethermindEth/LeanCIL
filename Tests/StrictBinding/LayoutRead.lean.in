@@ -38,7 +38,7 @@ theorem readAtOffset (shape : Extracted.method0.fieldShape Extracted.fieldRef0 =
     .value READ_OFFSET 4 false) (data : Nat → BitVec 8) :
     invoke Extracted.program 8 0 (contract.args data) (caller data) =
       .ok (caller data, contract.results (wordAt READ_OFFSET data)) := by
-  let frame : Frame := ⟨1, [], [], 0⟩
+  let frame : Frame := ⟨1, [], [], 0, []⟩
   let address : Reference := ⟨0, 0⟩
   let args : List Safety.Value := [.reference (.address address)]
   let memory := caller data

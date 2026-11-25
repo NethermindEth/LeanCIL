@@ -22,7 +22,7 @@ private theorem invokeMin (left right : W32) (memory : Safety.Memory) :
     invoke Extracted.program 8 0 (contract.args (left, right)) memory =
       .ok (memory, [.scalar (.i32 (minimum left right))]) := by
   change run Extracted.program 5 0 (if left.toInt ≤ right.toInt then 5 else 3)
-    [.scalar (.i32 left), .scalar (.i32 right)] ⟨memory.nextIdentity, [], [], 0⟩ [] memory = _
+    [.scalar (.i32 left), .scalar (.i32 right)] ⟨memory.nextIdentity, [], [], 0, []⟩ [] memory = _
   by_cases ordered : left.toInt ≤ right.toInt
   · rw [ite_eq_left ordered, minimum, ite_eq_left ordered]
     rfl

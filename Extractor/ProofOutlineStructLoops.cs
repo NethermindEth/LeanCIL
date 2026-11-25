@@ -109,7 +109,7 @@ internal static partial class ProofOutline
             Line();
             Line("/-- The checked cutpoint just before the loop condition loads its fields. -/");
             Line($"def header ({receiver} : Reference) (initial : Memory) (state : {StateType}) : LoopState :=");
-            Line($"  ⟨{header}, ⟨initial.nextIdentity, [], [], 0⟩, [], state.memory⟩");
+            Line($"  ⟨{header}, ⟨initial.nextIdentity, [], [], 0, []⟩, [], state.memory⟩");
             lean.Quiet();
             Line("/-- The property preserved at the loop condition. -/");
             lean.Wrapped("def invariant", Grouped(binders.Concat([("initial", "Memory"), ("state", StateType)])),
@@ -129,7 +129,7 @@ internal static partial class ProofOutline
             Line($"  have checked : {spec.ArgumentValues}.mapM (checkedValue initial) =");
             Line($"      .ok {spec.ArgumentValues} := by simp [cil_checked, ← same, state.formed]");
             Line($"  have setup : enterFrame Extracted.method0 {spec.ArgumentValues} initial =");
-            Line("      .ok (⟨initial.nextIdentity, [], [], 0⟩, initial) := by rfl");
+            Line("      .ok (⟨initial.nextIdentity, [], [], 0, []⟩, initial) := by rfl");
             Line($"  refine invoke_loop_satisfies Extracted.program_method0 checked setup {HeaderTerm}");
             Line($"    (invariant {Parameters} initial) (measure {Parameters} initial) (fun start => ?_) ?_");
             Line("  ·");

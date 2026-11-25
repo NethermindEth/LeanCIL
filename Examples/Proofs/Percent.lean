@@ -20,23 +20,23 @@ private theorem found :
 
 private theorem setupFrame :
     (fun (value : W32) (m : Safety.Memory) => enterFrame caller [.scalar (.i32 value)] m) =
-    (fun _ m => .ok (⟨m.nextIdentity, [], [], 0⟩, m)) := by cil_kernel_rfl
+    (fun _ m => .ok (⟨m.nextIdentity, [], [], 0, []⟩, m)) := by cil_kernel_rfl
 #print axioms setupFrame
 
 private theorem loadArgumentZero :
     (fun (value : W32) (m : Safety.Memory) => Safety.step caller (.ldarg 0) 0 [.scalar (.i32 value)]
-      ⟨m.nextIdentity, [], [], 0⟩ [] m) =
-    (fun value m => .ok (.next 1 [.scalar (.i32 value)] ⟨m.nextIdentity, [], [], 0⟩ m)) := by
+      ⟨m.nextIdentity, [], [], 0, []⟩ [] m) =
+    (fun value m => .ok (.next 1 [.scalar (.i32 value)] ⟨m.nextIdentity, [], [], 0, []⟩ m)) := by
   cil_kernel_rfl
 #print axioms loadArgumentZero
 
 private theorem atComparison (program : Program) (lookup : program[0]? = some caller)
     (value : W32) (m : Safety.Memory) :
     invoke program 66 0 [.scalar (.i32 value)] m =
-    run program 64 0 2 [.scalar (.i32 value)] ⟨m.nextIdentity, [], [], 0⟩
+    run program 64 0 2 [.scalar (.i32 value)] ⟨m.nextIdentity, [], [], 0, []⟩
       [.scalar (.i32 100), .scalar (.i32 value)] m := by
   let args : List Safety.Value := [.scalar (.i32 value)]
-  let activation : Safety.Frame := ⟨m.nextIdentity, [], [], 0⟩
+  let activation : Safety.Frame := ⟨m.nextIdentity, [], [], 0, []⟩
   have checked : args.mapM (checkedValue m) = .ok args := rfl
   have setup : enterFrame caller args m = .ok (activation, m) := congrFun (congrFun setupFrame value) m
   change invoke program 66 0 args m = run program 64 0 2 args activation _ m
@@ -53,7 +53,8 @@ private theorem atComparison (program : Program) (lookup : program[0]? = some ca
   | error fault => exact invoke_of_run_fault lookup checked setup (steps.trans outcome)
 #print axioms atComparison
 
-private def callerFrame (memory : Safety.Memory) : Safety.Frame := ⟨memory.nextIdentity, [], [], 0⟩
+private def callerFrame (memory : Safety.Memory) : Safety.Frame :=
+  ⟨memory.nextIdentity, [], [], 0, []⟩
 
 private theorem comparison :
     (fun (value : W32) (memory : Safety.Memory) =>

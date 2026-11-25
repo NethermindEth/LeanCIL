@@ -20,7 +20,7 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
       formed nofun (fun _ _ => nofun) (fun _ => nofun) (fun _ => nofun) (fun _ => nofun)
       nofun (Or.inr rfl)
   let frame : Frame := ⟨memory.nextIdentity, [.bytes (.aggregate 8) middle], [middle.allocation],
-    0⟩
+    0, []⟩
   have setup : enterFrame Extracted.method0
       [.reference (.address source), .reference (.address destination)] memory =
         .ok (frame, entered) := by

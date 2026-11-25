@@ -31,7 +31,7 @@ theorem correctness : countCallsContract.Refuted Extracted.program 0 := by
       (state [.scalar (.i32 0)] current) := by
     apply ReachesRun.call (callee := 1) (values := [.scalar (.i32 1)])
       (results := [.scalar (.i32 0)]) (rest := []) (updated := current) (entered := current)
-      (childFrame := ⟨current.nextIdentity, [], [], 0⟩) (calleeFuel := 4)
+      (childFrame := ⟨current.nextIdentity, [], [], 0, []⟩) (calleeFuel := 4)
       Extracted.program_method0 Extracted.method0_instruction6 _ Extracted.program_method1
     all_goals rfl
   have tail : SegmentRun Extracted.program 0 7 12 5 args (state [.scalar (.i32 0)] current)

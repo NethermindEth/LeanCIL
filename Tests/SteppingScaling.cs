@@ -516,7 +516,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                 (inputs outputs : List ArgumentView) (valid : ValidCall memory inputs outputs)
                 (left right : BitVec 64) :
                 WP (Execution (fun fuel => run [body] fuel 0 0
-                  [.scalar (.i64 left), .scalar (.i64 right)] ⟨0, slots, [], 0⟩ [] memory))
+                  [.scalar (.i64 left), .scalar (.i64 right)] ⟨0, slots, [], 0, []⟩ [] memory))
                   (fun result => result.2 = [.scalar (.i64 ({{SnapshotResult(requested)}}))]) := by
               have formed := valid.wellFormed
               have preserved := MemoryBelow.refl boundary memory

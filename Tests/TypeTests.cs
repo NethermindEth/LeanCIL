@@ -149,7 +149,7 @@ void QueueRuntime(string name, string folder)
           intro value initial
           let args : List Value := [.scalar (.i32 value)]
           let result : List Value := [.scalar (.i32 (value + {{(name == "Marker" ? 1 : 2)}}))]
-          let frame : Frame := ⟨initial.nextIdentity, [], [], 0⟩
+          let frame : Frame := ⟨initial.nextIdentity, [], [], 0, []⟩
           have child : invoke Extracted.program 62 1 args initial = .ok (initial, result) := by
             apply invoke_of_run (frame := frame) (entered := initial) Extracted.program_method1 rfl rfl
             {{comparisonPath.Replace("\n", "\n    ")}}

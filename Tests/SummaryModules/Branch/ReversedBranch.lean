@@ -65,7 +65,7 @@ theorem composed (flag : Bool) (x y : W64) : (branchContract flag x y).Holds Ext
 theorem invocation (memory : CIL.Safety.Memory) (flag : Bool) (x y : W64) :
     ∃ fuel, invoke Extracted.program fuel 0 (arguments flag x y) memory =
       .ok (memory, [.scalar (.i64 (if flag then y else x))]) := by
-  let frame : Frame := ⟨memory.nextIdentity, [], [], 0⟩
+  let frame : Frame := ⟨memory.nextIdentity, [], [], 0, []⟩
   let before : SegmentState := ⟨frame, [.scalar (.i32 (if flag then 1 else 0))], memory⟩
   obtain ⟨exit, ran, _, post⟩ := composed flag x y (arguments flag x y) before ⟨rfl, rfl, rfl⟩
   cases post

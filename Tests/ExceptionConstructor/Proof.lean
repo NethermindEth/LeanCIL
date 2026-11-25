@@ -42,7 +42,7 @@ where
 private def expected := expected?.get (by cil_kernel_rfl)
 private def entry := ProgramEntry.range Extracted.boundPackage
 private def initial := entry.initialMemory.toOption.getD .empty
-private def frame : Safety.Frame := ⟨initial.nextIdentity, [], [], 0⟩
+private def frame : Safety.Frame := ⟨initial.nextIdentity, [], [], 0, []⟩
 private def args (value : W32) : List Safety.Value := [.scalar (.i32 value)]
 
 private theorem loaded :
