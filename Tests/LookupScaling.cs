@@ -2339,7 +2339,7 @@ void ModelTableCosts()
             let start <- IO.monoNanosNow
             for i in [:count] do
               let pair := TypeExpr.aggregate identity ((i + trial) % 2)
-              if integerPairResult environment pair "System.UInt64" 8 then
+              if integerPairResult environment pair .uint64 8 then
                 throw (IO.userError "DivRem accepted an oversized tuple")
             return (← IO.monoNanosNow) - start
         #eval checkScaling "DivRem oversized tuple queries" 250 timeOversizedTuple
