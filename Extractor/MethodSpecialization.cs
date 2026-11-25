@@ -51,7 +51,9 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                     definition.Parameters.Select(parameter => parameter.ParameterType)) ||
             (declaringArguments.Length != 0 && !definition.IsStatic && !GenericStructs.Is(reference.DeclaringType)) ||
             (definition.IsConstructor && (methodArguments.Length != 0 || definition.IsStatic)) ||
-            !definition.HasBody || definition.Body.ExceptionHandlers.Count != 0 ||
+            !definition.HasBody ||
+            definition.Body.ExceptionHandlers.Any(handler =>
+                handler.HandlerType is not (ExceptionHandlerType.Catch or ExceptionHandlerType.Finally)) ||
             (reference.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default ||
             (definition.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
             throw new InvalidDataException($"Unsupported generic method signature or body: {reference.FullName}");
@@ -213,6 +215,15 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                 Mono.Cecil.CallSite site => SubstituteSite(site),
                 _ => instruction.Operand
             };
+
+        Instruction? Mapped(Instruction? boundary) => boundary is null ? null : instructions[boundary];
+        foreach (var handler in definition.Body.ExceptionHandlers)
+            clone.Body.ExceptionHandlers.Add(new ExceptionHandler(handler.HandlerType)
+            {
+                TryStart = Mapped(handler.TryStart), TryEnd = Mapped(handler.TryEnd),
+                HandlerStart = Mapped(handler.HandlerStart), HandlerEnd = Mapped(handler.HandlerEnd),
+                CatchType = handler.CatchType is { } caught ? Substitute(caught) : null
+            });
 
         instances.Add(key, clone);
         origins.Add(clone, new(definition.FullName, arguments.Select(t => t.FullName).ToArray()));

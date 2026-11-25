@@ -31,18 +31,31 @@ internal static class Reachability
         // Never use them as constant facts, even before their address escapes.
         HashSet<int> addressed = instructions.Where(i => i.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
             .Select(FeatureConstants.Local).ToHashSet();
+        // A handler or the target of a leave can follow any instruction of its try, so no local keeps a fact.
+        if (method.Body.HasExceptionHandlers) addressed.UnionWith(Enumerable.Range(0, method.Body.Variables.Count));
         Dictionary<Instruction, FeatureConstants> incoming = new()
         {
             [instructions[0]] = new(method.Body.Variables.Count)
         };
+        Queue<Instruction> pending = new();
+        HashSet<Instruction> queued = [instructions[0]];
+        pending.Enqueue(instructions[0]);
+        foreach (var handler in method.Body.ExceptionHandlers)
+        {
+            incoming[handler.HandlerStart] = FeatureConstants.HandlerEntry(method.Body.Variables.Count,
+                handler.HandlerType == ExceptionHandlerType.Catch);
+            if (queued.Add(handler.HandlerStart)) pending.Enqueue(handler.HandlerStart);
+        }
         // Revisit successors when a backedge or join weakens a constant fact.
         // Facts only move from a constant to unknown, so this reaches a fixed point.
         var typeTests = TypeTests.Analyze(method);
         var throws = Throws.Analyze(method, managedConstructor);
+        foreach (var handler in method.Body.ExceptionHandlers)
+            if (typeTests.Interior.Contains(handler.HandlerStart) || throws.Interior.Contains(handler.HandlerStart) ||
+                TailCalls.IsInterior(handler.HandlerStart))
+                throw new InvalidDataException(
+                    $"Exception handler starts inside a folded sequence: {handler.HandlerStart}");
         InstructionIndex? positions = null;
-        Queue<Instruction> pending = new();
-        HashSet<Instruction> queued = [instructions[0]];
-        pending.Enqueue(instructions[0]);
         while (pending.TryDequeue(out Instruction? i))
         {
             queued.Remove(i);

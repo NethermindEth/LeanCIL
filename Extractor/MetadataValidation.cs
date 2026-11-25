@@ -625,8 +625,7 @@ internal static class MetadataValidation
             Reject(() => method.DeclaringType.HasGenericParameters &&
                     MethodSpecialization.OwnerArguments(method).Count == 0,
                 OpenGenericMember);
-            Reject(() => method.Body.ExceptionHandlers.Count != 0,
-                "Unsupported method metadata: exception handlers");
+            Check(method, null, () => ExceptionClauses.Validate(method), named: true);
             Reject(() => method.IsConstructor && method.IsStatic,
                 "Unsupported static initialisation: static constructors are never extracted");
             var owner = method.DeclaringType.FullName;
@@ -861,6 +860,7 @@ internal static class MetadataValidation
                 }
                 if (!Check(method, instruction, () =>
                     {
+                        if (throws!.Protected.Contains(instruction)) throw Throws.ProtectedRefusal(instruction);
                         // Fold recognition scans the whole body, but only reachable unsupported throws are rejected.
                         if (instruction.OpCode.Code == Code.Newobj && instruction.Next?.OpCode.Code == Code.Throw)
                             throw Call("Unsupported exception constructor", reference, method, instruction,

@@ -19,6 +19,10 @@ internal sealed class FeatureConstants
         _locals = new int?[locals];
     }
 
+    /// <summary>The state a handler starts in: no known local, and the caught object for a catch.</summary>
+    internal static FeatureConstants HandlerEntry(int locals, bool caught) =>
+        new(caught ? [null] : [], new int?[locals]);
+
     private FeatureConstants(List<int?> stack, int?[] locals)
     {
         _stack = stack;
@@ -158,6 +162,9 @@ internal sealed class FeatureConstants
                 return;
             case Code.Ret:
                 if (InitAccessors.Return(method.ReturnType).MetadataType != MetadataType.Void) Pop();
+                return;
+            case Code.Leave: case Code.Leave_S:
+                _stack.Clear();
                 return;
         }
 

@@ -40,6 +40,7 @@ internal sealed class InstructionAdmission(MethodDefinition method, FeatureProfi
         }
         if (typeTests.Results.ContainsKey(site) || typeTests.Operands.Contains(site)) return;
         var throws = Throws.Analyze(method, managedConstructor);
+        if (throws.Protected.Contains(site)) throw Throws.ProtectedRefusal(site);
         if (code == Code.Constrained)
         {
             var next = site.Next ?? throw new InvalidDataException("Constrained prefix has no call");

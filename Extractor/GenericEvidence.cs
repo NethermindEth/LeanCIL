@@ -471,6 +471,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var objectBases = classOwner ? ObjectTypes.BaseList(method.DeclaringType) : "[]";
         var (parameters, returnType) = SignatureTypes(method);
         var locals = Locals(method);
+        var handlers = Handlers(method);
         // Lines break only after a comma, so the emitted definition stays on one line.
         return $$"""
             { token := {{method.MetadataToken.ToUInt32()}}, owner := {{owner}},
@@ -484,8 +485,19 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             returnType := {{returnType}}, parameters := {{parameters}},
             locals := {{locals}}, initLocals := {{Bool(method.Body.InitLocals)}},
             maxStack := {{method.Body.MaxStackSize}}, genericParameters := {{List(constraints)}},
-            {{staticInput}}code := {{List(code)}} }
+            {{staticInput}}code := {{List(code)}}{{handlers}} }
             """.ReplaceLineEndings(" ");
+    }
+
+    // A body without clauses omits the field, which defaults to none.
+    string Handlers(MethodDefinition method)
+    {
+        var clauses = ExceptionClauses.Of(method);
+        if (clauses.Length == 0) return "";
+        return ", handlers := " + List(clauses.Select(clause =>
+            $"{{ tryStart := {clause.TryStart}, tryEnd := {clause.TryEnd}, " +
+            $"handlerStart := {clause.HandlerStart}, handlerEnd := {clause.HandlerEnd}, " +
+            $"kind := {(clause.CatchType is { } caught ? $".catch ({Type(caught)})" : ".finally")} }}"));
     }
 
     static bool ObjectReceiver(MethodDefinition method) =>
@@ -572,7 +584,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Ldlen, Code.Ldelem_I1, Code.Ldelem_U1, Code.Ldelem_I2, Code.Ldelem_U2, Code.Ldelem_I4, Code.Ldelem_U4,
         Code.Ldelem_I8, Code.Ldelem_I, Code.Ldelem_Ref, Code.Stelem_I, Code.Stelem_I1, Code.Stelem_I2,
         Code.Stelem_I4, Code.Stelem_I8, Code.Stelem_Ref,
-        Code.Readonly,
+        Code.Readonly, Code.Leave, Code.Leave_S, Code.Endfinally,
         Code.Br_S, Code.Brfalse_S, Code.Brtrue_S, Code.Beq_S, Code.Bge_S, Code.Bgt_S, Code.Ble_S, Code.Blt_S,
         Code.Bne_Un_S, Code.Bge_Un_S, Code.Bgt_Un_S, Code.Ble_Un_S, Code.Blt_Un_S,
         Code.Br, Code.Brfalse, Code.Brtrue, Code.Beq, Code.Bge, Code.Bgt, Code.Ble, Code.Blt,
@@ -712,6 +724,22 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             // The kernel decides the equality of a literal and its materialized name, so the table may hold
             // either; the name spares the reachable site a conversion.
             else if (reachable.Contains(site)) operands[known] = (token, key, operand);
+        }
+        // A catch class token sits in the exception section, not in the code, and names its class as a type operand.
+        foreach (var handler in original.Body.ExceptionHandlers)
+        {
+            if (handler.CatchType is not { } caught) continue;
+            var token = caught.MetadataToken.ToUInt32();
+            var operand = $".type ({Type(caught)})";
+            var known = positions.GetValueOrDefault(token, -1);
+            if (known < 0)
+            {
+                positions[token] = operands.Count;
+                operands.Add((token, operand, operand));
+            }
+            else if (operands[known].Key != operand)
+                throw new InvalidDataException(
+                    $"Metadata token 0x{token:X8} resolves to two operands in {original.FullName}.");
         }
         // Each closed instantiation carries its own bytes and metadata slice, built from the open definition and the
         // assembly, so a method's component names no other method and does not depend on which instantiations the

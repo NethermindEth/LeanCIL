@@ -155,6 +155,12 @@ internal static class NativeOperands
 
         var pending = new Queue<Instruction>();
         pending.Enqueue(method.Body.Instructions[0]);
+        // A catch handler starts with the caught object and a finally handler with an empty stack.
+        foreach (var handler in method.Body.ExceptionHandlers)
+        {
+            incoming[handler.HandlerStart] = handler.HandlerType == ExceptionHandlerType.Catch ? [Kind.Object] : [];
+            pending.Enqueue(handler.HandlerStart);
+        }
         while (pending.TryDequeue(out var instruction))
         {
             if (!reachable.Contains(instruction) || !incoming.TryGetValue(instruction, out var before)) continue;
@@ -288,6 +294,8 @@ internal static class NativeOperands
                     throw new InvalidDataException(
                         $"Throw requires an object on the evaluation stack: {method.FullName}");
             }
+            else if (code is Code.Leave or Code.Leave_S)
+                stack.Clear();
             else if (code == Code.Ret)
             {
                 var returned = InitAccessors.Return(method.ReturnType);

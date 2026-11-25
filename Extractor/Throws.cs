@@ -8,8 +8,13 @@ namespace Nethermind.LeanCIL;
 internal static class Throws
 {
     const int ArgumentLimit = 4;
+    /// <summary>
+    /// The folded raises with their operands and interiors, and the instructions of candidates left unfolded because a
+    /// clause protects their throw: a folded raise carries no object for a catch to test.
+    /// </summary>
     internal sealed record Analysis(
-        Dictionary<Instruction, ExceptionType> Raises, HashSet<Instruction> Operands, HashSet<Instruction> Interior);
+        Dictionary<Instruction, ExceptionType> Raises, HashSet<Instruction> Operands, HashSet<Instruction> Interior,
+        HashSet<Instruction> Protected);
 
     const string Message = "System.String";
     const string Inner = "System.Exception";
@@ -65,7 +70,13 @@ internal static class Throws
 
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, Analysis> cache = new();
 
-    static readonly Analysis NoFolds = new([], [], []);
+    static readonly Analysis NoFolds = new([], [], [], []);
+
+    /// <summary>The refusal of an instruction of a recognized throw that a clause protects.</summary>
+    internal static InvalidDataException ProtectedRefusal(Instruction site) => new($"""
+        Unsupported throw inside a protected range: {site}
+          A recognized exception constructor is folded into a fault without an object, which no catch can test.
+        """.ReplaceLineEndings("\n"));
 
     internal static Analysis Analyze(MethodDefinition method, Instruction? managedConstructor = null) =>
         managedConstructor is null ? cache.GetValue(method, Compute) : NoFolds;
@@ -73,7 +84,8 @@ internal static class Throws
     static Analysis Compute(MethodDefinition method)
     {
         var code = method.Body.Instructions;
-        var analysis = new Analysis([], [], []);
+        var analysis = new Analysis([], [], [], []);
+        var clauses = ExceptionClauses.Of(method);
         for (int at = 0; at < code.Count; at++)
         {
             int count = 0;
@@ -83,6 +95,12 @@ internal static class Throws
             if (count == ArgumentLimit || raise >= code.Count || code[raise].OpCode.Code != Code.Throw ||
                 Raised(code[at + count], code, at, count) is not ExceptionType raised)
                 continue;
+            if (clauses.Any(clause => clause.TryStart <= raise && raise < clause.TryEnd))
+            {
+                for (int k = at; k <= raise; k++) analysis.Protected.Add(code[k]);
+                at = raise;
+                continue;
+            }
             for (int k = at; k < raise; k++) analysis.Operands.Add(code[k]);
             for (int k = at + 1; k <= raise; k++) analysis.Interior.Add(code[k]);
             analysis.Raises.Add(code[raise], raised);

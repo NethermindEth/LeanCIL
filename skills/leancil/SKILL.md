@@ -73,7 +73,7 @@ State these limits to the user before promising a result.
   `metadata and CIL validation`. `leancil list` validates nothing.
 - Outside the supported subset are interface calls, virtual dispatch outside the extracted
   classes, type tests against interfaces, `System.Object` or value types, boxing, ordinary
-  recursion, exception handlers, floating point, reading a string's characters and arbitrary
+  recursion, filter and fault clauses, floating point, reading a string's characters and arbitrary
   external calls. Classes, arrays, spans, structs and SIMD intrinsics are supported
   with restrictions; look an instruction or call up in the
   [opcode table](https://github.com/NethermindEth/LeanCIL/blob/main/docs/OPCODES.md#unsupported-opcodes)

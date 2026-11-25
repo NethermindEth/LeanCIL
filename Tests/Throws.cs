@@ -238,7 +238,9 @@ rejected.Check();
 // Exercise stack-based throws, constructor signatures and control flow in compiled images.
 foreach (var (mutation, marker) in new[]
 {
-    ("handler", "Unsupported method metadata"),
+    ("handler", "Unsupported throw inside a protected range"),
+    ("fault-clause", "Unsupported exception clause: fault"),
+    ("handler-return", "ret inside an exception region"),
     ("no-throw", "Contract imports support call only, not callvirt, newobj or ldftn."),
     ("separated-null", ""),
     ("null-branch", ""),
@@ -275,6 +277,24 @@ foreach (var (mutation, marker) in new[]
                 helper.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Catch)
                 {
                     TryStart = code[0], TryEnd = code[2], HandlerStart = code[2], HandlerEnd = leave,
+                    CatchType = module.ImportReference(typeof(Exception))
+                });
+                break;
+            case "fault-clause":
+                var resumed = il.Create(OpCodes.Ret);
+                il.Append(il.Create(OpCodes.Endfinally));
+                il.Append(resumed);
+                helper.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Fault)
+                {
+                    TryStart = code[0], TryEnd = code[2], HandlerStart = code[2], HandlerEnd = resumed
+                });
+                break;
+            case "handler-return":
+                il.Append(il.Create(OpCodes.Pop));
+                il.Append(il.Create(OpCodes.Ret));
+                helper.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Catch)
+                {
+                    TryStart = code[0], TryEnd = code[2], HandlerStart = code[2], HandlerEnd = null,
                     CatchType = module.ImportReference(typeof(Exception))
                 });
                 break;

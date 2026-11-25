@@ -134,7 +134,7 @@ correctness and memory-safety claims.
 Other classes and field types, arrays of references other than one-dimensional arrays of
 admitted classes or of non-generic classes such as `string`, reading a string's characters,
 virtual dispatch outside the extracted classes, interface calls, type tests against interfaces,
-`System.Object` or value types, boxing, ordinary recursive calls, exception handlers,
+`System.Object` or value types, boxing, ordinary recursive calls, filter and fault clauses,
 floating-point arithmetic and arbitrary external calls are outside the supported subset.
 Concurrency, GC implementation correctness and equivalence to arbitrary .NET runtimes are
 outside the model's guarantees. See [soundness and limitations](docs/SOUNDNESS.md).

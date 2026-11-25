@@ -116,23 +116,26 @@ See [runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions).
 
 ### Method body decoding
 
-`CIL.Extraction.decodeSingleCatch` reads a fat method body with one small or fat typed catch
-clause. The fat format uses 32-bit offsets and lengths for both ranges.
-It checks the class token against the supplied metadata and the protected and handler ranges
-against the decoded instruction boundaries. Each clause has nonempty, disjoint ranges.
-`CIL.Extraction.decodeCatchFinally` reads a typed catch inside a finally. The outer try
-must contain the inner try and catch handler, and the cleanup handler must end at an
-`endfinally` instruction. Public execution requires a section-free body.
-
-Each method's evidence holds the bytes the extractor emitted for its body (the header and the
-code, not extra sections) and a token table. `BodyDecodes` decodes the bytes in the kernel
+Each method's evidence holds the bytes the extractor emitted for its body (the header, the code
+and its exception section) and a token table. `BodyDecodes` decodes the bytes in the kernel
 ([BodyDecoding](../CIL/Extraction/BodyDecoding.lean)) and requires the result to equal the
-original definition's `maxStack`, `initLocals` and `code`, and checks the definition and locals
-against the metadata it carries ([Metadata binding](#metadata-binding)):
+original definition's `maxStack`, `initLocals`, `code` and `handlers`, and checks the definition
+and locals against the metadata it carries ([Metadata binding](#metadata-binding)):
 
 - The header is a tiny header or a fat header of three words that sets at most the init-locals
-  flag. A body with extra sections (exception handlers) is rejected, and the supplied bytes must
-  be exactly the header and the declared code size.
+  and more-sections flags. The supplied bytes must be exactly the header, the declared code size
+  and the section the header announces.
+- The exception section is one small or fat table, padded to four bytes, with at least one
+  clause and no section after it. A typed catch takes the class its token has in the checked
+  token table, and a finally has a zero operand. Filter, fault and other clause kinds are
+  rejected by kind. Every range boundary is an instruction start that follows no prefix, or the
+  code end, and becomes an instruction index; each clause has nonempty, disjoint ranges.
+- `checkRegions` ([ExceptionRegions](../CIL/Extraction/ExceptionRegions.lean)) requires clauses
+  to be disjoint or nested with the inner clause listed first, no `ret`, `jmp` or `tail.`
+  inside a region, no `localloc` in a handler, control to enter a region only at the first
+  instruction of a protected range and to leave one only by `leave`, `endfinally` only in a
+  finally handler, no `leave` out of a finally handler and no instruction falling out of a
+  region.
 - Every opcode of the ECMA-335 table has one operand encoding. The table is transcribed from the
   standard; `operand_kinds_agree_with_cecil` in `Tests/BodyDecoding.lean` compares it with a
   static list generated once from `Mono.Cecil.Cil.OpCodes`. An unknown opcode byte, a truncated
