@@ -162,7 +162,9 @@ const string helper = "System.Int32 Fixture::Helper(System.Int32)";
 const string excluded = "System.UInt64 Fixture::Excluded(System.UInt64,System.UInt64)";
 JsonElement Blocker(string construct) => blockers.Single(b => b.GetProperty("construct").GetString() == construct);
 string[] Reached(JsonElement blocker, string[]? names = null) => blocker.GetProperty("entries").EnumerateArray()
-    .Select(e => e.GetProperty("profile").GetString() + " " + string.Join(" -> ", e.GetProperty("chains").EnumerateArray().Single().EnumerateArray().Select(m => (names ?? methodNames)[m.GetInt32()])))
+    .Select(e => e.GetProperty("profile").GetString() + " " + string.Join(" -> ",
+        e.GetProperty("chains").EnumerateArray().Single().EnumerateArray()
+            .Select(m => (names ?? methodNames)[m.GetInt32()])))
     .Order(StringComparer.Ordinal).ToArray();
 string Id(JsonElement blocker) => blocker.GetProperty("id").GetString()!;
 Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(StringComparer.Ordinal)

@@ -271,8 +271,8 @@ internal static partial class Blockers
 
         batch.RequireUnchanged();
         // A chain names each method by its index in `methods`, so a name is written once however many chains hold it.
-        string[] methodTable = [.. ordered.SelectMany(f => f.Entries).SelectMany(r => r.Chains).SelectMany(chain => chain)
-            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+        string[] methodTable = [.. ordered.SelectMany(f => f.Entries).SelectMany(r => r.Chains)
+            .SelectMany(chain => chain).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
         var methodIndex = methodTable.Select((name, index) => (name, index))
             .ToDictionary(pair => pair.name, pair => pair.index, StringComparer.Ordinal);
         var report = new
