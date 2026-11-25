@@ -157,6 +157,10 @@ internal static partial class Blockers
 
         var findings = new Dictionary<string, Finding>(StringComparer.Ordinal);
         var outcomes = new List<Outcome>();
+        // Chains repeat the same methods across entries; one name per method keeps the report's memory linear.
+        var names = new Dictionary<MethodDefinition, string>(ReferenceEqualityComparer.Instance);
+        string NameOf(MethodDefinition method) =>
+            names.TryGetValue(method, out var name) ? name : names[method] = method.FullName;
         // One module serves every entry, so per-method analyses are computed once; each entry's
         // operand rewrites are undone before the next entry is validated.
         var references = referencePaths.Distinct(StringComparer.Ordinal).ToArray();
@@ -249,7 +253,7 @@ internal static partial class Blockers
                 var construct = Construct(failure.Error.Message);
                 if (!findings.TryGetValue(construct, out var finding)) findings[construct] = finding = new(construct);
                 var site = SiteOf(failure);
-                var chain = failure.Chain.Select(method => method.FullName).ToArray();
+                var chain = failure.Chain.Select(NameOf).ToArray();
                 finding.Add(site, chain[0], profileName, chain);
                 if (knownFindings.Add(finding)) entryFindings.Add(finding);
             }
@@ -266,7 +270,7 @@ internal static partial class Blockers
         foreach (var outcome in outcomes) outcome.Findings.Sort((left, right) => ranks[left].CompareTo(ranks[right]));
 
         batch.RequireUnchanged();
-        var report = JsonSerializer.Serialize(new
+        var report = new
         {
             schema = 1,
             note = Disclaimer,
@@ -297,9 +301,15 @@ internal static partial class Blockers
                 sites = f.Sites.Select(s => new { method = s.Method, ilOffset = s.IlOffset, instruction = s.Instruction, source = s.Source, message = s.Message }),
                 entries = f.Entries.Select(r => new { signature = r.Signature, profile = r.Profile, chains = r.Chains })
             })
-        }, new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        };
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-        File.WriteAllText(outputPath, report + "\n", new UTF8Encoding(false));
+        // Streamed, since the report can exceed the longest string the runtime allocates.
+        using (var stream = File.Create(outputPath))
+        {
+            JsonSerializer.Serialize(stream, report,
+                new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+            stream.WriteByte((byte)'\n');
+        }
         Console.Write(Summary(identity, outcomes, ordered, outputPath));
         return 0;
     }
