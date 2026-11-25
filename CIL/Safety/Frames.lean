@@ -53,6 +53,14 @@ inductive LocalSlot where
   | object (value : Option ManagedReference)
   deriving DecidableEq, Repr
 
+/-- How an activation continues when a finally handler it entered reaches `endfinally`. -/
+inductive Resumption where
+  /-- Continue the `leave` to `target` that entered the handler. -/
+  | leave (target : Nat)
+  /-- Raise again the exception that entered the handler, located where it was first raised. -/
+  | raise (location : LocatedFault) (object : Option Reference)
+  deriving DecidableEq, Repr
+
 /-- A method activation: its identity, local slots and the allocations it owns (expired by
     `leaveFrame`). -/
 structure Frame where
@@ -61,6 +69,9 @@ structure Frame where
   owned : List AllocationId
   /-- Rounded bytes reserved by this activation's dynamic stack allocations. -/
   stackBytes : Nat := 0
+  /-- The finally handlers the activation is running, innermost first: each clause's index in
+      the body's exception clauses and how its `endfinally` resumes. -/
+  resumptions : List (Nat × Resumption) := []
   deriving Repr
 
 /-- Natural alignment for 32/64-bit scalar homes on the supported 64-bit targets
@@ -364,7 +375,7 @@ def enterFrame (body : CIL.Method) (args : List Value) (m : Memory) :
     makeSelectedLocals activation body.opaqueVectorLocals body.localKinds body.locals m
   let (parameters, parameterIds, memory) ←
     makeParameterHomes activation body.parameterHomes args memory
-  return (⟨activation, locals ++ parameters.map Prod.snd, owned ++ parameterIds, 0⟩, memory)
+  return (⟨activation, locals ++ parameters.map Prod.snd, owned ++ parameterIds, 0, []⟩, memory)
 
 /-- Ends an activation by expiring every allocation it owns. -/
 def leaveFrame (frame : Frame) (m : Memory) : Memory :=
@@ -378,7 +389,7 @@ theorem enterFrame_of_no_opaque (body : CIL.Method) (args : List Value) (m : Mem
       let (locals, owned, memory) ← makeLocals activation body.localKinds body.locals m
       let (parameters, parameterIds, memory) ←
         makeParameterHomes activation body.parameterHomes args memory
-      return (⟨activation, locals ++ parameters.map Prod.snd, owned ++ parameterIds, 0⟩,
+      return (⟨activation, locals ++ parameters.map Prod.snd, owned ++ parameterIds, 0, []⟩,
         memory)) := by
   simp only [enterFrame, noOpaque, makeSelectedLocals_nil]
 #print axioms enterFrame_of_no_opaque

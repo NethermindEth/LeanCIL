@@ -58,6 +58,6 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .ldloca _ | .stloc .. | .starg _ | .ldarga _
   | .ret | .throw _ | .unadmitted _ | .br _ | .switch _ | .brfalse _
   | .brtrue _ | .bgt _ | .ble _ | .ble_un _ | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _
-  | .blt _ | .beq _ | .bne_un _ => none
+  | .blt _ | .beq _ | .bne_un _ | .leave _ | .endfinally => none
 
 end CIL.Extraction

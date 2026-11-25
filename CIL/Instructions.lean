@@ -292,6 +292,12 @@ inductive Instruction where
   /-- Throw the object on the evaluation stack. A recognized constructor fold supplies the
       exception type established by its checked operands. -/
   | throw (folded : Option ExceptionType := none)
+  /-- `leave` to `target`: empties the stack and exits every protected range that holds the pc
+      but not `target`, running the handler of each finally it exits first, innermost first. -/
+  | leave (target : Nat)
+  /-- `endfinally`: ends the running finally handler and resumes the `leave` or the raised
+      exception that entered it. -/
+  | endfinally
   /-- A hole carrying the raw `opcode` at its pc: an opcode no instruction family admits, or one
       outside the code the extractor reaches under the selected profile. It faults when stepped. -/
   | unadmitted (opcode : Nat)
@@ -441,6 +447,39 @@ def Instruction.readsLink (op : Instruction) : Bool := by
   case call | callvirt | newobj | calli => exact true
   all_goals exact false
 
+/-- What an exception clause does with an exception raised in its protected range. -/
+inductive HandlerKind where
+  /-- A typed catch of exceptions whose runtime class is `type` or derives from it. -/
+  | catch (type : Extraction.TypeExpr)
+  /-- A finally handler, which runs whenever control leaves the protected range. -/
+  | finally
+  deriving DecidableEq, Repr
+
+/-- An exception clause of a method body (ECMA-335 II.19) in instruction indices: the protected
+    range `[tryStart, tryEnd)` and the handler `[handlerStart, handlerEnd)`. A body lists a
+    clause before every clause that encloses it. -/
+structure ExceptionClause where
+  tryStart : Nat
+  tryEnd : Nat
+  handlerStart : Nat
+  handlerEnd : Nat
+  kind : HandlerKind
+  deriving DecidableEq, Repr
+
+/-- Whether `pc` lies in the protected range of `clause`. -/
+def ExceptionClause.protects (clause : ExceptionClause) (pc : Nat) : Bool :=
+  clause.tryStart ≤ pc && pc < clause.tryEnd
+
+/-- Whether `pc` lies in the handler of `clause`. -/
+def ExceptionClause.handles (clause : ExceptionClause) (pc : Nat) : Bool :=
+  clause.handlerStart ≤ pc && pc < clause.handlerEnd
+
+/-- Whether `clause` is a finally clause. -/
+def ExceptionClause.isFinally (clause : ExceptionClause) : Bool :=
+  match clause.kind with
+  | .finally => true
+  | .catch _ => false
+
 /-- An extracted method body with the frame layout the interpreter needs. -/
 structure Method where
   /-- The hardware features the method was compiled against. -/
@@ -459,7 +498,13 @@ structure Method where
   /-- Call-family pc to link; the first entry for a pc wins. -/
   links : List (Nat × Link) := []
   returnsValue : Bool
+  /-- The exception clauses of the body, nested clauses first; see `ExceptionClause`. -/
+  handlers : List ExceptionClause := []
   deriving Repr
+
+/-- No exception clause of `body` protects `pc`, so a fault there leaves the activation. -/
+def Method.unprotectedAt (body : Method) (pc : Nat) : Bool :=
+  body.handlers.all fun clause => !clause.protects pc
 
 /-- The link the first entry of `links` for `query` gives, `none` without one. -/
 def linkLookup (links : List (Nat × Link)) (query : Nat) : Option Link :=
@@ -477,9 +522,9 @@ def Method.linkAt (body : Method) (pc : Nat) : Option Link :=
 def Method.staticAt (body : Method) (pc : Nat) : Option StaticDescriptor :=
   (body.staticSites.find? (fun site => site.1 == pc)).map Prod.snd
 
-/-- Replace the code and clear the links and static sites keyed by its pcs. -/
+/-- Replace the code and clear the links, static sites and exception clauses keyed by its pcs. -/
 def Method.withCode (method : Method) (code : List Instruction) : Method :=
-  { method with code := code, links := [], staticSites := [] }
+  { method with code := code, links := [], staticSites := [], handlers := [] }
 
 /-- Replacing the code clears its link table. -/
 theorem Method.withCode_linkAt (method : Method) (code : List Instruction) (pc : Nat) :

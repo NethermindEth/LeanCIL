@@ -1,4 +1,5 @@
 import CIL.Safety.ArrayAllocation
+import CIL.Extraction.MetadataNames
 
 /-!
 # Heap objects
@@ -137,6 +138,46 @@ def objectTest (memory : Memory) (type : CIL.Extraction.TypeExpr) (throwing : Bo
     if type ∈ runtime.lineage then pure reference
     else if throwing then .error (.thrown .invalidCast)
     else pure .null
+
+/-- `System.Exception` as CoreLib defines it and as a reference assembly names it. -/
+def exceptionClasses : List CIL.Extraction.TypeExpr :=
+  [.object CIL.Extraction.coreLibraryScope CIL.ExceptionType.baseException.ownerName,
+    .atom CIL.Extraction.runtimeScope CIL.ExceptionType.baseException.ownerName]
+
+/-- `System.Object` as CoreLib defines it and as a reference assembly names it. -/
+def objectClasses : List CIL.Extraction.TypeExpr :=
+  [.object CIL.Extraction.coreLibraryScope "System.Object",
+    .atom CIL.Extraction.runtimeScope "System.Object"]
+
+/-- The scope and full name of a class spelling. -/
+private def classSpelling :
+    CIL.Extraction.TypeExpr → Option (String × CIL.Extraction.ClassName)
+  | .object scope name => some (scope, name)
+  | .atom scope name => some (scope, .ofText name)
+  | _ => none
+
+/-- Runtime identity of two class spellings: two full names are two classes, while one full name
+    in two scopes may be one forwarded class. Other spellings defer to `sameRuntimeType`. -/
+def sameClass (left right : CIL.Extraction.TypeExpr) : Option Bool :=
+  match classSpelling left, classSpelling right with
+  | some (scope, name), some (otherScope, otherName) =>
+    if name != otherName then some false else if scope == otherScope then some true else none
+  | _, _ => CIL.Extraction.sameRuntimeType left right
+
+/-- Whether a catch of class `type` takes the live object `reference`: its runtime class or a base
+    its lineage lists is `type`, or `type` is `System.Object`. The lineage must include
+    `System.Exception`, since the runtime wraps any other thrown object before a handler sees it,
+    and a class identity metadata cannot settle (`sameClass`) is inconclusive. -/
+def catchesObject (memory : Memory) (type : CIL.Extraction.TypeExpr) (reference : Reference) :
+    ExecutionResult Bool := do
+  let runtime ← runtimeTypeOf memory reference
+  let isException := runtime.lineage.any fun base =>
+    exceptionClasses.any (sameClass base · == some true)
+  if !isException then .error (.unsupported "Raised object outside System.Exception") else
+  let verdicts := (runtime.lineage ++ objectClasses).map (sameClass type)
+  if verdicts.contains (some true) then .ok true
+  else if verdicts.all (· == some false) then .ok false
+  else .error (.unsupported "Catch type identity is not settled by metadata")
 
 /-- Object storage is aligned to the 8-byte field slots of the admitted 64-bit targets. -/
 def objectAlignment : Nat := 8

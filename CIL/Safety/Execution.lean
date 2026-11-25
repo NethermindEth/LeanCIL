@@ -210,6 +210,9 @@ inductive FrameAction where
   | construct (callee : Nat) (args rest : List Value) (frame : Frame)
       (temporary : Reference) (kind : CIL.LocalKind) (memory : Memory)
   | returned (result : List Value) (memory : Memory)
+  /-- The exception that entered a finally handler, raised again from its `endfinally` as it was
+      first raised: located at `location`, with the thrown `object` when there is one. -/
+  | raise (location : LocatedFault) (object : Option Reference) (frame : Frame) (memory : Memory)
 
 /-- How a call-family instruction faults when its method's link table gives its pc no target, or
     a target of another kind than the instruction enters. -/
@@ -633,6 +636,50 @@ def newobjStep (link : Option CIL.Link) (method : CIL.Extraction.MethodRef)
       frame stack m
   | _ => .error unlinkedCall
 
+/-- The first clause of `clauses`, numbered from `index`, that satisfies `test`, with its
+    number. -/
+def findClause (test : CIL.ExceptionClause → Bool) :
+    Nat → List CIL.ExceptionClause → Option (Nat × CIL.ExceptionClause)
+  | _, [] => none
+  | index, clause :: rest =>
+    if test clause then some (index, clause) else findClause test (index + 1) rest
+
+/-- A `leave` from `pc` to `target` with an empty stack: through the handler of the innermost
+    finally whose protected range holds `pc` but not `target`, whose `endfinally` resumes the
+    leave, or at `target` once no such finally remains. -/
+def leaveFrom (body : CIL.Method) (pc target : Nat) (frame : Frame) (memory : Memory) :
+    FrameAction :=
+  match findClause (fun clause => clause.isFinally && clause.protects pc && !clause.protects target)
+      0 body.handlers with
+  | none => .next target [] frame memory
+  | some (index, clause) =>
+    .next clause.handlerStart []
+      { frame with resumptions := (index, .leave target) :: frame.resumptions } memory
+
+/-- `leave` at `pc` to `target`. Only `endfinally` ends a finally handler, so a leave from inside
+    one to outside it is an invalid state. -/
+def leaveStep (body : CIL.Method) (pc target : Nat) (frame : Frame) (memory : Memory) :
+    ExecutionResult FrameAction :=
+  if body.handlers.any fun clause =>
+      clause.isFinally && clause.handles pc && !clause.handles target then
+    .error .invalidState
+  else .ok (leaveFrom body pc target frame memory)
+
+/-- `endfinally` at `pc` ends the handler of the innermost finally that holds `pc` and resumes
+    how the activation entered it: the pending `leave`, or the exception raised again. Outside a
+    finally handler, or with another clause's resumption pending, the state is invalid. -/
+def endFinallyStep (body : CIL.Method) (pc : Nat) (frame : Frame) (memory : Memory) :
+    ExecutionResult FrameAction :=
+  match findClause (fun clause => clause.isFinally && clause.handles pc) 0 body.handlers,
+      frame.resumptions with
+  | some (index, _), (pending, resumption) :: rest =>
+    if pending != index then .error .invalidState else
+    let frame := { frame with resumptions := rest }
+    match resumption with
+    | .leave target => .ok (leaveFrom body pc target frame memory)
+    | .raise location object => .ok (.raise location object frame memory)
+  | _, _ => .error .invalidState
+
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
     bits are rejected before dispatch, and a call in the arm of its link. -/
 def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
@@ -941,6 +988,9 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     | some exception => .thrown exception
     | none => throwFault m stack)
   | .ret, _ => returnFrom body.returnNarrow body.returnsValue stack m
+  -- Protected ranges are left by `leave`, and a finally handler ends at `endfinally`.
+  | .leave target, _ => leaveStep body pc target frame m
+  | .endfinally, _ => endFinallyStep body pc frame m
   | _, _ =>
     match pureArity op with
     | some argc =>
@@ -955,8 +1005,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       let (memory, values) ← instruction op stack m
       return .next (pc + 1) values frame memory
 
-/-- Memory supplied to the failing operation, including writes from completed instructions.
-An explicit stack throw also carries the reference of the object that was raised. -/
+/-- The state execution stopped in: where it stopped, the memory there, the memory after leaving
+    every activation the invocation entered, and the object an explicit stack throw raised. -/
 structure FaultState where
   location : LocatedFault
   memory : Memory
@@ -965,101 +1015,172 @@ structure FaultState where
   exceptionObject : Option Reference
 
 /-- Expire the storage of the caller a fault has just left. -/
-private def FaultState.unwind (frame : Frame) (fault : FaultState) : FaultState :=
+def FaultState.unwind (frame : Frame) (fault : FaultState) : FaultState :=
   { fault with unwoundMemory := leaveFrame frame fault.unwoundMemory }
 
-/-- Only a successful classification of an explicit stack throw identifies a raised object. -/
-private def thrownReference : CIL.Instruction → List Value → ExecutionFault → Option Reference
-  | .throw none, .object (.address reference) :: _, .thrown _ => some reference
-  | _, _, _ => none
+/-- The live object at offset 0 that an explicit stack throw raises; `none` for any other
+    instruction or operand. -/
+def thrownReference (memory : Memory) : CIL.Instruction → List Value → Option Reference
+  | .throw none, .object (.address reference) :: _ =>
+    match runtimeTypeOf memory reference with
+    | .ok _ => if reference.offset = 0 then some reference else none
+    | .error _ => none
+  | _, _ => none
 
-/-- Apply frame cleanup when retaining a fault state. The ordinary result records the location. -/
-private def propagateFault (onUnwind : Option (Frame → ε → ε)) (frame : Frame)
-    (result : Except ε α) : Except ε α :=
-  match onUnwind with
-  | none => result
-  | some expire => result.mapError (expire frame)
+/-- The handler of the activation that a raised exception enters. -/
+inductive HandlerEntry where
+  /-- The catch handler at `start`, which receives the raised `object`. -/
+  | catch (start : Nat) (object : Reference)
+  /-- The handler at `start` of the finally clause numbered `index`. -/
+  | finally (index start : Nat)
 
-/-- Execute the methods supplied by `lookup`. The reporter receives the failure location,
-    memory at the fault, memory after unwinding and any explicitly thrown object. Constructor
-    storage belongs to its caller, so expiration of the constructor's private
-    frame does not destroy the value being constructed. Static instructions use
-    extraction-bound field identities and readonly allocation storage. -/
-def runReporting {ε : Type} (report : LocatedFault → Memory → Memory → Option Reference → ε)
-    (onUnwind : Option (Frame → ε → ε)) (lookup : Nat → Option CIL.Method) :
-    Nat → Nat → Nat → List Value → Frame →
-    List Value → Memory → Except ε (Memory × List Value)
+/-- The handler of `clauses`, numbered from `index`, that an exception raised at `pc` enters:
+    that of the first clause whose protected range holds `pc` and that is a finally, or a catch
+    of the class of the raised `object`. A catch cannot test an exception raised without one. -/
+def handlerFor (memory : Memory) (object : Option Reference) (pc : Nat) :
+    Nat → List CIL.ExceptionClause → ExecutionResult (Option HandlerEntry)
+  | _, [] => .ok none
+  | index, clause :: rest =>
+    if !clause.protects pc then handlerFor memory object pc (index + 1) rest else
+    match clause.kind, object with
+    | .finally, _ => .ok (some (.finally index clause.handlerStart))
+    | .catch type, some reference => do
+      if ← catchesObject memory type reference then
+        .ok (some (.catch clause.handlerStart reference))
+      else handlerFor memory object pc (index + 1) rest
+    | .catch _, none => .error (.unsupported "Exception without an object at a typed catch")
+
+/-- `frame` without the pending resumptions of the finally handlers that hold `pc` but not
+    `target`: an exception raised in a finally handler abandons what it would resume. -/
+def exitHandlers (body : CIL.Method) (pc target : Nat) (frame : Frame) : Frame :=
+  { frame with resumptions := frame.resumptions.filter fun (index, _) =>
+      match body.handlers[index]? with
+      | some clause => !(clause.handles pc && !clause.handles target)
+      | none => true }
+
+/-- The stopped state a fault without an exception object leaves at a protected `pc`: the
+    runtime would raise an exception there that handlers see, which the model does not build. -/
+def unraisedAt (method pc : Nat) (frame : Frame) (memory : Memory) : FaultState :=
+  ⟨⟨method, pc, .unsupported "Fault without an exception object in a protected range"⟩, memory,
+    leaveFrame frame memory, none⟩
+
+/-- How the activation of `method`, running `body` at `pc` in `frame`, meets the stopped state
+    `state`: it resumes with `memory` in the handler that takes the raised exception, a finally
+    handler recording the exception to raise again, or `state` leaves it. Fuel exhaustion, an
+    invalid state and an unmodelled operation pass every handler; any other fault without an object
+    is inconclusive at a protected pc, since the runtime would raise an exception there. -/
+def recover (method : Nat) (body : CIL.Method) (pc : Nat) (frame : Frame) (memory : Memory)
+    (state : FaultState) : Except FaultState (Nat × List Value × Frame × Memory) :=
+  if body.unprotectedAt pc then .error state else
+  match state.location.fault, state.exceptionObject with
+  | .fuelExhausted, _ | .invalidState, _ | .unsupported _, none => .error state
+  | .thrown _, _ | .arithmetic _, _ | .unsupported _, some _ =>
+    match handlerFor memory state.exceptionObject pc 0 body.handlers with
+    | .error fault => .error ⟨⟨method, pc, fault⟩, memory, leaveFrame frame memory, none⟩
+    | .ok none => .error state
+    | .ok (some (.catch start object)) =>
+      .ok (start, [.object (.address object)], exitHandlers body pc start frame, memory)
+    | .ok (some (.finally index start)) =>
+      let frame := exitHandlers body pc start frame
+      .ok (start, [], { frame with resumptions :=
+        (index, .raise state.location state.exceptionObject) :: frame.resumptions }, memory)
+  | _, _ => .error (unraisedAt method pc frame memory)
+
+/-- Execute the methods `lookup` supplies, stopping in the state a fault leaves. An exception
+    meets the handlers of each activation it leaves through `recover`, innermost first.
+    Constructor storage belongs to its caller, so expiration of the constructor's private frame
+    does not destroy the value being constructed. Static instructions use extraction-bound field
+    identities and readonly allocation storage. -/
+def runFaulting (lookup : Nat → Option CIL.Method) :
+    Nat → Nat → Nat → List Value → Frame → List Value → Memory →
+    Except FaultState (Memory × List Value)
   | 0, method, pc, _, frame, _, memory =>
-    .error (report ⟨method, pc, .fuelExhausted⟩ memory (leaveFrame frame memory) none)
+    .error ⟨⟨method, pc, .fuelExhausted⟩, memory, leaveFrame frame memory, none⟩
   | fuel + 1, method, pc, args, frame, stack, memory => do
     let some body := lookup method |
-      .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none)
+      .error ⟨⟨method, pc, .invalidState⟩, memory, leaveFrame frame memory, none⟩
     let some op := body.code[pc]? |
-      .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none)
-    let action ← (step body op pc args frame stack memory).mapError
-      fun fault => report ⟨method, pc, fault⟩ memory (leaveFrame frame memory) (thrownReference op stack fault)
-    match action with
-    | .next target stack frame memory => runReporting report onUnwind lookup fuel method target args frame stack memory
-    | .call callee arguments rest memory =>
+      .error ⟨⟨method, pc, .invalidState⟩, memory, leaveFrame frame memory, none⟩
+    match step body op pc args frame stack memory with
+    | .error fault =>
+      let (target, stack, frame, memory) ← recover method body pc frame memory
+        ⟨⟨method, pc, fault⟩, memory, leaveFrame frame memory, thrownReference memory op stack⟩
+      runFaulting lookup fuel method target args frame stack memory
+    | .ok (.next target stack frame memory) =>
+      runFaulting lookup fuel method target args frame stack memory
+    | .ok (.raise location object frame memory) =>
+      let (target, stack, frame, memory) ←
+        recover method body pc frame memory ⟨location, memory, leaveFrame frame memory, object⟩
+      runFaulting lookup fuel method target args frame stack memory
+    | .ok (.call callee arguments rest memory) =>
       let some child := lookup callee |
-        .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none)
+        .error ⟨⟨method, pc, .invalidState⟩, memory, leaveFrame frame memory, none⟩
       let (childFrame, memory) ← (enterFrame child arguments memory).mapError
-        fun fault => report ⟨method, pc, fault⟩ memory (leaveFrame frame memory) none
-      let (memory, result) ← propagateFault onUnwind frame
-        (runReporting report onUnwind lookup fuel callee 0 arguments childFrame [] memory)
-      runReporting report onUnwind lookup fuel method (pc + 1) args frame (result ++ rest) memory
-    | .tailCall callee arguments memory =>
+        fun fault => ⟨⟨method, pc, fault⟩, memory, leaveFrame frame memory, none⟩
+      match runFaulting lookup fuel callee 0 arguments childFrame [] memory with
+      | .ok (memory, result) =>
+        runFaulting lookup fuel method (pc + 1) args frame (result ++ rest) memory
+      | .error state =>
+        let (target, stack, frame, memory) ←
+          recover method body pc frame state.unwoundMemory (state.unwind frame)
+        runFaulting lookup fuel method target args frame stack memory
+    | .ok (.tailCall callee arguments memory) =>
       let some child := lookup callee |
-        .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none)
+        .error ⟨⟨method, pc, .invalidState⟩, memory, leaveFrame frame memory, none⟩
       if child.returnsValue != body.returnsValue then
-        .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none) else
+        .error ⟨⟨method, pc, .invalidState⟩, memory, leaveFrame frame memory, none⟩ else
         let memory := leaveFrame frame memory
         let arguments ← (arguments.mapM (checkedValue memory)).mapError
-          fun fault => report ⟨method, pc, fault⟩ memory memory none
+          fun fault => ⟨⟨method, pc, fault⟩, memory, memory, none⟩
         let (childFrame, memory) ← (enterFrame child arguments memory).mapError
-          fun fault => report ⟨method, pc, fault⟩ memory memory none
-        runReporting report onUnwind lookup fuel callee 0 arguments childFrame [] memory
-    | .construct callee arguments rest frame temporary kind memory =>
+          fun fault => ⟨⟨method, pc, fault⟩, memory, memory, none⟩
+        runFaulting lookup fuel callee 0 arguments childFrame [] memory
+    | .ok (.construct callee arguments rest frame temporary kind memory) =>
       let some child := lookup callee |
-        .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none)
+        .error ⟨⟨method, pc, .invalidState⟩, memory, leaveFrame frame memory, none⟩
       let (childFrame, memory) ← (enterFrame child arguments memory).mapError
-        fun fault => report ⟨method, pc, fault⟩ memory (leaveFrame frame memory) none
-      let (memory, result) ← propagateFault onUnwind frame
-        (runReporting report onUnwind lookup fuel callee 0 arguments childFrame [] memory)
-      if !result.isEmpty then
-        .error (report ⟨method, pc, .invalidState⟩ memory (leaveFrame frame memory) none) else
-        let value ← (loadLocal memory (.bytes kind temporary)).mapError
-          fun fault => report ⟨method, pc, fault⟩ memory (leaveFrame frame memory) none
-        runReporting report onUnwind lookup fuel method (pc + 1) args frame (value :: rest) memory
-    | .returned result memory =>
+        fun fault => ⟨⟨method, pc, fault⟩, memory, leaveFrame frame memory, none⟩
+      match runFaulting lookup fuel callee 0 arguments childFrame [] memory with
+      | .error state =>
+        let (target, stack, frame, memory) ←
+          recover method body pc frame state.unwoundMemory (state.unwind frame)
+        runFaulting lookup fuel method target args frame stack memory
+      | .ok (memory, result) =>
+        if !result.isEmpty then
+          .error ⟨⟨method, pc, .invalidState⟩, memory, leaveFrame frame memory, none⟩ else
+          let value ← (loadLocal memory (.bytes kind temporary)).mapError
+            fun fault => ⟨⟨method, pc, fault⟩, memory, leaveFrame frame memory, none⟩
+          runFaulting lookup fuel method (pc + 1) args frame (value :: rest) memory
+    | .ok (.returned result memory) =>
       let memory := leaveFrame frame memory
       let result ← (result.mapM (checkedValue memory)).mapError
-        fun fault => report ⟨method, pc, fault⟩ memory memory none
+        fun fault => ⟨⟨method, pc, fault⟩, memory, memory, none⟩
       return (memory, result)
 
-/-- Calls the method `lookup` gives at `method` with checked `args` in a fresh frame. -/
-def invokeReporting {ε : Type} (report : LocatedFault → Memory → Memory → Option Reference → ε)
-    (onUnwind : Option (Frame → ε → ε)) (lookup : Nat → Option CIL.Method)
-    (fuel method : Nat) (args : List Value)
-    (m : Memory) : Except ε (Memory × List Value) := do
-  let some body := lookup method | .error (report ⟨method, 0, .invalidState⟩ m m none)
-  let args ← (args.mapM (checkedValue m)).mapError fun fault => report ⟨method, 0, fault⟩ m m none
-  let (frame, memory) ← (enterFrame body args m).mapError fun fault => report ⟨method, 0, fault⟩ m m none
-  runReporting report onUnwind lookup fuel method 0 args frame [] memory
+/-- Calls the method `lookup` gives at `method` with checked `args` in a fresh frame, stopping
+    in the state a fault leaves. -/
+def invokeFaulting (lookup : Nat → Option CIL.Method) (fuel method : Nat) (args : List Value)
+    (m : Memory) : Except FaultState (Memory × List Value) := do
+  let some body := lookup method | .error ⟨⟨method, 0, .invalidState⟩, m, m, none⟩
+  let args ← (args.mapM (checkedValue m)).mapError fun fault => ⟨⟨method, 0, fault⟩, m, m, none⟩
+  let (frame, memory) ← (enterFrame body args m).mapError
+    fun fault => ⟨⟨method, 0, fault⟩, m, m, none⟩
+  runFaulting lookup fuel method 0 args frame [] memory
 
 /-- Execute with the public located-fault observation. -/
-def runWith (lookup : Nat → Option CIL.Method) :=
-  runReporting (fun location _ _ _ => location) none lookup
+def runWith (lookup : Nat → Option CIL.Method) (fuel method pc : Nat) (args : List Value)
+    (frame : Frame) (stack : List Value) (memory : Memory) :
+    Except LocatedFault (Memory × List Value) :=
+  (runFaulting lookup fuel method pc args frame stack memory).mapError FaultState.location
 
 /-- Enter with the public located-fault observation. -/
-def invokeWith (lookup : Nat → Option CIL.Method) :=
-  invokeReporting (fun location _ _ _ => location) none lookup
+def invokeWith (lookup : Nat → Option CIL.Method) (fuel method : Nat) (args : List Value)
+    (m : Memory) : Except LocatedFault (Memory × List Value) :=
+  (invokeFaulting lookup fuel method args m).mapError FaultState.location
 
 /-- Enter the same checked program and retain the failure state needed by handlers. -/
 def invokeWithFaultState (program : CIL.Program) :=
-  invokeReporting FaultState.mk
-    (some FaultState.unwind)
-    (program[·]?)
+  invokeFaulting (program[·]?)
 
 /-- The interpreter over `program`, reading each method by its index in the list. A proof that
     evaluates it rewrites by `run_eq_runWith` to read an index of the program instead. -/
@@ -1079,50 +1200,11 @@ private theorem errorMap_bind (f : α → β) (x : Except α γ) (k : γ → Exc
 private theorem errorMap_comp (f : β → γ) (g : α → β) (x : Except α δ) :
     (x.mapError g).mapError f = x.mapError (fun a => f (g a)) := by cases x <;> rfl
 
-private theorem errorMap_ite (f : α → β) (p : Prop) [Decidable p] (x y : Except α γ) :
-    (if p then x else y).mapError f = if p then x.mapError f else y.mapError f := by
-  split <;> rfl
-
-/-- Changing only the fault observation preserves the instruction trace and the return value. -/
-theorem runReporting_project (project : α → β)
-    (report : LocatedFault → Memory → Memory → Option Reference → α) (expire : Frame → α → α)
-    (preserves : ∀ frame fault, project (expire frame fault) = project fault)
-    (lookup : Nat → Option CIL.Method)
-    (fuel method pc : Nat) (args : List Value) (frame : Frame) (stack : List Value) (memory : Memory) :
-    (runReporting report (some expire) lookup fuel method pc args frame stack memory).mapError project =
-      runReporting (fun loc state unwound object => project (report loc state unwound object))
-        none lookup fuel method pc args frame stack memory := by
-  induction fuel generalizing method pc args frame stack memory with
-  | zero => rfl
-  | succ fuel ih =>
-    simp only [runReporting]
-    split
-    · split
-      · simp only [errorMap_bind, errorMap_comp]
-        congr 1
-        funext action
-        cases action <;> simp only [propagateFault, errorMap_bind, errorMap_comp, preserves, ih]
-        all_goals repeat' split
-        all_goals try simp only [propagateFault, errorMap_bind, errorMap_comp, errorMap_ite, preserves, ih]
-        all_goals try rfl
-      · rfl
-    · rfl
-#print axioms runReporting_project
-
 /-- Projecting a fault state to its location recovers ordinary invocation for every program. -/
 theorem invokeWithFaultState_location (program : CIL.Program) (fuel method : Nat)
     (args : List Value) (memory : Memory) :
     (invokeWithFaultState program fuel method args memory).mapError FaultState.location =
-      invoke program fuel method args memory := by
-  unfold invokeWithFaultState invoke invokeWith invokeReporting
-  split
-  · simp only [errorMap_bind, errorMap_comp]
-    congr 1
-    funext arguments
-    congr 1
-    funext entered
-    exact runReporting_project FaultState.location FaultState.mk FaultState.unwind (fun _ _ => rfl) ..
-  · rfl
+      invoke program fuel method args memory := rfl
 #print axioms invokeWithFaultState_location
 
 /-- A checked execution with a decidable result can be compared by its fault or return value. -/
@@ -1139,9 +1221,139 @@ theorem run_zero (program : CIL.Program) (method pc : Nat) (args : List Value) (
 
 #print axioms run_zero
 
-/-- `run` takes one step as the interpreter over the list reads it. -/
+/-- At a pc no clause protects, every stopped state leaves the activation unchanged. -/
+theorem recover_of_unprotected {method : Nat} {body : CIL.Method} {pc : Nat}
+    (unprotected : body.unprotectedAt pc = true) (frame : Frame) (memory : Memory)
+    (state : FaultState) : recover method body pc frame memory state = .error state := by
+  simp [recover, unprotected]
+
+#print axioms recover_of_unprotected
+
+/-- No method of `program` has an exception clause, so every fault leaves its activation. -/
+def HandlerFree (program : CIL.Program) : Prop :=
+  ∀ body ∈ program, body.handlers = []
+
+/-- In a program without exception clauses no clause protects any pc. -/
+theorem HandlerFree.unprotected {program : CIL.Program} (free : HandlerFree program)
+    (method pc : Nat) : (program[method]?).all (·.unprotectedAt pc) = true := by
+  cases found : program[method]? with
+  | none => rfl
+  | some body =>
+    simp [CIL.Method.unprotectedAt, free body (List.mem_of_getElem? found)]
+
+#print axioms HandlerFree.unprotected
+
+/-- `runWith` takes one step at a pc of a method no exception clause protects. -/
+theorem runWith_succ (lookup : Nat → Option CIL.Method) (fuel method pc : Nat)
+    (args : List Value) (frame : Frame) (stack : List Value) (memory : Memory)
+    (unprotected : (lookup method).all (·.unprotectedAt pc) = true) :
+    runWith lookup (fuel + 1) method pc args frame stack memory = (do
+      let some body := lookup method | .error ⟨method, pc, .invalidState⟩
+      let some op := body.code[pc]? | .error ⟨method, pc, .invalidState⟩
+      let action ← (step body op pc args frame stack memory).mapError
+        fun fault => ⟨method, pc, fault⟩
+      match action with
+      | .next target stack frame memory => runWith lookup fuel method target args frame stack memory
+      | .raise location _ _ _ => .error location
+      | .call callee arguments rest memory =>
+        let some child := lookup callee | .error ⟨method, pc, .invalidState⟩
+        let (childFrame, memory) ← (enterFrame child arguments memory).mapError
+          fun fault => ⟨method, pc, fault⟩
+        let (memory, result) ← runWith lookup fuel callee 0 arguments childFrame [] memory
+        runWith lookup fuel method (pc + 1) args frame (result ++ rest) memory
+      | .tailCall callee arguments memory =>
+        let some child := lookup callee | .error ⟨method, pc, .invalidState⟩
+        if child.returnsValue != body.returnsValue then .error ⟨method, pc, .invalidState⟩ else
+          let memory := leaveFrame frame memory
+          let arguments ← (arguments.mapM (checkedValue memory)).mapError
+            fun fault => ⟨method, pc, fault⟩
+          let (childFrame, memory) ← (enterFrame child arguments memory).mapError
+            fun fault => ⟨method, pc, fault⟩
+          runWith lookup fuel callee 0 arguments childFrame [] memory
+      | .construct callee arguments rest frame temporary kind memory =>
+        let some child := lookup callee | .error ⟨method, pc, .invalidState⟩
+        let (childFrame, memory) ← (enterFrame child arguments memory).mapError
+          fun fault => ⟨method, pc, fault⟩
+        let (memory, result) ← runWith lookup fuel callee 0 arguments childFrame [] memory
+        if !result.isEmpty then .error ⟨method, pc, .invalidState⟩ else
+          let value ← (loadLocal memory (.bytes kind temporary)).mapError
+            fun fault => ⟨method, pc, fault⟩
+          runWith lookup fuel method (pc + 1) args frame (value :: rest) memory
+      | .returned result memory =>
+        let memory := leaveFrame frame memory
+        let result ← (result.mapM (checkedValue memory)).mapError
+          fun fault => ⟨method, pc, fault⟩
+        return (memory, result)) := by
+  unfold runWith
+  rw [runFaulting]
+  cases found : lookup method with
+  | none => rfl
+  | some body =>
+    have free : body.unprotectedAt pc = true := by simpa [found] using unprotected
+    dsimp only
+    cases fetched : body.code[pc]? with
+    | none => rfl
+    | some op =>
+      dsimp only
+      cases stepped : step body op pc args frame stack memory with
+      | error fault => dsimp only; rw [recover_of_unprotected free]; rfl
+      | ok action =>
+        cases action with
+        | next => rfl
+        | raise => dsimp only; rw [recover_of_unprotected free]; rfl
+        | call callee arguments rest updated =>
+          dsimp only [Except.mapError, Bind.bind, Except.bind]
+          cases lookup callee with
+          | none => rfl
+          | some child =>
+            dsimp only
+            cases enterFrame child arguments updated with
+            | error => rfl
+            | ok entered =>
+              dsimp only
+              cases runFaulting lookup fuel callee 0 arguments entered.1 [] entered.2 with
+              | error state => dsimp only; rw [recover_of_unprotected free]; rfl
+              | ok => rfl
+        | tailCall callee arguments updated =>
+          dsimp only [Except.mapError, Bind.bind, Except.bind]
+          cases lookup callee with
+          | none => rfl
+          | some child =>
+            dsimp only
+            cases child.returnsValue != body.returnsValue
+            · cases arguments.mapM (checkedValue (leaveFrame frame updated)) with
+              | error => rfl
+              | ok checked =>
+                dsimp only
+                cases enterFrame child checked (leaveFrame frame updated) <;> rfl
+            · rfl
+        | construct callee arguments rest parent temporary kind updated =>
+          dsimp only [Except.mapError, Bind.bind, Except.bind]
+          cases lookup callee with
+          | none => rfl
+          | some child =>
+            dsimp only
+            cases enterFrame child arguments updated with
+            | error => rfl
+            | ok entered =>
+              dsimp only
+              cases runFaulting lookup fuel callee 0 arguments entered.1 [] entered.2 with
+              | error state => dsimp only; rw [recover_of_unprotected free]; rfl
+              | ok result =>
+                obtain ⟨returned, values⟩ := result
+                dsimp only
+                cases values.isEmpty <;> cases loadLocal returned (.bytes kind temporary) <;> rfl
+        | returned result updated =>
+          dsimp only [Except.mapError, Bind.bind, Except.bind]
+          cases result.mapM (checkedValue (leaveFrame frame updated)) <;> rfl
+
+#print axioms runWith_succ
+
+/-- `run` takes one step as the interpreter over the list reads it, at a pc of a method no
+    exception clause protects. -/
 theorem run_succ (program : CIL.Program) (fuel method pc : Nat) (args : List Value)
-    (frame : Frame) (stack : List Value) (memory : Memory) :
+    (frame : Frame) (stack : List Value) (memory : Memory)
+    (unprotected : (program[method]?).all (·.unprotectedAt pc) = true) :
     run program (fuel + 1) method pc args frame stack memory = (do
       let some body := program[method]? | .error ⟨method, pc, .invalidState⟩
       let some op := body.code[pc]? | .error ⟨method, pc, .invalidState⟩
@@ -1149,6 +1361,7 @@ theorem run_succ (program : CIL.Program) (fuel method pc : Nat) (args : List Val
         fun fault => ⟨method, pc, fault⟩
       match action with
       | .next target stack frame memory => run program fuel method target args frame stack memory
+      | .raise location _ _ _ => .error location
       | .call callee arguments rest memory =>
         let some child := program[callee]? | .error ⟨method, pc, .invalidState⟩
         let (childFrame, memory) ← (enterFrame child arguments memory).mapError
@@ -1177,7 +1390,8 @@ theorem run_succ (program : CIL.Program) (fuel method pc : Nat) (args : List Val
         let memory := leaveFrame frame memory
         let result ← (result.mapM (checkedValue memory)).mapError
           fun fault => ⟨method, pc, fault⟩
-        return (memory, result)) := rfl
+        return (memory, result)) :=
+  runWith_succ (program[·]?) fuel method pc args frame stack memory unprotected
 
 #print axioms run_succ
 
@@ -1187,7 +1401,19 @@ theorem invoke_eq (program : CIL.Program) (fuel method : Nat) (args : List Value
       let some body := program[method]? | .error ⟨method, 0, .invalidState⟩
       let args ← (args.mapM (checkedValue m)).mapError fun fault => ⟨method, 0, fault⟩
       let (frame, memory) ← (enterFrame body args m).mapError fun fault => ⟨method, 0, fault⟩
-      run program fuel method 0 args frame [] memory) := rfl
+      run program fuel method 0 args frame [] memory) := by
+  simp only [invoke, invokeWith, invokeFaulting, run, runWith]
+  cases program[method]? with
+  | none => rfl
+  | some body =>
+    simp only [Bind.bind, Except.bind, Except.mapError]
+    cases args.mapM (checkedValue m) with
+    | error => rfl
+    | ok checked =>
+      simp only []
+      cases enterFrame body checked m with
+      | error => rfl
+      | ok => rfl
 
 #print axioms invoke_eq
 

@@ -26,13 +26,13 @@ def Instruction.relabel (r : Nat → Nat) : Instruction → Instruction
   | .brfalse t => .brfalse (r t) | .brtrue t => .brtrue (r t)
   | .blt_un t => .blt_un (r t) | .bge_un t => .bge_un (r t) | .bgt_un t => .bgt_un (r t)
   | .bge t => .bge (r t) | .blt t => .blt (r t) | .beq t => .beq (r t)
-  | .bne_un t => .bne_un (r t)
+  | .bne_un t => .bne_un (r t) | .leave t => .leave (r t)
   | op => op
 
 /-- Every code target of an instruction, in operand order. -/
 def Instruction.targets : Instruction → List Nat
   | .bgt t | .ble t | .ble_un t | .br t | .brfalse t | .brtrue t
-  | .blt_un t | .bge_un t | .bgt_un t | .bge t | .blt t | .beq t | .bne_un t => [t]
+  | .blt_un t | .bge_un t | .bgt_un t | .bge t | .blt t | .beq t | .bne_un t | .leave t => [t]
   | .switch ts => ts
   | _ => []
 
@@ -56,7 +56,7 @@ theorem Instruction.relabel_of_targets_nil (r : Nat → Nat) (op : Instruction)
 def Instruction.continues : Instruction → Bool
   | .calli _ true => false
   | .call _ prefixes => !prefixes.tail
-  | .br _ | .ret | .throw _ | .unadmitted _ => false
+  | .br _ | .ret | .throw _ | .leave _ | .endfinally | .unadmitted _ => false
   | _ => true
 
 /-- A hole (`.unadmitted`) faults whenever it executes, so it constrains nothing. -/
@@ -131,6 +131,9 @@ structure Embeds (expected actual : Method) (map : List Nat) : Prop where
         ((sites actual.code.length 0 expected.code map).map Site.pc)
   flow : (sites actual.code.length 0 expected.code map).all
     (fun site => !site.op.continues || site.next == site.image + 1) = true
+  /-- Exception clauses name pcs, so only bodies without them are related. -/
+  expectedHandlers : expected.handlers = []
+  actualHandlers : actual.handlers = []
 
 /-- Method `index` of `program` has a body that `expected` embeds into. -/
 def MethodEmbeds (program : Program) (index : Nat) (expected : Method) : Prop :=

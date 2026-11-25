@@ -74,98 +74,100 @@ inductive RunTrace (program : CIL.Program) : Nat → Nat → Nat → List Value 
         final values) :
       RunTrace program (fuel + 1) method pc args frame stack m final values
 
-/-- Every successful run has a trace. -/
-theorem run_success_trace (program : CIL.Program) (fuel method pc : Nat)
-    (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
-    (values : List Value)
+/-- Every successful run of a program without exception clauses has a trace. -/
+theorem run_success_trace (program : CIL.Program) (free : HandlerFree program)
+    (fuel method pc : Nat) (args : List Value) (frame : Frame) (stack : List Value)
+    (m final : Memory) (values : List Value)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     RunTrace program fuel method pc args frame stack m final values := by
   induction fuel generalizing method pc args frame stack m final values with
   | zero => cases h
   | succ fuel ih =>
+    rw [run_succ _ _ _ _ _ _ _ _ (free.unprotected method pc)] at h
     cases hb : program[method]? with
-    | none => simp [run_succ, hb] at h
+    | none => simp [hb] at h
     | some body =>
       cases ho : body.code[pc]? with
-      | none => simp [run_succ, hb, ho] at h
+      | none => simp [hb, ho] at h
       | some op =>
         cases hs : step body op pc args frame stack m with
         | error fault =>
-          simp [run_succ, hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
+          simp [hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
         | ok action =>
           have actual : ProgramStep program method pc args frame stack m action :=
             ⟨body, op, hb, ho, hs⟩
           cases action with
+          | raise => simp [hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
           | next target nextStack nextFrame memory =>
-            simp only [run_succ, hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
+            simp only [hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
             exact .next actual (ih method target args nextFrame nextStack memory final values h)
           | returned result memory =>
             cases hr : result.mapM (checkedValue (leaveFrame frame memory)) <;>
-              simp only [run_succ, hb, ho, hs, hr, Except.mapError, Bind.bind, Except.bind,
+              simp only [hb, ho, hs, hr, Except.mapError, Bind.bind, Except.bind,
                 Pure.pure, Except.pure] at h
             · cases h
             · cases h
               exact .returned actual hr
           | call callee arguments rest memory =>
             cases hc : program[callee]? with
-            | none => simp [run_succ, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
+            | none => simp [hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
             | some child =>
               cases he : enterFrame child arguments memory with
               | error fault =>
-                simp [run_succ, hb, ho, hs, hc, he, Except.mapError, Bind.bind, Except.bind] at h
+                simp [hb, ho, hs, hc, he, Except.mapError, Bind.bind, Except.bind] at h
               | ok entered =>
                 obtain ⟨childFrame, childMemory⟩ := entered
                 cases hr : run program fuel callee 0 arguments childFrame [] childMemory with
                 | error fault =>
-                  simp [run_succ, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind,
+                  simp [hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind,
                     Except.bind] at h
                 | ok returned =>
                   obtain ⟨childFinal, result⟩ := returned
-                  simp only [run_succ, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind,
+                  simp only [hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind,
                     Except.bind] at h
                   exact .call actual hc he hr
                     (ih callee 0 arguments childFrame [] childMemory childFinal result hr)
                     (ih method (pc + 1) args frame (result ++ rest) childFinal final values h)
           | tailCall callee arguments memory =>
             cases hc : program[callee]? with
-            | none => simp [run_succ, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
+            | none => simp [hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
             | some child =>
               cases returns : child.returnsValue != body.returnsValue with
               | true =>
-                simp [run_succ, hb, ho, hs, hc, returns, Except.mapError, Bind.bind,
+                simp [hb, ho, hs, hc, returns, Except.mapError, Bind.bind,
                   Except.bind] at h
               | false =>
                 cases check : arguments.mapM (checkedValue (leaveFrame frame memory)) with
                 | error fault =>
-                  simp [run_succ, hb, ho, hs, hc, returns, check, Except.mapError,
+                  simp [hb, ho, hs, hc, returns, check, Except.mapError,
                     Bind.bind, Except.bind] at h
                 | ok checked =>
                   cases enter : enterFrame child checked (leaveFrame frame memory) with
                   | error fault =>
-                    simp [run_succ, hb, ho, hs, hc, returns, check, enter, Except.mapError,
+                    simp [hb, ho, hs, hc, returns, check, enter, Except.mapError,
                       Bind.bind, Except.bind] at h
                   | ok entered =>
                     obtain ⟨childFrame, childMemory⟩ := entered
-                    simp only [run_succ, hb, ho, hs, hc, returns, check, enter, Except.mapError,
+                    simp only [hb, ho, hs, hc, returns, check, enter, Except.mapError,
                       Bind.bind, Except.bind, Bool.false_eq_true, ite_false] at h
                     exact .tailCall actual hb hc returns check enter h
                       (ih callee 0 checked childFrame [] childMemory final values h)
           | construct callee arguments rest parentFrame temporary kind memory =>
             cases hc : program[callee]? with
-            | none => simp [run_succ, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
+            | none => simp [hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
             | some child =>
               cases he : enterFrame child arguments memory with
               | error fault =>
-                simp [run_succ, hb, ho, hs, hc, he, Except.mapError, Bind.bind, Except.bind] at h
+                simp [hb, ho, hs, hc, he, Except.mapError, Bind.bind, Except.bind] at h
               | ok entered =>
                 obtain ⟨childFrame, childMemory⟩ := entered
                 cases hr : run program fuel callee 0 arguments childFrame [] childMemory with
                 | error fault =>
-                  simp [run_succ, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind,
+                  simp [hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind,
                     Except.bind] at h
                 | ok returned =>
                   obtain ⟨childFinal, result⟩ := returned
-                  simp only [run_succ, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind,
+                  simp only [hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind,
                     Except.bind] at h
                   cases result with
                   | cons value rest' => simp at h
@@ -180,6 +182,43 @@ theorem run_success_trace (program : CIL.Program) (fuel method pc : Nat)
                         (ih method (pc + 1) args parentFrame (value :: rest) childFinal final values
                           h)
 
+/-- The run of a trace at the level of stopped states. -/
+private theorem RunTrace.faulting {program : CIL.Program} {fuel method pc : Nat}
+    {args : List Value} {frame : Frame} {stack : List Value} {m final : Memory}
+    {values : List Value}
+    (trace : RunTrace program fuel method pc args frame stack m final values) :
+    runFaulting (program[·]?) fuel method pc args frame stack m = .ok (final, values) := by
+  have succeeded {x : Except FaultState (Memory × List Value)} {result : Memory × List Value}
+      (ran : x.mapError FaultState.location = .ok result) : x = .ok result := by
+    cases x <;> simp_all [Except.mapError]
+  induction trace with
+  | next step _ ih =>
+    obtain ⟨body, op, hb, ho, hs⟩ := step
+    rw [runFaulting]
+    simpa only [hb, ho, hs] using ih
+  | returned step checked =>
+    obtain ⟨body, op, hb, ho, hs⟩ := step
+    rw [runFaulting]
+    simp only [hb, ho, hs, checked, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+      Except.pure]
+  | call step lookup enter finish _ _ _ ih =>
+    obtain ⟨body, op, hb, ho, hs⟩ := step
+    rw [runFaulting]
+    simpa only [hb, ho, hs, lookup, enter, succeeded finish, Except.mapError, Bind.bind,
+      Except.bind] using ih
+  | tailCall step bodyLookup lookup returns check enter _ _ ih =>
+    obtain ⟨body, op, hb, ho, hs⟩ := step
+    have same := Option.some.inj (hb.symm.trans bodyLookup)
+    subst same
+    rw [runFaulting]
+    simpa only [hb, ho, hs, lookup, returns, check, enter, Except.mapError, Bind.bind,
+      Except.bind, Bool.false_eq_true, ite_false] using ih
+  | construct step lookup enter finish _ load _ _ ih =>
+    obtain ⟨body, op, hb, ho, hs⟩ := step
+    rw [runFaulting]
+    simpa only [hb, ho, hs, lookup, enter, succeeded finish, load, Except.mapError, Bind.bind,
+      Except.bind, List.isEmpty_nil, Bool.not_true, Bool.false_eq_true, ite_false] using ih
+
 /-- The trace characterizes the existing interpreter, rather than replacing its
     semantics with a weaker execution relation. -/
 theorem RunTrace.success {program : CIL.Program} {fuel method pc : Nat}
@@ -187,29 +226,7 @@ theorem RunTrace.success {program : CIL.Program} {fuel method pc : Nat}
     {values : List Value}
     (trace : RunTrace program fuel method pc args frame stack m final values) :
     run program fuel method pc args frame stack m = .ok (final, values) := by
-  induction trace with
-  | next step _ ih =>
-    obtain ⟨body, op, hb, ho, hs⟩ := step
-    simpa only [run_zero, run_succ, hb, ho, hs, Except.mapError, Bind.bind, Except.bind] using ih
-  | returned step checked =>
-    obtain ⟨body, op, hb, ho, hs⟩ := step
-    simp only [run_succ, hb, ho, hs, checked, Except.mapError, Bind.bind, Except.bind,
-      Pure.pure, Except.pure]
-  | call step lookup enter finish _ _ _ ih =>
-    obtain ⟨body, op, hb, ho, hs⟩ := step
-    simpa only [run_zero, run_succ, hb, ho, hs, lookup, enter, finish, Except.mapError, Bind.bind,
-      Except.bind] using ih
-  | tailCall step bodyLookup lookup returns check enter finish _ ih =>
-    obtain ⟨body, op, hb, ho, hs⟩ := step
-    have same := Option.some.inj (hb.symm.trans bodyLookup)
-    subst same
-    simpa only [run_zero, run_succ, hb, ho, hs, lookup, returns, check, enter, Except.mapError,
-      Bind.bind, Except.bind, Bool.false_eq_true, ite_false] using ih
-  | construct step lookup enter finish _ load _ _ ih =>
-    obtain ⟨body, op, hb, ho, hs⟩ := step
-    simpa only [run_zero, run_succ, hb, ho, hs, lookup, enter, finish, load, Except.mapError,
-      Bind.bind, Except.bind, List.isEmpty_nil, Bool.not_true, Bool.false_eq_true,
-      ite_false] using ih
+  simp only [run, runWith, trace.faulting, Except.mapError]
 
 /-- Separate invocation setup from execution once, including checked arguments. -/
 theorem invoke_success_setup {program : CIL.Program} {fuel method : Nat}

@@ -1174,8 +1174,7 @@ theorem run_next {program : CIL.Program} {fuel method pc target : Nat}
       .ok (.next target values nextFrame updated)) :
     run program (fuel + 1) method pc args frame stack memory =
       run program fuel method target args nextFrame values updated := by
-  simp only [run_succ, methodFound, instructionFound, stepped, Except.mapError, Bind.bind,
-    Except.bind]
+  simp only [run, runWith, runFaulting, methodFound, instructionFound, stepped]
 #print axioms run_next
 
 /-- Return through frame expiration and the checked result validation. -/
@@ -1188,21 +1187,23 @@ theorem run_return {program : CIL.Program} {fuel method pc : Nat}
     (checked : values.mapM (checkedValue (leaveFrame frame updated)) = .ok values) :
     run program (fuel + 1) method pc args frame stack memory =
       .ok (leaveFrame frame updated, values) := by
-  simp only [run_succ, methodFound, instructionFound, stepped, checked,
+  simp only [run, runWith, runFaulting, methodFound, instructionFound, stepped, checked,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms run_return
 
-/-- A fetched step that faults ends the run with that fault, located at its method and pc. -/
+/-- A fetched step that faults at a pc no exception clause protects ends the run with that fault,
+    located at its method and pc. -/
 theorem run_fault {program : CIL.Program} {fuel method pc : Nat}
     {body : CIL.Method} {op : CIL.Instruction} {args stack : List Value}
     {frame : Frame} {memory : Memory} {fault : ExecutionFault}
     (methodFound : program[method]? = some body)
     (instructionFound : body.code[pc]? = some op)
-    (failed : step body op pc args frame stack memory = .error fault) :
+    (failed : step body op pc args frame stack memory = .error fault)
+    (unprotected : body.unprotectedAt pc = true := by rfl) :
     run program (fuel + 1) method pc args frame stack memory = .error ⟨method, pc, fault⟩ := by
-  simp only [run_succ, methodFound, instructionFound, failed, Except.mapError, Bind.bind,
-    Except.bind]
+  simp only [run_succ program fuel method pc args frame stack memory (by simp [methodFound,
+    unprotected]), methodFound, instructionFound, failed, Except.mapError, Bind.bind, Except.bind]
 
 #print axioms run_fault
 
