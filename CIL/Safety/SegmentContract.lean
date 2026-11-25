@@ -610,6 +610,65 @@ theorem SegmentContract.Holds.then {program : CIL.Program} {method start middle 
 
 #print axioms SegmentContract.Holds.then
 
+/-- One loop iteration from cutpoint `head`, relative to the loop's entry state `origin`: from an
+    invariant state it reaches `finish` satisfying `post`, or returns to `head` in an invariant
+    state of strictly smaller measure. Every iteration stays within the loop's footprint. -/
+def SegmentContract.iteration (head finish : Nat) (origin : SegmentState)
+    (pre : List Value -> SegmentState -> Prop)
+    (invariant : List Value -> SegmentState -> SegmentState -> Prop)
+    (measure : List Value -> SegmentState -> SegmentState -> Nat)
+    (post : List Value -> SegmentState -> SegmentState -> Prop)
+    (footprint : List Value -> SegmentState -> List (Prod Reference Nat)) : SegmentContract where
+  pre arguments current := And (pre arguments origin) (invariant arguments origin current)
+  footprint arguments _ := footprint arguments origin
+  post arguments current
+    | .reaches pc after => Or (And (pc = finish) (post arguments origin after))
+        (And (pc = head) (And (invariant arguments origin after)
+          (measure arguments origin after < measure arguments origin current)))
+    | _ => False
+
+/-- A loop summary needs an invariant and a termination measure: if every iteration holds and
+    the entry state satisfies the invariant, the loop reaches `finish` within its footprint and
+    cannot diverge, fault or return. -/
+theorem SegmentContract.Holds.loop {program : CIL.Program} {method head finish : Nat}
+    {pre : List Value -> SegmentState -> Prop}
+    {invariant : List Value -> SegmentState -> SegmentState -> Prop}
+    {measure : List Value -> SegmentState -> SegmentState -> Nat}
+    {post : List Value -> SegmentState -> SegmentState -> Prop}
+    {footprint : List Value -> SegmentState -> List (Prod Reference Nat)}
+    (iteration : forall origin, (SegmentContract.iteration head finish origin pre invariant
+      measure post footprint).Holds program method head)
+    (entry : forall arguments before, pre arguments before -> invariant arguments before before) :
+    (SegmentContract.continuing finish pre post footprint).Holds program method head := by
+  intro arguments origin permitted
+  have reaches : forall rank current, measure arguments origin current = rank ->
+      invariant arguments origin current ->
+      Confined (footprint arguments origin) origin.memory current.memory ->
+      Exists fun after => And
+        ((SegmentExit.reaches finish after).Exhibited program method head arguments current)
+        (And (Confined (footprint arguments origin) origin.memory after.memory)
+          (post arguments origin after)) := by
+    intro rank
+    induction rank using Nat.strongRecOn with
+    | ind rank smaller =>
+      intro current ranked valid framedSoFar
+      obtain ⟨exit, ran, framed, satisfied⟩ :=
+        iteration origin arguments current (And.intro permitted valid)
+      cases exit with
+      | reaches pc after =>
+        rcases satisfied with ⟨rfl, done⟩ | ⟨rfl, preserved, decreases⟩
+        · exact ⟨after, ran, framedSoFar.trans framed, done⟩
+        · obtain ⟨cost, positive, reached⟩ := ran
+          obtain ⟨final, tail, finalFramed, done⟩ := smaller (measure arguments origin after)
+            (by omega) after rfl preserved (framedSoFar.trans framed)
+          exact ⟨final, reached.exhibited tail, finalFramed, done⟩
+      | returns | faults | diverges => exact False.elim satisfied
+  obtain ⟨after, ran, framed, done⟩ := reaches _ origin rfl (entry arguments origin permitted)
+    (Confined.refl _ _)
+  exact ⟨.reaches finish after, ran, framed, rfl, done⟩
+
+#print axioms SegmentContract.Holds.loop
+
 /-- A validated branch exposes its selected successor and preserves the incoming memory. -/
 theorem SegmentContract.branch {program : CIL.Program} {method pc target : Nat}
     {body : CIL.Method} {op : CIL.Instruction}

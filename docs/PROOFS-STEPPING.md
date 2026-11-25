@@ -499,6 +499,15 @@ second's precondition. Supply a footprint covering
 both regions' writes. The result binds their concatenated instructions and relates the initial
 and final states through the state at the join.
 
+A loop summary requires an invariant and a termination measure. `SegmentContract.Holds.loop`
+takes, for each entry state, a `SegmentContract.iteration` contract at the loop head: from a state
+satisfying the invariant, one iteration either reaches the exit with the postcondition or returns
+to the head in an invariant state of strictly smaller natural measure, within the loop's footprint.
+It concludes a `continuing` contract from the head, so the loop reaches its exit and cannot
+diverge, fault or return. `DecodedSegmentSummary.loop` gives the same result as a decoded summary
+from the loop's binding, placement and model listing. A loop that only returns to its head has no
+such summary, since its run exhausts every fuel budget.
+
 A reusable summary takes the containing method and a `CodeAt` premise for its exact instructions.
 Instructions that read the method's declared signature, environment, links or runtime profile
 require the corresponding facts in the theorem. Branch targets depend on the placement pc.

@@ -106,6 +106,9 @@ name = "Tests.DecodedSummary"
 name = "Tests.DecodedSegment"
 
 [[lean_lib]]
+name = "Tests.LoopSummary"
+
+[[lean_lib]]
 name = "Tests.FieldRef"
 
 [[lean_lib]]

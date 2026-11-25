@@ -133,4 +133,28 @@ theorem DecodedSegmentSummary.then {program : Program} {evidence : List MethodEv
 
 #print axioms DecodedSegmentSummary.then
 
+/-- A decoded loop summary: the loop at `head` reaches `finish` when each iteration, once the
+    listed models resolve, keeps the invariant and decreases the measure or exits to `finish`. -/
+theorem DecodedSegmentSummary.loop {program : Program} {evidence : List MethodEvidence}
+    {profile : FeatureProfile} {environment : LayoutEnvironment} {method head finish : Nat}
+    {pin : AssemblyPin} {token : Nat} {arguments : List TypeExpr} {first : Instruction}
+    {rest : List Instruction} {models : List ModelledCall}
+    {pre : List Value → SegmentState → Prop}
+    {invariant : List Value → SegmentState → SegmentState → Prop}
+    {measure : List Value → SegmentState → SegmentState → Nat}
+    {post : List Value → SegmentState → SegmentState → Prop}
+    {footprint : List Value → SegmentState → List (Reference × Nat)}
+    (bound : DecodedAt program evidence profile environment method pin token arguments)
+    (placed : ∃ body, program[method]? = some body ∧ CodeAt body head (first :: rest))
+    (listed : ModelsListed program method models)
+    (iteration : ModelsResolve environment models → ∀ origin,
+      (SegmentContract.iteration head finish origin pre invariant measure post footprint).Holds
+        program method head)
+    (entry : ∀ args before, pre args before → invariant args before before) :
+    DecodedSegmentSummary program evidence profile environment method head pin token arguments
+      first rest models (.continuing finish pre post footprint) :=
+  ⟨bound, placed, fun resolved => SegmentContract.Holds.loop (iteration resolved) entry, listed⟩
+
+#print axioms DecodedSegmentSummary.loop
+
 end CIL.Safety
