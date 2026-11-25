@@ -137,7 +137,10 @@ var summary = Run(["dotnet", ExtractorPath, "blockers", assembly, "--manifest", 
 var json = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(report));
 var entries = json.GetProperty("entries").EnumerateArray().ToArray();
 var blockers = json.GetProperty("blockers").EnumerateArray().ToArray();
-var methodNames = json.GetProperty("methods").EnumerateArray().Select(method => method.GetString()!).ToArray();
+// A chain names its methods by index into its own report's method table.
+string[] MethodNames(JsonElement report) =>
+    [.. report.GetProperty("methods").EnumerateArray().Select(method => method.GetString()!)];
+var methodNames = MethodNames(json);
 var checks = 0;
 
 void Require(bool condition, string message)
@@ -158,8 +161,8 @@ Require(entries[0].GetProperty("method").GetString() == "System.UInt64 Fixture::
 const string helper = "System.Int32 Fixture::Helper(System.Int32)";
 const string excluded = "System.UInt64 Fixture::Excluded(System.UInt64,System.UInt64)";
 JsonElement Blocker(string construct) => blockers.Single(b => b.GetProperty("construct").GetString() == construct);
-string[] Reached(JsonElement blocker) => blocker.GetProperty("entries").EnumerateArray()
-    .Select(e => e.GetProperty("profile").GetString() + " " + string.Join(" -> ", e.GetProperty("chains").EnumerateArray().Single().EnumerateArray().Select(m => methodNames[m.GetInt32()])))
+string[] Reached(JsonElement blocker, string[]? names = null) => blocker.GetProperty("entries").EnumerateArray()
+    .Select(e => e.GetProperty("profile").GetString() + " " + string.Join(" -> ", e.GetProperty("chains").EnumerateArray().Single().EnumerateArray().Select(m => (names ?? methodNames)[m.GetInt32()])))
     .Order(StringComparer.Ordinal).ToArray();
 string Id(JsonElement blocker) => blocker.GetProperty("id").GetString()!;
 Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(StringComparer.Ordinal)
@@ -352,7 +355,8 @@ var refusalSite = refusal.GetProperty("sites").EnumerateArray().Single();
 Require(asyncJson.GetProperty("entries").EnumerateArray().All(e => e.GetProperty("status").GetString() == "blocked") &&
     refusalSite.GetProperty("method").GetString() == twiceMethod &&
     refusalSite.GetProperty("message").GetString()!.Contains("returns the awaited result, not the declared task") &&
-    Reached(refusal).SequenceEqual([$"scalar {callerMethod} -> {twiceMethod}", $"scalar {twiceMethod}"]),
+    Reached(refusal, MethodNames(asyncJson))
+        .SequenceEqual([$"scalar {callerMethod} -> {twiceMethod}", $"scalar {twiceMethod}"]),
     "Runtime-async method not refused as entry and callee:\n" + asyncSummary + "\n" + File.ReadAllText(asyncReport));
 var asyncExtract = Execute(["dotnet", ExtractorPath, "extract", asyncAssembly, "Awaiting::Twice(long)",
     Path.Combine(directory, "extract", "runtime-async"), "scalar"]);

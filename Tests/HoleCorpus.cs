@@ -302,7 +302,7 @@ static void CheckUndecodedCallee(string template)
             site.GetProperty("instruction").GetString() != "IL_0002: add" ||
             !site.GetProperty("message").GetString()!.EndsWith($"at pc 2 of {bodyName}", StringComparison.Ordinal) ||
             chains.GetArrayLength() != 1 || chains[0].GetArrayLength() != 1 ||
-            chains[0][0].GetString() != entryName)
+            refused.GetProperty("methods")[chains[0][0].GetInt32()].GetString() != entryName)
             throw new InvalidOperationException($"Incorrect undecoded callee report: {refused}");
     }
     finally { Directory.Delete(directory, recursive: true); }
