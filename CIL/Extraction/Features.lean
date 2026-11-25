@@ -7,6 +7,7 @@ import CIL.Extraction.FeatureLocals
 import CIL.Extraction.IndirectAccess
 import CIL.Semantics
 import CIL.Extraction.RuntimeModels
+import CIL.Extraction.ExceptionRegions
 
 /-!
 # Feature flow
@@ -295,6 +296,9 @@ private def featureTransferAtWith {Locals : Type} (layouts : Array RawLayout) (r
     | _ :: _ :: stack => some { state with stack := some (if value then 1 else 0) :: stack }
     | _ => none
   | _ => match instruction with
+    -- `leave` empties the stack; `endfinally` has no successor in the method's flow.
+    | ⟨_, 221, .target _⟩ | ⟨_, 222, .target _⟩ => some { state with stack := [] }
+    | ⟨_, 220, .none⟩ => some state
     | ⟨_, 40, .call site⟩ =>
       match site.parameterCount == 0 && !site.hasThis && site.returnsValue, constant with
       | true, some word => some { state with stack := some word :: state.stack }
@@ -321,8 +325,9 @@ def featureSuccessors (role : Option FoldRole) (pc : Nat)
   -- `ret`, `throw`, `rethrow`, `endfinally` and `endfilter` leave the method or handler.
   else if instruction.opcode == 42 || instruction.opcode == 122 || instruction.opcode == 65050 ||
       instruction.opcode == 220 || instruction.opcode == 65041 then some []
-  -- `br`, then `switch`.
-  else if instruction.opcode == 43 || instruction.opcode == 56 then
+  -- `br` and `leave`, then `switch`.
+  else if instruction.opcode == 43 || instruction.opcode == 56 ||
+      leaveOpcode instruction.opcode then
     match instruction.operand with | .target target => some [target] | _ => none
   else if instruction.opcode == 69 then
     match instruction.operand with
@@ -384,7 +389,7 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     (instruction : RawInstruction) (emitted : Instruction) : Bool :=
     Id.run do
   -- These terminal/transfer encodings have no admitted emitted counterpart.
-  if instruction.opcode ∈ [39, 220, 65041, 65044, 65050] then return false
+  if instruction.opcode ∈ [39, 65041, 65044, 65050] then return false
   if (match emitted with
     | .call _ prefixes => prefixes.tail | .calli _ true => true | _ => false) then
     return false
@@ -449,12 +454,15 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     | 54, .target x, .ble_un y | 67, .target x, .ble_un y
     | 55, .target x, .blt_un y | 68, .target x, .blt_un y => x == y
     | 69, .targets x, .switch y => x == y
+    -- `leave` keeps its target; `endfinally` has no operand.
+    | 221, .target x, .leave y | 222, .target x, .leave y => x == y
+    | 220, .none, .endfinally => true
     | 42, _, .ret => true
     | 20, .none, .ldnull | 122, .none, .throw none => true
     -- No other raw instruction may emit control flow, a feature test or a hole.
     | _, _, .ldnull | _, _, .unadmitted _ | _, _, .throw _ | _, _, .br _ | _, _, .switch _
-    | _, _, .brfalse _ | _, _, .brtrue _ => false
-    | opcode, _, _ => !(opcode ∈ [20, 37, 42, 95, 96, 97, 122] ||
+    | _, _, .brfalse _ | _, _, .brtrue _ | _, _, .leave _ | _, _, .endfinally => false
+    | opcode, _, _ => !(opcode ∈ [20, 37, 42, 95, 96, 97, 122, 220, 221, 222] ||
         (65025 <= opcode && opcode <= 65029) || (43 <= opcode && opcode <= 69)) &&
         fallbackFeatureEffect instruction emitted
 
@@ -610,10 +618,32 @@ private theorem featureSites_at {code : List RawInstruction} {roles : List (Opti
 
 #print axioms featureSites_at
 
-/-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
-    be well shaped, match its emitted instruction, including the indirect access rule over the
-    raw instructions `rawAt` gives, and flow into a weaker state at every recomputed
-    successor. -/
+/-- The stack facts a handler starts with: the caught object for a catch, nothing for a
+    finally. -/
+def _root_.CIL.ExceptionClause.entryFacts (clause : ExceptionClause) : List (Option W32) :=
+  match clause.kind with
+  | .catch _ => [none]
+  | .finally => []
+
+/-- Some exception clause of `raw` has its handler start at `pc`. -/
+def handlerStartsAt (raw : RawMethod) (pc : Nat) : Bool :=
+  raw.handlers.any (·.handlerStart == pc)
+
+/-- A reachable `stack` at `pc` fits the exception clauses of `raw`: a handler starting there
+    is a fold entry entered with its entry facts, a protected range starting there has an empty
+    stack, and a folded `throw`, which raises no object for a catch to test, lies in no protected
+    range. `featureLocalEligible` keeps every local of a method with clauses unknown. -/
+def clauseSiteFits (raw : RawMethod) (pc : Nat) (role : Option FoldRole)
+    (stack : List (Option W32)) : Bool :=
+  raw.handlers.all fun clause =>
+    (clause.handlerStart != pc || foldEntry (some role) && stack == clause.entryFacts) &&
+      (clause.tryStart != pc || stack.isEmpty) &&
+      (!clause.protects pc || !(role matches some (.raise _)))
+
+/-- One pc of the certificate: an unreachable pc must emit a hole and start no handler; a
+    reachable one must be well shaped, fit the exception clauses (`clauseSiteFits`), match its
+    emitted instruction, including the indirect access rule over the raw instructions `rawAt`
+    gives, and flow into a weaker state at every recomputed successor. -/
 private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
     (constants : Nat → Option W32) (linkAt : Nat → Option Link) (raw : RawMethod)
     (facts : LocalFacts Locals)
@@ -621,9 +651,9 @@ private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
     (certificate : Nat → Option (Option (FeatureFacts Locals)))
     (roles : Nat → Option (Option FoldRole)) (rawAt : Nat → Option RawInstruction) :
     FeatureSite → Option (FeatureFacts Locals) → Instruction → Bool
-  | _, none, .unadmitted _ => true
+  | site, none, .unadmitted _ => !handlerStartsAt raw site.pc
   | ⟨pc, previous, instruction, role⟩, some state, emitted =>
-    wellShaped raw facts state &&
+    wellShaped raw facts state && clauseSiteFits raw pc role state.stack &&
       (featureOpMatchesAt layouts raw role instruction emitted previous &&
         indirectSiteWindow rawAt pc instruction emitted false previous) &&
       match featureTransferAtWith layouts raw facts profile
@@ -807,8 +837,10 @@ private theorem featureTransferAtWith_expand (layouts : Array RawLayout) (raw : 
     · simp
   · split <;> simp_all [FeatureState.expand]
   · split
-    · split <;> simp_all [FeatureState.expand]
-    · exact base
+    all_goals first
+      | exact base
+      | (split <;> simp_all [FeatureState.expand])
+      | simp_all [FeatureState.expand]
 
 #print axioms featureTransferAtWith_expand
 
@@ -948,7 +980,7 @@ private theorem FeatureFlowValid_iff_expand (layouts : Array RawLayout)
       obtain ⟨⟨pc, previous, instruction, role⟩, emitted, checked⟩ := all3_mem sites member
       simp only [checkFeatureSiteWith, knownLocals, Bool.and_eq_true,
         wellShaped_expand (featureLocalEligible_none raw)] at checked
-      exact checked.1.1.1
+      exact checked.1.1.1.1
     refine ⟨allKnown, by simp [expandCertificate, length], codeLength, ?_, ?_, ?_⟩
     · simp [expandCertificate, mask, Function.comp_def]
     · simp [expandCertificate, entry, FeatureState.expand]
@@ -1004,7 +1036,7 @@ private theorem FeatureListValid.lengths {layouts : Array RawLayout}
   obtain ⟨⟨pc, previous, instruction, role⟩, emitted, checked⟩ := all3_mem valid.2.2.2.2 member
   simp only [checkFeatureSiteWith, wellShaped, LocalFacts.list, Bool.and_eq_true,
     beq_iff_eq] at checked
-  exact checked.1.1.1.1
+  exact checked.1.1.1.1.1
 
 #print axioms FeatureListValid.lengths
 

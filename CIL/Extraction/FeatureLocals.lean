@@ -41,9 +41,12 @@ def FeatureLocalKind.accepts (kind : FeatureLocalKind) (fact : Option W32) : Boo
   | .word => true
   | .boolean => fact == some 0 || fact == some 1
 
-/-- The original local rule, independent of any precomputed index. -/
+/-- The original local rule, independent of any precomputed index. A method with exception
+    clauses keeps no local fact, since a handler or a resumed `leave` would otherwise need the
+    facts of every pc that reaches it. -/
 def featureLocalEligible (raw : RawMethod) (index : Nat) (fact : Option W32) : Bool :=
   if fact.isNone then true
+  else if !raw.handlers.isEmpty then false
   else if raw.code.any (fun instruction =>
     (instruction.opcode == 18 || instruction.opcode == 65037) &&
       localIndex instruction == some index) then false
@@ -55,18 +58,20 @@ def featureLocalEligible (raw : RawMethod) (index : Nat) (fact : Option W32) : B
 
 /-- Address exclusions and exact type classifications shared by every certificate state. -/
 structure FeatureLocalIndex where
+  /-- The method has exception clauses, so no local holds a fact. -/
+  guarded : Bool
   addressed : Std.TreeSet Nat
   kinds : FlowIndex FeatureLocalKind
 
 /-- Classify each raw local once and collect addressed slots in one instruction traversal. -/
 def FeatureLocalIndex.ofRaw (raw : RawMethod) : FeatureLocalIndex :=
-  ⟨Std.TreeSet.ofList (raw.code.filterMap addressedLocal),
+  ⟨!raw.handlers.isEmpty, Std.TreeSet.ofList (raw.code.filterMap addressedLocal),
     FlowIndex.ofList (raw.locals.map FeatureLocalKind.ofType)⟩
 
 /-- Unknown facts remain admissible, including missing or addressed locals. -/
 def FeatureLocalIndex.eligible (locals : FeatureLocalIndex) (index : Nat)
     (fact : Option W32) : Bool :=
-  if fact.isNone then true else if locals.addressed.contains index then false
+  if fact.isNone then true else if locals.guarded || locals.addressed.contains index then false
   else ((locals.kinds.get? index).getD .unknown).accepts fact
 
 /-- Collecting addressed slots preserves the raw opcode and local-index checks exactly. -/
@@ -87,6 +92,9 @@ theorem FeatureLocalIndex.eligible_eq (raw : RawMethod) (index : Nat) (fact : Op
     List.getElem?_map, featureLocalEligible]
   split <;> rename_i unknown
   · rfl
+  by_cases guarded : raw.handlers.isEmpty
+  case neg => simp [guarded]
+  simp only [guarded, Bool.not_true, Bool.false_or, Bool.false_eq_true, ↓reduceIte]
   split <;> rename_i addressed
   · rfl
   cases found : raw.locals[index]? with

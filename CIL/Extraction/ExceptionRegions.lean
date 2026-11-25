@@ -8,7 +8,8 @@ the structural rules a body with clauses must satisfy before it is admitted (ECM
 and II.19). `checkRegions` decides them on the decoded instructions: clauses are disjoint or
 properly nested with inner clauses listed first, no instruction that leaves the activation sits
 inside a region, control enters a region only at the first instruction of a protected range,
-only `leave` exits one, `endfinally` ends only a finally handler, and no `leave` exits one.
+only `leave` exits one, `endfinally` ends only a finally handler, and no `leave` exits a finally
+handler.
 
 The clauses are sorted once and swept once against the instructions, so the check costs the
 sort of the clauses plus a constant per instruction and branch target.

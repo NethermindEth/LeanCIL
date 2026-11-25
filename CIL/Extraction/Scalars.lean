@@ -735,6 +735,8 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   if role matches some (.result _) then
     let _ :: _ :: tail := stack | none
     return .word32 :: tail
+  -- `leave` empties the stack.
+  if leaveOpcode opcode then return []
   if opcode == 0x71 || opcode == 0x81 then
     let .type type := instruction.operand | none
     let home := scalarType (.byref type)
@@ -935,10 +937,25 @@ private def decodedValueSite (raw : RawInstruction) (role : Option FoldRole)
     (emitted : Instruction) : Bool :=
   !boundSite raw && role.isNone && !(emitted matches .unadmitted _)
 
+/-- The stack kinds a handler starts with: the caught object for a catch, nothing for a
+    finally. -/
+def _root_.CIL.ExceptionClause.entryKinds (clause : ExceptionClause) : List ScalarKind :=
+  match clause.kind with
+  | .catch _ => [.object]
+  | .finally => []
+
+/-- A reachable `stack` at `pc` fits the exception clauses of `raw`: a handler starting there is
+    entered with its entry kinds and a protected range starting there with an empty stack. -/
+def scalarClauseFits (raw : RawMethod) (pc : Nat) (stack : List ScalarKind) : Bool :=
+  raw.handlers.all fun clause =>
+    (clause.handlerStart != pc || stack == clause.entryKinds) &&
+      (clause.tryStart != pc || stack.isEmpty)
+
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
-    agree with the feature stack depth, satisfy the indirect access rule and the `readonly.` rule
-    (`readOnlyPrefixMatches`) over the raw instructions `rawAt` gives, emit the right encoding
-    after the raw instruction before it, and give every successor, which must be reachable,
+    agree with the feature stack depth, fit the exception clauses (`scalarClauseFits`), satisfy
+    the indirect access rule and the `readonly.` rule (`readOnlyPrefixMatches`) over the raw
+    instructions `rawAt` gives, emit the right encoding after the raw instruction before it,
+    and give every successor, which must be reachable,
     exactly the resulting stack kinds, with local slots read through `locals`. An ordinary
     value site skips the raw value comparison, which the decoded code equation implies. -/
 private def checkScalarSite (raw : RawMethod)
@@ -950,6 +967,7 @@ private def checkScalarSite (raw : RawMethod)
   | ((instruction, role), pc), some feature, some stack, emitted =>
     let skipEncoding := decodedValueSite instruction role emitted
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
+      scalarClauseFits raw pc stack &&
       indirectSiteWindow rawAt pc instruction emitted skipEncoding &&
       readOnlyPrefixMatches (rawAt (pc + 1)) instruction &&
       scalarEmissionMatches role (rawBefore rawAt pc) instruction stack emitted

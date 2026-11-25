@@ -279,8 +279,9 @@ def links (table : List SpecializedMethod) (raw : RawMethod) :=
 def supportsProfile (profile : FeatureProfile) : Bool :=
   profile.nativeWidth == 64 && profile.littleEndian && profile.architecture != .arm64
 
-/-- Infer scalar stacks along reachable paths. With no caller-supplied feature facts, both
-successors of a conditional are considered and every stack value has unknown feature bits. -/
+/-- Infer scalar stacks along reachable paths from the entry and from every handler start. With no
+caller-supplied feature facts, both successors of a conditional are considered and every stack
+value has unknown feature bits. -/
 private def inferFlow? (raw : RawMethod) (method : Method)
     (supplied : Option FeatureCertificate) : Option (FeatureCertificate × ScalarCertificate) := do
   let sites := (raw.code.zip (foldRoles raw.code)).toArray
@@ -311,7 +312,10 @@ private def inferFlow? (raw : RawMethod) (method : Method)
           incoming := incoming.set! target (some after)
           todo := target :: todo
       visit fuel todo incoming
-  let states ← visit sites.size [0] ((Array.replicate sites.size none).set! 0 (some []))
+  let roots := (0, []) :: raw.handlers.map fun clause => (clause.handlerStart, clause.entryKinds)
+  let seeded := roots.foldl (fun states (pc, stack) => states.set! pc (some stack))
+    (Array.replicate sites.size none)
+  let states ← visit (sites.size + roots.length) (roots.map Prod.fst) seeded
   let features := supplied.getD (states.map (·.map fun stack =>
     { stack := List.replicate stack.length none, locals := [] }))
   return (features, states)
@@ -434,7 +438,8 @@ def constructorImage? (item : ConstructorSource) (pc : Nat)
   let body ← original.bindConstructor? source pc image.dependencies
     ⟨[], callee, ⟨coreLibraryScope⟩⟩
   let code ← (checkBody body source []).toOption
-  let raw := { source with code := code.code, initLocals := code.initLocals }
+  let raw := { source with
+    code := code.code, initLocals := code.initLocals, handlers := code.handlers }
   -- Every entry to this newobj runs these loads, so the message is a string literal.
   let start := pc - image.loads.length
   let targets := branchTargets raw.code
