@@ -141,7 +141,7 @@ theorem store_unavailable {entered memory : Memory} {boundary : Nat} {kinds slot
 
 private def packetTag : CIL.Extraction.FieldRef :=
   { owner := .aggregate "Packet" 0, index := 1, name := name!"Tag",
-    type := .atom CIL.Extraction.runtimeScope "System.Int32" }
+    type := .primitive .int32 }
 
 /-- Zero a struct local, store its int field, then store and reload a word local. -/
 @[cil_code] def structAndWord : CIL.Method := {

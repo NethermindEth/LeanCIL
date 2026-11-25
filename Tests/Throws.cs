@@ -95,7 +95,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         {
             ("vararg", "declared.convention := 0x25"),
             ("explicit-this", "declared.convention := 0x60"),
-            ("result", "declared.returnType := .atom Extraction.runtimeScope \"System.Int32\""),
+            ("result", "declared.returnType := .primitive .int32"),
             ("generic-arity", "method.genericArity := 1")
         })
         {

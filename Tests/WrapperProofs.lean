@@ -28,7 +28,7 @@ macro "math_wrapper_step " model:term:max evaluated:term : tactic => `(tactic|
     CIL.Safety.checkedValue, List.drop] <;> rfl))
 
 private def minimumRef : CIL.Extraction.MethodRef :=
-  let int := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Int32"
+  let int := CIL.Extraction.TypeExpr.primitive .int32
   { owner := .atom CIL.Extraction.runtimeScope "System.Math", name := name!"Min",
     hasThis := false, genericArity := 0, returnType := int, parameters := [int, int] }
 

@@ -24,14 +24,14 @@ private def limbsEnvironment : LayoutEnvironment :=
 /-- A UInt64 member of the four-word fixture, selected by its metadata field index. -/
 private def limbField (index : Nat) (name : MetadataName) : Extraction.FieldRef :=
   { owner := .aggregate "Fixture::Limbs" 0, index, name,
-    type := .atom Extraction.runtimeScope "System.UInt64" }
+    type := .primitive .uint64 }
 
 /-- The readonly limb argument is formed with AsRef before As retypes it as a vector. -/
 private def limbsCall (asVector : Bool) : Instruction :=
   let limbs := Extraction.TypeExpr.aggregate "Fixture::Limbs" 0
   let vector := Extraction.TypeExpr.apply
     (.constructor Extraction.intrinsicsScope "System.Runtime.Intrinsics.Vector256`1")
-    (.atom Extraction.runtimeScope "System.UInt64")
+    (.primitive .uint64)
   let method : Extraction.MethodRef :=
     { owner := Extraction.unsafeOwner, name := if asVector then name!"As" else name!"AsRef",
       hasThis := false, genericArity := if asVector then 2 else 1,

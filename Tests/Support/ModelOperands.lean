@@ -21,6 +21,7 @@ def decoded (site : CallSite) (environment : LayoutEnvironment := {})
 def checks (site : CallSite) : Bool :=
   let wrong := TypeExpr.atom "Fixture" "Other"
   let owner := match site.method.owner with
+    | .primitive type => TypeExpr.atom "Fixture" type.display
     | .atom _ name => TypeExpr.atom "Fixture" name
     | _ => wrong
   let parameters := match site.method.parameters with

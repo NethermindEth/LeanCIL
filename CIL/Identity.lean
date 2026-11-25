@@ -1043,6 +1043,14 @@ def TypeIdentity.text? (type : TypeIdentity) : Option String := do
 def TypeIdentity.display (type : TypeIdentity) : String :=
   type.text?.getD (reprStr type)
 
+/-- The simple name of a primitive, such as `Int32`, as member names such as
+    `ReadInt32BigEndian` spell it. -/
+def PrimitiveType.simpleName : PrimitiveType → String
+  | .boolean => "Boolean" | .char => "Char" | .sbyte => "SByte" | .byte => "Byte"
+  | .int16 => "Int16" | .uint16 => "UInt16" | .int32 => "Int32" | .uint32 => "UInt32"
+  | .int64 => "Int64" | .uint64 => "UInt64" | .single => "Single" | .double => "Double"
+  | .intPtr => "IntPtr" | .uintPtr => "UIntPtr"
+
 /-- The full name Cecil and method signatures give a primitive, such as `System.Int32`. -/
 def PrimitiveType.display : PrimitiveType → String
   | .boolean => "System.Boolean" | .char => "System.Char" | .sbyte => "System.SByte"
@@ -1050,6 +1058,12 @@ def PrimitiveType.display : PrimitiveType → String
   | .int32 => "System.Int32" | .uint32 => "System.UInt32" | .int64 => "System.Int64"
   | .uint64 => "System.UInt64" | .single => "System.Single" | .double => "System.Double"
   | .intPtr => "System.IntPtr" | .uintPtr => "System.UIntPtr"
+
+/-- A primitive's full name is its simple name in the `System` namespace. -/
+theorem PrimitiveType.display_eq (type : PrimitiveType) :
+    type.display = "System." ++ type.simpleName := by
+  cases type <;> rfl
+#print axioms PrimitiveType.display_eq
 
 /-! ## Notation -/
 

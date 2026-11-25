@@ -61,7 +61,7 @@ theorem layouts_valid : LayoutsValid rawLayouts computedLayouts .x64 := by decid
 
 /-- An enum over another enum has neither metadata storage nor a declared field kind. -/
 theorem nestedEnumHasNoFieldKind :
-    let nested := TypeExpr.enum (Tests.enumIdentity "E") (.enum (Tests.enumIdentity "Inner") (.atom runtimeScope "System.Int32"))
+    let nested := TypeExpr.enum (Tests.enumIdentity "E") (.enum (Tests.enumIdentity "Inner") (.primitive .int32))
     And (typeStorage rawLayouts nested = none) (fieldKind? rawLayouts nested = none) := by
   decide +kernel
 #print axioms nestedEnumHasNoFieldKind
@@ -70,8 +70,8 @@ theorem nestedEnumHasNoFieldKind :
 @[cil_code] def environment : LayoutEnvironment :=
   { rawLayouts := rawLayouts, layouts := computedLayouts }
 
-private def int16 : TypeExpr := .atom runtimeScope "System.Int16"
-private def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
+private def int16 : TypeExpr := .primitive .int16
+private def uint32 : TypeExpr := .primitive .uint32
 private def inner : TypeExpr := .aggregate "T::Inner" 0
 private def pair : TypeExpr := .aggregate "T::Pair" 1
 private def node : TypeExpr := .object scope "Node"
@@ -197,7 +197,7 @@ theorem class_struct_array_slot :
 def lanesField : FieldRef :=
   { owner := node, index := 1, name := name!"lanes",
     type := .array (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
-      (.atom runtimeScope "System.UInt64")) }
+      (.primitive .uint64)) }
 
 cil_field_shape environment lanesField
 
@@ -217,7 +217,7 @@ theorem refuses_a_byref_like_array_slot :
 
 theorem refuses_a_double_slot :
     environment.fieldShape
-        { owner := node, index := 3, type := .atom runtimeScope "System.Double",
+        { owner := node, index := 3, type := .primitive .double,
           name := name!"ratio" } =
       .unsupported "Class instance field type" := by decide +kernel
 #print axioms refuses_a_double_slot
@@ -260,7 +260,7 @@ theorem short_value_width (body : Method) (shared : body.environment = environme
 -- Integer vectors and spans resolve before layouts.
 theorem value_kinds :
     environment.valueShape (.apply (.constructor intrinsicsScope
-        "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Int32")) =
+        "System.Runtime.Intrinsics.Vector128`1") (.primitive .int32)) =
       .vector 16 ∧
     environment.valueShape (.apply (.constructor runtimeScope "System.Span`1") int16) = .span :=
   by decide +kernel
@@ -269,7 +269,7 @@ theorem value_kinds :
 /-- The storage size of a 128-bit floating-point vector is available to runtime models. -/
 theorem double_vector_shape :
     environment.valueShape (.apply (.constructor intrinsicsScope
-        "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Double")) =
+        "System.Runtime.Intrinsics.Vector128`1") (.primitive .double)) =
       .vector 16 := by decide +kernel
 #print axioms double_vector_shape
 
@@ -301,7 +301,7 @@ run_cmd Command.liftTermElabM do
 
 /-- `Node.count`, an `int32` class field at raw index 0. -/
 def countField : FieldRef :=
-  { owner := node, index := 0, type := .atom runtimeScope "System.Int32", name := name!"count" }
+  { owner := node, index := 0, type := .primitive .int32, name := name!"count" }
 
 -- `ldflda` of a class field faults as unsupported, since the model forms no address into an
 -- object; the fault is not definite, so no refutation lemma takes it as evidence about the method.
@@ -404,7 +404,7 @@ end
 private def lanes : TypeExpr := .aggregate "T::Lanes" 3
 /-- A `Vector*<ulong>` of the given generic definition. -/
 private def ulongVector (definition : String) : TypeExpr :=
-  .apply (.constructor intrinsicsScope definition) (.atom runtimeScope "System.UInt64")
+  .apply (.constructor intrinsicsScope definition) (.primitive .uint64)
 
 /-- `Lanes.wide`, the 32-byte vector at offset 0. -/
 def wideField : FieldRef :=
@@ -416,7 +416,7 @@ def narrowField : FieldRef :=
     name := name!"narrow" }
 /-- `Lanes.tag`, the `int32` at offset 48. -/
 def tagField : FieldRef :=
-  { owner := lanes, index := 2, type := .atom runtimeScope "System.Int32", name := name!"tag" }
+  { owner := lanes, index := 2, type := .primitive .int32, name := name!"tag" }
 
 cil_field_shape environment wideField
 cil_field_shape environment narrowField
@@ -568,7 +568,7 @@ theorem padded_load_faults_first :
 def inlineLanes : FieldRef :=
   { owner := node, index := 1, name := name!"inline",
     type := .array (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
-      (.atom runtimeScope "System.UInt64")) }
+      (.primitive .uint64)) }
 
 -- A closed body steps a field without a fact by evaluating its shape to the literal a fact would
 -- state, so the stepped goal spells the vector element as a string literal.
@@ -608,11 +608,11 @@ theorem fact_lanes_load (frame : Safety.Frame) (memory : Safety.Memory)
 /-- `Lanes.narrow` read as a `Vector128<double>`, whose element no vector field declares. -/
 def doubleNarrow : FieldRef :=
   { narrowField with type := .apply (.constructor intrinsicsScope
-      "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Double") }
+      "System.Runtime.Intrinsics.Vector128`1") (.primitive .double) }
 /-- `Lanes.narrow` read as a `Vector128<long>`, the width it declares with another lane. -/
 def longNarrow : FieldRef :=
   { narrowField with type := .apply (.constructor intrinsicsScope
-      "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Int64") }
+      "System.Runtime.Intrinsics.Vector128`1") (.primitive .int64) }
 
 -- A vector field is held only at its declared lane, so another element type is refused.
 theorem refuses_another_lane :

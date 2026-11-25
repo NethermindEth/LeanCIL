@@ -82,7 +82,7 @@ example : ¬ LayoutsValid defaultVector256 arm64Layout .x64 := by decide
 private def lanes : FieldRef := {
   owner := .aggregate "VectorHolder" 0, index := 1, name := name!"lanes",
   type := .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector256`1")
-    (.atom runtimeScope "System.UInt64") }
+    (.primitive .uint64) }
 
 private def vectorLoad (architecture : Architecture) (layouts : Array ComputedLayout) : Method :=
   { profile := { architecture }, environment := { rawLayouts := defaultVector256, layouts },
@@ -116,8 +116,7 @@ def raw : List RawLayout := [{
 
 def vector (scope : String) : TypeExpr := .apply
   (.constructor scope "System.Runtime.Intrinsics.Vector256`1")
-  (.atom "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-    "System.UInt64")
+  (.primitive .uint64)
 
 example : instructionLayoutUses raw 0 ⟨0, 0x7b, .field (.aggregate "VectorHolder" 0) 0
     (vector "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
@@ -129,8 +128,7 @@ example : instructionLayoutUses raw 0 ⟨0, 0x7b, .field (.aggregate "VectorHold
     (vector "Spoofed.Intrinsics") name!"value" false⟩ = none := by decide
 
 example : instructionLayoutUses raw 0 ⟨0, 0x7b, .field (.aggregate "VectorHolder" 0) 0
-    (.atom "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-      "System.UInt64")
+    (.primitive .uint64)
     name!"value" false⟩ = none := by decide
 
 end Tests.VectorFields

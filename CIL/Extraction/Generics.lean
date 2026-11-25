@@ -383,7 +383,7 @@ structure NativeDispatchContext where
 
 /-- Native integer metadata eligible for an authenticated table element. -/
 def nativeDispatchInteger : TypeExpr → Bool
-  | .atom scope name => scope == runtimeScope && name ∈ ["System.IntPtr", "System.UIntPtr"]
+  | .primitive .intPtr | .primitive .uintPtr => true
   | _ => false
 
 /-- Derive callable homes from raw call sites, never from emitted kinds or numerical values. -/
@@ -504,6 +504,7 @@ def callOperandMatches (site : CallSite) : Instruction → Bool
 
 /-- Split a scoped declaring type from its ordered generic arguments. -/
 def managedOwner : TypeExpr → Option (String × List TypeExpr)
+  | .primitive type => some (runtimeScope ++ "::" ++ type.display, [])
   | .atom scope name => some (scope ++ "::" ++ name, [])
   | .object scope name | .constructor scope name | .objectConstructor scope name => do return (scope ++ "::" ++ (← name.signatureName?), [])
   | .aggregate identity _ => some (identity, [])

@@ -14,10 +14,10 @@ open CIL CIL.Extraction
 /-- The primitive assembly identity with its checked byte representation. -/
 private def runtime := runtimeScope
 private def owner := "Fixture, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-private def intType : TypeExpr := .atom runtime "System.Int32"
-private def span (scope element : String) : TypeExpr :=
-  .apply (.constructor scope "System.ReadOnlySpan`1") (.atom runtime element)
-private def words := span runtime "System.UInt32"
+private def intType : TypeExpr := .primitive .int32
+private def span (scope : String) (element : PrimitiveType) : TypeExpr :=
+  .apply (.constructor scope "System.ReadOnlySpan`1") (.primitive element)
+private def words := span runtime .uint32
 
 /-- The readonly indexer at the local receiver. -/
 private def getItem : CallSite := {
@@ -43,16 +43,16 @@ private def raw (locals : List TypeExpr) (code : List RawInstruction) : RawMetho
 private def state (stack : List (Option W32)) : Option FeatureState := some ⟨stack, []⟩
 
 -- Only a primitive runtime span names a span local.
-example : spanLocal words ∧ spanLocal (span runtime "System.Byte") := by decide
-example : ¬ spanLocal (span owner "System.UInt32") ∧ ¬ spanLocal (span runtime "System.Double") ∧
+example : spanLocal words ∧ spanLocal (span runtime .byte) := by decide
+example : ¬ spanLocal (span owner .uint32) ∧ ¬ spanLocal (span runtime .double) ∧
     ¬ spanLocal intType := by decide
 
 /-- Native integers and the two small primitive types retain their physical element widths. -/
 theorem primitive_span_widths :
-    spanStorage (span runtime "System.IntPtr") = some (.span 8 false) ∧
-    spanStorage (span runtime "System.UIntPtr") = some (.span 8 false) ∧
-    spanStorage (span runtime "System.Char") = some (.span 2 false) ∧
-    spanStorage (span runtime "System.Boolean") = some (.span 1 false) := by decide
+    spanStorage (span runtime .intPtr) = some (.span 8 false) ∧
+    spanStorage (span runtime .uintPtr) = some (.span 8 false) ∧
+    spanStorage (span runtime .char) = some (.span 2 false) ∧
+    spanStorage (span runtime .boolean) = some (.span 1 false) := by decide
 #print axioms primitive_span_widths
 
 /-- Each range has the MemberRef declaration of the corresponding array overload. -/
@@ -89,7 +89,7 @@ theorem exact_array_span_call :
         { site with method.parameters := method.parameters.set 0 intType },
         { site with method.returnType := .void }, { site with declared.convention := 0x20 },
         { site with declared.parameters := wrongOpen }, { site with target := .external "Another" },
-        arraySpanCall range (.atom runtime "System.Double"),
+        arraySpanCall range (.primitive .double),
         arraySpanCall range (.aggregate "Missing::Layout" 0) ]
       decide (decodeArrayCall site = .ok [.call method {}]) &&
         (runtimeModel {} .call method == some (.memory (.arraySpan .signed32 true range))) &&
@@ -181,7 +181,7 @@ theorem constructor_models :
           (method.parameters.length == op.argumentCount) &&
           !runtimeCatalog.siteAgrees {} .scalar (i 115 (.call site)) (.call method) none true &&
           refused.all (fun other => refusesConstructor other)) &&
-      [(TypeExpr.atom runtime "System.Double", "System.Double"),
+      [(TypeExpr.primitive .double, "System.Double"),
        (.aggregate "Missing::Layout" 0, "Layout")].all (fun (element, name) =>
         (constructors writable element name).all (fun (site, _) =>
           refusesConstructor site))) := by
@@ -203,7 +203,7 @@ theorem constructor_array_storage :
 
 /-- The readonly byte pointer overload uses the checked byte-span construction. -/
 theorem byte_pointer_constructor :
-    ((constructors false (.atom runtime "System.Byte") "System.Byte")[2]?).any (fun (site, _) =>
+    ((constructors false (.primitive .byte) "System.Byte")[2]?).any (fun (site, _) =>
       runtimeModel {} .newobj site.method == some (.memory .spanCreate)) := by
   decide +kernel
 #print axioms byte_pointer_constructor
@@ -266,7 +266,7 @@ example : ¬ typeTestInstruction
 /-- The eight bulk declarations instantiated at the named element type. -/
 private def bulkSites (element : TypeExpr) (elementName : String) : List CallSite := Id.run do
   let writable := spanHead true
-  let boolean := TypeExpr.atom runtime "System.Boolean"
+  let boolean := TypeExpr.primitive .boolean
   let var := TypeExpr.ownerParameter 0
   let row (owner : TypeExpr) (ownerName name : String) (key : MetadataName)
       (result : TypeExpr) (resultName params : String) (closed openParams : List TypeExpr)
@@ -330,7 +330,7 @@ theorem bulk_call_operands :
 
 /-- A well-formed overload over a floating-point element has no bulk memory model. -/
 theorem bulk_call_elements :
-    ((bulkSites (.atom runtime "System.Single") "System.Single").all fun site =>
+    ((bulkSites (.primitive .single) "System.Single").all fun site =>
       decide (bulkCode site = liveHoleAt 0 40)) := by
   decide +kernel
 
@@ -338,7 +338,7 @@ theorem bulk_call_elements :
 
 /-- The signed backing and nominal identity survive both array fill overloads. -/
 theorem bulk_enum_models :
-    let element := TypeExpr.enum (Tests.enumIdentity "Tag") (.atom runtime "System.SByte")
+    let element := TypeExpr.enum (Tests.enumIdentity "Tag") (.primitive .sbyte)
     let storage := ArrayElement.enumeration (Tests.enumIdentity "Tag") .signed8
     let operations : List MemoryOp := [.spanFill 1 true, .spanFill 1 false, .spanCopy 1 false,
       .spanCopy 1 true, .spanCopy 1 false, .spanCopy 1 true, .arrayFill storage false,
@@ -384,7 +384,7 @@ private def localConstructor : CallSite := {
   declared := { convention := 0x20, parameters := [.array (.parameter 0)] },
   method := {
     owner := words, name := name!".ctor", hasThis := true, genericArity := 0, returnType := .void,
-    parameters := [.array (.atom runtime "System.UInt32")] },
+    parameters := [.array (.primitive .uint32)] },
   name := ".ctor",
   target := .external (runtime ++
     "::System.Void System.ReadOnlySpan`1<System.UInt32>::.ctor(!0[])"), typeArguments := [],
@@ -404,7 +404,7 @@ private def admitted (source : RawMethod) : Bool :=
     followed by one pure push per parameter. -/
 theorem constructor_window_admitted :
     admitted (raw [words] constructorCode) = true ∧
-    admitted (raw [words, .array (.atom runtime "System.UInt32")]
+    admitted (raw [words, .array (.primitive .uint32)]
       [i 18 (.local 0), i 7, i 40 (.call localConstructor), i 42]) = true ∧
     admitted (raw [] [i 15 (.argument 0), i 20, i 40 (.call localConstructor), i 42]) = true := by
   decide +kernel
@@ -414,10 +414,10 @@ theorem constructor_window_admitted :
     store or a duplicate inside the window, a local of another span type, an `in` parameter
     loaded by value, and a branch to an argument push or to the call. -/
 theorem constructor_window_refused :
-    admitted (raw [words, .array (.atom runtime "System.UInt32")]
+    admitted (raw [words, .array (.primitive .uint32)]
       [i 18 (.local 0), i 20, i 11, i 7, i 40 (.call localConstructor), i 42]) = false ∧
     admitted (raw [words] [i 18 (.local 0), i 37, i 20, i 40 (.call localConstructor)]) = false ∧
-    admitted (raw [span runtime "System.Int32"] constructorCode) = false ∧
+    admitted (raw [span runtime .int32] constructorCode) = false ∧
     admitted { raw [] [i 2, i 20, i 40 (.call localConstructor), i 42] with
       parameters := [.byref words] } = false ∧
     admitted (raw [words] (constructorCode ++ [i 43 (.target 1)])) = false ∧
@@ -435,7 +435,7 @@ theorem span_reset_evidence :
     admitted (raw [words] [i 18 (.local 0), i 65045 (.type words), i 42]) = true ∧
     admitted (raw [] [i 15 (.argument 0), i 65045 (.type words), i 42]) = true ∧
     admitted (raw [words] [i 18 (.local 0), i 0, i 65045 (.type words), i 42]) = false ∧
-    admitted (raw [span runtime "System.Int32"]
+    admitted (raw [span runtime .int32]
       [i 18 (.local 0), i 65045 (.type words), i 42]) = false ∧
     admitted (raw [words]
       [i 18 (.local 0), i 65045 (.type words), i 42, i 43 (.target 1)]) = false := by
@@ -445,7 +445,7 @@ theorem span_reset_evidence :
 /-- The byte-span constructor decodes to the address of its home and a model call, consumes its
     argument and returns with an empty stack. -/
 theorem decoded_span_constructor_returns :
-    let byte := TypeExpr.atom runtimeScope "System.Byte"
+    let byte := TypeExpr.primitive .byte
     let bytes := TypeExpr.apply (.constructor runtimeScope "System.Span`1") byte
     let ctor := { localConstructor with
       method.owner := bytes,

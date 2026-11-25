@@ -1399,6 +1399,17 @@ def NamedType.fixedStorage (named : NamedType) : Bool :=
   (named.name.drop longestPrimitiveName).isEmpty && named.scope == runtimeScopeBytes &&
     (named.name == systemStringName || named.name == systemObjectName || valueAtomName named.name)
 
+/-- Whether an atom spells one of the 14 primitives in the runtime scope. Resolution refuses
+    every such atom: `.primitive` is the only form of a runtime primitive, and the spelling
+    cannot tell `System`.`Int32` from an empty-namespace type named `System.Int32`. -/
+def runtimePrimitiveAtom (scope name : List Nat) : Bool :=
+  (name.drop longestPrimitiveName).isEmpty && valueAtomName name && scope == runtimeScopeBytes
+
+/-- The namespace and simple-name columns of a runtime primitive: `System` and `Int32` for
+    `Int32`. -/
+def primitiveParts (type : PrimitiveType) : List (List Nat) :=
+  [systemNamespace, ((primitiveName type.elementType).getD []).drop systemPrefix.length]
+
 mutual
 
 /-- Whether the extractor's `TypeExpr` names the resolved type. The scope, the name and the kind
@@ -1409,17 +1420,25 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
   | fuel + 1, type, expr =>
     match type, expr with
     | .primitive code, .void => code == 0x01
+    | .primitive code, .primitive type =>
+      frame.corlib == some runtimeScopeBytes && type.elementType == code
     | .primitive code, .atom scope name =>
       code != 0x01 && frame.corlib == some (bytesOf scope) &&
-        primitiveName code == some (bytesOf name)
+        primitiveName code == some (bytesOf name) &&
+        !runtimePrimitiveAtom (bytesOf scope) (bytesOf name)
     | .primitive 0x0E, .object scope name =>
       frame.corlib == some (bytesOf scope) && name.levels == [⟨name!"System", name!"String"⟩]
-    -- A type that cannot be a value type is never the runtime's primitive with value storage.
+    -- A runtime primitive is selected by its namespace and simple-name columns.
+    | .named named, .primitive type =>
+      named.scope == runtimeScopeBytes && named.parts == primitiveParts type && !named.isEnum &&
+        named.kind.reference? == some false
+    -- `System.String` and `System.Object` keep their atoms only as references.
     | .named named, .atom scope name =>
       named.scope == bytesOf scope && named.name == bytesOf name && !named.isEnum &&
         named.kind != .importedOwner &&
-        (!named.fixedStorage || named.kind.reference? ==
-          some (named.name == systemStringName || named.name == systemObjectName))
+        (!named.fixedStorage || named.kind.reference? == some true &&
+          (named.name == systemStringName || named.name == systemObjectName)) &&
+        !runtimePrimitiveAtom (bytesOf scope) (bytesOf name)
     | .named named, .object scope name =>
       named.scope == bytesOf scope && declarationMatches name.levels named.parts &&
         objectNamed named &&
@@ -1468,7 +1487,8 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
         modifier.name == bytesOf name && typeAdmits frame fuel element inner
     | .modified required modifier element, .atom scope name =>
       !frame.rawIndices && bytesOf scope == frame.anchor &&
-        cecilName false fuel (.modified required modifier element) == some (bytesOf name)
+        cecilName false fuel (.modified required modifier element) == some (bytesOf name) &&
+        !runtimePrimitiveAtom (bytesOf scope) (bytesOf name)
     | _, _ => false
 
 /-- A generic instance binds the constructor's scope, name and value or reference kind. -/
@@ -1529,6 +1549,37 @@ def Frame.admitsHeld (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : B
         (!named.fixedStorage || (named.kind.reference? == some true &&
           (named.name == systemStringName || named.name == systemObjectName)))
     | _, _ => false
+
+/-- An application chain never admits an atom, since each prefix test admits only an application
+    or a generic definition. -/
+private theorem argumentsAdmit_atom {frame : Frame} {scope name : String} :
+    ∀ (fuel : Nat) (arguments : ResolvedList) (prefixMatches : TypeExpr → Bool),
+      prefixMatches (.atom scope name) = false →
+      argumentsAdmit frame fuel arguments prefixMatches (.atom scope name) = false
+  | 0, _, _, _ => by simp [argumentsAdmit]
+  | _ + 1, .nil, _, refused => by simpa [argumentsAdmit] using refused
+  | fuel + 1, .cons _ rest, _, _ => by
+    simp only [argumentsAdmit]
+    exact argumentsAdmit_atom fuel rest _ rfl
+#print axioms argumentsAdmit_atom
+
+/-- Resolution refuses an atom that spells a runtime primitive, whatever the resolved type, the
+    frame and the nesting bound. -/
+theorem typeAdmits_runtimePrimitiveAtom {frame : Frame} {fuel : Nat} {type : ResolvedType}
+    {scope name : String} (spelled : runtimePrimitiveAtom (bytesOf scope) (bytesOf name) = true) :
+    typeAdmits frame fuel type (.atom scope name) = false := by
+  cases fuel with
+  | zero => simp [typeAdmits]
+  | succ fuel =>
+    cases type with
+    | genericInst head arguments =>
+      cases fuel with
+      | zero => simp [typeAdmits, appliedAdmits]
+      | succ fuel =>
+        simp only [typeAdmits, appliedAdmits]
+        exact argumentsAdmit_atom _ _ _ rfl
+    | _ => simp [typeAdmits, spelled]
+#print axioms typeAdmits_runtimePrimitiveAtom
 
 /-- Every admitted enum parameter has the assembly columns of its resolved definition or reference. -/
 theorem typeAdmits_enum_assembly {frame : Frame} {fuel : Nat} {named : NamedType}

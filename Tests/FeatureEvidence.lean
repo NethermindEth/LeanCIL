@@ -5,15 +5,13 @@ set_option maxRecDepth 4096
 namespace Tests.FeatureEvidence
 open CIL CIL.Extraction
 
-private def intType : TypeExpr := .atom
-  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-  "System.Int32"
+private def intType : TypeExpr := .primitive .int32
 private def getter : CallSite := {
-  declared := { convention := 0, returnType := .atom runtimeScope "System.Boolean" },
+  declared := { convention := 0, returnType := .primitive .boolean },
   method := {
     owner := .atom intrinsicsScope "System.Runtime.Intrinsics.X86.Sse2",
     name := name!"get_IsSupported", hasThis := false, genericArity := 0,
-    returnType := .atom runtimeScope "System.Boolean",
+    returnType := .primitive .boolean,
     parameters := [] },
   name := "get_IsSupported", target := .external
     s!"{intrinsicsScope}::System.Boolean System.Runtime.Intrinsics.X86.Sse2::get_IsSupported()",
@@ -123,9 +121,7 @@ example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none)
 
 -- A state no edge reaches is checked for its shape alone: its known facts must name each local
 -- once, by increasing index, below the local count, with a word the local's type admits.
-private def boolType : TypeExpr := .atom
-  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-  "System.Boolean"
+private def boolType : TypeExpr := .primitive .boolean
 private def deadRaw := raw [i 22, i 10, i 42, i 6, i 38, i 42] [intType, boolType] .void
 private def deadStates (facts : List (Nat × W32)) : FeatureCertificate :=
   [state [], state [some 0], state [] [(0, 0)], state [] facts, state [some 0], state []]
@@ -210,7 +206,7 @@ example : featureOpMatches #[] branchRaw (i 88) (.add) = true := by decide
 example : featureOpMatches #[] branchRaw (i 88) (.nop) = false := by decide
 -- A Boolean local that is never addressed is eligible for constant facts; its load and store bind
 -- to the plain instructions at its own index, since the slot's kind does the narrowing.
-private def booleanRaw := raw [i 6, i 10] [.atom runtimeScope "System.Boolean"] .void
+private def booleanRaw := raw [i 6, i 10] [.primitive .boolean] .void
 example : featureOpMatches #[] booleanRaw (i 6) (.ldloc 0) = true := by decide +kernel
 example : featureOpMatches #[] booleanRaw (i 10) (.stloc 0) = true := by decide +kernel
 example : featureOpMatches #[] booleanRaw (i 6) (.ldloc 1) = false := by decide +kernel
@@ -219,7 +215,7 @@ example : featureOpMatches #[] booleanRaw (i 6) (.stloc 0) = false := by decide 
 -- Taking the address of a span local or of a span argument binds only the address instruction of
 -- the same local or argument, whose step pushes the span's view; a load in its place is rejected.
 private def spanRaw := raw [i 18 (.local 0), i 15 (.argument 0)]
-  [.apply (.constructor runtimeScope "System.Span`1") (.atom runtimeScope "System.UInt32")] .void
+  [.apply (.constructor runtimeScope "System.Span`1") (.primitive .uint32)] .void
 example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.ldloca 0) = true := by decide +kernel
 example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.ldloc 0) = false := by decide +kernel
 example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldarga 0) = true := by
@@ -237,7 +233,7 @@ example : emittedFeatureEffect (.cpblk 8) false = some (3, 0) := by decide
 example : emittedFeatureEffect (.newobj (.arity 2)) false = some (2, 1) := by decide
 /-- Indexed facts retain boolean bounds, exact type identity, address exclusions and absence. -/
 theorem indexed_local_eligibility :
-    let types := [intType, .atom runtimeScope "System.Boolean",
+    let types := [intType, .primitive .boolean,
       .atom "Wrong.Runtime" "System.Int32", .byref intType]
     let locals := FeatureLocalIndex.ofRaw (raw [i 18 (.local 0), i 65037 (.local 3)] types)
     locals.eligible 0 (some 1) = false ∧ locals.eligible 0 none = true ∧

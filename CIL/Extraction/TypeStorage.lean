@@ -16,10 +16,8 @@ def intrinsicsScope : String :=
 
 /-- Byte width of an admitted integer vector, bound to both exact runtime type identities. -/
 def integerVectorWidth : TypeExpr → Option Nat
-  | .apply (.constructor scope name) (.atom elementScope element) =>
-    if scope != intrinsicsScope || elementScope != runtimeScope ||
-        element ∉ ["System.Byte", "System.Int32", "System.UInt32", "System.Int64",
-          "System.UInt64"] then none
+  | .apply (.constructor scope name) (.primitive element) =>
+    if scope != intrinsicsScope || element ∉ [.byte, .int32, .uint32, .int64, .uint64] then none
     else if name == "System.Runtime.Intrinsics.Vector128`1" then some 16
     else if name == "System.Runtime.Intrinsics.Vector256`1" then some 32
     else if name == "System.Runtime.Intrinsics.Vector512`1" then some 64
@@ -32,31 +30,40 @@ def objectApplicationAdmitted : TypeExpr → Bool
   | type@(.apply ..) => type.isRuntimeSpan || (integerVectorWidth type).isSome
   | _ => true
 
-/-- Primitive array element identity is derived from the exact runtime metadata scope. -/
+/-- The storage of an enum over the primitive; `none` where `typeStorage` admits no enum. -/
+def _root_.CIL.PrimitiveType.enumStorage : PrimitiveType → Option EnumStorage
+  | .sbyte => some .signed8 | .byte => some .unsigned8
+  | .int16 => some .signed16 | .uint16 => some .unsigned16
+  | .int32 => some .signed32 | .uint32 => some .unsigned32
+  | .int64 => some .signed64 | .uint64 => some .unsigned64
+  | .boolean | .char | .single | .double | .intPtr | .uintPtr => none
+
+/-- The array element storage of a primitive; `none` for `Single` and `Double`. -/
+def _root_.CIL.PrimitiveType.arrayElement? : PrimitiveType → Option ArrayElement
+  | .sbyte => some .signed8 | .byte => some .unsigned8
+  | .int16 => some .signed16 | .uint16 => some .unsigned16
+  | .int32 => some .signed32 | .uint32 => some .unsigned32
+  | .int64 => some .signed64 | .uint64 => some .unsigned64
+  | .intPtr => some .nativeInt | .uintPtr => some .nativeUInt
+  | .boolean => some .boolean | .char => some .character
+  | .single | .double => none
+
+/-- Whether a pointer to the primitive has reference storage: the integers and `Char`, not
+    `Boolean` or the floating types. -/
+def _root_.CIL.PrimitiveType.pointerStorage : PrimitiveType → Bool
+  | .sbyte | .byte | .int16 | .uint16 | .char | .int32 | .uint32 | .int64 | .uint64 | .intPtr
+  | .uintPtr => true
+  | .boolean | .single | .double => false
+
+/-- Primitive array element identity is derived from the typed runtime primitive. -/
 def arrayElementType (type : TypeExpr) (aggregateWidth : Nat := 0) : Option ArrayElement :=
   match type with
   | .aggregate identity _ => some (.aggregate identity aggregateWidth)
-  | type@(.apply (.constructor _ name) (.atom _ element)) => do
+  | type@(.apply (.constructor _ name) (.primitive element)) => do
     let width ← integerVectorWidth type
-    return .vector ((← name.signatureName?) ++ "<" ++ element ++ ">") width
-  | .enum identity (.atom scope name) => do
-    if scope != runtimeScope then none else pure ()
-    let storage ← match name with
-      | "System.SByte" => some EnumStorage.signed8 | "System.Byte" => some .unsigned8
-      | "System.Int16" => some .signed16 | "System.UInt16" => some .unsigned16
-      | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
-      | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
-      | _ => none
-    return .enumeration identity storage
-  | .atom scope name =>
-    if scope != runtimeScope then none else match name with
-      | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
-      | "System.Int16" => some .signed16 | "System.UInt16" => some .unsigned16
-      | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
-      | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
-      | "System.IntPtr" => some .nativeInt | "System.UIntPtr" => some .nativeUInt
-      | "System.Boolean" => some .boolean | "System.Char" => some .character
-      | _ => none
+    return .vector ((← name.signatureName?) ++ "<" ++ element.display ++ ">") width
+  | .enum identity (.primitive underlying) => .enumeration identity <$> underlying.enumStorage
+  | .primitive type => type.arrayElement?
   | _ => none
 /-- Primitive/vector widths are intrinsic; aggregate widths come from checked layout uses. -/
 def spanElementWidth (type : TypeExpr) (aggregateWidth : Nat := 0) : Option Nat :=
@@ -89,10 +96,10 @@ def callableType : TypeExpr → TypeExpr
 
 /-- Function pointers admit checked aggregates, integer vectors and integer/reference types. -/
 def managedParameter : TypeExpr → Bool
-  | .atom scope name => scope == runtimeScope && (primitiveField name).isSome
+  | .primitive type => type.fieldType?.isSome
   | .enum _ underlying => (enumUnderlyingField underlying).isSome
   | .byref element => match element with
-      | .atom .. | .enum .. | .aggregate .. | .apply .. => managedParameter element
+      | .primitive _ | .enum .. | .aggregate .. | .apply .. => managedParameter element
       | _ => false
   | .aggregate .. => true
   | type => (integerVectorWidth type).isSome
@@ -154,8 +161,9 @@ private def identityEq (left right : String) : Decidable (left = right) :=
 
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorageAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Option StorageType
-  | .atom scope name =>
-    if scope = runtimeScope ∨ scope = coreLibraryScope then .field <$> primitiveField name else none
+  | .primitive type => .field <$> type.fieldType?
+  -- CoreLib defines its own primitives; a runtime-scope atom has no storage.
+  | .atom scope name => if scope = coreLibraryScope then .field <$> primitiveField name else none
   | .object _ _ => some .object
   | .aggregate identity index => do
     let metadata ← layoutAt index
@@ -175,8 +183,9 @@ def typeStorageAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Option St
     | none => StorageType.array <$> arrayElementType element
   | type@(.functionPointer ..) => if callableLayoutsAt layoutAt type then
       StorageType.methodPointer <$> managedSignature type else none
+  | .pointer (.primitive type) => if type.pointerStorage then some .reference else none
   | .pointer (.atom scope name) =>
-    if (scope == runtimeScope || scope == coreLibraryScope) &&
+    if scope == coreLibraryScope &&
         name ∈ ["System.SByte", "System.Byte", "System.Int16",
         "System.UInt16", "System.Char", "System.Int32", "System.UInt32", "System.Int64",
         "System.UInt64", "System.IntPtr", "System.UIntPtr"] then some .reference else none
@@ -193,10 +202,9 @@ def typeStorageAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Option St
         if metadata.identity != identity then none else
           return .aggregateSpan index (name == "System.Span`1")
       else return storage
-    let .atom elementScope element := elementType | none
-    if scope != intrinsicsScope || elementScope != runtimeScope ||
-        element ∉ ["System.UInt64", "System.Int64", "System.UInt32", "System.Int32",
-          "System.Byte", "System.Double", "System.Single"] then none
+    let .primitive element := elementType | none
+    if scope != intrinsicsScope ||
+        element ∉ [.uint64, .int64, .uint32, .int32, .byte, .double, .single] then none
     else if name = "System.Runtime.Intrinsics.Vector128`1" then some .vector128
     else if name = "System.Runtime.Intrinsics.Vector256`1" then some .vector256
     else if name = "System.Runtime.Intrinsics.Vector512`1" then some .vector512 else none
@@ -211,11 +219,11 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType :=
 def fieldKind? (layouts : List RawLayout) (type : TypeExpr) : Option FieldType :=
   match typeStorage layouts type, type with
   | some (.field kind), _ => some kind
-  -- `typeStorage` has decided both scopes; the element's name decides the lane.
-  | some .vector128, .apply _ (.atom _ element) =>
-    FieldType.vector128 <$> (primitiveField element).bind VectorLane.ofField?
-  | some .vector256, .apply _ (.atom _ element) =>
-    FieldType.vector256 <$> (primitiveField element).bind VectorLane.ofField?
+  -- `typeStorage` has decided the vector's scope; the element primitive decides the lane.
+  | some .vector128, .apply _ (.primitive element) =>
+    FieldType.vector128 <$> element.fieldType?.bind VectorLane.ofField?
+  | some .vector256, .apply _ (.primitive element) =>
+    FieldType.vector256 <$> element.fieldType?.bind VectorLane.ofField?
   | _, _ => none
 
 /-- Storage accepted by Unsafe reference casts and element offsets. -/

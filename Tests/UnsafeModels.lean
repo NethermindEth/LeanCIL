@@ -17,7 +17,7 @@ open CIL CIL.Extraction CIL.Safety
 /-- The `System.Runtime` type `name`. -/
 private def runtimeType (name : String) : TypeExpr := .atom runtimeScope name
 /-- `System.Int32`. -/
-private def int32 : TypeExpr := runtimeType "System.Int32"
+private def int32 : TypeExpr := .primitive .int32
 
 /-- `int Unsafe.SizeOf<element>()` as a call site instantiates it. -/
 private def sizeOf (element : TypeExpr) : MethodRef :=
@@ -50,7 +50,7 @@ example : LayoutsValid (sized 3 "Fixture::Other").rawLayouts
 /-- `Vector256<ulong>`, whose size is its width under every profile. -/
 private def vector256 : TypeExpr :=
   .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector256`1")
-    (runtimeType "System.UInt64")
+    (.primitive .uint64)
 
 -- The size is the checked layout's: one reference, two environments, two sizes.
 example : runtimeModel (sized 3) .call (sizeOf packet) = some (.constant 24) := by
@@ -62,11 +62,11 @@ example : runtimeModel (sized 2 (byRefLike := true)) .call (sizeOf packet) =
     some (.constant 16) := by decide +kernel
 -- Primitive and vector widths are the element's own, in any environment.
 example : runtimeModel {} .call (sizeOf int32) = some (.constant 4) := by decide +kernel
-example : runtimeModel {} .call (sizeOf (runtimeType "System.UIntPtr")) = some (.constant 8) := by
+example : runtimeModel {} .call (sizeOf (.primitive .uintPtr)) = some (.constant 8) := by
   decide +kernel
-example : runtimeModel {} .call (sizeOf (runtimeType "System.Char")) = some (.constant 2) := by
+example : runtimeModel {} .call (sizeOf (.primitive .char)) = some (.constant 2) := by
   decide +kernel
-example : runtimeModel {} .call (sizeOf (runtimeType "System.Boolean")) = some (.constant 1) := by
+example : runtimeModel {} .call (sizeOf (.primitive .boolean)) = some (.constant 1) := by
   decide +kernel
 example : runtimeModel {} .call (sizeOf vector256) = some (.constant 32) := by decide +kernel
 -- The model reads no profile: a 256-bit element has its size and model under the scalar profile.
@@ -88,7 +88,7 @@ example : runtimeModel {} .call { sizeOf int32 with methodArguments := [int32, i
     none := by decide +kernel
 example : runtimeModel {} .call { sizeOf int32 with parameters := [int32] } = none := by
   decide +kernel
-example : runtimeModel {} .call { sizeOf int32 with returnType := runtimeType "System.Int64" } =
+example : runtimeModel {} .call { sizeOf int32 with returnType := .primitive .int64 } =
     none := by decide +kernel
 example : runtimeModel {} .newobj (sizeOf int32) = none := by decide +kernel
 
@@ -105,7 +105,7 @@ example : runtimeModel {} .call
 example : runtimeModel {} .call
     (sizeOf (.apply (.constructor runtimeScope "System.Span`1") int32)) = none := by
   decide +kernel
-example : runtimeModel {} .call (sizeOf (runtimeType "System.Single")) = none := by
+example : runtimeModel {} .call (sizeOf (.primitive .single)) = none := by
   decide +kernel
 example : runtimeModel {} .call (sizeOf packet) = none := by decide +kernel
 example : runtimeModel (sized 3 "Fixture::Other") .call (sizeOf packet) = none := by
@@ -163,7 +163,7 @@ private def emitting (emitted : CIL.Instruction) : CIL.Method :=
 /-- A double vector has a runtime SizeOf call, while its raw object load decodes to a hole. -/
 theorem double_vector_size_and_load :
     let head := TypeExpr.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1"
-    let vector := TypeExpr.apply head (runtimeType "System.Double")
+    let vector := TypeExpr.apply head (.primitive .double)
     let called := sizeOf vector
     let load := method ⟨0, 0x71, .type vector⟩
     runtimeModel {} .call called = some (.constant 16) ∧
@@ -184,7 +184,7 @@ example : ¬ RuntimeModelsAgree (method (site (sizeOf packet))) [true] (emitting
 /-- `bool Unsafe.<name><element>(ref element, ref element)` as a call site instantiates it. -/
 private def comparison (name : MetadataName) (element : TypeExpr) : MethodRef :=
   { owner := unsafeOwner, name, hasThis := false, genericArity := 1,
-    returnType := runtimeType "System.Boolean", parameters := [.byref element, .byref element],
+    returnType := .primitive .boolean, parameters := [.byref element, .byref element],
     methodArguments := [element] }
 
 /-- `void Unsafe.SkipInit<element>(out element)` as a call site instantiates it. -/
@@ -216,7 +216,7 @@ example : runtimeModel (sized 3) .call (skipInitOf packet) = some .skipInit := b
 example : runtimeModel {} .call { areSame int32 with returnType := int32 } = none := by
   decide +kernel
 example : runtimeModel {} .call
-    { isLess int32 with parameters := [.byref int32, .byref (runtimeType "System.Int64")] } =
+    { isLess int32 with parameters := [.byref int32, .byref (.primitive .int64)] } =
     none := by decide +kernel
 example : runtimeModel {} .call { isGreater int32 with genericArity := 2 } = none := by
   decide +kernel
@@ -235,7 +235,7 @@ example : runtimeModel {} .call
     (skipInitOf (.apply (.constructor runtimeScope "System.Span`1") int32)) = none := by
   decide +kernel
 example : runtimeModel {} .call
-    { skipInitOf int32 with returnType := runtimeType "System.Boolean" } = none := by
+    { skipInitOf int32 with returnType := .primitive .boolean } = none := by
   decide +kernel
 example : runtimeModel {} .call
     { skipInitOf int32 with parameters := [.byref int32, .byref int32] } = none := by
@@ -300,7 +300,7 @@ theorem forged_sizeOf_refused :
 
 /-- At Boolean, a generic result closes to the correct type but refuses the AreSame call. -/
 theorem forged_areSame_refused :
-    let reference := areSame (runtimeType "System.Boolean")
+    let reference := areSame (.primitive .boolean)
     let control := site reference unsafeComparisonDeclaration
     let forged := { unsafeComparisonDeclaration with returnType := .parameter 0 }
     refuses control (site reference forged) reference (sized 3) (.call reference {}) = true := by

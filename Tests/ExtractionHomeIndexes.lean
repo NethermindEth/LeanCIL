@@ -50,7 +50,7 @@ def raw : RawMethod := {
 /-- Whole-vector locals are eligible only when no instruction takes their address. -/
 def vectorType : TypeExpr := .apply
   (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
-  (.atom runtimeScope "System.UInt64")
+  (.primitive .uint64)
 
 /-- Both address encodings exclude locals, even in unreachable raw code. -/
 theorem opaque_edges : opaqueLocalIndices { raw with
@@ -61,11 +61,11 @@ theorem opaque_edges : opaqueLocalIndices { raw with
 
 /-- The matching raw static field load. -/
 def load : RawInstruction :=
-  ⟨0, 126, .field .void 0 (.atom runtimeScope "System.Byte") name!"Value" true⟩
+  ⟨0, 126, .field .void 0 (.primitive .byte) name!"Value" true⟩
 
 /-- The field `load` names. -/
 def loaded : FieldRef :=
-  { owner := .void, index := 0, type := .atom runtimeScope "System.Byte", name := name!"Value" }
+  { owner := .void, index := 0, type := .primitive .byte, name := name!"Value" }
 
 /-- A one-byte unsigned static field descriptor of `loaded`. -/
 def descriptor : StaticDescriptor := ⟨0, loaded, [0], none, some false, 1, false⟩
@@ -84,8 +84,9 @@ theorem first_static_wins :
 #print axioms first_static_wins
 
 /-- A scalar static load with matching enum identities and a descriptor of the given width. -/
-private def enumLoad (name : String) (width : Nat) (scalar : Option Bool := some false) : Bool :=
-  let field := { loaded with type := .enum (Tests.enumIdentity "E") (.atom runtimeScope name) }
+private def enumLoad (underlying : PrimitiveType) (width : Nat) (scalar : Option Bool := some false) :
+    Bool :=
+  let field := { loaded with type := .enum (Tests.enumIdentity "E") (.primitive underlying) }
   let operand := RawOperand.field field.owner field.index field.type field.name true
   let site := { descriptor with field, bytes := List.replicate width 0, scalar }
   methodShapeInstructions { raw with code := [{ load with operand }] }
@@ -93,8 +94,8 @@ private def enumLoad (name : String) (width : Nat) (scalar : Option Bool := some
 
 /-- The load admits an Int32 enum and rejects Boolean, Char and native integer bases. -/
 theorem staticEnumNeedsInteger :
-    [enumLoad "System.Boolean" 1, enumLoad "System.Char" 2, enumLoad "System.IntPtr" 8,
-      enumLoad "System.Boolean" 1 none, enumLoad "System.Int32" 4] =
+    [enumLoad .boolean 1, enumLoad .char 2, enumLoad .intPtr 8, enumLoad .boolean 1 none,
+      enumLoad .int32 4] =
       [false, false, false, false, true] := by decide +kernel
 #print axioms staticEnumNeedsInteger
 

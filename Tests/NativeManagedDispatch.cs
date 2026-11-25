@@ -152,8 +152,8 @@ foreach (var (name, mutated) in new[]
     ("emitted-add-ovf", ForgeDecodedInstruction(scalar, 0, addPc, "fun _ => .add_ovf")),
     ("raw-sub", ChangeRaw(scalar, addPc, "opcode := 89")),
     ("raw-operand", ChangeRaw(scalar, addPc, "operand := .local 0")),
-    ("input", scalar.Replace(".pointer (.atom Extraction.runtimeScope \"System.IntPtr\")",
-        ".pointer (.atom Extraction.runtimeScope \"System.Int64\")", StringComparison.Ordinal))
+    ("input", scalar.Replace(".pointer (.primitive .intPtr)",
+        ".pointer (.primitive .int64)", StringComparison.Ordinal))
 })
 {
     if (mutated == scalar) throw new InvalidOperationException("Ineffective native evidence mutation: " + name);

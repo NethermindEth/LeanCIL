@@ -27,11 +27,11 @@ private def tallyEnvironment : CIL.LayoutEnvironment := {
 
 def tallyCount : CIL.Extraction.FieldRef :=
   { owner := tallyType, index := 0, name := name!"Count",
-    type := .atom CIL.Extraction.runtimeScope "System.UInt32" }
+    type := .primitive .uint32 }
 
 def tallySum : CIL.Extraction.FieldRef :=
   { owner := tallyType, index := 1, name := name!"Sum",
-    type := .atom CIL.Extraction.runtimeScope "System.UInt32" }
+    type := .primitive .uint32 }
 
 cil_field_shape tallyEnvironment tallyCount
 cil_field_shape tallyEnvironment tallySum
@@ -308,15 +308,15 @@ private def mixedEnvironment : CIL.LayoutEnvironment := {
 
 def mixedFlag : CIL.Extraction.FieldRef :=
   { owner := .aggregate "Mixed" 1, index := 0, name := name!"Flag",
-    type := .atom CIL.Extraction.runtimeScope "System.Byte" }
+    type := .primitive .byte }
 
 def mixedCount : CIL.Extraction.FieldRef :=
   { owner := .aggregate "Mixed" 1, index := 1, name := name!"Count",
-    type := .atom CIL.Extraction.runtimeScope "System.Int16" }
+    type := .primitive .int16 }
 
 def mixedTotal : CIL.Extraction.FieldRef :=
   { owner := .aggregate "Mixed" 1, index := 2, name := name!"Total",
-    type := .atom CIL.Extraction.runtimeScope "System.UInt32" }
+    type := .primitive .uint32 }
 
 cil_field_shape mixedEnvironment mixedFlag
 cil_field_shape mixedEnvironment mixedCount
@@ -529,7 +529,7 @@ open Lean in
 
 /-- The signed element offset of the loop's reference to an Int32. -/
 private def stampOffset : CIL.Extraction.MethodRef :=
-  let word := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Int32"
+  let word := CIL.Extraction.TypeExpr.primitive .int32
   { owner := CIL.Extraction.unsafeOwner, name := name!"Add", hasThis := false,
     genericArity := 1, methodArguments := [word], parameters := [.byref word, word],
     returnType := .byref word }
@@ -547,9 +547,9 @@ cil_runtime_models stamps
 /-- Both calls name the native word size getter. Only the second site has a link. -/
 @[cil_code] private def sizeCalls : CIL.Method :=
   let getter : CIL.Extraction.MethodRef := {
-    owner := .atom CIL.Extraction.runtimeScope "System.IntPtr", name := name!"get_Size",
+    owner := .primitive .intPtr, name := name!"get_Size",
     hasThis := false, genericArity := 0, parameters := [],
-    returnType := .atom CIL.Extraction.runtimeScope "System.Int32" }
+    returnType := .primitive .int32 }
   { returnsValue := true, locals := [], code := [.call getter {}, .call getter {}, .ret],
     links := [(1, .direct 1)] }
 
@@ -614,7 +614,7 @@ example (frame : Frame) (memory : Memory)
 
 /-- `new Span<int>(ref value)` without a link, a construction the runtime table models. -/
 @[cil_code] private def spanOfReference : CIL.Method :=
-  let int := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Int32"
+  let int := CIL.Extraction.TypeExpr.primitive .int32
   { returnsValue := true, locals := [], code := [.ldarg 0, .newobj {
       owner := .apply (.constructor CIL.Extraction.runtimeScope "System.Span`1") int,
       name := name!".ctor", hasThis := true, genericArity := 0, returnType := .void,

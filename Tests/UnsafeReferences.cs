@@ -237,10 +237,10 @@ foreach (var (name, theorem) in new[]
 }
 controls.Check(replay: false);
 var rejected = new RejectedEvidence(Path.Combine(root, "EvidenceRejections"));
-const string wrongWidth = "methodArguments := [.atom Extraction.runtimeScope \"System.UInt32\"]";
-const string wordWidth = "methodArguments := [.atom Extraction.runtimeScope \"System.UInt64\"]";
-const string signedOffset = "parameters := method.parameters.set 1 (.atom Extraction.runtimeScope \"System.IntPtr\")";
-const string unsignedOffset = "parameters := method.parameters.set 1 (.atom Extraction.runtimeScope \"System.UIntPtr\")";
+const string wrongWidth = "methodArguments := [.primitive .uint32]";
+const string wordWidth = "methodArguments := [.primitive .uint64]";
+const string signedOffset = "parameters := method.parameters.set 1 (.primitive .intPtr)";
+const string unsignedOffset = "parameters := method.parameters.set 1 (.primitive .uintPtr)";
 foreach (var (name, pc, fields) in new[]
 {
     ("AddSigned", 2, unsignedOffset), ("AddUnsigned", 2, signedOffset),
@@ -263,10 +263,10 @@ foreach (var methodName in new[] { "AddPointer", "SubtractPointer" })
         "method0_models_validated");
     foreach (var (name, before, after) in new[]
     {
-        ("offset-type", ".atom Extraction.runtimeScope \"System.Int32\"",
-            ".atom Extraction.runtimeScope \"System.UInt32\""),
+        ("offset-type", ".primitive .int32",
+            ".primitive .uint32"),
         ("return", "returnType := .pointer (.void)",
-            "returnType := .byref (.atom Extraction.runtimeScope \"System.UInt64\")"),
+            "returnType := .byref (.primitive .uint64)"),
         ("identity", "target := .external externalIdentity0", "target := .external \"forged\""),
         ("scope", "owner := .atom Extraction.runtimeScope", "owner := .atom \"forged\"")
     })
@@ -286,12 +286,12 @@ foreach (var (name, before, after) in new[]
         "method0Reachable { method0 with code := method0.code.set 2 .sub } := by decide"),
     ("scope", "owner := .atom Extraction.runtimeScope", "owner := .atom \"forged\""),
     ("identity", "target := .external externalIdentity0", "target := .external \"forged\""),
-    ("result", "returnType := .atom Extraction.runtimeScope \"System.IntPtr\"",
-        "returnType := .atom Extraction.runtimeScope \"System.UIntPtr\""),
-    ("generic", "typeArguments := [.atom Extraction.runtimeScope \"System.Byte\"]",
-        "typeArguments := [.byref (.atom Extraction.runtimeScope \"System.Byte\") ]"),
-    ("array-storage", ".atom Extraction.runtimeScope \"System.Byte\"",
-        ".array (.atom Extraction.runtimeScope \"System.Byte\")")
+    ("result", "returnType := .primitive .intPtr",
+        "returnType := .primitive .uintPtr"),
+    ("generic", "typeArguments := [.primitive .byte]",
+        "typeArguments := [.byref (.primitive .byte) ]"),
+    ("array-storage", ".primitive .byte",
+        ".array (.primitive .byte)")
 })
 {
     if (!byteOffsetSource.Contains(before, StringComparison.Ordinal))

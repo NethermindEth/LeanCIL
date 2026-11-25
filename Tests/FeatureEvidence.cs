@@ -153,7 +153,7 @@ string MutateState(string source, string update) => FeatureLayoutPattern.Feature
 // Each mutation checks feature flow independently, without unrelated validator proofs
 // or instruction lookup equations that could reject it for a different reason.
 Reject("wrong-feature", ForgeDecodedInstruction(baseline, 0, 3, "fun _ => .call { owner := .atom Extraction.intrinsicsScope \"System.Runtime.Intrinsics.X86.Sse2\", " +
-    "name := name!\"get_IsSupported\", hasThis := false, genericArity := 0, returnType := .atom Extraction.runtimeScope \"System.Boolean\", parameters := [] }"));
+    "name := name!\"get_IsSupported\", hasThis := false, genericArity := 0, returnType := .primitive .boolean, parameters := [] }"));
 Reject("wrong-branch", ForgeDecodedInstruction(baseline, 0, 4, "fun _ => .brfalse 11"));
 Reject("forged-constant", baseline.Replace("stack := [some (BitVec.ofInt 32 (0))]", "stack := [some (BitVec.ofInt 32 (1))]"));
 Reject("malformed-entry", MutateState(baseline, "set 0 (some { stack := [], locals := [(0, BitVec.ofInt 32 (0))] })"));

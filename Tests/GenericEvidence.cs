@@ -162,13 +162,14 @@ foreach (var (name, scope) in new[]
     ("wrong-runtime-token", "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=0000000000000000")
 })
     Reject(0, name, source => ChangeDefinition(source, "method1Closed", line =>
-        line.Replace("Extraction.runtimeScope", System.Text.Json.JsonSerializer.Serialize(scope))));
+        line.Replace(".primitive .uint64",
+            $".atom {System.Text.Json.JsonSerializer.Serialize(scope)} \"System.UInt64\"")));
 Reject(0, "wrong-type-argument", source => ChangeDefinition(source, "method1TypeArgumentsRaw",
-    line => line.Replace("System.UInt64", "System.UInt32")));
+    line => line.Replace(".primitive .uint64", ".primitive .uint32")));
 Reject(0, "wrong-closed-signature", source => ChangeDefinition(source, "method1Closed",
-    line => line.Replace("System.UInt64", "System.UInt32")));
+    line => line.Replace(".primitive .uint64", ".primitive .uint32")));
 Reject(7, "wrong-closed-local", source => ChangeDefinition(source, "method1Closed", line =>
-    line.Replace("locals := [.atom", "locals := [.byref (.atom").Replace("], initLocals", ")], initLocals")));
+    line.Replace("locals := [.primitive .int32]", "locals := [.byref (.primitive .int32)]")));
 Reject(12, "wrong-type-operand", source => ChangeDefinition(source, "method1Closed", line =>
     line.Replace("operand := .type (.aggregate", "operand := .type (.byref (.aggregate").Replace(" 0) }", " 0)) }")));
 Reject(0, "altered-opcode", source => ChangeDefinition(source, "method1Closed",

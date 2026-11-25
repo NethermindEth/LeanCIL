@@ -17,16 +17,16 @@ open CIL CIL.Extraction Lean Meta
 
 /-- An `int32` instance field of a class, at raw index 1. -/
 def classOperand : RawOperand :=
-  .field (.object "T" "T.Account") 1 (.atom runtimeScope "System.Int32") name!"balance" false
+  .field (.object "T" "T.Account") 1 (.primitive .int32) name!"balance" false
 
 /-- The field `classOperand` names. -/
 def classField : FieldRef :=
-  { owner := .object "T" "T.Account", index := 1, type := .atom runtimeScope "System.Int32",
+  { owner := .object "T" "T.Account", index := 1, type := .primitive .int32,
     name := name!"balance" }
 
 /-- An `int32` instance field of a struct, at raw index 1. -/
 def structOperand : RawOperand :=
-  .field (.aggregate "T::Pair" 0) 1 (.atom runtimeScope "System.Int32") name!"balance" false
+  .field (.aggregate "T::Pair" 0) 1 (.primitive .int32) name!"balance" false
 
 /-- The field `structOperand` names. -/
 def structField : FieldRef := { classField with owner := .aggregate "T::Pair" 0 }
@@ -38,7 +38,7 @@ private def staticOperand : RawOperand :=
 private def dog : TypeExpr := .object "Fixture" "Fixture.Dog"
 
 /-- The element type `System.Int32`. -/
-private def int32 : TypeExpr := .atom runtimeScope "System.Int32"
+private def int32 : TypeExpr := .primitive .int32
 
 /-- A one-field generic layout whose owner is the runtime span named by `name`. -/
 private def spanLayout (name : String) : RawLayout :=
@@ -70,19 +70,19 @@ theorem span_reset_substitution :
 
 /-- A static call site of `T.Account::Deposit(int32)`. -/
 private def callSite : CallSite := {
-  declared := { convention := 0, parameters := [.atom runtimeScope "System.Int32"] },
+  declared := { convention := 0, parameters := [.primitive .int32] },
   method := {
     owner := .object "T" "T.Account", name := name!"Deposit", hasThis := false,
-    genericArity := 0, returnType := .void, parameters := [.atom runtimeScope "System.Int32"] },
+    genericArity := 0, returnType := .void, parameters := [.primitive .int32] },
   name := "Deposit", target := .managed 0x06000001, typeArguments := [], parameterCount := 1,
   returnsValue := false }
 
 /-- A managed site of the `int32` constructor of `T.Account`. -/
 private def accountConstruction : CallSite := {
-  declared := { convention := 0x20, parameters := [.atom runtimeScope "System.Int32"] },
+  declared := { convention := 0x20, parameters := [.primitive .int32] },
   method := {
     owner := .object "T" "T.Account", name := name!".ctor", hasThis := true, genericArity := 0,
-    returnType := .void, parameters := [.atom runtimeScope "System.Int32"] },
+    returnType := .void, parameters := [.primitive .int32] },
   name := ".ctor", target := .managed 1, typeArguments := [], parameterCount := 1,
   returnsValue := false }
 
@@ -352,8 +352,7 @@ theorem folded_argument_index (localCount index : Nat) (argumentAt : Nat → Opt
 def probes : List RawInstruction :=
   ((List.range 256 ++ (List.range 32).map (65024 + ·)).flatMap fun opcode =>
     ([.none, .integer 1, .argument 1, .local 1, .target 1, .targets [1], .text "",
-      .type (.atom runtimeScope
-        "System.Int32"), classOperand, .call callSite] : List RawOperand).map
+      .type (.primitive .int32), classOperand, .call callSite] : List RawOperand).map
       fun operand => { offset := 0, opcode, operand })
 
 /-- `ofRaw?` decodes only value opcodes, every value opcode is named, and every named form
@@ -419,7 +418,7 @@ theorem block_alignments :
 theorem object_prefixes :
     let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1") int32
     let pair := TypeExpr.aggregate "Pair" 0
-    let types := [int32, .enum (Tests.enumIdentity "Signed8") (.atom runtimeScope "System.SByte"), pair, span] ++
+    let types := [int32, .enum (Tests.enumIdentity "Signed8") (.primitive .sbyte), pair, span] ++
       [128, 256, 512].map (fun bits =>
         .apply (.constructor intrinsicsScope s!"System.Runtime.Intrinsics.Vector{bits}`1") int32)
     let check := fun (operand : RawOperand) (type : TypeExpr) =>
@@ -496,7 +495,7 @@ theorem malformed_field_prefix_refused :
 
 /-- A typed indirect load or store binds both its type token and its preceding alignment. -/
 theorem indirect_object_binding :
-    let other := TypeExpr.atom runtimeScope "System.UInt64"
+    let other := TypeExpr.primitive .uint64
     let unaligned := fun (n : Int) => some (RawInstruction.mk 0 0xfe12 (.integer n))
     [(0x71, Instruction.ldobj), (0x81, Instruction.stobj)].all fun (opcode, operation) =>
       let raw := RawInstruction.mk 3 opcode (.type int32)
@@ -635,11 +634,11 @@ def mutations : List (RawInstruction × Instruction) := [
   (⟨0, 123, classOperand⟩, .ldfld { classField with index := 2 }),
   (⟨0, 123, classOperand⟩, .ldfld { classField with name := name!"limit" }),
   (⟨0, 123, classOperand⟩, .ldflda classField), (⟨0, 125, classOperand⟩, .ldfld classField),
-  (⟨0, 123, .field (.object "T" "T.Account") 1 (.atom runtimeScope "System.Int32")
+  (⟨0, 123, .field (.object "T" "T.Account") 1 (.primitive .int32)
     name!"balance" true⟩, .ldfld classField),
   (⟨0, 123, structOperand⟩, .ldfld classField), (⟨0, 123, classOperand⟩, .ldfld structField),
   (⟨0, 125, structOperand⟩,
-    .stfld { structField with type := .atom runtimeScope "System.UInt32" }),
+    .stfld { structField with type := .primitive .uint32 }),
   -- Another method or constructor than the site names, a prefix the bytes do not hold, or a call
   -- operand under another opcode.
   (⟨0, 40, .call callSite⟩, .call { callSite.method with name := name!"Withdraw" }),
@@ -740,7 +739,7 @@ private def genericOperand : RawOperand :=
   .field (.object "T" "T.Account") 1 (.parameter 0) name!"balance" false
 
 -- Instantiating a class field with `int32` decodes to the access of `classField`.
-example : ((substituteOperand [.atom runtimeScope "System.Int32"] [] 0 genericOperand).bind
+example : ((substituteOperand [.primitive .int32] [] 0 genericOperand).bind
     (fun operand => Instruction.ofRaw? none ⟨0, 123, operand⟩)).any
       (·.sameValue (.ldfld classField)) = true := by
   decide +kernel
@@ -750,7 +749,7 @@ private def genericStructOperand : RawOperand :=
   .field (.aggregate "T::Pair" 0) 1 (.parameter 0) name!"balance" false
 
 -- Instantiating a struct field with `int32` decodes to the access of `structField`.
-example : ((substituteOperand [.atom runtimeScope "System.Int32"] [] 0 genericStructOperand).bind
+example : ((substituteOperand [.primitive .int32] [] 0 genericStructOperand).bind
     (fun operand => Instruction.ofRaw? none ⟨0, 125, operand⟩)).any
       (·.sameValue (.stfld structField)) = true := by
   decide +kernel

@@ -208,9 +208,9 @@ def worldPlatform : PlatformTable := platform_table%
    ⟨runtimeScopeBytes, [bytesOf "System.Runtime.CompilerServices", bytesOf "Unsafe"], .classType⟩]
 
 /-- The 32-bit and 64-bit unsigned types as the extractor writes them. -/
-def int32 : TypeExpr := .atom runtimeScope "System.Int32"
-def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
-def uint64 : TypeExpr := .atom runtimeScope "System.UInt64"
+def int32 : TypeExpr := .primitive .int32
+def uint32 : TypeExpr := .primitive .uint32
+def uint64 : TypeExpr := .primitive .uint64
 
 /-- The platform AssemblyRef columns used by the fixture signatures. -/
 def runtimeColumns : AssemblyColumns :=

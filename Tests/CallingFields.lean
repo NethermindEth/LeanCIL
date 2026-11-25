@@ -267,11 +267,11 @@ def viewResult (value : CIL.Value) : MethodContract Reference Unit where
   { locals := [], returnsValue := true, code := forwarderCode [0, 1] (Tests.callee 2),
     links := [(2, .direct 1)],
     declared := { returnType := match narrow with
-      | none => .atom CIL.Extraction.runtimeScope "System.Int64"
-      | some .signed8 => .atom CIL.Extraction.runtimeScope "System.SByte"
-      | some .unsigned8 => .atom CIL.Extraction.runtimeScope "System.Byte"
-      | some .signed16 => .atom CIL.Extraction.runtimeScope "System.Int16"
-      | some .unsigned16 => .atom CIL.Extraction.runtimeScope "System.UInt16" } }
+      | none => .primitive .int64
+      | some .signed8 => .primitive .sbyte
+      | some .unsigned8 => .primitive .byte
+      | some .signed16 => .primitive .int16
+      | some .unsigned16 => .primitive .uint16 } }
 
 /-- The same forwarding proof preserves the valid-call precondition and exact result encoding. -/
 theorem forwards_view_result (value : CIL.Value) (narrow : Option CIL.NarrowKind)

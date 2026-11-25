@@ -26,7 +26,7 @@ open CIL CIL.Extraction Tests.MetadataBuilder Tests.BodyEncoding
 private def pin : AssemblyPin :=
   { identity := "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" }
 private def extScope : String := "Ext, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-private def int32 : TypeExpr := .atom runtimeScope "System.Int32"
+private def int32 : TypeExpr := .primitive .int32
 /-- `Ext.Point` as a struct and as a class; its member references admit either reading. -/
 private def point : TypeExpr := .aggregate (extScope ++ "::Ext.Point") 0
 private def pointClass : TypeExpr := .object extScope "Ext.Point"
@@ -390,7 +390,7 @@ theorem pair_second_item_reads_its_own_declaration :
       some (.operandMismatch (build (pairWorldWith [0x08, 0x08] [0x13, 0x00]) (bytesOf "T")
         pin.identity).2.2.1) ∧
     checkSecond [0x08, 0x09] [0x13, 0x01]
-      (.field mixedPair 1 (.atom runtimeScope "System.UInt32") name!"Item2" false) = none ∧
+      (.field mixedPair 1 (.primitive .uint32) name!"Item2" false) = none ∧
     (checkSecond [0x08, 0x09] [0x13, 0x01] (.field mixedPair 1 int32 name!"Item2" false)).isSome =
       true := by decide +kernel
 #print axioms pair_second_item_reads_its_own_declaration
@@ -441,7 +441,7 @@ theorem refuses_unequal_width_pair :
 /-- Two unsupported primitives have no certified storage width. -/
 theorem refuses_single_pair :
     itemError (pairWorldWith [0x0C, 0x0C]) 0 (tupleOwner "System.Single" "System.Single")
-      (.atom runtimeScope "System.Single") = some (.unboundInstanceField 0x0A000001) := by
+      (.primitive .single) = some (.unboundInstanceField 0x0A000001) := by
   decide +kernel
 #print axioms refuses_single_pair
 
@@ -449,7 +449,7 @@ theorem refuses_single_pair :
     the sequential offset 4, even when the MemberRef correctly declares Item2 as !1. -/
 theorem refuses_byte_uint_second_item :
     checkSecond [0x05, 0x09] [0x13, 0x01]
-      (.field (tupleOwner "System.Byte" "System.UInt32") 1 (.atom runtimeScope "System.UInt32")
+      (.field (tupleOwner "System.Byte" "System.UInt32") 1 (.primitive .uint32)
         name!"Item2" false) = some (.unboundInstanceField 0x0A000002) := by decide +kernel
 #print axioms refuses_byte_uint_second_item
 
@@ -458,8 +458,8 @@ theorem binds_equal_width_items :
     let bytes := pairWorldWith [0x05, 0x02]
     let owner := tupleOwner "System.Byte" "System.Boolean"
     itemError (pairWorldWith [0x08, 0x09]) 0 mixedPair int32 = none ∧
-    itemError bytes 0 owner (.atom runtimeScope "System.Byte") = none ∧
-    itemError bytes 1 owner (.atom runtimeScope "System.Boolean") = none := by decide +kernel
+    itemError bytes 0 owner (.primitive .byte) = none ∧
+    itemError bytes 1 owner (.primitive .boolean) = none := by decide +kernel
 #print axioms binds_equal_width_items
 
 /-- Repeating a CLASS marker in the operand cannot give the tuple a field index. -/

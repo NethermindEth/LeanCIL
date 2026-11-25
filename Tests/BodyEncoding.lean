@@ -92,19 +92,12 @@ def encodeCode (offsets : List Nat) : List (RawInstruction × Nat) → Option (L
 
 /-! ## Metadata -/
 
-/-- The element type byte of each primitive the encoder writes. -/
-def primitiveBytes : List (String × Nat) :=
-  [("System.Boolean", 0x02), ("System.Char", 0x03), ("System.SByte", 0x04), ("System.Byte", 0x05),
-   ("System.Int16", 0x06), ("System.UInt16", 0x07), ("System.Int32", 0x08),
-   ("System.UInt32", 0x09), ("System.Int64", 0x0A), ("System.UInt64", 0x0B),
-   ("System.Single", 0x0C), ("System.Double", 0x0D), ("System.IntPtr", 0x18),
-   ("System.UIntPtr", 0x19), ("System.Object", 0x1C)]
-
 /-- The signature bytes of a type of a method with `arity` generic parameters. -/
 def typeBytes (arity : Nat) : TypeExpr → Option (List Nat)
   | .void => some [0x01]
+  | .primitive type => some [type.elementType]
   | .atom scope name =>
-    if scope == runtimeScope then (primitiveBytes.lookup name).map fun code => [code] else none
+    if scope == runtimeScope && name == "System.Object" then some [0x1C] else none
   | .object scope name =>
     if scope == runtimeScope && name == "System.String" then some [0x0E] else none
   | .byref element => (0x10 :: ·) <$> typeBytes arity element

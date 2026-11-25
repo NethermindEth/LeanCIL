@@ -125,7 +125,7 @@ foreach (var name in new[] { "ReadOnlyView", "View" })
 {
     var element = name == "ReadOnlyView"
         ? $".aggregate {JsonSerializer.Serialize(pairIdentity)} 0"
-        : ".atom Extraction.runtimeScope \"System.UInt64\"";
+        : ".primitive .uint64";
     var change = $$"""
         fun instruction => match instruction with
         | .call target prefixes =>

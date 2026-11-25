@@ -102,6 +102,7 @@ def exceptionConstructor? (site : CallSite) : Option ExceptionType := do
   guard (site.parameterTypes ∈ admittedParameters raised)
   let names := site.parameterTypes.map fun type =>
     match type with
+    | .primitive type => type.display
     | .atom _ name => name
     | .object .. => "System.String" -- The only class parameter in admittedParameters.
     | _ => ""

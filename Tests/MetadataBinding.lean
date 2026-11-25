@@ -73,7 +73,7 @@ private def sizeCall (arity : Nat) (arguments : List TypeExpr) : CallSite :=
 /-- The first parameter of Object.ReferenceEquals as claimed before and after substitution. -/
 private def referenceEqualsCall (declared closed : TypeExpr) : CallSite :=
   let root := TypeExpr.object runtimeScope "System.Object"
-  let result := TypeExpr.atom runtimeScope "System.Boolean"
+  let result := TypeExpr.primitive .boolean
   memberCall (.atom runtimeScope "System.Object") name!"ReferenceEquals" "ReferenceEquals"
     "System.Boolean System.Object::ReferenceEquals(System.Object,System.Object)" 0 []
     { convention := 0, returnType := result, parameters := [declared, root] } result [closed, root]
@@ -151,13 +151,13 @@ example :
 
 /-- The signed BigMul(int,int) operand has a concrete Int64 result before substitution. -/
 private def signedProduct (declared : TypeExpr) (identity : String) : CallSite :=
-  let result := TypeExpr.atom runtimeScope "System.Int64"
+  let result := TypeExpr.primitive .int64
   memberCall (.atom runtimeScope "System.Math") name!"BigMul" "BigMul"
     (identity ++ " System.Math::BigMul(System.Int32,System.Int32)") 0 []
     { convention := 0, returnType := declared, parameters := [int32, int32] } result [int32, int32]
 
 example :
-    let result := TypeExpr.atom runtimeScope "System.Int64"
+    let result := TypeExpr.primitive .int64
     let member := memberFixture "System" "Math" "BigMul" [0, 2, 0x0A, 8, 8] none
     passes member.1 lib member.2 (.call (signedProduct result "System.Int64")) := by decide +kernel
 
@@ -165,8 +165,8 @@ example :
     let member := memberFixture "System" "Math" "BigMul" [0, 2, 0x1E, 0, 8, 8] none
     let openCall := { signedProduct (.parameter 0) "!!0" with method.returnType := .parameter 0 }
     rejects member.1 lib member.2 (.call openCall) (.operandMismatch member.2) 1 &&
-      (substituteOperand [.atom runtimeScope "System.Int64"] [] 1 (.call openCall)).any
-        (fun | .call site => site.method.returnType == .atom runtimeScope "System.Int64"
+      (substituteOperand [.primitive .int64] [] 1 (.call openCall)).any
+        (fun | .call site => site.method.returnType == .primitive .int64
              | _ => false) := by decide +kernel
 
 /-- Replace the bytes of a row of a slice. -/
@@ -1717,22 +1717,68 @@ theorem tells_nested_types_apart_by_their_namespace_columns :
 
 /-! ## Kinds against the extractor's constructors -/
 
-/-- `System.Int32` of the runtime scope as a type of the given kind. -/
+/-- `System.Int32` of the runtime scope, by its namespace and name columns, as a type of the
+    given kind. -/
 private def runtimeInt32 (kind : Extraction.TypeKind) : ResolvedType :=
-  .named (namedIn runtimeScope "System.Int32" kind)
+  .named { namedIn runtimeScope "System.Int32" kind with
+    parts := [bytesOf "System", bytesOf "Int32"] }
 
-/-- A type that cannot be a value type is never admitted as the runtime's primitive atom, which
-    uses fixed value storage. An ordinary class keeps its atom. -/
+/-- A type that cannot be a value type is never admitted as the runtime's primitive, which uses
+    fixed value storage. An ordinary class keeps its atom. -/
 theorem refuses_a_class_named_as_a_primitive :
-    !pairFrame.admits (runtimeInt32 (.external (some false))) int32 &&
-      !pairFrame.admits (runtimeInt32 .classType) int32 &&
-      !pairFrame.admits (runtimeInt32 .interfaceType) int32 &&
-      !pairFrame.admits (runtimeInt32 (.external none)) int32 &&
-      pairFrame.admits (runtimeInt32 (.external (some true))) int32 &&
+    !pairFrame.admits (runtimeInt32 (.external (some false))) (.primitive .int32) &&
+      !pairFrame.admits (runtimeInt32 .classType) (.primitive .int32) &&
+      !pairFrame.admits (runtimeInt32 .interfaceType) (.primitive .int32) &&
+      !pairFrame.admits (runtimeInt32 (.external none)) (.primitive .int32) &&
+      pairFrame.admits (runtimeInt32 (.external (some true))) (.primitive .int32) &&
       pairFrame.admits (.named (namedIn runtimeScope "System.Console" .classType))
         (.atom runtimeScope "System.Console") := by
   decide +kernel
 #print axioms refuses_a_class_named_as_a_primitive
+
+/-! ## Runtime primitives are typed -/
+
+/-- A frame whose core library is the runtime assembly. -/
+private def runtimeFrame : Frame :=
+  { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
+
+/-- A value type whose single name column spells `System.Int32` and whose namespace is empty. -/
+private def flattenedInt32 : ResolvedType :=
+  .named { namedIn runtimeScope "System.Int32" (.external (some true)) with
+    parts := [[], bytesOf "System.Int32"] }
+
+/-- A runtime primitive binds only as `TypeExpr.primitive`: the runtime-scope atom of its name is
+    refused for an element code, a named reference of every kind, and a flattened name, while
+    an atom of another core library keeps its binding. -/
+theorem runtime_primitive_atoms_are_refused :
+    runtimeFrame.admits (.primitive 8) (.primitive .int32) &&
+      !runtimeFrame.admits (.primitive 8) (.primitive .uint32) &&
+      !runtimeFrame.admits (.primitive 8) (.atom runtimeScope "System.Int32") &&
+      pairFrame.admits (.primitive 8) (.atom "C" "System.Int32") &&
+      !pairFrame.admits (.primitive 8) (.primitive .int32) &&
+      runtimeFrame.admits (runtimeInt32 (.external (some true))) (.primitive .int32) &&
+      !runtimeFrame.admits (runtimeInt32 (.external (some true))) (.primitive .uint32) &&
+      [Extraction.TypeKind.external (some true), .external (some false), .external none,
+        .valueType, .classType, .interfaceType].all (fun kind =>
+          !runtimeFrame.admits (runtimeInt32 kind) (.atom runtimeScope "System.Int32")) &&
+      !runtimeFrame.admits flattenedInt32 (.primitive .int32) &&
+      !runtimeFrame.admits flattenedInt32 (.atom runtimeScope "System.Int32") := by
+  decide +kernel
+#print axioms runtime_primitive_atoms_are_refused
+
+/-- The runtime-scope atom of a primitive's name has no storage; the typed primitive and the core
+    library's own atom keep theirs. -/
+theorem runtime_primitive_atoms_have_no_storage :
+    typeStorage [] (.atom runtimeScope "System.Int32") = none ∧
+      typeStorage [] (.primitive .int32) = some (.field .signed32) ∧
+      typeStorage [] (.atom coreLibraryScope "System.Int32") = some (.field .signed32) := by
+  decide +kernel
+#print axioms runtime_primitive_atoms_have_no_storage
+
+/-- Every resolved type refuses the runtime-scope atom of `System.UInt64`. -/
+example (frame : Frame) (fuel : Nat) (type : ResolvedType) :
+    typeAdmits frame fuel type (.atom runtimeScope "System.UInt64") = false :=
+  typeAdmits_runtimePrimitiveAtom (by decide +kernel)
 
 /-- An owner parameter past the owner's arity is refused, even where its extractor index would
     follow the method's parameters. -/

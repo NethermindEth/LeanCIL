@@ -6,7 +6,7 @@ namespace CIL.Extraction
 
 /-- A declaration can use a runtime primitive, a vector, its generic element, or a pair result. -/
 private inductive HWType where
-  | word (name : String)
+  | word (type : PrimitiveType)
   | vector (width : Nat) (element : HWType)
   | element
   | pair
@@ -22,7 +22,7 @@ private def vectorHead (width : Nat) := s!"System.Runtime.Intrinsics.Vector{widt
 private def HWType.operand (argument : Operand) (result : TypeExpr) : HWType → Operand
   | .element => argument
   | .pair => (result, "System.ValueTuple`2<System.UInt64,System.UInt64>")
-  | .word name => (.atom runtimeScope ("System." ++ name), "System." ++ name)
+  | .word type => (.primitive type, type.display)
   | .vector width scalar =>
     let (type, name) := scalar.operand argument result
     let head := vectorHead width
@@ -32,12 +32,12 @@ private def HWType.operand (argument : Operand) (result : TypeExpr) : HWType →
 private structure HardwareRow where
   result : HWType
   parameters : List HWType
-  operation : String → Intrinsic
-  elements : List String := []
+  operation : TypeExpr → Intrinsic
+  elements : List PrimitiveType := []
 
 /-- A signature with one operation at every admitted element. -/
 private def signature (result : HWType) (parameters : List HWType) (operation : Intrinsic)
-    (elements : List String := []) : HardwareRow :=
+    (elements : List PrimitiveType := []) : HardwareRow :=
   ⟨result, parameters, fun _ => operation, elements⟩
 
 /-- One opcode, owner and metadata name reserves every overload in its slot. -/
@@ -82,9 +82,9 @@ private def HardwareRow.argument (row : HardwareRow) (slot : HardwareSlot) (meth
         | .apply _ element => pure element
         | _ => none
   if row.elements.isEmpty then return (.void, "")
-  let .atom scope name := type | none
-  guard (scope == runtimeScope && row.elements.contains name)
-  return (type, name)
+  let .primitive element := type | none
+  guard (row.elements.contains element)
+  return (type, element.display)
 
 /-- An overload checks the full closed signature before assigning an intrinsic and arity. -/
 private def HardwareRow.accepts (row : HardwareRow) (slot : HardwareSlot) (method : MethodRef) :
@@ -117,8 +117,8 @@ private def HardwareRow.binding (row : HardwareRow) (slot : HardwareSlot) : Mode
 private def HardwareRow.model (row : HardwareRow) (slot : HardwareSlot) (reader : CallLayouts)
     (method : MethodRef) : Option RuntimeModel := do
   let argument ← row.argument slot method
-  guard (row.result != .pair || integerPairResult reader method.returnType "System.UInt64" 8)
-  return .intrinsic (row.operation argument.2) row.parameters.length
+  guard (row.result != .pair || integerPairResult reader method.returnType .uint64 8)
+  return .intrinsic (row.operation argument.1) row.parameters.length
 
 /-- The row selected by the closed types also supplies the external operand check. -/
 private def HardwareSlot.entry (slot : HardwareSlot) : ModelEntry :=
@@ -127,28 +127,28 @@ private def HardwareSlot.entry (slot : HardwareSlot) : ModelEntry :=
       { operand := row.binding slot, accepts := row.accepts slot, resolve := row.model slot } }
 
 /-- The UInt64 hardware signature component. -/
-private def u64 := HWType.word "UInt64"
+private def u64 := HWType.word .uint64
 
 /-- The Int64 hardware signature component. -/
-private def i64 := HWType.word "Int64"
+private def i64 := HWType.word .int64
 
 /-- The UInt32 hardware signature component. -/
-private def u32 := HWType.word "UInt32"
+private def u32 := HWType.word .uint32
 
 /-- The Int32 hardware signature component. -/
-private def i32 := HWType.word "Int32"
+private def i32 := HWType.word .int32
 
 /-- The Byte hardware signature component. -/
-private def u8 := HWType.word "Byte"
+private def u8 := HWType.word .byte
 
 /-- The Boolean hardware signature component. -/
-private def boolean := HWType.word "Boolean"
+private def boolean := HWType.word .boolean
 
 /-- The Single hardware signature component. -/
-private def f32 := HWType.word "Single"
+private def f32 := HWType.word .single
 
 /-- The Double hardware signature component. -/
-private def f64 := HWType.word "Double"
+private def f64 := HWType.word .double
 
 /-- The element type determines the 128-bit vector signature. -/
 private def v128 := HWType.vector 128
@@ -406,8 +406,7 @@ private def otherMachineSlots : List HardwareSlot := [
   x86X86BaseX64DivRem]
 
 /-- Portable integer bitwise operations admit the same five primitive elements at each width. -/
-private def integerElements :=
-  ["System.Byte", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64"]
+private def integerElements : List PrimitiveType := [.byte, .int32, .uint32, .int64, .uint64]
 
 /-- A portable helper uses the named static class or the vector constructor of its width. -/
 private def portableSlot (width : Nat) (key : MetadataName) (name : String)
@@ -427,16 +426,16 @@ private def exactVectorSlots (width : Nat) : List HardwareSlot :=
    member name!"get_Zero" "get_Zero" 0 (.zero width),
    member name!"get_AllBitsSet" "get_AllBitsSet" 0 (.ones width),
    portableSlot width name!"EqualsAll" "EqualsAll"
-     [signature (.word "Boolean") [vector, vector] (.vector (.equalsAll width)) integerElements]]
+     [signature boolean [vector, vector] (.vector (.equalsAll width)) integerElements]]
 
 /-- Arithmetic and reinterpretation helpers admit the specified closed elements. -/
 private def otherVectorSlots (width : Nat) : List HardwareSlot :=
   let vec := HWType.vector width
   let openVector := vec .element
-  let words := ["System.UInt64"]
+  let words : List PrimitiveType := [.uint64]
   let cast := fun key name element => portableSlot width key name
     [signature (vec (.word element)) [openVector] (.vector (.reinterpret width))
-      (integerElements ++ ["System.Single"])]
+      (integerElements ++ [.single])]
   [portableSlot width name!"op_Addition" "op_Addition"
      [signature openVector [openVector, openVector] (.vector (.add64 width)) words] true,
    portableSlot width name!"op_Subtraction" "op_Subtraction"
@@ -445,24 +444,24 @@ private def otherVectorSlots (width : Nat) : List HardwareSlot :=
      [signature openVector [openVector, openVector] (.vector (.eq64 width)) words],
    portableSlot width name!"LessThan" "LessThan"
      [⟨openVector, [openVector, openVector], fun element =>
-       .vector (if element == "System.Int64" then .lt64 width else .ltu64 width),
-       ["System.Int64", "System.UInt64"]⟩],
+       .vector (if element == .primitive .int64 then .lt64 width else .ltu64 width),
+       [.int64, .uint64]⟩],
    portableSlot width name!"Sum" "Sum"
      [signature .element [openVector] (.vector (.sum64 width)) words],
    portableSlot width name!"ExtractMostSignificantBits" "ExtractMostSignificantBits"
      [signature u32 [openVector] (.vector (.extractMSB64 width)) words],
    portableSlot width name!"ShiftRightArithmetic" "ShiftRightArithmetic"
-     [signature (vec i64) [vec i64, .word "Int32"] (.vector (.ashr64 width))],
+     [signature (vec i64) [vec i64, i32] (.vector (.ashr64 width))],
    portableSlot width name!"CreateScalar" "CreateScalar"
      [signature (vec u32) [u32] (.vector (.createScalar32 width)),
       signature (vec u64) [u64] (.vector (.createScalar64 width))],
-   cast name!"AsByte" "AsByte" "Byte",
-   cast name!"AsDouble" "AsDouble" "Double",
-   cast name!"AsInt32" "AsInt32" "Int32",
-   cast name!"AsInt64" "AsInt64" "Int64",
-   cast name!"AsSingle" "AsSingle" "Single",
-   cast name!"AsUInt32" "AsUInt32" "UInt32",
-   cast name!"AsUInt64" "AsUInt64" "UInt64"]
+   cast name!"AsByte" "AsByte" .byte,
+   cast name!"AsDouble" "AsDouble" .double,
+   cast name!"AsInt32" "AsInt32" .int32,
+   cast name!"AsInt64" "AsInt64" .int64,
+   cast name!"AsSingle" "AsSingle" .single,
+   cast name!"AsUInt32" "AsUInt32" .uint32,
+   cast name!"AsUInt64" "AsUInt64" .uint64]
 
 /-- The exact family contains fixed signatures and portable integer bitwise declarations. -/
 private def exactSlots := exactMachineSlots ++ [128, 256, 512].flatMap exactVectorSlots

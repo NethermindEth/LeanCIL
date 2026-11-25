@@ -7,13 +7,13 @@ import CIL.Extraction.RuntimeModels
 namespace Tests.IntrinsicMethods
 open CIL CIL.Extraction
 
-private def i32 := TypeExpr.atom runtimeScope "System.Int32"
-private def byte := TypeExpr.atom runtimeScope "System.Byte"
-private def vectorOf (width : Nat) (element : String) := TypeExpr.apply
-  (.constructor intrinsicsScope s!"System.Runtime.Intrinsics.Vector{width}`1") (.atom runtimeScope element)
-private def v32 := vectorOf 256 "System.UInt32"
+private def i32 := TypeExpr.primitive .int32
+private def byte := TypeExpr.primitive .byte
+private def vectorOf (width : Nat) (element : PrimitiveType) := TypeExpr.apply
+  (.constructor intrinsicsScope s!"System.Runtime.Intrinsics.Vector{width}`1") (.primitive element)
+private def v32 := vectorOf 256 .uint32
 /-- The closed vector operand shared by the arithmetic calls and typed memory accesses. -/
-def vector256UInt64 := vectorOf 256 "System.UInt64"
+def vector256UInt64 := vectorOf 256 .uint64
 
 private def layouts : LayoutEnvironment := {}
 
@@ -69,7 +69,7 @@ def multiplyLow := member "X86.Avx512DQ/VL" name!"MultiplyLow" vector256UInt64 [
 @[cil_code] theorem multiplyLow_model (env : LayoutEnvironment) :
     runtimeModel env .call multiplyLow = some (.intrinsic (.avx512DQ .mul64) 2) := rfl
 
-private def word := TypeExpr.atom runtimeScope "System.UInt64"
+private def word := TypeExpr.primitive .uint64
 
 def createFour := member "Vector256" name!"Create" vector256UInt64 [word, word, word, word]
 
@@ -99,12 +99,12 @@ def asUInt32 := { member "Vector256" name!"AsUInt32" v32 [vector256UInt64] with
     runtimeModel env .call asUInt32 = some (.intrinsic (.vector (.reinterpret 256)) 1) := rfl
 
 /-- The closed vector operand used by the byte intrinsics and typed loads. -/
-def vector128Byte := vectorOf 128 "System.Byte"
+def vector128Byte := vectorOf 128 .byte
 
 cil_value_shape layouts vector128Byte
 
 def shiftLeftBytes := member "X86.Sse2" name!"ShiftLeftLogical128BitLane"
-  (vectorOf 128 "System.UInt64") [vectorOf 128 "System.UInt64", byte]
+  (vectorOf 128 .uint64) [vectorOf 128 .uint64, byte]
 
 theorem shiftLeftBytes_model (env : LayoutEnvironment) :
     runtimeModel env .call shiftLeftBytes = some (.intrinsic (.sse .shiftLeftBytes) 2) := rfl
@@ -119,8 +119,8 @@ def ternaryLogic := member "X86.Avx512F/VL" name!"TernaryLogic" vector256UInt64 
 theorem ternaryLogic_model (env : LayoutEnvironment) :
     runtimeModel env .call ternaryLogic = some (.intrinsic (.avx512 .ternaryLogic) 4) := rfl
 
-def shuffle256 := member "X86.Avx2" name!"Shuffle" (vectorOf 256 "System.Byte")
-  [vectorOf 256 "System.Byte", vectorOf 256 "System.Byte"]
+def shuffle256 := member "X86.Avx2" name!"Shuffle" (vectorOf 256 .byte)
+  [vectorOf 256 .byte, vectorOf 256 .byte]
 
 theorem shuffle256_model (env : LayoutEnvironment) :
     runtimeModel env .call shuffle256 = some (.intrinsic (.avx2 .shuffleBytes) 2) := rfl

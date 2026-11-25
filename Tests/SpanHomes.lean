@@ -20,12 +20,12 @@ set_option maxRecDepth 8192
 
 /-- `System.Span<int>`, the type of every span local and parameter below. -/
 private def intSpan : TypeExpr :=
-  .apply (.constructor runtimeScope "System.Span`1") (.atom runtimeScope "System.Int32")
+  .apply (.constructor runtimeScope "System.Span`1") (.primitive .int32)
 
 /-- `Span<int>.get_Length`, whose runtime model reads the view at its receiver. -/
 private def getLength : MethodRef := {
   owner := intSpan, name := name!"get_Length", hasThis := true, genericArity := 0,
-  returnType := .atom runtimeScope "System.Int32", parameters := [] }
+  returnType := .primitive .int32, parameters := [] }
 
 /-- One live 16-byte caller allocation; the length getter reads no element bytes. -/
 private def memory : Safety.Memory := { Memory.empty with
@@ -100,7 +100,7 @@ theorem initobj_through_home :
 /-- `Span<int>(ref int)`, the single-element constructor a call runs on a span home. -/
 private def singleConstructor : MethodRef := {
   owner := intSpan, name := name!".ctor", hasThis := true, genericArity := 0,
-  returnType := .void, parameters := [.byref (.atom runtimeScope "System.Int32")] }
+  returnType := .void, parameters := [.byref (.primitive .int32)] }
 
 /-- The address of the first int32 of allocation 0, the element a single-element span views. -/
 private def element : Safety.Value := .reference (.address ⟨0, 0⟩)
@@ -217,17 +217,17 @@ theorem shifted_home_renamed :
 
 /-- `System.ReadOnlySpan<byte>`, whose pointer constructor views bytes. -/
 private def byteSpan : TypeExpr :=
-  .apply (.constructor runtimeScope "System.ReadOnlySpan`1") (.atom runtimeScope "System.Byte")
+  .apply (.constructor runtimeScope "System.ReadOnlySpan`1") (.primitive .byte)
 
 /-- `ReadOnlySpan<byte>(void*, int)`. -/
 private def bytePointerConstructor : MethodRef := {
   owner := byteSpan, name := name!".ctor", hasThis := true, genericArity := 0,
-  returnType := .void, parameters := [.pointer .void, .atom runtimeScope "System.Int32"] }
+  returnType := .void, parameters := [.pointer .void, .primitive .int32] }
 
 /-- `ReadOnlySpan<byte>.get_Length`. -/
 private def byteLength : MethodRef := {
   owner := byteSpan, name := name!"get_Length", hasThis := true, genericArity := 0,
-  returnType := .atom runtimeScope "System.Int32", parameters := [] }
+  returnType := .primitive .int32, parameters := [] }
 
 /-- A method with one read-only byte span local. -/
 private def byteLocal (code : List Instruction) : Method := {
@@ -269,12 +269,12 @@ theorem in_place_constructor_matches_slot :
 
 /-- `System.ReadOnlySpan<int>`. -/
 private def readOnlyIntSpan : TypeExpr :=
-  .apply (.constructor runtimeScope "System.ReadOnlySpan`1") (.atom runtimeScope "System.Int32")
+  .apply (.constructor runtimeScope "System.ReadOnlySpan`1") (.primitive .int32)
 
 /-- `ReadOnlySpan<int>(in int)`, the read-only single-element constructor. -/
 private def readOnlySingleConstructor : MethodRef := {
   owner := readOnlyIntSpan, name := name!".ctor", hasThis := true, genericArity := 0,
-  returnType := .void, parameters := [.byref (.atom runtimeScope "System.Int32")] }
+  returnType := .void, parameters := [.byref (.primitive .int32)] }
 
 /-- `ReadOnlySpan<int>.get_Length`. -/
 private def readOnlyLength : MethodRef := { getLength with owner := readOnlyIntSpan }
@@ -306,7 +306,7 @@ theorem constructor_on_read_only_parameter :
 private def spanRaw : RawMethod := {
   token := 1, owner := "Fixture", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
-  returnType := .atom runtimeScope "System.Int32", parameters := [intSpan], locals := [intSpan],
+  returnType := .primitive .int32, parameters := [intSpan], locals := [intSpan],
   initLocals := true, maxStack := 2, genericParameters := [], code := [] }
 
 /-- A managed call to a void method taking one argument of type `parameter`. -/

@@ -54,28 +54,28 @@ def method9Signature : String :=
 /-- `SumDiscard`: passes its local's address as `AddFlag`'s `res` and returns the flag. -/
 @[cil_code] def method5 : Method :=
   {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   returnsValue := true, locals := [.unmodeled], localKinds := [.word64], code :=
     [.ldarg 0, .ldarg 1, .ldloca 0, .call (Tests.callee 3) {}, .ret], links := [(3, .direct 8)] }
 /-- `IsZero`: a comparison returned as a narrowed boolean. -/
 @[cil_code] def method6 : Method := {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   returnsValue := true, locals := [], code :=
   [.ldarg 0, .ldc_i4 0, .conv_i8, .ceq, .ret] }
 /-- `IsZeroForward`: re-narrows `IsZero`'s boolean through its own `ret`. -/
 @[cil_code] def method7 : Method := {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   returnsValue := true, locals := [], code :=
   [.ldarg 0, .call (Tests.callee 1) {}, .ret], links := [(1, .direct 6)] }
 /-- `AddFlag`: `AddTo`'s store followed by a constant `true`. -/
 @[cil_code] def method8 : Method := {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   returnsValue := true, locals := [], code :=
   [.ldarg 2, .ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8, .add, .stind .i8, .ldc_i4 1,
     .ret] }
 /-- `IsZeroIgnoring`: forwards its first argument and never loads its second. -/
 @[cil_code] def method9 : Method := {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   returnsValue := true, locals := [], code :=
   [.ldarg 0, .call (Tests.callee 1) {}, .ret], links := [(1, .direct 6)] }
 /-- `AddFrom(out res, in b, in a) => AddTo(in a, in b, out res)`. -/
@@ -101,21 +101,21 @@ def method14Signature : String :=
     [.ldarg 0, .ldarg 1, .ldloca 0, .call (Tests.callee 3) {}, .ret], links := [(3, .direct 10)] }
 /-- `IsZeroSecond`: forwards its second argument and never loads its first. -/
 @[cil_code] def method12 : Method := {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   returnsValue := true, locals := [], code :=
   [.ldarg 1, .call (Tests.callee 1) {}, .ret], links := [(1, .direct 6)] }
 /-- `IsSet`: a boolean parameter, loaded narrowed, returned narrowed. -/
 @[cil_code] def method13 : Method := {
   declared := {
-    parameters := [.atom CIL.Extraction.runtimeScope "System.Boolean"]
-    returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+    parameters := [.primitive .boolean]
+    returnType := .primitive .boolean },
   returnsValue := true, locals := [], code :=
   [.ldarg 0, .ret] }
 /-- `IsSetForward`: passes its boolean parameter through a narrowed load. -/
 @[cil_code] def method14 : Method := {
   declared := {
-    parameters := [.atom CIL.Extraction.runtimeScope "System.Boolean"]
-    returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+    parameters := [.primitive .boolean]
+    returnType := .primitive .boolean },
   returnsValue := true, locals := [], code :=
   [.ldarg 0, .call (Tests.callee 1) {}, .ret], links := [(1, .direct 13)] }
 @[cil_code] def program : Program :=

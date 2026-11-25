@@ -695,7 +695,7 @@ def helper : CIL.Extraction.MethodRef :=
 def avx2Getter : CIL.Extraction.MethodRef :=
   { owner := .atom CIL.Extraction.intrinsicsScope "System.Runtime.Intrinsics.X86.Avx2",
     name := name!"get_IsSupported", hasThis := false, genericArity := 0,
-    returnType := .atom CIL.Extraction.runtimeScope "System.Boolean", parameters := [] }
+    returnType := .primitive .boolean, parameters := [] }
 
 def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [],
@@ -762,7 +762,7 @@ After projecting the returned values or another decidable result from `CIL.Safet
 
 `CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset and width of its
 checked layout entry when the operand holds the field's declared tag. For an enum,
-`Extraction.fieldKind?` requires an immediate runtime integer atom from the eight supported types
+`Extraction.fieldKind?` requires an immediate `TypeExpr.primitive` of one of the eight integer types
 `System.SByte`, `System.Byte`, `System.Int16`, `System.UInt16`, `System.Int32`, `System.UInt32`,
 `System.Int64` or `System.UInt64`. The enum has that integer's field kind. Other struct fields
 must match their primitive kind, struct index, or vector width and element lane. A class instance

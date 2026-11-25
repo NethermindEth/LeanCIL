@@ -39,55 +39,55 @@ open CIL CIL.Extraction
 
 -- A primitive below 32 bits narrows to its own width and signedness; the extractor's own table
 -- agrees head by head (Tests/InstructionIndexes.cs).
-example : declaredNarrow [] (.atom runtimeScope "System.SByte") = some .signed8 :=
+example : declaredNarrow [] (.primitive .sbyte) = some .signed8 :=
   declaredNarrow_primitive [] .sbyte
-example : declaredNarrow [] (.atom runtimeScope "System.Byte") = some .unsigned8 :=
+example : declaredNarrow [] (.primitive .byte) = some .unsigned8 :=
   declaredNarrow_primitive [] .byte
-example : declaredNarrow [] (.atom runtimeScope "System.Boolean") = some .unsigned8 :=
+example : declaredNarrow [] (.primitive .boolean) = some .unsigned8 :=
   declaredNarrow_primitive [] .boolean
-example : declaredNarrow [] (.atom runtimeScope "System.Int16") = some .signed16 :=
+example : declaredNarrow [] (.primitive .int16) = some .signed16 :=
   declaredNarrow_primitive [] .int16
-example : declaredNarrow [] (.atom runtimeScope "System.UInt16") = some .unsigned16 :=
+example : declaredNarrow [] (.primitive .uint16) = some .unsigned16 :=
   declaredNarrow_primitive [] .uint16
-example : declaredNarrow [] (.atom runtimeScope "System.Char") = some .unsigned16 :=
+example : declaredNarrow [] (.primitive .char) = some .unsigned16 :=
   declaredNarrow_primitive [] .char
 
 -- A primitive of 32 bits or more, or a floating-point one, is returned as it is.
-example : declaredNarrow [] (.atom runtimeScope "System.Int32") = none :=
+example : declaredNarrow [] (.primitive .int32) = none :=
   declaredNarrow_primitive [] .int32
-example : declaredNarrow [] (.atom runtimeScope "System.UInt32") = none :=
+example : declaredNarrow [] (.primitive .uint32) = none :=
   declaredNarrow_primitive [] .uint32
-example : declaredNarrow [] (.atom runtimeScope "System.Int64") = none :=
+example : declaredNarrow [] (.primitive .int64) = none :=
   declaredNarrow_primitive [] .int64
-example : declaredNarrow [] (.atom runtimeScope "System.UInt64") = none :=
+example : declaredNarrow [] (.primitive .uint64) = none :=
   declaredNarrow_primitive [] .uint64
-example : declaredNarrow [] (.atom runtimeScope "System.IntPtr") = none :=
+example : declaredNarrow [] (.primitive .intPtr) = none :=
   declaredNarrow_primitive [] .intPtr
-example : declaredNarrow [] (.atom runtimeScope "System.UIntPtr") = none :=
+example : declaredNarrow [] (.primitive .uintPtr) = none :=
   declaredNarrow_primitive [] .uintPtr
-example : declaredNarrow [] (.atom runtimeScope "System.Single") = none :=
+example : declaredNarrow [] (.primitive .single) = none :=
   declaredNarrow_primitive [] .single
-example : declaredNarrow [] (.atom runtimeScope "System.Double") = none :=
+example : declaredNarrow [] (.primitive .double) = none :=
   declaredNarrow_primitive [] .double
 
 -- An enum narrows as its underlying integer type.
-example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Small") (.atom runtimeScope "System.Int16")) =
+example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Small") (.primitive .int16)) =
     some .signed16 :=
   (declaredNarrow_enum [] _ .int16).trans rfl
-example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Flags") (.atom runtimeScope "System.Byte")) =
+example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Flags") (.primitive .byte)) =
     some .unsigned8 :=
   (declaredNarrow_enum [] _ .byte).trans rfl
-example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Signed") (.atom runtimeScope "System.SByte")) =
+example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Signed") (.primitive .sbyte)) =
     some .signed8 :=
   (declaredNarrow_enum [] _ .sbyte).trans rfl
-example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Wide") (.atom runtimeScope "System.UInt16")) =
+example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Wide") (.primitive .uint16)) =
     some .unsigned16 :=
   (declaredNarrow_enum [] _ .uint16).trans rfl
-example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Plain") (.atom runtimeScope "System.Int32")) = none :=
+example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Plain") (.primitive .int32)) = none :=
   (declaredNarrow_enum [] _ .int32).trans rfl
 
 -- An enum over a type `typeStorage` does not admit as an enum's underlying type has no storage.
-example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Truth") (.atom runtimeScope "System.Boolean")) =
+example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Truth") (.primitive .boolean)) =
     none :=
   (declaredNarrow_enum [] _ .boolean).trans rfl
 
@@ -101,12 +101,12 @@ example : declaredNarrow [pointLayout] (.aggregate "Examples.Point" 0) = none :=
   declaredNarrow_of_not_candidate _ _ rfl
 example : declaredNarrow [] (.object "Examples" "Examples.Box") = none :=
   declaredNarrow_of_not_candidate _ _ rfl
-example : declaredNarrow [] (.pointer (.atom runtimeScope "System.Byte")) = none :=
+example : declaredNarrow [] (.pointer (.primitive .byte)) = none :=
   declaredNarrow_of_not_candidate _ _ rfl
-example : declaredNarrow [] (.array (.atom runtimeScope "System.Byte")) = none :=
+example : declaredNarrow [] (.array (.primitive .byte)) = none :=
   declaredNarrow_of_not_candidate _ _ rfl
 example : declaredNarrow []
-    (.apply (.constructor runtimeScope "System.Span`1") (.atom runtimeScope "System.Byte")) =
+    (.apply (.constructor runtimeScope "System.Span`1") (.primitive .byte)) =
     none :=
   declaredNarrow_of_not_candidate _ _ rfl
 
@@ -121,7 +121,7 @@ example : declaredNarrow [] (.atom examplesScope "System.Byte") = none := by rfl
 /-- A method that returns a byte. -/
 def byteReturn : Method :=
   { code := [.ldc_i4 7, .ret], locals := [], returnsValue := true,
-    declared := { returnType := .atom runtimeScope "System.Byte" } }
+    declared := { returnType := .primitive .byte } }
 
 /-- A method whose return value narrows to a byte. -/
 theorem byteReturn_returnNarrow : byteReturn.returnNarrow = some .unsigned8 :=
@@ -138,7 +138,7 @@ example : byteReturn.returnsValue = true :=
 /-- A method returning an enum over `System.Int16`. -/
 def enumReturn : Method :=
   { code := [.ldc_i4 7, .ret], locals := [], returnsValue := true,
-    declared := { returnType := .enum (Tests.enumIdentity "Examples.Small") (.atom runtimeScope "System.Int16") } }
+    declared := { returnType := .enum (Tests.enumIdentity "Examples.Small") (.primitive .int16) } }
 
 /-- A method whose return value narrows as its enum's underlying type. -/
 theorem enumReturn_returnNarrow : enumReturn.returnNarrow = some .signed16 :=
@@ -165,7 +165,7 @@ theorem pointReturn_returnNarrow : pointReturn.returnNarrow = none :=
 /-- A method that returns nothing, with a declared return type that would narrow. -/
 def voidReturn : Method :=
   { code := [.ret], locals := [], returnsValue := false,
-    declared := { returnType := .atom runtimeScope "System.Byte" } }
+    declared := { returnType := .primitive .byte } }
 
 /-- A method that returns nothing does not narrow, whatever its declared return type. -/
 theorem voidReturn_returnNarrow : voidReturn.returnNarrow = none :=
@@ -212,16 +212,16 @@ elab "resolution_fixture " name:ident " : " type:term " returns " returns:term
   elabCommand (← `(#print axioms $narrowedName))
   elabCommand (← `(#print axioms $simplifiedName))
 
-resolution_fixture primitive : (.atom runtimeScope "System.Byte")
+resolution_fixture primitive : (.primitive .byte)
   returns true narrows (some .unsigned8)
-resolution_fixture enumeration : (.enum (Tests.enumIdentity "Small") (.atom runtimeScope "System.Int16"))
+resolution_fixture enumeration : (.enum (Tests.enumIdentity "Small") (.primitive .int16))
   returns true narrows (some .signed16)
-resolution_fixture invalidEnumeration : (.enum (Tests.enumIdentity "Truth") (.atom runtimeScope "System.Boolean"))
+resolution_fixture invalidEnumeration : (.enum (Tests.enumIdentity "Truth") (.primitive .boolean))
   returns true narrows none
 resolution_fixture nestedEnumeration :
-  (.enum (Tests.enumIdentity "Outer") (.enum (Tests.enumIdentity "Inner") (.atom runtimeScope "System.Byte")))
+  (.enum (Tests.enumIdentity "Outer") (.enum (Tests.enumIdentity "Inner") (.primitive .byte)))
   returns true narrows none
-resolution_fixture noValue : (.atom runtimeScope "System.Byte") returns false narrows none
+resolution_fixture noValue : (.primitive .byte) returns false narrows none
 resolution_fixture aggregate : (.aggregate "Examples.Point" 0) returns true narrows none
 resolution_fixture foreign : (.atom "Other" "System.Byte") returns true narrows none
 resolution_fixture misspelled : (.atom runtimeScope "System.Bytex") returns true narrows none
@@ -355,8 +355,8 @@ end Generated
 
 /-- A byte parameter and an int parameter, returning an int. -/
 def twoParameterSignature : DeclaredSignature :=
-  { parameters := [.atom runtimeScope "System.Byte", .atom runtimeScope "System.Int32"],
-    returnType := .atom runtimeScope "System.Int32" }
+  { parameters := [.primitive .byte, .primitive .int32],
+    returnType := .primitive .int32 }
 
 /-- A static method with a byte parameter read as it arrives and an int parameter that the body
     stores to, so it has a home after the method's one local. -/
@@ -461,8 +461,8 @@ info: 'Tests.ResolutionFacts.twoParameters_argumentAccess1' depends on axioms:
 /-- A value-type instance method's signature: a short and a byte-backed enum. -/
 def instanceSignature : DeclaredSignature :=
   { receiver := some .reference,
-    parameters := [.atom runtimeScope "System.Int16",
-      .enum (Tests.enumIdentity "Examples.Flags") (.atom runtimeScope "System.Byte")] }
+    parameters := [.primitive .int16,
+      .enum (Tests.enumIdentity "Examples.Flags") (.primitive .byte)] }
 
 /-- An instance method: `this` is stored to, so it has the home; its parameters follow. -/
 def instanceMethod : Method :=
@@ -489,7 +489,7 @@ example : instanceMethod.argumentAccess 2 = .value (some .unsigned8) :=
 /-- An unhomed `this` is read as it arrives. -/
 def unhomedThis : Method :=
   { code := [.ret], locals := [], returnsValue := false,
-    declared := { receiver := some .object, parameters := [.atom runtimeScope "System.Char"] } }
+    declared := { receiver := some .object, parameters := [.primitive .char] } }
 
 /-- The return fact the facts command also reads. -/
 theorem unhomedThis_returnsValue : unhomedThis.returnsValue = false := rfl
@@ -497,7 +497,7 @@ theorem unhomedThis_returnsValue : unhomedThis.returnsValue = false := rfl
 
 /-- The declared signature the facts command also reads. -/
 theorem unhomedThis_declared : unhomedThis.declared =
-    { receiver := some .object, parameters := [.atom runtimeScope "System.Char"] } := rfl
+    { receiver := some .object, parameters := [.primitive .char] } := rfl
 #print axioms unhomedThis_declared
 
 cil_resolution_facts unhomedThis
@@ -512,8 +512,8 @@ def wide : Method :=
     localKinds := [.word32, .word32], returnsValue := false,
     parameterHomes := [(3, .word32), (15, .word32), (16, .word32), (17, .word32), (31, .word32),
       (39, .narrow .unsigned16)],
-    declared := { parameters := (List.replicate 39 (.atom runtimeScope "System.Int32")) ++
-      [.atom runtimeScope "System.Char"] } }
+    declared := { parameters := (List.replicate 39 (.primitive .int32)) ++
+      [.primitive .char] } }
 
 /-- The return fact the facts command also reads. -/
 theorem wide_returnsValue : wide.returnsValue = false := rfl
@@ -521,8 +521,8 @@ theorem wide_returnsValue : wide.returnsValue = false := rfl
 
 /-- The declared signature the facts command also reads. -/
 theorem wide_declared : wide.declared = { parameters :=
-    (List.replicate 39 (.atom runtimeScope "System.Int32")) ++
-      [.atom runtimeScope "System.Char"] } := rfl
+    (List.replicate 39 (.primitive .int32)) ++
+      [.primitive .char] } := rfl
 #print axioms wide_declared
 
 cil_resolution_facts wide
@@ -544,8 +544,8 @@ example : ∀ index, index < 40 → wide.argumentAccess index =
 /-- A method whose homes do not ascend; a fact would otherwise depend on their order. -/
 def unordered : Method :=
   { code := [.ret], locals := [], parameterHomes := [(1, .word32), (0, .word32)],
-    returnsValue := false, declared := { parameters := [.atom runtimeScope "System.Int32",
-      .atom runtimeScope "System.Int32"] } }
+    returnsValue := false, declared := { parameters := [.primitive .int32,
+      .primitive .int32] } }
 
 /-- The return fact the facts command also reads. -/
 theorem unordered_returnsValue : unordered.returnsValue = false := rfl
@@ -553,7 +553,7 @@ theorem unordered_returnsValue : unordered.returnsValue = false := rfl
 
 /-- The declared signature the facts command also reads. -/
 theorem unordered_declared : unordered.declared = { parameters :=
-    [.atom runtimeScope "System.Int32", .atom runtimeScope "System.Int32"] } := rfl
+    [.primitive .int32, .primitive .int32] } := rfl
 #print axioms unordered_declared
 
 /--
@@ -636,7 +636,7 @@ cil_resolution_facts noParameters
 def siteDescriptor (k : Nat) : StaticDescriptor :=
   let field : Extraction.FieldRef :=
     { owner := .atom "Fixture" "Fixture", index := k,
-      type := .atom Extraction.runtimeScope "System.Byte", name := name!"Field" }
+      type := .primitive .byte, name := name!"Field" }
   { identity := k, field, bytes := [BitVec.ofNat 8 k] }
 
 /-- A method with eighteen static sites at the even pcs, so its facts cross a suffix block. -/
@@ -697,7 +697,7 @@ cil_resolution_facts unorderedSites
     the signature does not have. -/
 def strayHome : Method :=
   { code := [.ret], locals := [], parameterHomes := [(3, .word32)], returnsValue := false,
-    declared := { parameters := [.atom runtimeScope "System.Int16"] } }
+    declared := { parameters := [.primitive .int16] } }
 
 /-- The return fact the facts command also reads. -/
 theorem strayHome_returnsValue : strayHome.returnsValue = false := rfl
@@ -705,7 +705,7 @@ theorem strayHome_returnsValue : strayHome.returnsValue = false := rfl
 
 /-- The declared signature the facts command also reads. -/
 theorem strayHome_declared : strayHome.declared =
-    { parameters := [.atom runtimeScope "System.Int16"] } := rfl
+    { parameters := [.primitive .int16] } := rfl
 #print axioms strayHome_declared
 
 cil_resolution_facts strayHome
@@ -718,7 +718,7 @@ example : strayHome.argumentAccess 0 = .value (some .signed16) := strayHome_argu
     facts command refuses the method as it refuses descending homes. -/
 def duplicateHomes : Method :=
   { code := [.ret], locals := [], parameterHomes := [(0, .word32), (0, .word32)],
-    returnsValue := false, declared := { parameters := [.atom runtimeScope "System.Int32"] } }
+    returnsValue := false, declared := { parameters := [.primitive .int32] } }
 
 /-- The return fact the facts command also reads. -/
 theorem duplicateHomes_returnsValue : duplicateHomes.returnsValue = false := rfl
@@ -726,7 +726,7 @@ theorem duplicateHomes_returnsValue : duplicateHomes.returnsValue = false := rfl
 
 /-- The declared signature the facts command also reads. -/
 theorem duplicateHomes_declared : duplicateHomes.declared =
-    { parameters := [.atom runtimeScope "System.Int32"] } := rfl
+    { parameters := [.primitive .int32] } := rfl
 #print axioms duplicateHomes_declared
 
 /--
@@ -740,8 +740,8 @@ cil_resolution_facts duplicateHomes
     read each argument as it arrives without consulting the layouts. -/
 def referenceParameters : Method :=
   { code := [.ret], locals := [], returnsValue := false,
-    declared := { parameters := [.array (.atom runtimeScope "System.Byte"),
-      .pointer (.atom runtimeScope "System.Int16")] } }
+    declared := { parameters := [.array (.primitive .byte),
+      .pointer (.primitive .int16)] } }
 
 /-- The return fact the facts command also reads. -/
 theorem referenceParameters_returnsValue : referenceParameters.returnsValue = false := rfl
@@ -749,8 +749,8 @@ theorem referenceParameters_returnsValue : referenceParameters.returnsValue = fa
 
 /-- The declared signature the facts command also reads. -/
 theorem referenceParameters_declared : referenceParameters.declared =
-    { parameters := [.array (.atom runtimeScope "System.Byte"),
-      .pointer (.atom runtimeScope "System.Int16")] } := rfl
+    { parameters := [.array (.primitive .byte),
+      .pointer (.primitive .int16)] } := rfl
 #print axioms referenceParameters_declared
 
 cil_resolution_facts referenceParameters
@@ -773,7 +773,7 @@ example (index : Nat) (access : ArgumentAccess)
 def manyHomes : Method :=
   { code := [.ret], locals := [.i32 0], localKinds := [.word32], returnsValue := false,
     parameterHomes := (List.range 17).map (·, .word32),
-    declared := { parameters := List.replicate 20 (.atom runtimeScope "System.Int32") } }
+    declared := { parameters := List.replicate 20 (.primitive .int32) } }
 
 /-- The return fact the facts command also reads. -/
 theorem manyHomes_returnsValue : manyHomes.returnsValue = false := rfl
@@ -781,7 +781,7 @@ theorem manyHomes_returnsValue : manyHomes.returnsValue = false := rfl
 
 /-- The declared signature the facts command also reads. -/
 theorem manyHomes_declared : manyHomes.declared =
-    { parameters := List.replicate 20 (.atom runtimeScope "System.Int32") } := rfl
+    { parameters := List.replicate 20 (.primitive .int32) } := rfl
 #print axioms manyHomes_declared
 
 cil_resolution_facts manyHomes
@@ -795,7 +795,7 @@ example : manyHomes_homeSuffix16 = [(16, .word32)] := rfl
 /-! ## Array element shapes -/
 
 /-- The `int32` type as the extractor writes it. -/
-def int32Type : TypeExpr := .atom runtimeScope "System.Int32"
+def int32Type : TypeExpr := .primitive .int32
 
 /-- A function pointer type of the managed convention taking and returning an `int32`. -/
 def unaryPointer : TypeExpr :=
@@ -805,18 +805,18 @@ def unaryPointer : TypeExpr :=
 -- whatever the method's layouts, without evaluating the type name.
 example (body : Method) : body.elementShape int32Type = .value .signed32 :=
   Method.elementShape_primitive body .int32
-example (body : Method) : body.elementShape (.atom runtimeScope "System.Double") =
+example (body : Method) : body.elementShape (.primitive .double) =
     .unsupported ElementShape.unsupportedType :=
   Method.elementShape_primitive body .double
 
 -- An enum array holds the enum's storage over its underlying integer type, and an enum over a
 -- type no enum may have as its underlying type has no shape.
 example (body : Method) :
-    body.elementShape (.enum (Tests.enumIdentity "Examples.Small") (.atom runtimeScope "System.Int16")) =
+    body.elementShape (.enum (Tests.enumIdentity "Examples.Small") (.primitive .int16)) =
       .value (.enumeration (Tests.enumIdentity "Examples.Small") .signed16) :=
   Method.elementShape_enum body _ .int16
 example (body : Method) :
-    body.elementShape (.enum (Tests.enumIdentity "Examples.Truth") (.atom runtimeScope "System.Boolean")) =
+    body.elementShape (.enum (Tests.enumIdentity "Examples.Truth") (.primitive .boolean)) =
       .unsupported ElementShape.unsupportedType :=
   Method.elementShape_enum body _ .boolean
 
@@ -877,11 +877,11 @@ def arraysClosed : RawMethod :=
     callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
     parameters := [], locals := [], initLocals := true, maxStack := 3, genericParameters := [],
     code := [⟨0, 141, .type int32Type⟩, ⟨5, 163, .type int32Type⟩,
-      ⟨10, 163, .type (.enum (Tests.enumIdentity "Examples.Small") (.atom runtimeScope "System.Int16"))⟩,
+      ⟨10, 163, .type (.enum (Tests.enumIdentity "Examples.Small") (.primitive .int16))⟩,
       ⟨15, 164, .type (.aggregate "Examples.Point" 0)⟩,
       ⟨20, 143, .type (.aggregate "Examples.SpanLike" 1)⟩,
       ⟨25, 141, .type (.object "Examples" "Examples.Box")⟩,
-      ⟨30, 140, .type (.atom runtimeScope "System.Int64")⟩,
+      ⟨30, 140, .type (.primitive .int64)⟩,
       ⟨35, 163, .type unaryPointer⟩, ⟨40, 42, .none⟩] }
 
 /-- The return fact the facts command also reads. -/
@@ -895,7 +895,7 @@ theorem arrays_declared : arrays.declared = {} := rfl
 cil_resolution_facts arrays
 
 example : arrays.elementShape int32Type = .value .signed32 := arrays_elementShape0
-example : arrays.elementShape (.enum (Tests.enumIdentity "Examples.Small") (.atom runtimeScope "System.Int16")) =
+example : arrays.elementShape (.enum (Tests.enumIdentity "Examples.Small") (.primitive .int16)) =
     .value (.enumeration (Tests.enumIdentity "Examples.Small") .signed16) := arrays_elementShape1
 example : arrays.elementShape (.aggregate "Examples.Point" 0) =
     .value (.aggregate "Examples.Point" 2) := arrays_elementShape2
@@ -1014,7 +1014,7 @@ example : literalArrays.elementShape (.aggregate "Examples.SpanLike" 1) =
     .unsupported ElementShape.byRefLikeElement := by simp only [cil_step]
 example : literalArrays.elementShape int32Type = .value .signed32 := by simp only [cil_step]
 example : literalArrays.elementShape unaryPointer =
-    .method ⟨.atom runtimeScope "System.Int32", [.atom runtimeScope "System.Int32"]⟩ := by
+    .method ⟨.primitive .int32, [.primitive .int32]⟩ := by
   simp only [cil_step]
 example : literalArrays.elementShape
     (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1") int32Type) =
@@ -1131,7 +1131,7 @@ cil_runtime_models parameterCaller
 
 /-- A decided comparison, an unresolved forwarding scope, and an unmodelled getter. -/
 def comparedTypes : CIL.Method :=
-  let word := TypeExpr.atom runtimeScope "System.UInt64"
+  let word := TypeExpr.primitive .uint64
   let token := CIL.Instruction.ldtoken (.type word)
   let getter := CIL.Instruction.call getTypeFromHandle.method {}
   let test := CIL.Instruction.call (runtimeTypeComparison true).method {}
@@ -1145,7 +1145,7 @@ cil_runtime_models comparedTypes
 
 /-- The two equal operands give one checked identity for consumers of the comparison. -/
 theorem wordComparison :
-    sameRuntimeType (.atom runtimeScope "System.UInt64") (.atom runtimeScope "System.UInt64") =
+    sameRuntimeType (.primitive .uint64) (.primitive .uint64) =
       some true := comparedTypes_typeIdentity4
 
 #print axioms wordComparison

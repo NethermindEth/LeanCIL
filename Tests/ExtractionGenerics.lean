@@ -8,9 +8,7 @@ import Tests.Support
 namespace Tests.ExtractionGenerics
 open CIL CIL.Extraction
 
-def word : TypeExpr := .atom
-  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-  "System.UInt64"
+def word : TypeExpr := .primitive .uint64
 def raw : RawMethod := {
   token := 1, owner := "Test::Owner", hasThis := false, explicitThis := false,
   callingConvention := 16, attributes := 0, implementation := 0,
@@ -78,7 +76,7 @@ theorem structural_call :
 /-- Equal storage width does not permit substituting a signed parameter. -/
 theorem signed_parameter_rejected :
     ¬ ManagedCallsValid [⟨[word], closed, ⟨"Test"⟩⟩] [] (fun _ => false)
-      (caller (.atom runtimeScope "System.Int64")) [true] callCode := by
+      (caller (.primitive .int64)) [true] callCode := by
   decide +kernel
 #print axioms signed_parameter_rejected
 
@@ -91,7 +89,7 @@ theorem parameter_scope_rejected :
 
 /-- A closed signature cannot stand in for different method type arguments. -/
 theorem generic_argument_rejected :
-    ¬ ManagedCallsValid [⟨[.atom runtimeScope "System.Int64"], closed, ⟨"Test"⟩⟩] [] (fun _ => false)
+    ¬ ManagedCallsValid [⟨[.primitive .int64], closed, ⟨"Test"⟩⟩] [] (fun _ => false)
       (caller word) [true] callCode := by
   decide +kernel
 #print axioms generic_argument_rejected

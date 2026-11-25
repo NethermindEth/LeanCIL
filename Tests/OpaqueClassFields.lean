@@ -19,8 +19,8 @@ open CIL CIL.Extraction Tests.MetadataBuilder
 
 private def pin : AssemblyPin :=
   { identity := "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" }
-private def int32 : TypeExpr := .atom runtimeScope "System.Int32"
-private def int64 : TypeExpr := .atom runtimeScope "System.Int64"
+private def int32 : TypeExpr := .primitive .int32
+private def int64 : TypeExpr := .primitive .int64
 private def fixture : TypeExpr := .object pin.identity "Fixture"
 private def holder : TypeExpr := .object pin.identity "Holder"
 private def systemObject : TypeExpr := .object runtimeScope "System.Object"

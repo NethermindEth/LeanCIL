@@ -63,8 +63,14 @@ def scalarType : TypeExpr → ScalarKind
     match spanStorage type, arrayElementType element with
     | some (.span _ writable), some identity => .enumSpan identity writable false
     | _, _ => .other
+  | .primitive type => match type with
+    | .intPtr | .uintPtr => .native
+    | .int64 | .uint64 => .word64
+    | .boolean | .char | .sbyte | .byte | .int16 | .uint16 | .int32 | .uint32 => .word32
+    | .single | .double => .other
+  -- CoreLib defines its own primitives; a runtime-scope atom has no storage.
   | .atom scope name =>
-    if scope != runtimeScope && scope != coreLibraryScope then .other
+    if scope != coreLibraryScope then .other
     else if name ∈ ["System.IntPtr", "System.UIntPtr"] then .native
     else if name ∈ ["System.Int64", "System.UInt64"] then .word64
     else if name ∈ ["System.Boolean", "System.Char", "System.SByte", "System.Byte", "System.Int16",
@@ -508,6 +514,7 @@ private def joinBytes (separator : List UInt8) : List (List UInt8) → List UInt
     method type parameter, `&` and `*` suffixes, and `<...>` for generic arguments. -/
 private def scalarTypeBytes : TypeExpr → Option (List UInt8)
   | .void => some (signatureBytes "System.Void")
+  | .primitive type => some (signatureBytes type.display)
   | .atom _ name => some (signatureBytes name)
   | .object _ name | .constructor _ name | .objectConstructor _ name => signatureBytes <$> name.signatureName?
   | type@(.aggregate ..) => signatureBytes <$> spanElementName type
@@ -609,6 +616,9 @@ private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
   | some normalized =>
     let signature := (splitBytes normalized [58, 58])[1]?.getD []
     match site.returnType with
+    | .primitive type =>
+      if (signatureBytes type.display ++ [32]).isPrefixOf signature then scalarType site.returnType
+      else .other
     | .atom _ name =>
       if (signatureBytes name ++ [32]).isPrefixOf signature then scalarType site.returnType
       else .other

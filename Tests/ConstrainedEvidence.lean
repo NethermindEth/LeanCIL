@@ -24,7 +24,7 @@ theorem named_metadata_decoding :
 
 /-- The assembly every fixture type is declared in. -/
 private def fixturePin : AssemblyPin := { identity := "Fixture" }
-private def integer : TypeExpr := .atom runtimeScope "System.Int32"
+private def integer : TypeExpr := .primitive .int32
 private def receiver : TypeExpr := .aggregate "Fixture::Counter" 0
 private def interface : TypeExpr := .atom "Fixture" "IValue"
 private def slot : DispatchMethod := {
@@ -198,7 +198,7 @@ theorem default_interface_slot_rejected :
       receiver site = none := by decide +kernel
 #print axioms default_interface_slot_rejected
 
-private def boolean : TypeExpr := .atom runtimeScope "System.Boolean"
+private def boolean : TypeExpr := .primitive .boolean
 private def allowance : TypeExpr := .aggregate "Fixture::Allowance" 0
 private def price : TypeExpr := .aggregate "Fixture::Price" 1
 private def allowanceOwner : TypeExpr := .objectConstructor "Fixture" "IAllowance`1"
@@ -619,7 +619,7 @@ theorem generic_call_valid :
 /-- A different specialization of the same method token cannot satisfy the receiver. -/
 theorem changed_owner_arguments_rejected :
     ¬ ConstrainedCallsValid genericTypes [⟨[], genericRaw, fixturePin⟩,
-      { genericTarget with arguments := [.atom runtimeScope "System.Int64"] }]
+      { genericTarget with arguments := [.primitive .int64] }]
       genericRaw [true, true, true, true] genericEmitted := by decide +kernel
 #print axioms changed_owner_arguments_rejected
 

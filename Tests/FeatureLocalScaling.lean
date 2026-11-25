@@ -13,7 +13,7 @@ def raw (instructions locals : Nat) : RawMethod := {
   token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
   returnType := .void, parameters := [],
-  locals := List.replicate locals (.atom runtimeScope "System.Int32"),
+  locals := List.replicate locals (.primitive .int32),
   initLocals := true, maxStack := 1, genericParameters := [],
   code := List.replicate instructions ⟨0, 0, .none⟩ }
 

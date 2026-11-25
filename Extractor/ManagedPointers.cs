@@ -94,7 +94,8 @@ internal static class ManagedPointers
             var identity = EnumTypes.Identity(type).ToLean();
             return $".enum {identity} ({TypeEvidence(EnumTypes.Storage(type))})";
         }
-        return $".atom {GenericEvidence.Scope(type)} {IdentityText.Quote(type.FullName)}";
+        return GenericEvidence.RuntimePrimitive(type) ??
+            $".atom {GenericEvidence.Scope(type)} {IdentityText.Quote(type.FullName)}";
     }
 
     internal static string SignatureEvidence(IMethodSignature signature) =>

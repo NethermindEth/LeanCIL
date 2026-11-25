@@ -14,7 +14,7 @@ private def typeMethod (name : String) (methodName : MetadataName) (signature : 
     owner := type, name := methodName, hasThis := false,
     genericArity := 0,
     returnType := if fromHandle then type else
-      .atom runtimeScope (metadata_text% "System.Boolean"),
+      .primitive .boolean,
     parameters := if fromHandle then
         [.atom runtimeScope (metadata_text% "System.RuntimeTypeHandle")]
       else [type, type] }

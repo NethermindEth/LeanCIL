@@ -278,8 +278,8 @@ theorem classFieldRefusesStructLayout :
 /-- A class keeps its second argument even when a layout claims that exact closed owner. -/
 theorem twoArgumentClassStaysClass :
     let owner := TypeExpr.objectConstructor "S" "C`2"
-    let first := TypeExpr.atom runtimeScope "System.Byte"
-    let second := TypeExpr.atom runtimeScope "System.Int32"
+    let first := TypeExpr.primitive .byte
+    let second := TypeExpr.primitive .int32
     let applied := TypeExpr.apply (.apply owner first) second
     let entry := { classWrap with generic := some {
       owner, arity := 2, arguments := [first, second], fields := [], constraints := [] } }
@@ -289,7 +289,7 @@ theorem twoArgumentClassStaysClass :
 /-- `System.Runtime.Intrinsics.Vector128<ulong>`. -/
 def vectorOfWords : TypeExpr :=
   .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
-    (.atom runtimeScope "System.UInt64")
+    (.primitive .uint64)
 
 /-- `S::Wrap1<E>` for an enum `E` over `underlying`, stored with the one field `kind`. -/
 def enumWrap (underlying : TypeExpr) (kind : FieldType) : RawLayout := {
@@ -303,7 +303,7 @@ def enumWrap (underlying : TypeExpr) (kind : FieldType) : RawLayout := {
 /-- An enum argument requires an immediate integer atom. The indexed and propositional checks
     reject the same four-byte claim for a nested enum. -/
 theorem enumArgumentNeedsIntegerUnderlying :
-    let int32 := TypeExpr.atom runtimeScope "System.Int32"
+    let int32 := TypeExpr.primitive .int32
     let integer := enumWrap int32 .signed32
     let nested := enumWrap (.enum (Tests.enumIdentity "Inner") int32) .signed32
     let aggregate := enumWrap (.aggregate leaf.identity 0) (.aggregate 0)

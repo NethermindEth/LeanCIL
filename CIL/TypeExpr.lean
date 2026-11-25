@@ -113,6 +113,10 @@ def enumSignatureName? (identity : TypeIdentity) : Option String :=
 /-- Scoped metadata types shared by extraction and typed import slots. -/
 inductive TypeExpr where
   | void
+  /-- A primitive of `runtimeAssembly`, the only form of one; resolution refuses the atom of a
+      primitive's name in `runtimeScope`. -/
+  | primitive (type : PrimitiveType)
+  /-- A type by its assembly scope and full name. -/
   | atom (scope name : String)
   | aggregate (identity : String) (index : Nat)
   | enum (identity : TypeIdentity) (underlying : TypeExpr)
@@ -231,6 +235,7 @@ def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
     keyBytes (if required then "modreq" else "modopt") :: keyBytes scope :: keyBytes name ::
       typeKeyInto element rest
   | .void, rest => keyBytes "void" :: rest
+  | .primitive type, rest => keyBytes "primitive" :: keyBytes (toString type.elementType) :: rest
   | .atom scope name, rest => keyBytes "atom" :: keyBytes scope :: keyBytes name :: rest
   | .aggregate identity index, rest =>
     keyBytes "aggregate" :: keyBytes identity :: keyBytes (toString index) :: rest

@@ -26,7 +26,7 @@ private def view (writable : Bool) (element : TypeExpr) : TypeExpr :=
 /-- All observed overloads, with the source and target elements supplied by the caller. -/
 private def fixtures (source target : TypeExpr) (width targetWidth : Nat) (kind : TransferKind) :
     List Fixture :=
-  let byte := TypeExpr.atom runtimeScope "System.Byte"
+  let byte := TypeExpr.primitive .byte
   let span := view true
   let readOnly := view false
   [⟨"GetReference", .byref source, [span source], [source], .spanReference⟩,
@@ -71,7 +71,7 @@ private def Fixture.raw (fixture : Fixture) (declared : OpenSignature) : RawInst
 
 /-- Concrete 32-bit elements and 16-bit Cast targets. -/
 private def scalarSites : List (Fixture × OpenSignature) :=
-  (fixtures int32Type (.atom runtimeScope "System.Int16") 4 2 (.scalar 4 false)).zip declarations
+  (fixtures int32Type (.primitive .int16) 4 2 (.scalar 4 false)).zip declarations
 
 /-- The same closed signature under a declaration with a different parameter list. -/
 private def changed (declaration : OpenSignature) : OpenSignature :=
@@ -89,12 +89,11 @@ private def sized (words : Nat) : LayoutEnvironment :=
   { rawLayouts := raw, layouts := (computeLayouts raw).getD #[] }
 
 /-- A vector of the runtime's specified lane type. -/
-private def vector (element : String) (bits : Nat := 128) : TypeExpr :=
+private def vector (element : PrimitiveType) (bits : Nat := 128) : TypeExpr :=
   let owner := if bits == 128 then "System.Runtime.Intrinsics.Vector128`1"
     else if bits == 256 then "System.Runtime.Intrinsics.Vector256`1"
     else "System.Runtime.Intrinsics.Vector512`1"
-  .apply (.constructor intrinsicsScope owner)
-    (.atom runtimeScope element)
+  .apply (.constructor intrinsicsScope owner) (.primitive element)
 
 /-- Every reference resolves to its expected operation. -/
 private def resolves (environment : LayoutEnvironment) (cases : List Fixture) : Bool :=
@@ -104,7 +103,7 @@ private def resolves (environment : LayoutEnvironment) (cases : List Fixture) : 
 /-- Both overloads preserve mutability. Aggregate widths follow each environment's layout. -/
 theorem marshal_resolutions :
     resolves {} (scalarSites.map Prod.fst) ∧
-    resolves {} (fixtures (vector "System.Byte") int32Type 16 4 (.snapshot .vector128)) ∧
+    resolves {} (fixtures (vector .byte) int32Type 16 4 (.snapshot .vector128)) ∧
     resolves (sized 1) (fixtures packet packet 8 8 (.snapshot (.aggregate 8))) ∧
     resolves (sized 3) (fixtures packet packet 24 24 (.snapshot (.aggregate 24))) := by
   decide +kernel
@@ -113,11 +112,11 @@ theorem marshal_resolutions :
 
 /-- Narrow signed integers and enums keep their sign. Boolean and Char use unsigned storage. -/
 theorem marshal_scalar_storage :
-    resolves {} (fixtures (.atom runtimeScope "System.Int16") int32Type 2 4 (.scalar 2 true)) ∧
-    resolves {} (fixtures (.enum (Tests.enumIdentity "Kind") (.atom runtimeScope "System.SByte"))
+    resolves {} (fixtures (.primitive .int16) int32Type 2 4 (.scalar 2 true)) ∧
+    resolves {} (fixtures (.enum (Tests.enumIdentity "Kind") (.primitive .sbyte))
       int32Type 1 4 (.scalar 1 true)) ∧
     resolves {} (fixtures booleanType int32Type 1 4 (.scalar 1 false)) ∧
-    resolves {} (fixtures (.atom runtimeScope "System.Char") int32Type 2 4 (.scalar 2 false)) := by
+    resolves {} (fixtures (.primitive .char) int32Type 2 4 (.scalar 2 false)) := by
   decide +kernel
 
 #print axioms marshal_scalar_storage
@@ -139,7 +138,7 @@ theorem marshal_reference_shapes :
 theorem marshal_excluded_elements :
     [view true int32Type, TypeExpr.parameter 0, .pointer int32Type, .byref int32Type,
      .object "Fixture" "Class", .apply (.objectConstructor "Fixture" "Box") int32Type,
-     .atom runtimeScope "System.Single", vector "System.Double", packet].all (fun element =>
+     .primitive .single, vector .double, packet].all (fun element =>
       (fixtures element int32Type 0 4 (.scalar 4 false)).all (fun fixture =>
         (runtimeModel {} .call fixture.method).isNone) &&
       ((fixtures int32Type element 4 0 (.scalar 4 false)).filter
@@ -153,8 +152,8 @@ theorem cast_result_identity :
     scalarSites.all (fun (fixture, _) => fixture.name != "Cast" ||
       let method := fixture.method
       let writable := method.parameters == [view true int32Type]
-      let unsigned := view writable (.atom runtimeScope "System.UInt16")
-      let flipped := view (!writable) (.atom runtimeScope "System.Int16")
+      let unsigned := view writable (.primitive .uint16)
+      let flipped := view (!writable) (.primitive .int16)
       [unsigned, flipped].all fun result =>
         (runtimeModel {} .call { method with returnType := result }).isNone) = true := by
   decide +kernel
@@ -228,7 +227,7 @@ private def refused (raw : RawInstruction) (alternative : Instruction) : Bool :=
 
 /-- Floating vectors of every supported register width have no transfer or span model. -/
 theorem floating_vectors_refused :
-    [128, 256, 512].all (fun bits => ["System.Single", "System.Double"].all fun lane =>
+    [128, 256, 512].all (fun bits => [PrimitiveType.single, .double].all fun lane =>
       let element := vector lane bits
       let shape := if bits == 128 then SnapshotShape.vector128 else
         if bits == 256 then .vector256 else .vector512
@@ -254,8 +253,8 @@ theorem unresolved_marshal_sites :
 /-- ManagedCallsValid refuses a linked Write<Double> through import admission even when the
     slot has the exact signature and the decoder retains the call. -/
 theorem linked_write_import_refused :
-    let double := TypeExpr.atom runtimeScope "System.Double"
-    let bytes := view true (.atom runtimeScope "System.Byte")
+    let double := TypeExpr.primitive .double
+    let bytes := view true (.primitive .byte)
     let owner := "System.Runtime.InteropServices.MemoryMarshal"
     let target := s!"{runtimeScope}::System.Void {owner}::Write(System.Span`1<System.Byte>,!!0&)"
     let method : MethodRef := {

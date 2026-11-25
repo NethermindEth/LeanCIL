@@ -9,7 +9,7 @@ namespace CIL.Extraction
 private def offsetPair (element : TypeExpr) : List TypeExpr := [.byref element, .byref element]
 
 /-- Byte displacements have native signed integer type. -/
-private def displacement (_ : TypeExpr) : TypeExpr := .atom runtimeScope "System.IntPtr"
+private def displacement (_ : TypeExpr) : TypeExpr := .primitive .intPtr
 
 /-- Unsafe.ByteOffset computes a displacement between references to a sized element. -/
 def unsafeByteOffsetModel (reader : CallLayouts) (method : MethodRef) :
@@ -26,10 +26,10 @@ private inductive OffsetForm where
   deriving DecidableEq
 
 /-- The runtime type of the displacement parameter. -/
-private def OffsetForm.offsetName : OffsetForm → String
-  | .int32 | .pointer => "System.Int32"
-  | .native => "System.IntPtr"
-  | .unsigned => "System.UIntPtr"
+private def OffsetForm.offsetType : OffsetForm → PrimitiveType
+  | .int32 | .pointer => .int32
+  | .native => .intPtr
+  | .unsigned => .uintPtr
 
 /-- The input and result address type of the overload. -/
 private def OffsetForm.address (form : OffsetForm) (element : TypeExpr) : TypeExpr :=
@@ -37,7 +37,7 @@ private def OffsetForm.address (form : OffsetForm) (element : TypeExpr) : TypeEx
 
 /-- The parameter types of the overload at its method argument. -/
 private def OffsetForm.parameters (form : OffsetForm) (element : TypeExpr) : List TypeExpr :=
-  [form.address element, .atom runtimeScope form.offsetName]
+  [form.address element, .primitive form.offsetType]
 
 /-- The method has this overload's static generic signature on the exact Unsafe owner. -/
 private def OffsetForm.accepts (form : OffsetForm) (method : MethodRef) : Bool :=
@@ -57,7 +57,7 @@ private def Displacement.model (kind : Displacement) (signed : Bool) (width : Na
 private def offsetOverload (name : String) (kind : Displacement) (form : OffsetForm) :
     ModelOverload :=
   let address := if form == .pointer then "System.Void*" else "!!0&"
-  { operand := unsafeOperand name address s!"{address},{form.offsetName}"
+  { operand := unsafeOperand name address s!"{address},{form.offsetType.display}"
       (unsafeDeclaration form.parameters form.address)
     accepts := form.accepts
     resolve := fun reader method => do

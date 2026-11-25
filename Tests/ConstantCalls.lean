@@ -14,9 +14,8 @@ body does not compute.
 namespace Tests.ConstantCalls
 open CIL CIL.Extraction
 
-private def runtime := runtimeScope
-private def boolean : TypeExpr := .atom runtime "System.Boolean"
-private def integer : TypeExpr := .atom runtime "System.Int32"
+private def boolean : TypeExpr := .primitive .boolean
+private def integer : TypeExpr := .primitive .int32
 private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction :=
   ⟨0, opcode, operand⟩
 

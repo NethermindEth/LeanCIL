@@ -18,7 +18,7 @@ partial class Program
                     The original site refuses a call to that instantiation. -/
                 private def changedElement (raw : RawInstruction) (site : CallSite)
                     (expected : MemoryOp) : Bool := Id.run do
-                  let arguments := site.typeArguments.set 0 (.atom runtimeScope "System.UInt16")
+                  let arguments := site.typeArguments.set 0 (.primitive .uint16
                   let close := substituteType arguments
                   let some result := close site.declared.returnType | return false
                   let some parameters := site.declared.parameters.mapM close | return false

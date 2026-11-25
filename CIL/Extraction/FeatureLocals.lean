@@ -28,10 +28,8 @@ inductive FeatureLocalKind where
 
 /-- Classify the exact runtime identity, rejecting every unsupported or malformed type. -/
 def FeatureLocalKind.ofType : TypeExpr → FeatureLocalKind
-  | .atom scope name =>
-    if scope != runtimeScope then .unknown
-    else if name == "System.Int32" || name == "System.UInt32" then .word
-    else if name == "System.Boolean" then .boolean else .unknown
+  | .primitive .int32 | .primitive .uint32 => .word
+  | .primitive .boolean => .boolean
   | _ => .unknown
 
 /-- A known fact must respect the local's admitted runtime representation. -/
@@ -51,9 +49,8 @@ def featureLocalEligible (raw : RawMethod) (index : Nat) (fact : Option W32) : B
     (instruction.opcode == 18 || instruction.opcode == 65037) &&
       localIndex instruction == some index) then false
   else match raw.locals[index]? with
-    | some (.atom scope name) => scope == runtimeScope &&
-        (name == "System.Int32" || name == "System.UInt32" ||
-          name == "System.Boolean" && (fact == some 0 || fact == some 1))
+    | some (.primitive .int32) | some (.primitive .uint32) => true
+    | some (.primitive .boolean) => fact == some 0 || fact == some 1
     | _ => false
 
 /-- Address exclusions and exact type classifications shared by every certificate state. -/
@@ -101,15 +98,8 @@ theorem FeatureLocalIndex.eligible_eq (raw : RawMethod) (index : Nat) (fact : Op
   | none => rfl
   | some type =>
     cases type <;> try rfl
-    rename_i scope name
-    by_cases scopeValid : scope = runtimeScope
-    · by_cases word : name = "System.Int32" ∨ name = "System.UInt32"
-      · rcases word with word | word <;>
-          simp [FeatureLocalKind.ofType, FeatureLocalKind.accepts, scopeValid, word]
-      · simp only [not_or] at word
-        by_cases boolean : name = "System.Boolean" <;>
-          simp [FeatureLocalKind.ofType, FeatureLocalKind.accepts, scopeValid, word, boolean]
-    · simp [FeatureLocalKind.ofType, FeatureLocalKind.accepts, scopeValid]
+    rename_i primitive
+    cases primitive <;> rfl
 
 #print axioms FeatureLocalIndex.eligible_eq
 

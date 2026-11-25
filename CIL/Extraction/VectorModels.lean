@@ -16,21 +16,21 @@ namespace CIL.Extraction
 /-- `vector<ulong>` for the generic vector type named `vector`, with exact scopes. The names
     are literals, so stepping never evaluates a string to compare a call's method. -/
 def ulongVectorOf (vector : String) : TypeExpr :=
-  .apply (.constructor intrinsicsScope vector) (.atom runtimeScope "System.UInt64")
+  .apply (.constructor intrinsicsScope vector) (.primitive .uint64)
 
 /-- `Vector128<ulong> Vector128.CreateScalarUnsafe(ulong)`. -/
 def createScalarUnsafeMethod : MethodRef :=
   { owner := .atom intrinsicsScope "System.Runtime.Intrinsics.Vector128",
     name := name!"CreateScalarUnsafe", hasThis := false, genericArity := 0,
     returnType := ulongVectorOf "System.Runtime.Intrinsics.Vector128`1",
-    parameters := [.atom runtimeScope "System.UInt64"] }
+    parameters := [.primitive .uint64] }
 
 /-- `ulong owner.GetElement<ulong>(vector<ulong>, int)`, as a call site instantiates it. -/
 def getElementMethod (owner vector : String) : MethodRef :=
   { owner := .atom intrinsicsScope owner, name := name!"GetElement", hasThis := false,
-    genericArity := 1, returnType := .atom runtimeScope "System.UInt64",
-    parameters := [ulongVectorOf vector, .atom runtimeScope "System.Int32"],
-    methodArguments := [.atom runtimeScope "System.UInt64"] }
+    genericArity := 1, returnType := .primitive .uint64,
+    parameters := [ulongVectorOf vector, .primitive .int32],
+    methodArguments := [.primitive .uint64] }
 
 /-- `GetElement` of a `Vector128<ulong>` lane. -/
 def getElement128Method : MethodRef :=
@@ -44,7 +44,7 @@ def getElement256Method : MethodRef :=
 def getElementSignature (vector : String) : OpenSignature :=
   { convention := 0x10, returnType := .parameter 0,
     parameters := [.apply (.constructor intrinsicsScope vector) (.parameter 0),
-      .atom runtimeScope "System.Int32"] }
+      .primitive .int32] }
 
 /-- The vector helper entries: each stands for one exact reference and runs as its intrinsic. -/
 def vectorEntries : List ModelEntry :=

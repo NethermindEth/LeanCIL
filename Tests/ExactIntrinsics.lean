@@ -17,7 +17,7 @@ private def runtimeScope :=
   "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
 private def vectorType (width : String) : TypeExpr :=
   .apply (.constructor scope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
-    (.atom runtimeScope "System.UInt64")
+    (.primitive .uint64)
 private def profile : FeatureProfile := { architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true, sse42 := true, avx := true, avx2 := true, bmi1 := true, bmi2 := true, avx512F := true, avx512FVL := true, avx512DQ := true, avx512DQVL := true, vector128Accelerated := true, vector256Accelerated := true }
 private def body (operations : List Instruction) : Method :=
   { code := operations, locals := [], returnsValue := true, profile }
@@ -51,7 +51,7 @@ private def call0 : CallSite := {
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
 example : keeps call0 (.intrinsic (.avx2 .band) 2) := by decide +kernel
-example : refuses { call0 with method.returnType := .atom runtimeScope "System.UInt64" } := by
+example : refuses { call0 with method.returnType := .primitive .uint64 } := by
   decide +kernel
 example : refuses { call0 with method.parameters := [vectorType "128", vectorType "256"] } := by
   decide +kernel
@@ -191,11 +191,11 @@ example : refuses { call7 with method.hasThis := true } := by decide +kernel
 example : refuses { call7 with target := .external "forged" } := by decide +kernel
 private def call8 : CallSite := {
   declared := {
-    convention := 0, returnType := .atom runtimeScope "System.Int32",
+    convention := 0, returnType := .primitive .int32,
     parameters := [vectorType "512"] },
   method := {
     owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ", name := name!"MoveMask",
-    hasThis := false, genericArity := 0, returnType := .atom runtimeScope "System.Int32",
+    hasThis := false, genericArity := 0, returnType := .primitive .int32,
     parameters := [vectorType "512"] },
   name := "MoveMask",
   target := .external (scope ++ "::System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(\
@@ -233,13 +233,13 @@ example : ¬ RuntimeModelsAgree (raw { call9 with method.hasThis := true }) [tru
 example : ¬ RuntimeModelsAgree (raw { call9 with target := .external "forged" }) [true]
     (body [.call call9.method]) := by decide +kernel
 /-- The same vector equality declaration instantiated at the supplied owner element. -/
-private def equalitySite (width : Nat) (element : String) : CallSite :=
+private def equalitySite (width : Nat) (element : PrimitiveType) : CallSite :=
   let head := s!"System.Runtime.Intrinsics.Vector{width}`1"
-  let vector := TypeExpr.apply (.constructor scope head) (.atom runtimeScope element)
+  let vector := TypeExpr.apply (.constructor scope head) (.primitive element)
   let openVector := TypeExpr.apply (.constructor scope head) (.ownerParameter 0)
-  let boolean := TypeExpr.atom runtimeScope "System.Boolean"
+  let boolean := TypeExpr.primitive .boolean
   let parameters := s!"{head}<!0>,{head}<!0>"
-  let target := s!"{scope}::System.Boolean {head}<{element}>::op_Equality({parameters})"
+  let target := s!"{scope}::System.Boolean {head}<{element.display}>::op_Equality({parameters})"
   let method : MethodRef :=
     { owner := vector, name := name!"op_Equality", hasThis := false, genericArity := 0,
       returnType := boolean, parameters := [vector, vector] }
@@ -252,10 +252,9 @@ private def equalitySite (width : Nat) (element : String) : CallSite :=
 /-- Integer equality keeps its call and a floating element at the same declaration is refused. -/
 theorem equalityElements :
     [128, 256, 512].all (fun width =>
-      ["System.Byte", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
-       "System.Single", "System.Double"].all fun element =>
+      [PrimitiveType.byte, .int32, .uint32, .int64, .uint64, .single, .double].all fun element =>
         let site := equalitySite width element
-        let expected := if element ∈ ["System.Single", "System.Double"] then liveHoleAt 0 40
+        let expected := if element ∈ [.single, .double] then liveHoleAt 0 40
           else .ok [Instruction.call site.method {}]
         decide ((decodeRaw .scalar {} [] [true] (raw site) []).map Method.code =
           expected)) = true := by decide +kernel
@@ -265,11 +264,11 @@ theorem equalityElements :
 private def call10 : CallSite := {
   declared := {
     convention := 0, returnType := vectorType "128",
-    parameters := [.atom runtimeScope "System.UInt64"] },
+    parameters := [.primitive .uint64] },
   method := {
     owner := .atom scope "System.Runtime.Intrinsics.Vector128", name := name!"CreateScalarUnsafe",
     hasThis := false, genericArity := 0, returnType := vectorType "128",
-    parameters := [.atom runtimeScope "System.UInt64"] },
+    parameters := [.primitive .uint64] },
   name := "CreateScalarUnsafe",
   target := .external (scope ++ "::System.Runtime.Intrinsics.Vector128`1<System.UInt64> \
     System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)"),
@@ -323,7 +322,7 @@ example : ¬ RuntimeModelsAgree (raw call0) [true]
 
 example : ¬ ({ profile with architecture := .arm64 } : FeatureProfile).Valid := by decide +kernel
 
-private def vector128 : TypeExpr := .apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.UInt64")
+private def vector128 : TypeExpr := .apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.primitive .uint64)
 private def withLocal : RawMethod := { raw call10 with locals := [vector128], code := [] }
 private def createsBody : Method := body [.call createScalarUnsafeMethod {}]
 
@@ -356,7 +355,7 @@ example : ¬ OpaqueLocalsValid withLocal
     { localBody with code := [.call getElement128Method] } := by decide +kernel
 example : ¬ OpaqueLocalsValid withLocal { localBody with localKinds := [.word64] }
     := by decide +kernel
-example : ¬ OpaqueLocalsValid { withLocal with locals := [.atom runtimeScope "System.UInt64"] } localBody := by
+example : ¬ OpaqueLocalsValid { withLocal with locals := [.primitive .uint64] } localBody := by
   decide +kernel
 
 example : evalIntrinsic (.avx2 .andNot) [.v256 1, .v256 3] = some (.v256 2) := by decide +kernel
@@ -472,11 +471,11 @@ example : evalIntrinsic (.avx512 .ltu512)
 example : keeps {
     declared := {
       convention := 0, returnType := vectorType "256",
-      parameters := [vectorType "256", .atom runtimeScope "System.Byte"] },
+      parameters := [vectorType "256", .primitive .byte] },
     method := {
       owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"ShiftLeftLogical",
       hasThis := false, genericArity := 0, returnType := vectorType "256",
-      parameters := [vectorType "256", .atom runtimeScope "System.Byte"] },
+      parameters := [vectorType "256", .primitive .byte] },
     name := "ShiftLeftLogical",
     target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
       System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(\
@@ -487,11 +486,11 @@ example : keeps {
 example : keeps {
     declared := {
       convention := 0, returnType := vectorType "256",
-      parameters := [vectorType "256", .atom runtimeScope "System.Byte"] },
+      parameters := [vectorType "256", .primitive .byte] },
     method := {
       owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"ShiftRightLogical",
       hasThis := false, genericArity := 0, returnType := vectorType "256",
-      parameters := [vectorType "256", .atom runtimeScope "System.Byte"] },
+      parameters := [vectorType "256", .primitive .byte] },
     name := "ShiftRightLogical",
     target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
       System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(\
@@ -501,11 +500,11 @@ example : keeps {
 
 example : keeps {
     declared := {
-      convention := 0, returnType := .atom runtimeScope "System.Int32",
+      convention := 0, returnType := .primitive .int32,
       parameters := [vectorType "256"] },
     method := {
       owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ", name := name!"MoveMask",
-      hasThis := false, genericArity := 0, returnType := .atom runtimeScope "System.Int32",
+      hasThis := false, genericArity := 0, returnType := .primitive .int32,
       parameters := [vectorType "256"] },
     name := "MoveMask",
     target := .external (scope ++ "::System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::\
@@ -531,11 +530,11 @@ theorem init_vector_admission :
       decide (ObjectOperandsValid (objectBody 0xfe15 unsigned) [true]
         { emitted with profile := { architecture := .arm64 } }) &&
       !(valid (malformed (.constructor "forged" "System.Runtime.Intrinsics.Vector128`1")
-        (.atom runtimeScope "System.UInt64"))) &&
+        (.primitive .uint64))) &&
       !(valid (malformed (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
         (.atom "forged" "System.UInt64"))) &&
       !(valid (malformed (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
-        (.atom runtimeScope "System.Int16"))) &&
+        (.primitive .int16))) &&
       !(valid (vectorType "64")) &&
       !decide (ObjectOperandsValid (objectBody 0xfe15 unsigned) [true]
         { emitted with profile := { nativeWidth := 32 } }) &&
@@ -546,7 +545,7 @@ theorem init_vector_admission :
 
 /-- An enum-span copy reads its own direct home and clears the reference flag on the value. -/
 theorem enum_span_copy :
-    let element := TypeExpr.enum (Tests.enumIdentity "Signed8") (.atom runtimeScope "System.SByte")
+    let element := TypeExpr.enum (Tests.enumIdentity "Signed8") (.primitive .sbyte)
     let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1") element
     let load := RawInstruction.mk 0 2 .none
     let copy := RawInstruction.mk 1 0x71 (.type span)
@@ -557,7 +556,7 @@ theorem enum_span_copy :
       scalarTransfer input copy [kind true] = some [kind false] ∧
       scalarTransfer input copy [kind false] = none ∧
       ¬ ObjectOperandsValid { input with parameters := [.byref (.apply
-        (.constructor runtimeScope "System.Span`1") (.atom runtimeScope "System.Int32"))] }
+        (.constructor runtimeScope "System.Span`1") (.primitive .int32))] }
         [true, true] emitted ∧
       ¬ ObjectOperandsValid { input with code := [load, ⟨1, 0, .none⟩, copy] }
         [true, true, true] (body [.ldarg 0, .nop, .ldobj span]) ∧
@@ -568,12 +567,12 @@ theorem enum_span_copy :
 /-- A valid load of a span does not admit a later sizeof of the same span type. -/
 theorem span_load_then_size_refused :
     let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1")
-      (.atom runtimeScope "System.Int32")
+      (.primitive .int32)
     let source := { raw call0 with
       parameters := [.byref span]
       code := [⟨0, 2, .none⟩, ⟨1, 0x71, .type span⟩] }
     let input := { source with
-      returnType := .atom runtimeScope "System.Int32"
+      returnType := .primitive .int32
       code := source.code ++ [⟨6, 38, .none⟩, ⟨7, 0xfe1c, .type span⟩, ⟨13, 42, .none⟩] }
     let emitted := body [.ldarg 0, .ldobj span, .pop, .sizeof span, .ret]
     ObjectOperandsValid source [true, true] (body [.ldarg 0, .ldobj span]) ∧
@@ -585,15 +584,15 @@ theorem init_vector_binding :
     let target := vectorType "128"
     let raw := RawInstruction.mk 0 0xfe15 (.type target)
     [Instruction.nop, .initobj (vectorType "256"), .initobj (vectorType "512"),
-      .initobj (.atom runtimeScope "System.UInt64"), .ldobj target].all fun emitted =>
+      .initobj (.primitive .uint64), .ldobj target].all fun emitted =>
         !scalarEmissionMatches none none raw [] emitted := by decide +kernel
 #print axioms init_vector_binding
 
 /-- Floating-point loads, class sizes and span stores fail admission. -/
 theorem object_shape_refusals :
     let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1")
-      (.atom runtimeScope "System.Int32")
-    let double := TypeExpr.atom runtimeScope "System.Double"
+      (.primitive .int32)
+    let double := TypeExpr.primitive .double
     let input := fun opcode type => objectBody opcode type
     ¬ ObjectOperandsValid (input 0x71 double) [true] (body [.ldobj double]) ∧
       ¬ ObjectOperandsValid (input 0xfe1c (.object runtimeScope "System.Object")) [true]
@@ -669,9 +668,9 @@ theorem exact_call_lengths :
 
 /-- The declared signature of a `(ulong, ulong) -> ulong` method. -/
 private def wordSignature : DeclaredSignature :=
-  { parameters := [.atom Extraction.runtimeScope "System.UInt64",
-      .atom Extraction.runtimeScope "System.UInt64"],
-    returnType := .atom Extraction.runtimeScope "System.UInt64" }
+  { parameters := [.primitive .uint64,
+      .primitive .uint64],
+    returnType := .primitive .uint64 }
 
 /-- A layout environment with one entry, as an extraction that reads a struct records. -/
 private def emittedEnvironment : LayoutEnvironment := { layouts := #[⟨⟨4, []⟩, 4⟩] }

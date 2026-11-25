@@ -72,7 +72,7 @@ theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
 #guard_msgs in #print axioms checked_arithmetic
 
 @[cil_code] def narrowEqualityMethod : CIL.Method := {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   code := [.ldarg 0, .ldarg 1, .xor, .ldc_i4 0, .ceq, .ret]
   locals := [], returnsValue := true }
 
@@ -97,7 +97,7 @@ theorem checked_narrow_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.F
 #print axioms checked_narrow_return
 
 @[cil_code] def decidedNarrowMethod : CIL.Method := {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   code := [.ldc_i4 0, .ldc_i4 0, .ceq, .ret]
   locals := [], returnsValue := true }
 
@@ -312,7 +312,7 @@ example (program : CIL.Program) (index : Nat) (memory : CIL.Safety.Memory) (a b 
 /-- A 27-instruction read-only leaf over symbolic memory: each field load comes from a fact, every step from an
     equation, so no step unfolds the dispatcher. -/
 def leafBody (profile : CIL.FeatureProfile) : CIL.Method := {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   profile, environment := wordsEnvironment, returnsValue := true, locals := [], code := [
   .ldarg 0, .ldfld word0, .ldarg 1, .ldfld word0, .xor,
   .ldarg 0, .ldfld word1, .ldarg 1, .ldfld word1, .xor, .or,
@@ -796,8 +796,8 @@ theorem feature_step_forall_global (body : CIL.Method) (frame : CIL.Safety.Frame
 
 -- Pointer arithmetic in the run loop steps without a `referenceAt` fact.
 private def addUInt64 : CIL.Extraction.MethodRef :=
-  let element := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.UInt64"
-  let offset := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Int32"
+  let element := CIL.Extraction.TypeExpr.primitive .uint64
+  let offset := CIL.Extraction.TypeExpr.primitive .int32
   { owner := CIL.Extraction.unsafeOwner, name := name!"Add", hasThis := false,
     genericArity := 1, methodArguments := [element], parameters := [.byref element, offset],
     returnType := .byref element }
@@ -1183,8 +1183,8 @@ theorem store_from_wrapped_fact (body : CIL.Method) (frame : Frame)
 #print axioms store_from_wrapped_fact
 
 private def byteToBoolean : CIL.Extraction.MethodRef :=
-  let source := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Byte"
-  let target := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Boolean"
+  let source := CIL.Extraction.TypeExpr.primitive .byte
+  let target := CIL.Extraction.TypeExpr.primitive .boolean
   { owner := CIL.Extraction.unsafeOwner, name := name!"BitCast", hasThis := false,
     genericArity := 2, methodArguments := [source, target], parameters := [source],
     returnType := target }
@@ -2015,9 +2015,9 @@ theorem contract_steps_modelled_call (program : CIL.Program)
 
 /-- `IntPtr.get_Size`, a call the runtime table models. -/
 def nativeSizeGetter : CIL.Extraction.MethodRef :=
-  { owner := .atom CIL.Extraction.runtimeScope "System.IntPtr", name := name!"get_Size",
+  { owner := .primitive .intPtr, name := name!"get_Size",
     hasThis := false, genericArity := 0, parameters := [],
-    returnType := .atom CIL.Extraction.runtimeScope "System.Int32" }
+    returnType := .primitive .int32 }
 
 /-- Two calls of the modelled size getter. Only the second has a link, which enters method 1. -/
 def linkedModelCalls : CIL.Method :=

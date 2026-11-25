@@ -9,7 +9,7 @@ namespace Tests.NativeMethodTables
 open CIL CIL.Safety
 
 private def signature : ManagedSignature :=
-  ⟨.atom Extraction.runtimeScope "System.Int32", [.atom Extraction.runtimeScope "System.Int32"]⟩
+  ⟨.primitive .int32, [.primitive .int32]⟩
 
 private def first : ManagedIdentity := ⟨"Handlers", 1, []⟩
 private def second : ManagedIdentity := ⟨"Handlers", 2, []⟩
@@ -207,7 +207,7 @@ theorem native_array_load :
 
 /-- A caller's signature that differs from the table's. -/
 private def otherSignature : ManagedSignature :=
-  ⟨.atom Extraction.runtimeScope "System.Int64", [.atom Extraction.runtimeScope "System.Int32"]⟩
+  ⟨.primitive .int64, [.primitive .int32]⟩
 
 /-- An unhomed table argument loads an entry under the table's own signature, and a call under
     any other signature selects no target from it. -/
@@ -318,7 +318,7 @@ theorem table_index_kinds_refused :
     missing type operand are refused. -/
 theorem table_element_type_refused :
     transfer 163 (.type otherSignature.typeExpr) [.word32, tableKind] = none ∧
-    transfer 163 (.type (.atom runtimeScope "System.IntPtr")) [.word32, tableKind] = none ∧
+    transfer 163 (.type (.primitive .intPtr)) [.word32, tableKind] = none ∧
     transfer 163 .none [.word32, tableKind] = none := by
   decide +kernel
 #print axioms table_element_type_refused

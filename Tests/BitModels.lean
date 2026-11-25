@@ -19,14 +19,14 @@ namespace Tests.BitModels
 open CIL CIL.Extraction CIL.Safety
 
 private def runtimeType (name : String) : TypeExpr := .atom runtimeScope name
-private def byte : TypeExpr := runtimeType "System.Byte"
-private def sbyte : TypeExpr := runtimeType "System.SByte"
-private def short : TypeExpr := runtimeType "System.Int16"
-private def int : TypeExpr := runtimeType "System.Int32"
-private def uint : TypeExpr := runtimeType "System.UInt32"
-private def long : TypeExpr := runtimeType "System.Int64"
-private def ulong : TypeExpr := runtimeType "System.UInt64"
-private def bool : TypeExpr := runtimeType "System.Boolean"
+private def byte : TypeExpr := .primitive .byte
+private def sbyte : TypeExpr := .primitive .sbyte
+private def short : TypeExpr := .primitive .int16
+private def int : TypeExpr := .primitive .int32
+private def uint : TypeExpr := .primitive .uint32
+private def long : TypeExpr := .primitive .int64
+private def ulong : TypeExpr := .primitive .uint64
+private def bool : TypeExpr := .primitive .boolean
 private def bitOperations : TypeExpr := runtimeType "System.Numerics.BitOperations"
 private def binaryPrimitives : TypeExpr :=
   .atom spanMemoryScope "System.Buffers.Binary.BinaryPrimitives"

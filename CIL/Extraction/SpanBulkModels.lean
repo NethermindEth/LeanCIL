@@ -17,11 +17,11 @@ private def BulkMember.names : BulkMember → MetadataName × String
 
 /-- The signature uses the owner's element for spans and the method's element for arrays. -/
 private def BulkMember.signature (member : BulkMember) (element : TypeExpr) : OpenSignature :=
-  let int := TypeExpr.atom runtimeScope "System.Int32"
+  let int := TypeExpr.primitive .int32
   match member with
   | .fill => ⟨0x20, .void, [element]⟩
   | .clear => ⟨0x20, .void, []⟩
-  | .copy trying => ⟨0x20, if trying then .atom runtimeScope "System.Boolean" else .void,
+  | .copy trying => ⟨0x20, if trying then .primitive .boolean else .void,
       [.apply (spanHead true) element]⟩
   | .arrayFill counted => ⟨0x10, .void,
       if counted then [.array element, element, int, int] else [.array element, element]⟩

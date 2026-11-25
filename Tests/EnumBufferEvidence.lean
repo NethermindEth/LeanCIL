@@ -8,7 +8,7 @@ open CIL CIL.Extraction
 
 /-- Two same-width enums deliberately differ only in their metadata name. -/
 private def element (name : String) : TypeExpr :=
-  .enum (Tests.enumIdentity name) (.atom runtimeScope "System.SByte")
+  .enum (Tests.enumIdentity name) (.primitive .sbyte)
 
 /-- A writable enum span over the supplied element type. -/
 private def span (name : String) : TypeExpr :=
@@ -23,18 +23,17 @@ private def method : RawMethod := {
 
 /-- All eight legal enum bases retain their exact identity and existing integer width. -/
 theorem enum_storage_checked :
-    [("System.SByte", EnumStorage.signed8), ("System.Byte", .unsigned8),
-     ("System.Int16", .signed16), ("System.UInt16", .unsigned16),
-     ("System.Int32", .signed32), ("System.UInt32", .unsigned32),
-     ("System.Int64", .signed64), ("System.UInt64", .unsigned64)].all
-      (fun (name, storage) =>
-        arrayElementType (.enum (Tests.enumIdentity "Choice") (.atom runtimeScope name)) ==
+    [(PrimitiveType.sbyte, EnumStorage.signed8), (.byte, .unsigned8), (.int16, .signed16),
+     (.uint16, .unsigned16), (.int32, .signed32), (.uint32, .unsigned32), (.int64, .signed64),
+     (.uint64, .unsigned64)].all
+      (fun (underlying, storage) =>
+        arrayElementType (.enum (Tests.enumIdentity "Choice") (.primitive underlying)) ==
           some (.enumeration (Tests.enumIdentity "Choice") storage)) = true := by decide +kernel
 #print axioms enum_storage_checked
 
 /-- An Int32 enum widens to a word, while an enum over an Int32 byref has no scalar kind. -/
 theorem enumScalarNeedsInteger :
-    let int32 := TypeExpr.atom runtimeScope "System.Int32"
+    let int32 := TypeExpr.primitive .int32
     (scalarType (.enum (Tests.enumIdentity "E") (.byref int32)), scalarType (.enum (Tests.enumIdentity "E") int32)) =
       (.other, .word32) := by decide +kernel
 #print axioms enumScalarNeedsInteger
@@ -73,10 +72,10 @@ theorem array_identity_checked :
 theorem enum_local_constructor :
     let constructor : CallSite := {
       declared := {
-        convention := 0x20, parameters := [.pointer .void, .atom runtimeScope "System.Int32"] },
+        convention := 0x20, parameters := [.pointer .void, .primitive .int32] },
       method := {
         owner := span "First", name := name!".ctor", hasThis := true, genericArity := 0,
-        returnType := .void, parameters := [.pointer .void, .atom runtimeScope "System.Int32"] },
+        returnType := .void, parameters := [.pointer .void, .primitive .int32] },
       name := ".ctor",
       target := .external (runtimeScope ++
         "::System.Void System.Span`1<First>::.ctor(System.Void*,System.Int32)"),

@@ -28,7 +28,7 @@ open CIL CIL.Safety
 theorem equal32 (program : Program) (profile : FeatureProfile)
     (environment : LayoutEnvironment)
     (declared : DeclaredSignature)
-    (returned : declared.returnType = .atom Extraction.runtimeScope "System.Boolean")
+    (returned : declared.returnType = .primitive .boolean)
     (first : (equalityBody profile environment declared true).argumentAccess 0 = .value none)
     (second : (equalityBody profile environment declared true).argumentAccess 1 = .value none)
     (found : program[0]? = some (equalityBody profile environment declared true))
@@ -46,7 +46,7 @@ theorem equal32 (program : Program) (profile : FeatureProfile)
 theorem different64 (program : Program) (profile : FeatureProfile)
     (environment : LayoutEnvironment)
     (declared : DeclaredSignature)
-    (returned : declared.returnType = .atom Extraction.runtimeScope "System.Boolean")
+    (returned : declared.returnType = .primitive .boolean)
     (first : (equalityBody profile environment declared false).argumentAccess 0 = .value none)
     (second : (equalityBody profile environment declared false).argumentAccess 1 = .value none)
     (found : program[0]? = some (equalityBody profile environment declared false))
@@ -66,7 +66,7 @@ theorem different64 (program : Program) (profile : FeatureProfile)
 theorem and32 (program : Program) (profile : FeatureProfile)
     (environment : LayoutEnvironment)
     (declared : DeclaredSignature)
-    (returned : declared.returnType = .atom Extraction.runtimeScope "System.Int32")
+    (returned : declared.returnType = .primitive .int32)
     (first : (bitwiseBody profile environment declared .and).argumentAccess 0 = .value none)
     (second : (bitwiseBody profile environment declared .and).argumentAccess 1 = .value none)
     (found : program[0]? = some (bitwiseBody profile environment declared .and))
@@ -84,7 +84,7 @@ theorem and32 (program : Program) (profile : FeatureProfile)
 theorem xor64 (program : Program) (profile : FeatureProfile)
     (environment : LayoutEnvironment)
     (declared : DeclaredSignature)
-    (returned : declared.returnType = .atom Extraction.runtimeScope "System.UInt64")
+    (returned : declared.returnType = .primitive .uint64)
     (first : (bitwiseBody profile environment declared .xor).argumentAccess 0 = .value none)
     (second : (bitwiseBody profile environment declared .xor).argumentAccess 1 = .value none)
     (found : program[0]? = some (bitwiseBody profile environment declared .xor))
@@ -101,7 +101,7 @@ theorem xor64 (program : Program) (profile : FeatureProfile)
 /-- A byte-declared bitwise body truncates the result that the full-width helper preserves. -/
 theorem byte_bitwise_truncates (memory : Safety.Memory) :
     invoke [bitwiseBody .scalar {}
-      { returnType := .atom Extraction.runtimeScope "System.Byte" } .and]
+      { returnType := .primitive .byte } .and]
       5 0 [.scalar (.i32 300), .scalar (.i32 511)] memory =
         .ok (memory, [.scalar (.i32 44)]) := rfl
 #print axioms byte_bitwise_truncates

@@ -8,37 +8,41 @@ namespace CIL.Extraction
 private inductive Getter where
   | supported (owner : String) (feature : Feature)
   | accelerated (owner : String) (feature : Feature)
-  | size (owner : String)
+  | size (owner : PrimitiveType)
   | processWidth
 
 /-- The platform declaration, raw member and exact external identity agree on one getter. -/
-private def getterEntry (scope owner : String) (key : MetadataName) (name result : String)
-    (model : RuntimeModel) : ModelEntry :=
-  let resultType := TypeExpr.atom runtimeScope result
+private def getterEntry (scope : String) (owner : TypeExpr) (ownerName : String)
+    (key : MetadataName) (name : String) (result : PrimitiveType) (model : RuntimeModel) :
+    ModelEntry :=
+  let resultType := TypeExpr.primitive result
   let declared : OpenSignature := { convention := 0, returnType := resultType }
-  let target := s!"{scope}::{result} {owner}::{name}()"
+  let target := s!"{scope}::{result.display} {ownerName}::{name}()"
   let accepts (method : MethodRef) := !method.hasThis && method.genericArity == 0 &&
     method.methodArguments.isEmpty && method.parameters.isEmpty && method.returnType == resultType
   let row : ModelOverload :=
     { operand := .external (fun _ => declared) name (fun _ => some target)
       accepts
       resolve := fun _ _ => some model }
-  { opcode := .call, owner := .atom scope owner, name := key, ownsName := true, overloads := [row] }
+  { opcode := .call, owner, name := key, ownsName := true, overloads := [row] }
 
 /-- The exact member that returns the profile value or target width. -/
 private def Getter.entry : Getter → ModelEntry
   | .supported owner feature =>
-    getterEntry intrinsicsScope ("System.Runtime.Intrinsics." ++ owner) name!"get_IsSupported"
-      "get_IsSupported" "System.Boolean" (.feature feature)
+    let ownerName := "System.Runtime.Intrinsics." ++ owner
+    getterEntry intrinsicsScope (.atom intrinsicsScope ownerName) ownerName name!"get_IsSupported"
+      "get_IsSupported" .boolean (.feature feature)
   | .accelerated owner feature =>
-    getterEntry intrinsicsScope ("System.Runtime.Intrinsics." ++ owner)
-      name!"get_IsHardwareAccelerated" "get_IsHardwareAccelerated" "System.Boolean"
-      (.feature feature)
+    let ownerName := "System.Runtime.Intrinsics." ++ owner
+    getterEntry intrinsicsScope (.atom intrinsicsScope ownerName) ownerName
+      name!"get_IsHardwareAccelerated" "get_IsHardwareAccelerated" .boolean (.feature feature)
   | .size owner =>
-    getterEntry runtimeScope owner name!"get_Size" "get_Size" "System.Int32" (.constant 8)
+    getterEntry runtimeScope (.primitive owner) owner.display name!"get_Size" "get_Size" .int32
+      (.constant 8)
   | .processWidth =>
-    getterEntry runtimeScope "System.Environment" name!"get_Is64BitProcess" "get_Is64BitProcess"
-      "System.Boolean" (.constant 1)
+    let ownerName := "System.Environment"
+    getterEntry runtimeScope (.atom runtimeScope ownerName) ownerName name!"get_Is64BitProcess"
+      "get_Is64BitProcess" .boolean (.constant 1)
 
 /-- Each nested hardware owner names its own external target even when two return one flag. -/
 private def getters : List Getter := [
@@ -66,15 +70,15 @@ private def getters : List Getter := [
   .supported "X86.X86Base/X64" .x86Base64,
   .accelerated "Vector128" .vector128Accelerated,
   .accelerated "Vector256" .vector256Accelerated,
-  .size "System.IntPtr", .size "System.UIntPtr", .processWidth]
+  .size .intPtr, .size .uintPtr, .processWidth]
 
 /-- All hardware and platform getter slots of the runtime catalog. -/
 def platformEntries := getters.map Getter.entry
 
 /-- A getter row can only yield its specified model. -/
-private theorem getterEntry_yields {scope owner key name result model}
+private theorem getterEntry_yields {scope owner ownerName key name result model}
     {property : RuntimeModel → Prop} (holds : property model) :
-    (getterEntry scope owner key name result model).Yields property := by
+    (getterEntry scope owner ownerName key name result model).Yields property := by
   intro reader method actual found
   obtain ⟨row, selected, resolved⟩ := Option.bind_eq_some_iff.mp found
   simp only [getterEntry, ModelEntry.select?, ModelEntry.select?.select] at selected

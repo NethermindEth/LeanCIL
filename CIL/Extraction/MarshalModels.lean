@@ -30,9 +30,9 @@ private def spanOf (writable : Bool) (element : TypeExpr) : TypeExpr :=
 private def Member.signature (member : Member) (source target : TypeExpr) (writable : Bool) :
     OpenSignature :=
   let view := spanOf writable
-  let byte := TypeExpr.atom runtimeScope "System.Byte"
-  let integer := TypeExpr.atom runtimeScope "System.Int32"
-  let boolean := TypeExpr.atom runtimeScope "System.Boolean"
+  let byte := TypeExpr.primitive .byte
+  let integer := TypeExpr.primitive .int32
+  let boolean := TypeExpr.primitive .boolean
   let sig (result : TypeExpr) (parameters : List TypeExpr) : OpenSignature :=
     { convention := 0x10, returnType := result, parameters }
   match member with

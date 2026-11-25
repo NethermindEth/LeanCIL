@@ -14,12 +14,10 @@ namespace CIL.Extraction
 
 /-- The integer types the helpers are modelled on, with their width in bits and signedness; the
     native integers are 64 bits wide. -/
-def mathIntegers : List (String × Nat × Bool) :=
-  [("System.SByte", 8, true), ("System.Byte", 8, false),
-    ("System.Int16", 16, true), ("System.UInt16", 16, false),
-    ("System.Int32", 32, true), ("System.UInt32", 32, false),
-    ("System.Int64", 64, true), ("System.UInt64", 64, false),
-    ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)]
+def mathIntegers : List (PrimitiveType × Nat × Bool) :=
+  [(.sbyte, 8, true), (.byte, 8, false), (.int16, 16, true), (.uint16, 16, false),
+    (.int32, 32, true), (.uint32, 32, false), (.int64, 64, true), (.uint64, 64, false),
+    (.intPtr, 64, true), (.uintPtr, 64, false)]
 
 /-- The modelled helpers by metadata name, with their operation and number of parameters. -/
 def mathOperations : List (MetadataName × IntegerMath × Nat) :=
@@ -38,11 +36,10 @@ def integerMathOperand (operation : IntegerMath) (arity : Nat) (fixed : Option T
   let parameter ← parameters.head?
   if parameters != List.replicate arity parameter then none
   if fixed.any (· != parameter) then none
-  let .atom scope name := parameter | none
-  if scope != runtimeScope then none
-  let (width, signed) ← mathIntegers.lookup name
+  let .primitive type := parameter | none
+  let (width, signed) ← mathIntegers.lookup type
   if operation.signedOnly && !signed then none
-  let result := if operation == .sign then TypeExpr.atom runtimeScope "System.Int32" else parameter
+  let result := if operation == .sign then TypeExpr.primitive .int32 else parameter
   if returned != result then none
   some (width, signed)
 
@@ -68,8 +65,8 @@ def integerMathEntry (owner : TypeExpr) (fixed : Option TypeExpr)
     type declares no `Abs` or `Sign`. -/
 def integerMathEntries : List ModelEntry :=
   mathOperations.map (integerMathEntry (.atom runtimeScope "System.Math") none) ++
-    mathIntegers.flatMap fun (name, _, signed) =>
-      let owner := TypeExpr.atom runtimeScope name
+    mathIntegers.flatMap fun (type, _, signed) =>
+      let owner := TypeExpr.primitive type
       (mathOperations.filter fun (_, operation, _) => signed || !operation.signedOnly).map
         (integerMathEntry owner (some owner))
 

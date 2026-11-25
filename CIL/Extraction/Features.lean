@@ -130,7 +130,7 @@ private def constant32 (instruction : RawInstruction) : Option W32 :=
     `ret` is reachable. Any other method, or a certificate without a reachable `ret`, has none. -/
 def constantReturn (closed : RawMethod) (certificate : FeatureCertificate) : Option W32 :=
   if closed.hasThis || !closed.parameters.isEmpty ||
-      closed.returnType != .atom runtimeScope "System.Boolean" then none else
+      closed.returnType != .primitive .boolean then none else
   match (closed.code.zip certificate).filterMap returned with
   | some word :: rest =>
     if (word == 0 || word == 1) && rest.all (· == some word) then some word else none

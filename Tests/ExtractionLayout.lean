@@ -44,7 +44,7 @@ example : computeLayouts [{ explicit := false, packing := 0, declaredSize := -1,
 /-- The second field of Leaf holds an unsigned word at byte four. -/
 private def leafWord : FieldRef :=
   { owner := .aggregate "Leaf" 0, index := 1, name := name!"word",
-    type := .atom runtimeScope "System.UInt32" }
+    type := .primitive .uint32 }
 
 /-- The decoded load and its execution environment share the typed field operand. -/
 theorem leaf_word_shape :

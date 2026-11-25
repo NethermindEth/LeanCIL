@@ -110,6 +110,6 @@ structure FieldRef where
     load. -/
 def littleEndianField : FieldRef :=
   { owner := .atom runtimeScope "System.BitConverter", index := 0,
-    type := .atom runtimeScope "System.Boolean", name := name!"IsLittleEndian" }
+    type := .primitive .boolean, name := name!"IsLittleEndian" }
 
 end CIL.Extraction

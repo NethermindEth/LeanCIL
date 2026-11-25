@@ -10,7 +10,7 @@ section
 open CIL.Extraction
 
 /-- The signed native result of the byte displacement call. -/
-private def native := TypeExpr.atom runtimeScope "System.IntPtr"
+private def native := TypeExpr.primitive .intPtr
 
 /-- The closed reference whose arguments are two references to the same element. -/
 private def byteOffset (element : TypeExpr) : MethodRef :=
@@ -70,7 +70,7 @@ theorem byteOffset_bad_site :
 theorem byteOffset_unsized :
     let elements : List TypeExpr := [.apply (.constructor runtimeScope "System.Span`1") native,
       .pointer native, .byref native, .array native,
-      .object runtimeScope "System.String", .atom runtimeScope "System.Single",
+      .object runtimeScope "System.String", .primitive .single,
       .aggregate "Fixture::Pair" 0]
     elements.all (fun element => decide (decoded (byteSite (byteOffset element)) =
       liveHoleAt 0 40)) = true := by decide +kernel
@@ -94,7 +94,7 @@ theorem byteOffset_sized :
       { rawLayouts := [layout], layouts := (computeLayouts [layout]).getD #[] }
     let elements : List TypeExpr := [native, .aggregate layout.identity 0,
       .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
-        (.atom runtimeScope "System.Byte")]
+        (.primitive .byte)]
     elements.all (fun element => decide (decoded (byteSite (byteOffset element)) environment =
       .ok [.call (byteOffset element) {}])) = true := by decide +kernel
 
@@ -109,13 +109,10 @@ theorem byteOffset_step (body : Method) (pc : Nat) (args stack : List Safety.Val
 
 #print axioms byteOffset_step
 
-/-- A stored runtime integer or native integer. -/
-private def atom (name : String) := TypeExpr.atom runtimeScope name
-
 /-- The runtime types of the signed 32-bit, signed native and unsigned native offsets. -/
-private def int := atom "System.Int32"
+private def int : TypeExpr := .primitive .int32
 /-- The unsigned native offset. -/
-private def unsigned := atom "System.UIntPtr"
+private def unsigned : TypeExpr := .primitive .uintPtr
 
 /-- A checked aggregate at index zero, sized by the number of its 64-bit fields. -/
 private def environment (words : Nat) : LayoutEnvironment :=
@@ -167,14 +164,14 @@ private def excludes (element : TypeExpr) : Bool :=
 
 example : [TypeExpr.apply (.constructor runtimeScope "System.Span`1") int, .parameter 0,
     .pointer int, .byref int, .object runtimeScope "System.String", .aggregate "Fixture::Packet" 0,
-    .array int, atom "System.Single", .void].all excludes := by decide +kernel
+    .array int, .primitive .single, .void].all excludes := by decide +kernel
 
 
 /-- The printed MemberRef name for the declared address or displacement type in this fixture. -/
 private def memberType : TypeExpr → String
   | .byref (.parameter 0) => "!!0&"
   | .pointer .void => "System.Void*"
-  | .atom _ name => name
+  | .primitive type => type.display
   | _ => "unsupported"
 
 /-- A MemberRef with the external target written by Cecil and its independently closed operand. -/
@@ -253,7 +250,7 @@ theorem span_displacements_refused :
 /-- An unsized closed argument yields a hole and an unbound method parameter fails closure. -/
 theorem unsized_displacement_code :
     let excluded : List TypeExpr := [.pointer int, .byref int, .array int, .void,
-      .atom runtimeScope "System.Single", .object runtimeScope "System.String",
+      .primitive .single, .object runtimeScope "System.String",
       .aggregate "Fixture::Absent" 0]
     excluded.all (fun element => (offsetSites element 0).all fun site =>
       refusesOffset site) = true ∧

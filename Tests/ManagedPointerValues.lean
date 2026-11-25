@@ -10,7 +10,7 @@ namespace Tests.ManagedPointerValues
 open CIL CIL.Safety
 
 private def signature : ManagedSignature :=
-  ⟨.atom Extraction.runtimeScope "System.Int32", [.atom Extraction.runtimeScope "System.Int32"]⟩
+  ⟨.primitive .int32, [.primitive .int32]⟩
 private def identity : ManagedIdentity := ⟨"Handlers", 1, []⟩
 private def other : ManagedIdentity := ⟨"Handlers", 2, []⟩
 private def memory : CIL.Safety.Memory :=

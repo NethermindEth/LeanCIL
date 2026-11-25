@@ -24,7 +24,7 @@ theorem words_valid : CIL.Extraction.LayoutsValid wordsLayouts wordsComputed .x6
 /-- The field of `T::Words` at `index`. -/
 def wordField (index : Nat) : CIL.Extraction.FieldRef :=
   { owner := .aggregate "T::Words" 0, index, name := name!"word",
-    type := .atom CIL.Extraction.runtimeScope "System.UInt64" }
+    type := .primitive .uint64 }
 /-- The first, second, third and fourth words. -/
 def word0 : CIL.Extraction.FieldRef := wordField 0
 /-- The output word at byte offset 8. -/
@@ -52,7 +52,7 @@ theorem pair_valid : CIL.Extraction.LayoutsValid pairEnvironment.rawLayouts
 
 def low : CIL.Extraction.FieldRef :=
   { owner := .aggregate "T::Pair" 0, index := 0, name := name!"Low",
-    type := .atom CIL.Extraction.runtimeScope "System.UInt64" }
+    type := .primitive .uint64 }
 
 def high : CIL.Extraction.FieldRef :=
   { low with index := 1, name := name!"High" }

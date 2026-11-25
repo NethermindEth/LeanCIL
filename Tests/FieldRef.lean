@@ -25,7 +25,7 @@ private def countField : FieldRef :=
 theorem decides_a_literal :
     countField =
       { owner := .atom ownIdentity "Program", index := 0,
-        type := .atom runtimeScope "System.Int32", name := name!"count" } := by decide +kernel
+        type := .primitive .int32, name := name!"count" } := by decide +kernel
 #print axioms decides_a_literal
 
 theorem another_owner_is_another_field :

@@ -26,7 +26,7 @@ open CIL CIL.Extraction Tests.MetadataBuilder Tests.BodyEncoding
 private def pin : AssemblyPin :=
   { identity := "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" }
 private def extScope : String := "Ext, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-private def int32 : TypeExpr := .atom runtimeScope "System.Int32"
+private def int32 : TypeExpr := .primitive .int32
 
 /-- The static field instructions under test. -/
 private def ldsfld : Nat := 0x7E

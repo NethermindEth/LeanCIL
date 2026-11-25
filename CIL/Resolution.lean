@@ -32,10 +32,9 @@ extraction shares, so one fact per distinct operand serves every method.
 
 namespace CIL
 
-/-- The type expression the extractor writes for a primitive: its full name in the runtime
-    scope. -/
+/-- The type expression the extractor writes for a primitive of the runtime assembly. -/
 def PrimitiveType.typeExpr (type : PrimitiveType) : Extraction.TypeExpr :=
-  .atom Extraction.runtimeScope type.display
+  .primitive type
 
 /-- The narrowing a value of the primitive takes; `none` for every type wider than 16 bits. -/
 def PrimitiveType.narrow : PrimitiveType → Option NarrowKind
@@ -52,9 +51,10 @@ def PrimitiveType.enumUnderlying : PrimitiveType → Bool
 
 namespace Extraction
 
-/-- Whether `declaredNarrow` can be `some` for the type's head: an atom or an enum. -/
+/-- Whether `declaredNarrow` can be `some` for the type's head: a primitive, an atom or an
+    enum. -/
 def TypeExpr.narrowCandidate : TypeExpr → Bool
-  | .atom .. | .enum .. => true
+  | .primitive _ | .atom .. | .enum .. => true
   | _ => false
 
 /-- The narrowing a value of declared type `type` takes: the small-integer storage of a primitive
@@ -117,6 +117,7 @@ theorem typeStorage_narrow_of_not_candidate (layouts : List RawLayout) (type : T
   apply storage_narrow_of_wide
   intro field stored
   cases type with
+  | primitive => simp [TypeExpr.narrowCandidate] at shape
   | atom => simp [TypeExpr.narrowCandidate] at shape
   | enum => simp [TypeExpr.narrowCandidate] at shape
   | aggregate identity index =>
@@ -179,20 +180,11 @@ theorem declaredNarrow_enum_of_none (layouts : List RawLayout) (identity : TypeI
     (type : TypeExpr) (narrow : declaredNarrow layouts type = none) :
     declaredNarrow layouts (.enum identity type) = none := by
   cases type <;> try rfl
-  case atom scope name =>
-    by_cases runtime : scope = runtimeScope
-    . subst scope
-      by_cases longName : name.utf8ByteSize > "System.UInt64".utf8ByteSize
-      . simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, typeStorageAt,
-          enumUnderlyingField, longName]
-      . cases stored : primitiveField name with
-        | none => simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, typeStorageAt,
-            enumUnderlyingField, longName, stored]
-        | some kind =>
-          cases kind <;> simp_all [declaredNarrow, TypeExpr.narrowCandidate, typeStorage,
-            typeStorageAt, enumUnderlyingField, StorageType.narrow]
-    . simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, typeStorageAt,
-        enumUnderlyingField, runtime]
+  case primitive type =>
+    cases type <;> first
+      | rfl
+      | simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, typeStorageAt,
+          PrimitiveType.fieldType?, StorageType.narrow] at narrow
 
 #print axioms declaredNarrow_enum_of_none
 
@@ -602,14 +594,6 @@ def PrimitiveType.elementShape : PrimitiveType → ElementShape
   | .int64 => .value .signed64 | .uint64 => .value .unsigned64
   | .intPtr => .value .nativeInt | .uintPtr => .value .nativeUInt
   | .single | .double => .unsupported ElementShape.unsupportedType
-
-/-- The storage of an enum over the primitive; `none` where `typeStorage` admits no enum. -/
-def PrimitiveType.enumStorage : PrimitiveType → Option EnumStorage
-  | .sbyte => some .signed8 | .byte => some .unsigned8
-  | .int16 => some .signed16 | .uint16 => some .unsigned16
-  | .int32 => some .signed32 | .uint32 => some .unsigned32
-  | .int64 => some .signed64 | .uint64 => some .unsigned64
-  | .boolean | .char | .single | .double | .intPtr | .uintPtr => none
 
 /-- The shape of an array of the enum `identity` over the primitive. -/
 def PrimitiveType.enumElementShape (identity : TypeIdentity) (type : PrimitiveType) : ElementShape :=

@@ -41,22 +41,12 @@ open Lean Meta Elab Command
 open CIL.InstructionEquations
   (Body instructions listElements declareSuffixes suffixBlock suffixFrom foundAt)
 
-/-- A recognized runtime primitive, checked by its complete scope and type name. -/
+/-- A recognized runtime primitive: the `PrimitiveType` constructor a `.primitive` head holds. -/
 def primitive? (type : Expr) : Option Name := do
-  let (``CIL.Extraction.TypeExpr.atom, #[scope, name]) := type.getAppFnArgs | none
-  let scopeMatches := scope.isConstOf ``CIL.Extraction.runtimeScope ||
-    match scope with
-    | .lit (.strVal value) => value == CIL.Extraction.runtimeScope
-    | _ => false
-  unless scopeMatches do none
-  let .lit (.strVal name) := name | none
-  let primitive ← #[(`sbyte, "System.SByte"), (`byte, "System.Byte"),
-    (`boolean, "System.Boolean"), (`int16, "System.Int16"), (`uint16, "System.UInt16"),
-    (`char, "System.Char"), (`int32, "System.Int32"), (`uint32, "System.UInt32"),
-    (`int64, "System.Int64"), (`uint64, "System.UInt64"), (`single, "System.Single"),
-    (`double, "System.Double"), (`intPtr, "System.IntPtr"), (`uintPtr, "System.UIntPtr")].find?
-      (fun entry => entry.2 == name)
-  return ``CIL.PrimitiveType ++ primitive.1
+  let (``CIL.Extraction.TypeExpr.primitive, #[primitive]) := type.getAppFnArgs | none
+  let .const name _ := primitive | none
+  unless name.getPrefix == ``CIL.PrimitiveType do none
+  return name
 
 /-- A storage lemma for recognized heads, or one of five checked reflexivity results. -/
 def declaredProof? (layouts type : Expr) : MetaM (Option Expr) := withDefault do
@@ -84,7 +74,8 @@ def declaredProof? (layouts type : Expr) : MetaM (Option Expr) := withDefault do
         #[layouts, identity, terminal, proof]
       terminal := mkApp2 (mkConst ``CIL.Extraction.TypeExpr.enum) identity terminal
     return some proof
-  unless terminal.isAppOf ``CIL.Extraction.TypeExpr.atom do return none
+  unless terminal.isAppOf ``CIL.Extraction.TypeExpr.primitive ||
+      terminal.isAppOf ``CIL.Extraction.TypeExpr.atom do return none
   let narrowType := mkConst ``CIL.NarrowKind
   let choices := #[mkApp (mkConst ``Option.none [.zero]) narrowType] ++
     #[``CIL.NarrowKind.signed8, ``CIL.NarrowKind.unsigned8,
@@ -482,7 +473,7 @@ def elementProof? (method type : Expr) (reads : LayoutReads) :
     MetaM (Option (Expr × Expr)) := withDefault do
   let head ← whnf type
   let chosen ← match head.getAppFnArgs with
-    | (``CIL.Extraction.TypeExpr.atom, _) =>
+    | (``CIL.Extraction.TypeExpr.primitive, _) =>
       pure ((primitive? head).map fun primitive =>
         mkApp2 (mkConst ``CIL.Method.elementShape_primitive) method (mkConst primitive))
     | (``CIL.Extraction.TypeExpr.enum, #[identity, underlying]) =>

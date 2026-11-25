@@ -6,10 +6,10 @@ namespace Tests.SpanMethods
 open CIL CIL.Extraction
 
 /-- The index and length type of span members. -/
-def int32 := TypeExpr.atom runtimeScope "System.Int32"
+def int32 := TypeExpr.primitive .int32
 
 /-- The element type of the word-summing loop. -/
-def uint64 := TypeExpr.atom runtimeScope "System.UInt64"
+def uint64 := TypeExpr.primitive .uint64
 
 private def span (writable : Bool) (element : TypeExpr) :=
   TypeExpr.apply (.constructor runtimeScope (if writable then "System.Span`1" else

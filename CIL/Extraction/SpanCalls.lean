@@ -19,8 +19,9 @@ def spanElementName (type : TypeExpr) : Option String := do
     return String.ofList (← aggregateName identity)
   if let some (_, name) := namedType type then
     return String.ofList name
-  let .apply (.constructor _ name) (.atom _ element) := type | none
-  if (integerVectorWidth type).isSome then return (← name.signatureName?) ++ "<" ++ element ++ ">"
+  let .apply (.constructor _ name) (.primitive element) := type | none
+  if (integerVectorWidth type).isSome then
+    return (← name.signatureName?) ++ "<" ++ element.display ++ ">"
   else none
 
 end CIL.Extraction

@@ -49,6 +49,14 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     static string Scope(string assembly) =>
         NamedScopes.FirstOrDefault(scope => scope.Assembly == assembly).Term ?? Quote(assembly);
 
+    /// <summary>The term <c>.primitive .int32</c> of a primitive the runtime assembly defines, or null for any
+    /// other type. Lean refuses the runtime-scope atom of a primitive's name, so this is the only form.</summary>
+    internal static string? RuntimePrimitive(TypeReference type) =>
+        type is not (TypeSpecification or GenericParameter) && type.DeclaringType is null &&
+        PrimitiveType.OfElementType(type.MetadataType) is { } primitive &&
+        type.Namespace == "System" && type.Name == primitive.Name &&
+        LayoutEvidence.Scope(type) == TypeTests.RuntimeScope ? $".primitive {primitive.ToLean()}" : null;
+
     internal string Type(TypeReference type) => Type(type, false);
 
     /// <summary>The type expression naming a class instance type, as field operations carry it.</summary>
@@ -152,7 +160,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             return $".enum {EnumTypes.Identity(type).ToLean()} ({Nested(underlying)})";
         }
         if (ObjectTypes.Reference(type)) return ObjectType(type);
-        return Aggregate(localOnly: true) ?? $".atom {Scope(type)} {Quote(type.FullName)}";
+        return Aggregate(localOnly: true) ?? RuntimePrimitive(type) ?? $".atom {Scope(type)} {Quote(type.FullName)}";
     }
 
     // The head says whether the instances are values or references, as the signature's marker does.

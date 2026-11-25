@@ -122,6 +122,7 @@ instance : ToExpr ClassName where
         return mkApp (mkConst ``ClassName.ofText) (mkStrLit text)
     return mkApp (mkConst ``ClassName.mk) (toExpr name.levels)
 
+deriving instance ToExpr for PrimitiveType
 deriving instance ToExpr for Extraction.TypeExpr
 deriving instance ToExpr for Extraction.FieldRef
 deriving instance ToExpr for Extraction.MethodRef

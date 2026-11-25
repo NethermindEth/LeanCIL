@@ -48,7 +48,7 @@ internal static class ModelOperandChecks
                         | .apply (.constructor _ name) element =>
                           .apply (.constructor "Foreign" name) element
                         | owner => owner
-                      let floating := TypeExpr.atom runtimeScope "System.Double"
+                      let floating := TypeExpr.primitive .double
                       let floatingSite : Option CallSite := do
                         let result <- substituteType [floating] site.declared.returnType
                         let parameters <- site.declared.parameters.mapM (substituteType [floating])
@@ -74,7 +74,7 @@ internal static class ModelOperandChecks
                         { site with method.returnType := .pointer .void },
                         { site with declared.convention := 32 },
                         { site with declared.parameters := .void :: site.declared.parameters },
-                        { site with typeArguments := [.atom runtimeScope "System.Double"] },
+                        { site with typeArguments := [.primitive .double] },
                         { site with target := .external "Other overload" }]
                       decide (decode profile site = some [.call site.method {}]) && {{availability}}
                         bad.all refused && ownerElement.all refused &&

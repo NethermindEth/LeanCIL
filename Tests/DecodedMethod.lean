@@ -313,7 +313,7 @@ theorem staticSpanDecodes :
         parameters := [.atom runtimeScope handle] },
       target := .external
         s!"{runtimeScope}::System.ReadOnlySpan`1<!!0> {owner}::{name}({handle})" }
-    let wide := TypeExpr.atom runtimeScope "System.UInt64"
+    let wide := TypeExpr.primitive .uint64
     Tests.ModelOperands.checks site ∧
       runtimeModel {} .call site.method = some (.memory (.createSpan 4)) ∧
       Tests.ModelOperands.decoded { site with method.methodArguments := [wide] } =
@@ -402,7 +402,7 @@ theorem invalid_prefix_sequences_refused :
     let add := instr 3 0x58
     let readOnly := instr 0 0xFE1E
     let owner := TypeExpr.object "T" "Account"
-    let field := instr 3 123 (.field owner 0 (.atom runtimeScope "System.Int32") name!"n" false)
+    let field := instr 3 123 (.field owner 0 (.primitive .int32) name!"n" false)
     let address := instr 4 143 (.type owner)
     let ret := instr 8 42
     let cases := [[modifier, add], [instr 0 0xFE12 (.integer 3), field], [instr 0 0xFE12, load],

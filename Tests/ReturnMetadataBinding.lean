@@ -58,7 +58,7 @@ private def acceptsReturn (result : List Nat) (claimed : TypeExpr)
 private def acceptsParameter (parameter : List Nat) (claimed : TypeExpr)
     (modifierNamespace : String := "System.Runtime.CompilerServices")
     (modifierName : String := "OtherModifier") : Bool :=
-  acceptsSignature [8] (.atom runtimeScope "System.Int32") [parameter] [claimed] modifierNamespace
+  acceptsSignature [8] (.primitive .int32) [parameter] [claimed] modifierNamespace
     modifierName
 
 /-- An opaque atom cannot conceal an unsupported required return modifier. -/
@@ -71,7 +71,7 @@ theorem rejects_opaque_modified_return :
 
 /-- Ordinary integer and the exact required init-void return remain admitted. -/
 theorem accepts_declared_returns :
-    acceptsReturn [8] (.atom runtimeScope "System.Int32") = true ∧
+    acceptsReturn [8] (.primitive .int32) = true ∧
     acceptsReturn [0x1F, 9, 1] .void "IsExternalInit" = true := by decide +kernel
 
 #print axioms accepts_declared_returns
@@ -115,8 +115,8 @@ theorem rejects_modified_parameters :
 /-- A plain parameter and an `in` reference, whose `InAttribute` modifier it loses at run time,
     remain admitted. -/
 theorem accepts_declared_parameters :
-    acceptsParameter [5] (.atom runtimeScope "System.Byte") = true ∧
-    acceptsParameter [0x1F, 9, 0x10, 8] (.byref (.atom runtimeScope "System.Int32"))
+    acceptsParameter [5] (.primitive .byte) = true ∧
+    acceptsParameter [0x1F, 9, 0x10, 8] (.byref (.primitive .int32))
       "System.Runtime.InteropServices" "InAttribute" = true := by decide +kernel
 
 #print axioms accepts_declared_parameters

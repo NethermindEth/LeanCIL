@@ -42,7 +42,7 @@ private def transfer (aligned store : Bool) (reader : CallLayouts) (method : Met
 
 /-- One external member with its open declaration and corresponding closed address type. -/
 private def overload (name : String) (aligned store byref : Bool) : ModelOverload :=
-  let address := if byref then TypeExpr.byref (.atom runtimeScope "System.Byte")
+  let address := if byref then TypeExpr.byref (.primitive .byte)
     else .pointer .void
   let spelling := if byref then "System.Byte&" else "System.Void*"
   { operand := unsafeOperand name (if store then "System.Void" else "!!0")

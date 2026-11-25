@@ -12,10 +12,10 @@ namespace Tests.UnsafeReinterpretations
 open CIL CIL.Extraction CIL.Safety
 
 /-- The primitive byte type used by the scalar casts. -/
-private def byteType := TypeExpr.atom runtimeScope "System.Byte"
+private def byteType := TypeExpr.primitive .byte
 
 /-- The Boolean result of the scalar BitCast overload. -/
-private def boolean := TypeExpr.atom runtimeScope "System.Boolean"
+private def boolean := TypeExpr.primitive .boolean
 
 /-- The example packet occupies layout slot zero. -/
 private def packet := TypeExpr.aggregate "Test::Packet" 0
@@ -29,9 +29,9 @@ private def environment (words : Nat) : LayoutEnvironment :=
   { rawLayouts := raw, layouts := (computeLayouts raw).getD #[] }
 
 /-- An intrinsic vector over the given runtime element type. -/
-private def vector (width : Nat) (element := "System.Byte") : TypeExpr :=
+private def vector (width : Nat) (element := PrimitiveType.byte) : TypeExpr :=
   .apply (.constructor intrinsicsScope s!"System.Runtime.Intrinsics.Vector{width}`1")
-    (.atom runtimeScope element)
+    (.primitive element)
 
 /-- A closed static call together with the declaration and external identity of its member. -/
 private def site (name : MetadataName) (text signature : String) (args : List TypeExpr)
@@ -155,8 +155,8 @@ theorem bitCastExclusions :
      .object "Test" "Class", .array byteType, byteType].all (fun arg =>
       (model (cast arg packet)).isNone && (model (cast packet arg)).isNone) &&
     (model (cast boolean byteType)).isNone &&
-    [("System.Single", 2, 128), ("System.Double", 4, 256),
-     ("System.Double", 2, 128), ("System.Single", 4, 256)].all (fun (element, words, width) =>
+    [(PrimitiveType.single, 2, 128), (.double, 4, 256),
+     (.double, 2, 128), (.single, 4, 256)].all (fun (element, words, width) =>
       let arg := vector width element
       (model (cast arg packet) (environment words)).isNone &&
         (model (cast packet arg) (environment words)).isNone) := by decide +kernel
@@ -200,7 +200,7 @@ theorem excludedOperands :
     [TypeExpr.byref byteType, .pointer byteType].all (fun arg =>
       refuses (asSite byteType byteType) (asSite byteType arg) &&
       refuses (asSite byteType byteType) (asSite arg byteType)) &&
-    [vector 256, vector 128 "System.Single", vector 128 "System.Double",
+    [vector 256, vector 128 .single, vector 128 .double,
       .aggregate "Other" 0, span byteType, .pointer byteType, .object "Test" "Class",
       .array byteType, byteType].all (fun arg =>
       refuses (cast (vector 128) packet) (cast arg packet) &&

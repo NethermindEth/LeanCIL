@@ -15,12 +15,12 @@ open CIL CIL.Extraction
 
 /-- A static feature getter with independently constructed raw metadata. -/
 def getter (owner member : String) : CallSite := {
-  declared := { convention := 0, returnType := .atom runtimeScope "System.Boolean" },
+  declared := { convention := 0, returnType := .primitive .boolean },
   method := {
     owner := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner),
     name := (MetadataName.ofBytes? (member.toUTF8.toList.map UInt8.toNat)).getD ⟨0⟩,
     hasThis := false, genericArity := 0,
-    returnType := .atom runtimeScope "System.Boolean", parameters := [] }
+    returnType := .primitive .boolean, parameters := [] }
   name := member
   target := .external (intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics." ++
     owner ++ "::" ++ member ++ "()")
@@ -119,20 +119,31 @@ theorem wrong_call_shape :
       none ∧
     platformGetterModel { getter "X86.Sse41" "get_IsSupported" with returnsValue := false } = none ∧
     platformGetterModel { getter "X86.Sse41" "get_IsSupported" with
-      typeArguments := [.atom runtimeScope "System.Int32"] } = none := by decide +kernel
+      typeArguments := [.primitive .int32] } = none := by decide +kernel
 #print axioms wrong_call_shape
 
 /-- Raw process-width calls retain their exact owner, result and external identity. -/
-def platform (owner member result : String) : CallSite := {
-  declared := { convention := 0, returnType := .atom runtimeScope result },
+def platform (owner : TypeExpr) (ownerName member : String) (result : PrimitiveType) :
+    CallSite := {
+  declared := { convention := 0, returnType := .primitive result },
   method := {
-    owner := .atom runtimeScope owner,
+    owner,
     name := (MetadataName.ofBytes? (member.toUTF8.toList.map UInt8.toNat)).getD ⟨0⟩,
-    hasThis := false, genericArity := 0, returnType := .atom runtimeScope result,
+    hasThis := false, genericArity := 0, returnType := .primitive result,
     parameters := [] }
   name := member
-  target := .external (runtimeScope ++ "::" ++ result ++ " " ++ owner ++ "::" ++ member ++ "()")
+  target := .external
+    (runtimeScope ++ "::" ++ result.display ++ " " ++ ownerName ++ "::" ++ member ++ "()")
   parameterCount := 0, returnsValue := true, typeArguments := [] }
+
+/-- The `get_Size` getter of the native integer `owner`. -/
+def sizeGetter (owner : PrimitiveType) : CallSite :=
+  platform (.primitive owner) owner.display "get_Size" .int32
+
+/-- `Environment.get_Is64BitProcess`. -/
+def processWidth : CallSite :=
+  platform (.atom runtimeScope "System.Environment") "System.Environment" "get_Is64BitProcess"
+    .boolean
 
 /-- Each supported hardware owner and each process getter keeps its call only at its exact row. -/
 theorem getter_decoding :
@@ -143,9 +154,7 @@ theorem getter_decoding :
       (fun owner => Tests.ModelOperands.checks (getter owner "get_IsSupported"))) = true ∧
     (["Vector128", "Vector256"].all (fun owner =>
       Tests.ModelOperands.checks (getter owner "get_IsHardwareAccelerated"))) = true ∧
-    ([platform "System.IntPtr" "get_Size" "System.Int32",
-      platform "System.UIntPtr" "get_Size" "System.Int32",
-      platform "System.Environment" "get_Is64BitProcess" "System.Boolean"].all
+    ([sizeGetter .intPtr, sizeGetter .uintPtr, processWidth].all
         Tests.ModelOperands.checks) = true := by
   decide +kernel
 
@@ -153,46 +162,47 @@ theorem getter_decoding :
 
 /-- Both native-size getters and the process query use the admitted 64-bit platform. -/
 theorem platform_values :
-    platformGetterModel (platform "System.IntPtr" "get_Size" "System.Int32") = some (.constant 8) ∧
-    platformGetterModel (platform "System.UIntPtr" "get_Size" "System.Int32") = some (.constant 8) ∧
-    platformGetterModel (platform "System.Environment" "get_Is64BitProcess" "System.Boolean") =
-      some (.constant 1) := by decide +kernel
+    platformGetterModel (sizeGetter .intPtr) = some (.constant 8) ∧
+    platformGetterModel (sizeGetter .uintPtr) = some (.constant 8) ∧
+    platformGetterModel processWidth = some (.constant 1) := by decide +kernel
 #print axioms platform_values
 
 /-- A platform constant is checked even when its forged instruction has the same stack effect. -/
 theorem platform_encoding (raw : RawMethod) :
-    let site := platform "System.IntPtr" "get_Size" "System.Int32"
+    let site := sizeGetter .intPtr
     featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.call site.method {}) = true ∧
     featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.ldc_i4 4) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
       method.owner := .atom "forged" "System.IntPtr" }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
+      method.owner := .atom runtimeScope "System.IntPtr" }⟩ (.ldc_i4 8) = false ∧
+    featureOpMatches #[] raw ⟨0, 40, .call { site with
       target := .external "forged" }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
-      method.returnType := .atom runtimeScope "System.UInt32" }⟩ (.ldc_i4 8) = false ∧
+      method.returnType := .primitive .uint32 }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 111, .call site⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with method.hasThis := true }⟩ (.ldc_i4 8) =
       false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with parameterCount := 1 }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
-      typeArguments := [.atom runtimeScope "System.Int32"] }⟩ (.ldc_i4 8) = false := by
+      typeArguments := [.primitive .int32] }⟩ (.ldc_i4 8) = false := by
   unfold featureOpMatches
   decide +kernel
 #print axioms platform_encoding
 
 /-- A raw static Boolean load from `owner` in `scope`. -/
 def staticBoolean (scope owner : String) : RawInstruction :=
-  ⟨0, 126, .field (.atom scope owner) 0 (.atom runtimeScope "System.Boolean")
+  ⟨0, 126, .field (.atom scope owner) 0 (.primitive .boolean)
     name!"IsLittleEndian" true⟩
 
 /-- A static `BitConverter` field of another type, which is not the endianness constant. -/
 def integerField : RawOperand :=
-  .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Int32")
+  .field (.atom runtimeScope "System.BitConverter") 0 (.primitive .int32)
     name!"IsLittleEndian" true
 
 /-- A static `BitConverter` Boolean with another name, which is not the endianness constant. -/
 def otherBoolean : RawOperand :=
-  .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Boolean")
+  .field (.atom runtimeScope "System.BitConverter") 0 (.primitive .boolean)
     name!"IsBigEndian" true
 
 /-- Only the runtime's `BitConverter` Boolean is the little-endian constant, bound exactly. -/
@@ -213,11 +223,11 @@ theorem platform_field (raw : RawMethod) :
 
 /-- A reference-content query retains its independently serialized generic argument. -/
 def referenceQuery (type : TypeExpr) : CallSite := {
-  declared := { convention := 0x10, returnType := .atom runtimeScope "System.Boolean" },
+  declared := { convention := 0x10, returnType := .primitive .boolean },
   method := {
     owner := .atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers",
     name := name!"IsReferenceOrContainsReferences", hasThis := false, genericArity := 1,
-    returnType := .atom runtimeScope "System.Boolean", parameters := [],
+    returnType := .primitive .boolean, parameters := [],
     methodArguments := [type] },
   name := "IsReferenceOrContainsReferences",
   target := .external (runtimeScope ++
@@ -227,12 +237,12 @@ def referenceQuery (type : TypeExpr) : CallSite := {
 
 /-- Representable references and views are not reference-free generic value storage. -/
 theorem reference_content_boundary :
-    let integer := TypeExpr.atom runtimeScope "System.Int32"
+    let integer := TypeExpr.primitive .int32
     let query := fun type => referenceContentFact #[] (referenceQuery type)
     query integer = some 0 ∧
-    query (.atom runtimeScope "System.Boolean") = some 0 ∧
-    query (.atom runtimeScope "System.Char") = some 0 ∧
-    query (.atom runtimeScope "System.UIntPtr") = some 0 ∧
+    query (.primitive .boolean) = some 0 ∧
+    query (.primitive .char) = some 0 ∧
+    query (.primitive .uintPtr) = some 0 ∧
     query (.enum (Tests.enumIdentity "enum") integer) = some 0 ∧
     query (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector256`1")
       integer) = some 0 ∧
@@ -241,7 +251,7 @@ theorem reference_content_boundary :
     query (.byref integer) = none ∧ query (.pointer integer) = none ∧
     query (.array integer) = none ∧ query (.parameter 0) = none ∧
     query (.atom runtimeScope "System.Object") = none ∧
-    query (.atom runtimeScope "System.Single") = none ∧
+    query (.primitive .single) = none ∧
     query (.apply (.constructor runtimeScope "System.Span`1") integer) = none ∧
     query (.apply (.constructor runtimeScope "System.ReadOnlySpan`1") integer) = none ∧
     query (.aggregate "missing" 0) = none := by decide +kernel
@@ -249,9 +259,9 @@ theorem reference_content_boundary :
 
 /-- A malformed query or an argument with managed references cannot acquire a model. -/
 theorem reference_decoding :
-    let query := referenceQuery (.atom runtimeScope "System.Int32")
+    let query := referenceQuery (.primitive .int32)
     Tests.ModelOperands.checks query = true ∧
-      Tests.ModelOperands.decoded (referenceQuery (.array (.atom runtimeScope "System.Int32"))) =
+      Tests.ModelOperands.decoded (referenceQuery (.array (.primitive .int32))) =
         liveHoleAt 0 40 := by decide +kernel
 
 #print axioms reference_decoding

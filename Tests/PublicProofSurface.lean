@@ -48,13 +48,13 @@ theorem named_call_continuation (program : CIL.Program) (memory : Memory) (value
 open CIL.Extraction in
 private def wordVector (width : Nat) : TypeExpr :=
   .apply (.constructor intrinsicsScope s!"System.Runtime.Intrinsics.Vector{width}`1")
-    (.atom runtimeScope "System.UInt64")
+    (.primitive .uint64)
 
 open CIL.Extraction in
 private def permuteMethod : MethodRef :=
   { owner := .atom intrinsicsScope "System.Runtime.Intrinsics.X86.Avx2", name := name!"Permute4x64",
     hasThis := false, genericArity := 0, returnType := wordVector 256,
-    parameters := [wordVector 256, .atom runtimeScope "System.Byte"] }
+    parameters := [wordVector 256, .primitive .byte] }
 
 open CIL.Extraction in
 private def zeroMethod : MethodRef :=
@@ -64,7 +64,7 @@ private def zeroMethod : MethodRef :=
 open CIL.Extraction in
 private def equalityMethod (width : Nat) : MethodRef :=
   { owner := wordVector width, name := name!"op_Equality", hasThis := false,
-    genericArity := 0, returnType := .atom runtimeScope "System.Boolean",
+    genericArity := 0, returnType := .primitive .boolean,
     parameters := [wordVector width, wordVector width] }
 
 /-- The vector control is an ordinary literal in the emitted instructions. -/
@@ -97,7 +97,7 @@ private def bytesToVector : MethodRef :=
 /-- An aggregate is reinterpreted as a vector and compared with zero before a narrow return. -/
 @[cil_code] def aggregateZero : CIL.Method :=
   {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   environment := {
     rawLayouts := [{ identity := "Fixture::Bytes", explicit := true, packing := 1,
                      declaredSize := 32, fields := [] }]
@@ -122,7 +122,7 @@ theorem aggregate_boolean_return (memory : Memory) (frame : Frame) (input : Refe
 /-- A vector comparison returns its scalar Boolean through the narrow return instruction. -/
 @[cil_code] def equalVector : CIL.Method :=
   {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   locals := [], returnsValue := true,
     code := [.call (equalityMethod 128), .ret] }
 cil_runtime_models equalVector
@@ -158,7 +158,7 @@ def pairView (reference : Reference) : ArgumentView := ⟨reference, 16⟩
 
 /-- The checked call that accepts the output byref before the two field reads. -/
 private def skipWord : CIL.Extraction.MethodRef :=
-  let word := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.UInt64"
+  let word := CIL.Extraction.TypeExpr.primitive .uint64
   { owner := CIL.Extraction.unsafeOwner, name := name!"SkipInit", hasThis := false,
     genericArity := 1, parameters := [.byref word], methodArguments := [word], returnType := .void }
 
@@ -170,7 +170,7 @@ private def pairEnvironment : CIL.LayoutEnvironment :=
 
 private def low : CIL.Extraction.FieldRef :=
   { owner := .aggregate "Pair" 0, index := 0, name := name!"Low",
-    type := .atom CIL.Extraction.runtimeScope "System.UInt64" }
+    type := .primitive .uint64 }
 
 private def high : CIL.Extraction.FieldRef := { low with index := 1, name := name!"High" }
 

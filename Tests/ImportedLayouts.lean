@@ -9,10 +9,8 @@ import Tests.LayoutAccumulation
 namespace Tests.ImportedLayouts
 open CIL CIL.Extraction
 
-/-- The primitive assembly identity with its checked byte representation. -/
-def runtime : String := runtimeScope
 def library : String := "Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-def word : TypeExpr := .atom runtime "System.UInt64"
+def word : TypeExpr := .primitive .uint64
 def owner : TypeExpr := .atom library "Library.Methods"
 def pair : TypeExpr := .atom library "Library.Pair"
 
@@ -52,7 +50,7 @@ theorem rejection_4 : ¬ LayoutProjectionValid artifactRaw artifactComputed publ
 
 /-- Matching published and actual rows cannot certify four bytes for an enum over an enum. -/
 theorem nestedEnumCatalogRejected :
-    let underlying := TypeExpr.enum (Tests.enumIdentity "Inner") (.atom runtimeScope "System.Int32")
+    let underlying := TypeExpr.enum (Tests.enumIdentity "Inner") (.primitive .int32)
     let rows := [Tests.LayoutAccumulation.enumWrap underlying .signed32]
     let imported := ImportLayoutCatalog.mk rows rows #[privateLayout]
     Not (imported.Valid .scalar) := by decide +kernel
@@ -118,7 +116,7 @@ theorem closed_generic_call :
     validateImportCall [] [identitySlot] 40 identitySite identitySlot.identity 0 1 = true := by decide +kernel
 #print axioms closed_generic_call
 
-theorem rejection_12 : validateImportCall [] [identitySlot] 40 { identitySite with typeArguments := [.atom runtime "System.UInt32"] }
+theorem rejection_12 : validateImportCall [] [identitySlot] 40 { identitySite with typeArguments := [.primitive .uint32] }
     identitySlot.identity 0 1 = false := by decide +kernel
 #print axioms rejection_12
 theorem rejection_13 : validateImportCall [] [identitySlot] 40 { identitySite with typeArguments := [.parameter 0] }

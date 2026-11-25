@@ -32,6 +32,16 @@ inductive FieldType where
   | aggregate (index : Nat)
   deriving DecidableEq, Repr
 
+/-- The field storage of a primitive; `none` for `Single` and `Double`, which no struct field of
+    the model holds. -/
+def _root_.CIL.PrimitiveType.fieldType? : PrimitiveType → Option FieldType
+  | .sbyte => some .signed8 | .byte => some .unsigned8 | .boolean => some .boolean
+  | .int16 => some .signed16 | .uint16 => some .unsigned16 | .char => some .character
+  | .int32 => some .signed32 | .uint32 => some .unsigned32
+  | .int64 => some .signed64 | .uint64 => some .unsigned64
+  | .intPtr => some .nativeInt | .uintPtr => some .nativeUInt
+  | .single | .double => none
+
 /-- The exact primitive runtime names and their field storage. -/
 private def primitiveFields : List (Prod String FieldType) :=
   [("System.SByte", .signed8), ("System.Byte", .unsigned8), ("System.Boolean", .boolean),
@@ -101,15 +111,19 @@ private theorem primitiveField_eq (name : String) : primitiveField name = (match
   repeat' (split <;> simp_all)
 #print axioms primitiveField_eq
 
-/-- The field kind of an enum whose immediate underlying type is a runtime integer atom. -/
+/-- A primitive's typed storage is the storage its runtime name selected, for every primitive. -/
+theorem _root_.CIL.PrimitiveType.fieldType?_eq_primitiveField (type : PrimitiveType) :
+    type.fieldType? = primitiveField type.display := by
+  cases type <;> rfl
+#print axioms CIL.PrimitiveType.fieldType?_eq_primitiveField
+
+/-- The field kind of an enum whose immediate underlying type is a runtime integer primitive. -/
 def enumUnderlyingField : TypeExpr -> Option FieldType
-  | .atom scope name =>
-    -- UInt64 has one of the longest admitted names. Bound the byte lookup for other names.
-    if scope != runtimeScope || name.utf8ByteSize > "System.UInt64".utf8ByteSize then none else
-      (primitiveField name).filter fun kind => match kind with
-        | .signed8 | .unsigned8 | .signed16 | .unsigned16 | .signed32 | .unsigned32
-        | .signed64 | .unsigned64 => true
-        | _ => false
+  | .primitive type =>
+    type.fieldType?.filter fun kind => match kind with
+      | .signed8 | .unsigned8 | .signed16 | .unsigned16 | .signed32 | .unsigned32
+      | .signed64 | .unsigned64 => true
+      | _ => false
   | _ => none
 
 /-- The lane of a vector whose elements have field kind `kind`; `none` for a kind no vector
@@ -500,14 +514,11 @@ private def genericFieldType (table : LayoutTable) (type : TypeExpr) : Option Fi
   | .enum _ underlying => enumUnderlyingField underlying
   | .aggregate identity index =>
     if (table.entry index).any (·.identity == identity) then some (.aggregate index) else none
-  | .atom scope name => if scope == runtimeScope then primitiveField name else none
-  | .apply (.constructor scope name) (.atom elementScope element) => do
+  | .primitive type => type.fieldType?
+  | .apply (.constructor scope name) (.primitive element) => do
     if scope != "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, " ++
-        "PublicKeyToken=cc7b13ffcd2ddd51" || elementScope != runtimeScope then none
-    let lane ← match element with
-      | "System.Byte" => some VectorLane.unsigned8 | "System.Int32" => some .signed32
-      | "System.UInt32" => some .unsigned32 | "System.Int64" => some .signed64
-      | "System.UInt64" => some .unsigned64 | _ => none
+        "PublicKeyToken=cc7b13ffcd2ddd51" then none
+    let lane ← element.fieldType?.bind VectorLane.ofField?
     if name == "System.Runtime.Intrinsics.Vector128`1" then some (.vector128 lane)
     else if name == "System.Runtime.Intrinsics.Vector256`1" then some (.vector256 lane) else none
   | _ => none
@@ -519,10 +530,15 @@ def genericOwnerIdentity (owner : TypeExpr) (arguments : List TypeExpr) : Option
           Prod.mk scope <$> name.signatureName?
         | _ => none
       let names ← arguments.mapM fun argument => match argument with
+        | .primitive type => some (runtimeScope ++ "::" ++ type.display)
         | .atom scope name => some (scope ++ "::" ++ name)
         | .aggregate identity _ => some identity
         | .enum identity _ => do
           return (← assemblyScope? identity.assembly) ++ "::" ++ (← enumSignatureName? identity)
+        | .apply (.constructor scope name) (.primitive element)
+        | .apply (.objectConstructor scope name) (.primitive element) =>
+          do return scope ++ "::" ++ (← name.signatureName?) ++
+            "<" ++ runtimeScope ++ "::" ++ element.display ++ ">"
         | .apply (.constructor scope name) (.atom elementScope element)
         | .apply (.objectConstructor scope name) (.atom elementScope element) =>
           do return scope ++ "::" ++ (← name.signatureName?) ++

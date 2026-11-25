@@ -55,7 +55,7 @@ private def scalarFrame : Frame := { activation := 0, locals := [], owned := [] 
 /-- A method whose one parameter is declared `System.Byte`. -/
 private def byteParameter : CIL.Method :=
   { code := [.ldarg 0, .ret], locals := [], returnsValue := true,
-    declared := { parameters := [.atom CIL.Extraction.runtimeScope "System.Byte"] } }
+    declared := { parameters := [.primitive .byte] } }
 
 /-- `ldarg` narrows an argument as its declared type requires: a Byte keeps its low 8 bits. -/
 theorem ldarg_narrows_declared_byte :
@@ -73,7 +73,7 @@ theorem ldarg_rejects_unspecified_narrow (low : CIL.W64) :
 private def homedParameter : CIL.Method :=
   { code := [.ldc_i4 9, .stloc 0, .ldarg 0, .ret], locals := [], returnsValue := true,
     parameterHomes := [(0, .word32)],
-    declared := { parameters := [.atom CIL.Extraction.runtimeScope "System.Int32"] } }
+    declared := { parameters := [.primitive .int32] } }
 
 /-- `ldarg` of a homed argument reads the home, not the value the caller passed. -/
 theorem ldarg_reads_home :
@@ -648,7 +648,7 @@ theorem divRem_zero : CIL.X86.divRem64 7 0 0 = .error .divideByZero := rfl
 theorem divRem_operands : CIL.X86.divRemValue [.i64 1, .i32 0, .i64 3] = .error .invalidOperands := rfl
 
 private def hardwareDivRem : CIL.Extraction.MethodRef :=
-  let word := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.UInt64"
+  let word := CIL.Extraction.TypeExpr.primitive .uint64
   { owner := .atom CIL.Extraction.intrinsicsScope "System.Runtime.Intrinsics.X86.X86Base/X64",
     name := name!"DivRem", genericArity := 0, hasThis := false,
     returnType := .aggregate (CIL.Extraction.integerPairIdentity "System.UInt64") 0,

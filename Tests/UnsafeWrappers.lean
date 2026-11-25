@@ -123,7 +123,7 @@ def sizeMethod (method : CIL.Extraction.MethodRef) (profile : CIL.FeatureProfile
     memory. -/
 theorem size_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvironment}
     {method : CIL.Extraction.MethodRef} {size : BitVec 32}
-    (returnedType : declared.returnType = .atom CIL.Extraction.runtimeScope "System.Int32")
+    (returnedType : declared.returnType = .primitive .int32)
     (found : CIL.Extraction.runtimeModel environment .call method = some (.constant size))
     (profile : CIL.FeatureProfile) (memory : Memory) :
     (invoke [sizeMethod method profile declared environment] 8 0 [] memory).map Prod.snd =
@@ -165,15 +165,15 @@ private def emittedEnvironment : CIL.LayoutEnvironment := { layouts := #[⟨⟨4
 /-- `int Unsafe.SizeOf<int>()` as a call site instantiates it. -/
 private def sizeOfInt : CIL.Extraction.MethodRef :=
   { owner := CIL.Extraction.unsafeOwner, name := name!"SizeOf", hasThis := false,
-    genericArity := 1, returnType := .atom CIL.Extraction.runtimeScope "System.Int32",
-    parameters := [], methodArguments := [.atom CIL.Extraction.runtimeScope "System.Int32"] }
+    genericArity := 1, returnType := .primitive .int32,
+    parameters := [], methodArguments := [.primitive .int32] }
 
 /-- `Unsafe.SizeOf` in the form an extraction emits. -/
 private def emittedSize : CIL.Method :=
   { profile := .scalar, returnsValue := true, locals := [], localKinds := [],
     opaqueVectorLocals := [], parameterHomes := [], staticSites := [],
     declared :=
-      { parameters := [], returnType := .atom CIL.Extraction.runtimeScope "System.Int32" },
+      { parameters := [], returnType := .primitive .int32 },
     environment := emittedEnvironment, links := [], code := [.call sizeOfInt {}, .ret] }
 
 example : (invoke [emittedSize] 8 0 [] Memory.empty).map Prod.snd = .ok [.scalar (.i32 4)] := by
@@ -182,8 +182,8 @@ example : (invoke [emittedSize] 8 0 [] Memory.empty).map Prod.snd = .ok [.scalar
 
 /-- The signed Int32 offset overload at a Boolean element. -/
 private def addBoolean : CIL.Extraction.MethodRef :=
-  let element := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Boolean"
-  let offset := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Int32"
+  let element := CIL.Extraction.TypeExpr.primitive .boolean
+  let offset := CIL.Extraction.TypeExpr.primitive .int32
   { owner := CIL.Extraction.unsafeOwner, name := name!"Add", hasThis := false,
     genericArity := 1, returnType := .byref element, parameters := [.byref element, offset],
     methodArguments := [element] }
@@ -193,9 +193,9 @@ private def emittedAdd : CIL.Method :=
   { profile := .scalar, returnsValue := true, locals := [], localKinds := [],
     opaqueVectorLocals := [], parameterHomes := [], staticSites := [],
     declared :=
-      { parameters := [.byref (.atom CIL.Extraction.runtimeScope "System.Boolean"),
-          .atom CIL.Extraction.runtimeScope "System.Int32"],
-        returnType := .byref (.atom CIL.Extraction.runtimeScope "System.Boolean") },
+      { parameters := [.byref (.primitive .boolean),
+          .primitive .int32],
+        returnType := .byref (.primitive .boolean) },
     environment := emittedEnvironment, links := [],
     code := [.ldarg 0, .ldarg 1, .call addBoolean {}, .ret] }
 

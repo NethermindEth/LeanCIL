@@ -13,22 +13,22 @@ open CIL CIL.Extraction
 /-- The primitive assembly identity with its checked byte representation. -/
 private def runtime := runtimeScope
 private def owner := "Fixture, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-private def intType : TypeExpr := .atom runtime "System.Int32"
-private def word : TypeExpr := .atom runtime "System.UInt64"
+private def intType : TypeExpr := .primitive .int32
+private def word : TypeExpr := .primitive .uint64
 private def marker : TypeExpr := .aggregate (owner ++ "::Fixture.Marker") 0
 private def other : TypeExpr := .aggregate (owner ++ "::Fixture.Other") 1
 
 private def typeCall (name : String) (methodName : MetadataName) (signature : String)
     (parameters : Nat) : RawOperand := .call {
   declared := {
-    convention := 0, returnType := .atom runtime
-      (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
+    convention := 0, returnType := if name == "GetTypeFromHandle" then .atom runtime "System.Type"
+      else .primitive .boolean,
     parameters := if name == "GetTypeFromHandle" then [.atom runtime "System.RuntimeTypeHandle"]
       else [.atom runtime "System.Type", .atom runtime "System.Type"] },
   method := {
     owner := .atom runtime "System.Type", name := methodName, hasThis := false, genericArity := 0,
-    returnType := .atom runtime
-      (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
+    returnType := if name == "GetTypeFromHandle" then .atom runtime "System.Type"
+      else .primitive .boolean,
     parameters := if name == "GetTypeFromHandle" then [.atom runtime "System.RuntimeTypeHandle"]
       else [.atom runtime "System.Type", .atom runtime "System.Type"] },
   name, target := .external (runtime ++ "::" ++ signature),

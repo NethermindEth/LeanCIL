@@ -536,7 +536,7 @@ example : caller.linkAt 1 = some (.direct 1) := rfl
 example : ({ caller with code := [] } : Method).links = caller.links := rfl
 
 /-- The declared type of a 32-bit integer parameter. -/
-def int32 : Extraction.TypeExpr := .atom Extraction.runtimeScope "System.Int32"
+def int32 : Extraction.TypeExpr := .primitive .int32
 
 /-- An instance method's declared types start after `this`. -/
 def instanceSignature : DeclaredSignature := {

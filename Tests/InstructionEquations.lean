@@ -369,7 +369,7 @@ example (wide : 32 < 40) :
 
 /-- This instance constructor consumes an int32 array and produces a writable span. -/
 private def arrayConstructor : CIL.Extraction.MethodRef :=
-  let int := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Int32"
+  let int := CIL.Extraction.TypeExpr.primitive .int32
   { owner := .apply (CIL.Extraction.spanHead true) int, name := name!".ctor",
     genericArity := 0, hasThis := true, returnType := .void, parameters := [.array int] }
 

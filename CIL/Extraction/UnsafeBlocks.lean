@@ -8,12 +8,12 @@ namespace CIL.Extraction
 /-- One static, non-generic overload with its exact address type and external target. -/
 private def blockRow (name : String) (copy pointer : Bool) (operation : MemoryOp) :
     ModelOverload :=
-  let byte := TypeExpr.atom runtimeScope "System.Byte"
+  let byte := TypeExpr.primitive .byte
   let address := if pointer then TypeExpr.pointer .void else .byref byte
   let addressName := if pointer then "System.Void*" else "System.Byte&"
   let sourceName := if copy then addressName else "System.Byte"
   let declared : OpenSignature := { convention := 0, parameters :=
-    [address, if copy then address else byte, .atom runtimeScope "System.UInt32"] }
+    [address, if copy then address else byte, .primitive .uint32] }
   { operand := unsafeOperand name "System.Void" s!"{addressName},{sourceName},System.UInt32"
       declared
     accepts := fun method => method.owner == unsafeOwner && !method.hasThis &&

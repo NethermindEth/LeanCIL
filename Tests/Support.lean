@@ -24,7 +24,7 @@ def supportedGetter (isa : String) : CIL.Extraction.MethodRef where
   name := name!"get_IsSupported"
   hasThis := false
   genericArity := 0
-  returnType := .atom CIL.Extraction.runtimeScope "System.Boolean"
+  returnType := .primitive .boolean
   parameters := []
 
 /-- The checked getter table selects AVX2 in every layout environment. -/

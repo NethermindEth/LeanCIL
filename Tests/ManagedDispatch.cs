@@ -111,8 +111,8 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
     }
     File.WriteAllText(proof, source + "\nprivate def dispatchMemory : CIL.Safety.Memory := " + memory + "\n" + """
         private def dispatchSignature : CIL.ManagedSignature :=
-          ⟨.atom CIL.Extraction.runtimeScope "System.Int32",
-            [.atom CIL.Extraction.runtimeScope "System.Int32"]⟩
+          ⟨.primitive .int32,
+            [.primitive .int32]⟩
         """ + "\ntheorem managed_dispatch_result :\n" + string.Join(" ∧\n", claims) +
         " := " + (claims.Count == 1 ? "by cil_kernel_rfl" :
             "by exact ⟨" + string.Join(", ", claims.Select(_ => "by cil_kernel_rfl")) + "⟩") +

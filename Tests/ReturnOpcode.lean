@@ -17,7 +17,7 @@ open CIL CIL.Safety
 /-- A byte-returning method whose stack value exceeds the declared storage width. -/
 private def byteBody : Method :=
   { code := [.ldc_i4 300, .ret], locals := [], returnsValue := true,
-    declared := { returnType := .atom Extraction.runtimeScope "System.Byte" } }
+    declared := { returnType := .primitive .byte } }
 
 /-- A return narrows the result according to the method declaration. -/
 theorem byte_return (pc : Nat) (args : List Safety.Value) (frame : Frame)
@@ -96,7 +96,7 @@ theorem invalid_reference_return (frame : Frame) :
 
 /-- A byte declaration cannot satisfy the full-width bitwise helper's return premise. -/
 theorem byte_not_full_width :
-    byteBody.declared.returnType ≠ .atom Extraction.runtimeScope "System.Int32" := by
+    byteBody.declared.returnType ≠ .primitive .int32 := by
   decide
 #print axioms byte_not_full_width
 
@@ -112,24 +112,24 @@ private def pairLayouts : List Extraction.RawLayout := [
 private def pairEnvironment : LayoutEnvironment :=
   { rawLayouts := pairLayouts, layouts := #[⟨⟨8, [⟨0, 4, false⟩, ⟨4, 4, false⟩]⟩, 4⟩] }
 
-private def mathDivRem (element : String) : Extraction.MethodRef :=
-  let word := Extraction.TypeExpr.atom Extraction.runtimeScope element
+private def mathDivRem (element : PrimitiveType) : Extraction.MethodRef :=
+  let word := Extraction.TypeExpr.primitive element
   { owner := .atom Extraction.runtimeScope "System.Math", name := name!"DivRem",
     genericArity := 0, hasThis := false, parameters := [word, word],
-    returnType := .aggregate (Extraction.integerPairIdentity element) 0 }
+    returnType := .aggregate (Extraction.integerPairIdentity element.display) 0 }
 
 /-- `Math.DivRem(int, int)` in the emitted form: a declared struct return over a non-empty
     environment, with the identity written out as a literal as an extraction writes it. -/
 private def pairDivRem : Method :=
   { profile := .scalar, returnsValue := true, locals := [], environment := pairEnvironment,
     declared := {
-      parameters := [.atom Extraction.runtimeScope "System.Int32",
-        .atom Extraction.runtimeScope "System.Int32"],
+      parameters := [.primitive .int32,
+        .primitive .int32],
       returnType := .aggregate "System.Runtime, Version=11.0.0.0, Culture=neutral, \
         PublicKeyToken=b03f5f7f11d50a3a::System.ValueTuple`2<System.Runtime, Version=11.0.0.0, \
         Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::System.Int32,System.Runtime, \
         Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::System.Int32>" 0 }
-    code := [.ldarg 0, .ldarg 1, .call (mathDivRem "System.Int32"), .ret] }
+    code := [.ldarg 0, .ldarg 1, .call (mathDivRem .int32), .ret] }
 
 set_option maxRecDepth 4096 in
 /-- A closed tuple-returning method produces the expected bytes through its checked call. -/
@@ -149,7 +149,7 @@ theorem pair_return_exists :
 
 private def remainderField : Extraction.FieldRef :=
   { owner := .aggregate (Extraction.integerPairIdentity "System.SByte") 0, index := 1, name := name!"Item2",
-    type := .atom Extraction.runtimeScope "System.SByte" }
+    type := .primitive .sbyte }
 
 /-- `Math.DivRem(sbyte, sbyte).Remainder` over a two-byte struct layout, whose
     narrowing return compares only its runtime scope and primitive name. -/
@@ -161,11 +161,11 @@ private def sbyteRemainder : Method :=
           fields := [{ type := .signed8 }, { type := .signed8 }] }]
       layouts := #[⟨⟨2, [⟨0, 1, false⟩, ⟨1, 1, false⟩]⟩, 1⟩] }
     declared := {
-      parameters := [.atom Extraction.runtimeScope "System.SByte",
-        .atom Extraction.runtimeScope "System.SByte"],
-      returnType := .atom Extraction.runtimeScope "System.SByte" }
+      parameters := [.primitive .sbyte,
+        .primitive .sbyte],
+      returnType := .primitive .sbyte }
     code := [.ldarg 0, .ldarg 1,
-      .call (mathDivRem "System.SByte"), .ldfld remainderField, .ret] }
+      .call (mathDivRem .sbyte), .ldfld remainderField, .ret] }
 
 set_option maxRecDepth 4096 in
 /-- A narrowing return over a non-empty environment is proved by evaluation, and the remainder

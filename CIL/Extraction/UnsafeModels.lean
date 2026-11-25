@@ -54,7 +54,7 @@ theorem unsafeGuarded_eq {admitted : Bool} {model resolved : RuntimeModel}
 /-- The size of the element of `int Unsafe.SizeOf<T>()`. -/
 def unsafeSizeOf (reader : CallLayouts) (method : MethodRef) : Option Nat := do
   let element ← unsafeArgument method
-  if !method.parameters.isEmpty || method.returnType != .atom runtimeScope "System.Int32" then
+  if !method.parameters.isEmpty || method.returnType != .primitive .int32 then
     none
   (reader.valueShape element).size?
 
@@ -67,7 +67,7 @@ def unsafeSizeOfModel (reader : CallLayouts) (method : MethodRef) :
     `relation`. -/
 def unsafeCompareModel (relation : ReferenceRelation) (reader : CallLayouts)
     (method : MethodRef) : Option RuntimeModel :=
-  let boolean := TypeExpr.atom runtimeScope "System.Boolean"
+  let boolean := TypeExpr.primitive .boolean
   unsafeGuarded (unsafeSignature reader method
     (fun element => [.byref element, .byref element]) (fun _ => boolean))
     (.referenceCompare relation)
@@ -99,12 +99,12 @@ def unsafeEntry (key : MetadataName) (name result parameters : String) (declared
 /-- The open declaration `bool (ref !!0, ref !!0)` of the reference comparisons. -/
 def unsafeComparisonDeclaration : OpenSignature :=
   unsafeDeclaration (fun element => [.byref element, .byref element])
-    (fun _ => .atom runtimeScope "System.Boolean")
+    (fun _ => .primitive .boolean)
 
 /-- The Unsafe helper entries. -/
 def unsafeEntries : List ModelEntry :=
   [unsafeEntry name!"SizeOf" "SizeOf" "System.Int32" ""
-    (unsafeDeclaration (fun _ => []) (fun _ => .atom runtimeScope "System.Int32"))
+    (unsafeDeclaration (fun _ => []) (fun _ => .primitive .int32))
     unsafeSizeOfModel,
    unsafeEntry name!"AreSame" "AreSame" "System.Boolean" "!!0&,!!0&"
      unsafeComparisonDeclaration (unsafeCompareModel .same),

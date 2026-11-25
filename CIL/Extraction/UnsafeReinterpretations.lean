@@ -32,7 +32,7 @@ private def bitCastOperation (reader : CallLayouts) (method : MethodRef) :
     Option MemoryOp := do
   let (source, target) ← unsafeTypePair method
   _root_.guard (method.parameters == [source] && method.returnType == target)
-  if source == .atom runtimeScope "System.Byte" && target == .atom runtimeScope "System.Boolean"
+  if source == .primitive .byte && target == .primitive .boolean
     then return .bitcastByteBool
   let .snapshot fromShape ← transferKind? reader source | none
   let .snapshot toShape ← transferKind? reader target | none
@@ -85,7 +85,7 @@ private def asRefOverload (pointer : Bool) : ModelOverload :=
 /-- The reserved reference helpers and their exact external overloads. -/
 def unsafeReferenceEntries : List ModelEntry :=
   let nonReference := fun (storage : StorageType) => storage != .reference
-  let boolean := TypeExpr.atom runtimeScope "System.Boolean"
+  let boolean := TypeExpr.primitive .boolean
   [{ opcode := .call, owner := unsafeOwner, name := name!"AsRef", ownsName := true,
      overloads := [asRefOverload false, asRefOverload true] },
    { opcode := .call, owner := unsafeOwner, name := name!"NullRef", ownsName := true,

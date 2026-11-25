@@ -13,7 +13,7 @@ private def node : RuntimeType := ⟨.object "Examples" "Examples.Node", []⟩
 /-- `Node.values`, the `int[]` field 1, in the slot at model offset 8. -/
 private def valuesField : Extraction.FieldRef :=
   { owner := node.identity, index := 1,
-    type := .array (.atom Extraction.runtimeScope "System.Int32"), name := name!"values" }
+    type := .array (.primitive .int32), name := name!"values" }
 
 /-- A method whose class field accesses need no layouts. -/
 private def body : CIL.Method := { returnsValue := false, locals := [], code := [] }

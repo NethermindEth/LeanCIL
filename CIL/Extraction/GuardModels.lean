@@ -12,18 +12,17 @@ private inductive GuardKind where
 
 /-- The integer guard reads the low bits at the declared width and signedness. -/
 private def guardInteger (element : TypeExpr) : Option (Nat × Bool) := do
-  let .atom scope name := element | none
-  guard (scope == runtimeScope)
-  match name with
-  | "System.SByte" => some (8, true)
-  | "System.Byte" => some (8, false)
-  | "System.Int16" => some (16, true)
-  | "System.UInt16" => some (16, false)
-  | "System.Int32" => some (32, true)
-  | "System.UInt32" => some (32, false)
-  | "System.Int64" | "System.IntPtr" => some (64, true)
-  | "System.UInt64" | "System.UIntPtr" => some (64, false)
-  | _ => none
+  let .primitive type := element | none
+  match type with
+  | .sbyte => some (8, true)
+  | .byte => some (8, false)
+  | .int16 => some (16, true)
+  | .uint16 => some (16, false)
+  | .int32 => some (32, true)
+  | .uint32 => some (32, false)
+  | .int64 | .intPtr => some (64, true)
+  | .uint64 | .uintPtr => some (64, false)
+  | .boolean | .char | .single | .double => none
 
 /-- Every guard has a final string argument naming the parameter. -/
 private def GuardKind.signature (kind : GuardKind) (element : TypeExpr) : OpenSignature :=

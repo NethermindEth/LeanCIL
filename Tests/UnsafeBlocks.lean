@@ -8,13 +8,13 @@ open CIL CIL.Extraction
 
 /-- A MemberRef for a block helper as it occurs in the example assembly. -/
 private def site (name : String) (key : MetadataName) (copy pointer : Bool) : CallSite :=
-  let byte := TypeExpr.atom runtimeScope "System.Byte"
+  let byte := TypeExpr.primitive .byte
   let address := if pointer then TypeExpr.pointer .void else .byref byte
   let addressText := if pointer then "System.Void*" else "System.Byte&"
   let second := if copy then addressText else "System.Byte"
   let owner := "System.Runtime.CompilerServices.Unsafe"
   let types := s!"{addressText},{second},System.UInt32"
-  let parameters := [address, if copy then address else byte, .atom runtimeScope "System.UInt32"]
+  let parameters := [address, if copy then address else byte, .primitive .uint32]
   let method : MethodRef :=
     { owner := .atom runtimeScope owner, name := key, hasThis := false,
       genericArity := 0, returnType := .void, parameters }
@@ -46,7 +46,7 @@ theorem block_emission : cases.all (fun (call, operation) =>
 
 /-- A malformed identity, closed signature, declaration or external operand emits a call hole. -/
 theorem block_refusals : cases.all (fun (call, _) =>
-    let word := TypeExpr.atom runtimeScope "System.UInt32"
+    let word := TypeExpr.primitive .uint32
     let invalid : List CallSite := [
       { call with method.owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe" },
       { call with method.name := name!"Other" }, { call with name := "Other" },

@@ -17,7 +17,7 @@ private inductive Source where
 
 /-- Open and closed signatures differ only in the owner's element type. -/
 private def Source.signature (source : Source) (element : TypeExpr) : OpenSignature :=
-  let int := TypeExpr.atom runtimeScope "System.Int32"
+  let int := TypeExpr.primitive .int32
   ⟨0x20, .void, match source with
     | .array => [.array element]
     | .range => [.array element, int, int]
@@ -47,7 +47,7 @@ private def Source.constructor (source : Source) (writable staticData : Bool)
   match source with
   | .reference => return .singleReference width writable
   | .pointer =>
-    if staticData && !writable && element == .atom runtimeScope "System.Byte" then
+    if staticData && !writable && element == .primitive .byte then
       return .staticBytes
     return .reference width writable
   | .array | .range =>

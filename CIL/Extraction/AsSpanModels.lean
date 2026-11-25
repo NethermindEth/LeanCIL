@@ -13,7 +13,7 @@ private def owner : TypeExpr := .atom spanMemoryScope "System.MemoryExtensions"
 
 /-- The number of int32 parameters determines which part of the array the call exposes. -/
 private def signature (range : ArraySpanRange) (element : TypeExpr) : OpenSignature :=
-  let bounds := List.replicate (range.argumentCount - 1) (.atom runtimeScope "System.Int32")
+  let bounds := List.replicate (range.argumentCount - 1) (.primitive .int32)
   ⟨0x10, .apply (spanHead true) element, .array element :: bounds⟩
 
 /-- The external identity retains the method type variable from the original MemberRef. -/

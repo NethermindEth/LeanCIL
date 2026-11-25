@@ -10,7 +10,7 @@ private def queryOwner :=
 
 /-- The open declaration has one method parameter and no value parameters. -/
 private def queryDeclaration : OpenSignature :=
-  { convention := 0x10, returnType := .atom runtimeScope "System.Boolean" }
+  { convention := 0x10, returnType := .primitive .boolean }
 
 /-- The exact open MemberRef whose closed type argument supplies the queried storage. -/
 private def queryOperand : ModelOperand :=

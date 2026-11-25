@@ -45,13 +45,13 @@ theorem construction : withoutLink 115 name!".ctor" ".ctor" = true := rfl
 #print axioms construction
 
 /-- Both helpers use the same scoped vector type in each occurrence of their type argument. -/
-private def vectorSite (read : Bool) (element : String) : RawInstruction := Id.run do
+private def vectorSite (read : Bool) (element : PrimitiveType) : RawInstruction := Id.run do
   let vector := fun name => TypeExpr.apply (.constructor intrinsicsScope
-    "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope name)
+    "System.Runtime.Intrinsics.Vector128`1") (.primitive name)
   let source := vector element
-  let target := vector "System.UInt64"
+  let target := vector .uint64
   let arguments := if read then [source] else [source, target]
-  let byteRef := TypeExpr.byref (.atom runtimeScope "System.Byte")
+  let byteRef := TypeExpr.byref (.primitive .byte)
   let signature := if read then
     "!!0 System.Runtime.CompilerServices.Unsafe::ReadUnaligned(System.Byte&)"
     else "!!1 System.Runtime.CompilerServices.Unsafe::BitCast(!!0)"
@@ -73,15 +73,15 @@ private def vectorSite (read : Bool) (element : String) : RawInstruction := Id.r
 theorem integerVectorTransfers :
     let decode := fun raw => methodCode .scalar {} [] [true]
       { body 40 .void name!"Run" "Run" with code := [raw] }
-    let control := vectorSite false "System.Byte"
+    let control := vectorSite false .byte
     (match control.operand with
       | .call site => decide (decode control = [.call site.method {}])
       | _ => false) = true ∧
-      decode (vectorSite false "System.Double") = [.unadmitted 40] ∧
-      (match (vectorSite true "System.Byte").operand with
-       | .call site => decide (decode (vectorSite true "System.Byte") = [.call site.method {}])
+      decode (vectorSite false .double) = [.unadmitted 40] ∧
+      (match (vectorSite true .byte).operand with
+       | .call site => decide (decode (vectorSite true .byte) = [.call site.method {}])
        | _ => false) = true ∧
-      decode (vectorSite true "System.Double") = [.unadmitted 40] := by decide +kernel
+      decode (vectorSite true .double) = [.unadmitted 40] := by decide +kernel
 
 #print axioms integerVectorTransfers
 
@@ -94,7 +94,7 @@ private def arithmeticCode (env : LayoutEnvironment) (site : CallSite) :=
 private def arithmeticChecks (env : LayoutEnvironment) (site : CallSite)
     (unsupported : CallSite) (expected : RuntimeModel) : Bool :=
   let method := site.method
-  let wrong := TypeExpr.atom runtimeScope "System.Boolean"
+  let wrong := TypeExpr.primitive .boolean
   let refusals := [
     { site with method.owner := .atom "Fixture" "System.Math" },
     { site with method.name := name!"Wrong" }, { site with name := "Wrong" },
@@ -109,28 +109,28 @@ private def arithmeticChecks (env : LayoutEnvironment) (site : CallSite)
 
 /-- A signed widening multiply accepts int32 input and rejects an int16 widening signature. -/
 theorem bigMulBinding :
-    let site := fun (element : String) =>
-      let word := TypeExpr.atom runtimeScope element
+    let site := fun (element : PrimitiveType) =>
+      let word := TypeExpr.primitive element
       let method : MethodRef := {
         owner := .atom runtimeScope "System.Math", name := name!"BigMul", hasThis := false,
-        genericArity := 0, returnType := .atom runtimeScope "System.Int64",
+        genericArity := 0, returnType := .primitive .int64,
         parameters := [word, word] }
-      let target := s!"System.Int64 System.Math::BigMul({element},{element})"
+      let target := s!"System.Int64 System.Math::BigMul({element.display},{element.display})"
       ({ method, name := "BigMul", declared := method.signature 0,
          target := .external s!"{runtimeScope}::{target}",
          typeArguments := [], parameterCount := 2, returnsValue := true } : CallSite)
-    arithmeticChecks {} (site "System.Int32") (site "System.Int16")
+    arithmeticChecks {} (site .int32) (site .int16)
       (.intrinsic (.scalar (.bigMul32 true)) 2) = true := by decide +kernel
 
 #print axioms bigMulBinding
 
 /-- A crossed result selects no arithmetic overload even before target text or layouts are read. -/
 theorem arithmetic_result_signedness :
-    let unsigned := TypeExpr.atom runtimeScope "System.UInt32"
+    let unsigned := TypeExpr.primitive .uint32
     let multiply : MethodRef := {
       owner := .atom runtimeScope "System.Math", name := name!"BigMul", hasThis := false,
       genericArity := 0, parameters := [unsigned, unsigned],
-      returnType := .atom runtimeScope "System.Int64" }
+      returnType := .primitive .int64 }
     let pair := integerPairIdentity
     let divide := { multiply with
       name := name!"DivRem", parameters := [int32Type, int32Type],
@@ -139,7 +139,7 @@ theorem arithmetic_result_signedness :
       (runtimeCatalog.table.entry? .call crossed).any fun entry =>
         (entry.select? { crossed with returnType := result }).isSome &&
           (entry.select? crossed).isNone
-    distinguishes multiply (.atom runtimeScope "System.UInt64") ∧
+    distinguishes multiply (.primitive .uint64) ∧
       distinguishes divide (.aggregate (pair "System.Int32") 0) := by decide +kernel
 
 #print axioms arithmetic_result_signedness
@@ -148,7 +148,7 @@ theorem arithmetic_result_signedness :
 theorem divRemTupleLayout :
     let pair := "System.ValueTuple`2<System.UInt64,System.UInt64>"
     let identity := integerPairIdentity "System.UInt64"
-    let word := TypeExpr.atom runtimeScope "System.UInt64"
+    let word := TypeExpr.primitive .uint64
     let method : MethodRef := {
       owner := .atom runtimeScope "System.Math", name := name!"DivRem",
       genericArity := 0, hasThis := false, returnType := .aggregate identity 1,
@@ -166,7 +166,7 @@ theorem divRemTupleLayout :
          layouts := #[computed, computed] } : LayoutEnvironment)
     let refused := fun raw alignment =>
       arithmeticCode (env raw alignment) site = liveHoleAt 0 40
-    let boolean := TypeExpr.atom runtimeScope "System.Boolean"
+    let boolean := TypeExpr.primitive .boolean
     let result := "System.ValueTuple`2<System.Boolean,System.Boolean>"
     let invalid := { method with
       parameters := [boolean, boolean]
@@ -189,7 +189,7 @@ theorem divRemTupleLayout :
 theorem sumDeclaration :
     let owner := "System.Runtime.Intrinsics.Vector128"
     let vector := TypeExpr.apply (.constructor intrinsicsScope (owner ++ "`1"))
-    let word := TypeExpr.atom runtimeScope "System.UInt64"
+    let word := TypeExpr.primitive .uint64
     let site : CallSite := {
       method := {
         owner := .atom intrinsicsScope owner, name := name!"Sum", hasThis := false,
@@ -210,7 +210,7 @@ theorem sumDeclaration :
 private def lengthBody : RawMethod :=
   let owner := TypeExpr.apply (.constructor runtimeScope "System.Span`1")
     (.aggregate "Fixture::Words" 0)
-  let int := TypeExpr.atom runtimeScope "System.Int32"
+  let int := TypeExpr.primitive .int32
   let site : CallSite := {
     method := ⟨owner, name!"get_Length", true, 0, int, [], []⟩,
     declared := ⟨0x20, int, []⟩, name := "get_Length", typeArguments := [],
@@ -221,7 +221,7 @@ private def lengthBody : RawMethod :=
 /-- A resolving getter rejects an unrelated one-in, one-out operation. A getter outside
     the layouts and an unknown span member decode only to their opcode's hole. -/
 theorem spanClaims :
-    let int := TypeExpr.atom runtimeScope "System.Int32"
+    let int := TypeExpr.primitive .int32
     let rows : List RawLayout := [{
       identity := "Fixture::Words", explicit := false, packing := 0, declaredSize := 0,
       fields := [⟨.unsigned32, none⟩] }]
@@ -267,7 +267,7 @@ private def constrainedSlot : CallSite := {
 
 /-- Closed decoding preserves a constrained receiver at a linked call and refuses an unowned pc. -/
 theorem constrainedLinkCode :
-    let receiver := TypeExpr.atom runtimeScope "System.Int32"
+    let receiver := TypeExpr.primitive .int32
     let source := { body 111 constrainedSlot.declaringType name!"Read" "Read" with
       code := [⟨0, 0xFE16, .type receiver⟩, ⟨6, 111, .call constrainedSlot⟩] }
     let decode := fun links =>

@@ -245,7 +245,7 @@ def forwardedResults (values : List Value) : List Value := values
 theorem projected_return (memory : Memory) (frame : Frame) :
     step
       { code := [], locals := [], returnsValue := true,
-        declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Byte" } } .ret
+        declared := { returnType := .primitive .byte } } .ret
       1 [] frame (forwardedResults [.scalar (.i32 1)] ++ []) memory =
       .ok (.returned [.scalar (.i32 1)] memory) := by
   cil_checked_step []

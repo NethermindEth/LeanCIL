@@ -259,9 +259,9 @@ foreach (var (name, element, width) in allocations)
     if (name == "Allocate")
     {
         foreach (var (mutation, replacement) in new[]
-            { ("element", ".type (.atom Extraction.runtimeScope \"System.UInt32\")") })
+            { ("element", ".type (.primitive .uint32)") })
         {
-            const string target = ".type (.atom Extraction.runtimeScope \"System.Int32\")";
+            const string target = ".type (.primitive .int32)";
             if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing newarr mutation");
             var forged = Path.Combine(root, "ForgedAllocation-" + mutation + ".lean");
             File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
@@ -272,13 +272,13 @@ foreach (var (name, element, width) in allocations)
     {
         // The token names the enum and its underlying type; its storage is resolved from them.
         var identity = ExampleEnumIdentity("Signed8");
-        const string underlying = ".atom Extraction.runtimeScope \"System.SByte\"";
+        const string underlying = ".primitive .sbyte";
         var target = $".type (.enum {identity} ({underlying}))";
         foreach (var (mutation, replacement) in new[]
         {
             ("identity", target.Replace(identity, ExampleEnumIdentity("Unsigned8"), StringComparison.Ordinal)),
-            ("underlying", target.Replace("System.SByte", "System.Byte", StringComparison.Ordinal)),
-            ("width", target.Replace("System.SByte", "System.Int16", StringComparison.Ordinal)),
+            ("underlying", target.Replace(".primitive .sbyte", ".primitive .byte", StringComparison.Ordinal)),
+            ("width", target.Replace(".primitive .sbyte", ".primitive .int16", StringComparison.Ordinal)),
             ("primitive", $".type ({underlying})")
         })
         {

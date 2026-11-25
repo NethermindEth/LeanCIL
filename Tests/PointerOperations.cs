@@ -129,12 +129,12 @@ foreach (var (name, parameters) in new[]
         var storageEvidence = NarrowEvidence(source, "method0_specialization_validated");
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, storageEvidence,
             ["method0_specialization_validated"], 0));
-        var pointee = name == "ReadCharacter" ? "System.Char" : "System.Int16";
-        var target = $".atom Extraction.runtimeScope \"{pointee}\"";
+        var (pointee, constructor) = name == "ReadCharacter" ? ("System.Char", "char") : ("System.Int16", "int16");
+        var target = $".primitive .{constructor}";
         foreach (var (mutation, replacement) in new[]
         {
             ("scope", $".atom \"forged\" \"{pointee}\""),
-            ("storage", ".atom Extraction.runtimeScope \"System.Boolean\"")
+            ("storage", ".primitive .boolean")
         })
         {
             if (!storageEvidence.Contains(target, StringComparison.Ordinal))

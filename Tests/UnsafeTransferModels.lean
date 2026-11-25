@@ -16,7 +16,7 @@ open CIL CIL.Extraction CIL.Safety
 /-- The open pointer overload and its external target at an Unsafe call. -/
 private def site (name : MetadataName) (store : Bool) (element : TypeExpr)
     (byref : Bool) (convention : Nat) : RawInstruction :=
-  let address := if byref then TypeExpr.byref (.atom runtimeScope "System.Byte")
+  let address := if byref then TypeExpr.byref (.primitive .byte)
     else .pointer .void
   let addressName := if byref then "System.Byte&" else "System.Void*"
   let result := fun type => if store then TypeExpr.void else type
@@ -50,13 +50,13 @@ theorem rejectedFloatingSites :
     ["128", "256", "512"].all (fun width =>
       let vector := fun lane => TypeExpr.apply
         (.constructor intrinsicsScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
-        (.atom runtimeScope lane)
-      ["System.Single", "System.Double"].all fun lane =>
+        (.primitive lane)
+      [PrimitiveType.single, .double].all fun lane =>
         [false, true].all fun byref =>
           [(name!"Read", false), (name!"Write", true),
            (name!"ReadUnaligned", false), (name!"WriteUnaligned", true)].all fun (name, store) =>
             let raw := site name store (vector lane) byref 0x10
-            let integer := site name store (vector "System.UInt64") byref 0x10
+            let integer := site name store (vector .uint64) byref 0x10
             match raw.operand, integer.operand with
             | .call call, .call substitute =>
               (runtimeModel {} .call call.method).isNone &&
@@ -110,13 +110,13 @@ private def resolves (environment : LayoutEnvironment) (element : TypeExpr)
 /-- The integer vector of the indicated width with unsigned 64-bit elements. -/
 private def vector (width : String) : TypeExpr :=
   .apply (.constructor intrinsicsScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
-    (.atom runtimeScope "System.UInt64")
+    (.primitive .uint64)
 
 /-- The closed signature selects a scalar or snapshot independently of the target profile. -/
 theorem integerTransfers :
-    resolves {} (.atom runtimeScope "System.UInt64") (.scalar 8 false) 8 &&
-    resolves {} (.atom runtimeScope "System.Int16") (.scalar 2 true) 2 &&
-    resolves {} (.enum (Tests.enumIdentity "Flag") (.atom runtimeScope "System.SByte")) (.scalar 1 true) 1 &&
+    resolves {} (.primitive .uint64) (.scalar 8 false) 8 &&
+    resolves {} (.primitive .int16) (.scalar 2 true) 2 &&
+    resolves {} (.enum (Tests.enumIdentity "Flag") (.primitive .sbyte)) (.scalar 1 true) 1 &&
     resolves {} (vector "128") (.snapshot .vector128) 16 &&
     resolves {} (vector "256") (.snapshot .vector256) 32 &&
     resolves {} (vector "512") (.snapshot .vector512) 64 := by decide +kernel
@@ -150,7 +150,7 @@ theorem sameSizeDifferentAlignment :
 
 /-- Unsupported storage and malformed method references have no transfer model. -/
 theorem refusedElementsAndReferences :
-    let word := TypeExpr.atom runtimeScope "System.UInt64"
+    let word := TypeExpr.primitive .uint64
     transfers.all (fun (name, store, _) =>
       let rejected := fun (type : TypeExpr) (change : MethodRef → MethodRef) =>
         match (site name store type false 0x10).operand with
@@ -167,7 +167,7 @@ theorem refusedElementsAndReferences :
        .apply (.constructor runtimeScope "System.ReadOnlySpan`1") word, .parameter 0,
        .pointer word, .byref word, .object runtimeScope "System.String", .void,
        .apply (.objectConstructor runtimeScope "System.Collections.Generic.List`1") word,
-       .aggregate "Fixture::Missing" 0, .atom runtimeScope "System.Double", .array word].all
+       .aggregate "Fixture::Missing" 0, .primitive .double, .array word].all
           (fun type => rejected type id) &&
       rejected word (fun method => { method with owner := .apply unsafeOwner word }) &&
       rejected word (fun method => { method with
@@ -181,7 +181,7 @@ theorem refusedElementsAndReferences :
 
 /-- A change to the open signature alone refuses both the kept call and the typed emission. -/
 theorem refusedDeclarations :
-    let word := TypeExpr.atom runtimeScope "System.UInt64"
+    let word := TypeExpr.primitive .uint64
     transfers.all (fun (name, store, aligned) =>
       let raw := site name store word false 0x10
       match raw.operand with
@@ -192,7 +192,7 @@ theorem refusedDeclarations :
             decide (decoded {} .scalar changed = liveHoleAt 0 40) &&
             !runtimeCatalog.siteAgrees {} .scalar changed (.call call.method {}) &&
             !runtimeCatalog.siteAgrees {} .scalar changed (.call call.method { tail := true })
-        let byteAddress := TypeExpr.byref (.atom runtimeScope "System.Byte")
+        let byteAddress := TypeExpr.byref (.primitive .byte)
         let forged := if aligned then { call.declared with
             parameters := if store then [byteAddress, .parameter 0] else [byteAddress] }
           else if store then { call.declared with parameters := [.pointer .void, word] }
@@ -207,7 +207,7 @@ theorem refusedDeclarations :
 theorem crossedOverloads :
     [false, true].all (fun store =>
       let name := if store then name!"WriteUnaligned" else name!"ReadUnaligned"
-      let element := TypeExpr.atom runtimeScope "System.UInt64"
+      let element := TypeExpr.primitive .uint64
       [false, true].all fun byref =>
         let raw := site name store element byref 0x10
         match raw.operand, (site name store element (!byref) 0x10).operand with
@@ -224,8 +224,8 @@ theorem crossedOverloads :
 
 /-- An unknown Unsafe member admits only a dead hole. -/
 theorem reservedEmissions :
-    let control := site name!"Read" false (.atom runtimeScope "System.UInt64") false 0x10
-    let other := site name!"Unknown" false (.atom runtimeScope "System.UInt64") false 0x10
+    let control := site name!"Read" false (.primitive .uint64) false 0x10
+    let other := site name!"Unknown" false (.primitive .uint64) false 0x10
     let operations := [Instruction.ldind .i8, .stind .i8,
       .ldobj (.aggregate "Fixture::Packet" 0), .stobj (.aggregate "Fixture::Packet" 0)] ++
       ["128", "256", "512"].flatMap (fun width => [.ldobj (vector width), .stobj (vector width)])
@@ -242,7 +242,7 @@ theorem reservedEmissions :
 
 /-- A non-call instruction cannot claim the checked pointer transfer of a runtime model. -/
 theorem nonCallTransferRefused :
-    let read := site name!"Read" false (.atom runtimeScope "System.UInt64") false 0x10
+    let read := site name!"Read" false (.primitive .uint64) false 0x10
     let nop : RawInstruction := ⟨0, 0, .none⟩
     (match read.operand with
     | .call call => decide (decoded {} .scalar read = .ok [.call call.method {}]) &&
@@ -254,7 +254,7 @@ theorem nonCallTransferRefused :
 
 /-- A transfer over a pointer or span decodes to a hole and refuses a unary replacement. -/
 theorem unresolvedTransfers :
-    let byte := TypeExpr.atom runtimeScope "System.Byte"
+    let byte := TypeExpr.primitive .byte
     let control := site name!"ReadUnaligned" false byte false 0x10
     (match control.operand with
      | .call call => decide (decoded {} .scalar control = .ok [.call call.method {}]) &&
@@ -293,7 +293,7 @@ theorem misalignedTransfers :
     let fault := ExecutionFault.memory .alignment address 8
     [false, true].all (fun store =>
       let name := if store then name!"Write" else name!"Read"
-      let raw := site name store (.atom runtimeScope "System.UInt64") false 0x10
+      let raw := site name store (.primitive .uint64) false 0x10
       match raw.operand with
       | .call call =>
         let stack : List Safety.Value := if store then [.scalar (.i64 0), .reference address]

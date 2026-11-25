@@ -17,10 +17,15 @@ internal sealed record ContractType(string Kind, string Scope, string Name, Cont
             new("atom", LayoutEvidence.Scope(type), type.FullName);
     }
 
+    // A runtime primitive has one Lean form; the wire format keeps its scope and full name.
+    string? RuntimePrimitive => Scope == TypeTests.RuntimeScope &&
+        PrimitiveType.All.FirstOrDefault(primitive => primitive.ToDisplay() == Name) is { } primitive
+            ? $".primitive {primitive.ToLean()}" : null;
+
     internal string Lean => Kind switch
     {
         "void" => ".void",
-        "atom" => $".atom {IdentityText.Quote(Scope)} {IdentityText.Quote(Name)}",
+        "atom" => RuntimePrimitive ?? $".atom {IdentityText.Quote(Scope)} {IdentityText.Quote(Name)}",
         "byref" when Element is not null => ".byref (" + Element.Lean + ")",
         _ => throw new InvalidDataException("Invalid imported type metadata.")
     };

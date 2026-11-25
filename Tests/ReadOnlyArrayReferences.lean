@@ -102,7 +102,7 @@ theorem restricted_null_field :
       .error (.memory .nullDereference .null 0) := ⟨rfl, rfl⟩
 #print axioms restricted_null_field
 
-private def intType : CIL.Extraction.TypeExpr := .atom CIL.Extraction.runtimeScope "System.Int32"
+private def intType : CIL.Extraction.TypeExpr := .primitive .int32
 private def raw (target : Nat) : CIL.Extraction.RawMethod := {
   token := 1, owner := "Readonly", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
@@ -209,7 +209,7 @@ theorem forged_addresses_refused :
       [.ldarg 0, .ldarg 1, .ldelema intType true, .ret] ∧
     !accepted (body [prefixRaw, addressRaw 4, retRaw 9]) (depthsOf [0, 1, 2, 2, 1])
       (addressStates 2)
-      [.ldarg 0, .ldarg 1, .nop, .ldelema (.atom runtimeScope "System.UInt32") true,
+      [.ldarg 0, .ldarg 1, .nop, .ldelema (.primitive .uint32) true,
         .ret] := by
   decide +kernel
 #print axioms forged_addresses_refused

@@ -14,7 +14,7 @@ open CIL.Safety
 
 /-- The byref overload of Unsafe.AsRef closed over UInt64. -/
 def asRefUInt64 : CIL.Extraction.MethodRef :=
-  let element := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.UInt64"
+  let element := CIL.Extraction.TypeExpr.primitive .uint64
   { owner := CIL.Extraction.unsafeOwner, name := name!"AsRef", hasThis := false,
     genericArity := 1, methodArguments := [element], parameters := [.byref element],
     returnType := .byref element }

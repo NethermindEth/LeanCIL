@@ -14,7 +14,7 @@ open CIL CIL.Extraction
 /-- The primitive assembly identity with its checked byte representation. -/
 private def runtime := runtimeScope
 private def owner := "Fixture, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-private def intType : TypeExpr := .atom runtime "System.Int32"
+private def intType : TypeExpr := .primitive .int32
 
 private def ctor (scope type : String) (parameters : Nat) : RawOperand := .call {
   declared := {

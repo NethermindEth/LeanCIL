@@ -193,14 +193,14 @@ namespace Table
 open CIL CIL.Extraction
 
 private def runtimeType (name : String) : TypeExpr := .atom runtimeScope name
-private def word : TypeExpr := runtimeType "System.UInt64"
+private def word : TypeExpr := .primitive .uint64
 
 /-- `Math.BigMul(UInt64, UInt64, out UInt64)` as a closed call site states it. -/
 private def bigMul : MethodRef :=
   { owner := runtimeType "System.Math", name := name!"BigMul", hasThis := false,
     genericArity := 0, returnType := word, parameters := [word, word, .byref word] }
 
-private def long : TypeExpr := runtimeType "System.Int64"
+private def long : TypeExpr := .primitive .int64
 
 /-- `Math.DivRem(Int64, Int64, out Int64)`, whose model the table below does not hold. -/
 private def divRem : MethodRef :=
@@ -215,12 +215,12 @@ private def signedBigMul : MethodRef :=
 private def spanLength (element : TypeExpr) : MethodRef :=
   { owner := .apply (.constructor runtimeScope "System.Span`1") element,
     name := name!"get_Length", hasThis := true, genericArity := 0,
-    returnType := runtimeType "System.Int32", parameters := [] }
+    returnType := .primitive .int32, parameters := [] }
 
 /-- `get_Length` of every span instance, an instance method of no parameters. -/
 private def spanLengthEntry : ModelEntry :=
   .single .call (.constructor runtimeScope "System.Span`1") name!"get_Length"
-    (.declaration (· == { convention := 0x20, returnType := runtimeType "System.Int32" }))
+    (.declaration (· == { convention := 0x20, returnType := .primitive .int32 }))
     (fun _ method =>
       if method.hasThis && method.parameters.isEmpty then some (.memory .spanLength) else none)
 
@@ -290,7 +290,7 @@ theorem retainedModelNamesMember (models : ModelCatalog) (environment : LayoutEn
 /-- A tree that files the span length entry under the key of `get_IsEmpty`. -/
 private def misfiled : ModelTable := .node .leaf (name!"get_IsEmpty").code [spanLengthEntry] .leaf
 private def spanIsEmpty : MethodRef :=
-  { spanLength word with name := name!"get_IsEmpty", returnType := runtimeType "System.Boolean" }
+  { spanLength word with name := name!"get_IsEmpty", returnType := .primitive .boolean }
 example : misfiled.find {} .call spanIsEmpty = none := by decide +kernel
 
 -- An unlinked call without a named family has no resolved instruction.
@@ -302,11 +302,11 @@ example : catalog.siteAgrees {} {} (site divRem) (.call bigMul) = false := by
 example : catalog.table.find {} .newobj bigMul = none := by decide +kernel
 example : catalog.table.find {} .call { bigMul with owner := runtimeType "System.Maths" } =
     none := by decide +kernel
-example : catalog.siteAgrees {} {} (site (spanLength word)) (.call (spanLength (runtimeType "System.Byte"))) = false := by
+example : catalog.siteAgrees {} {} (site (spanLength word)) (.call (spanLength (.primitive .byte))) = false := by
   decide +kernel
 example : catalog.table.find {} .call
     { spanLength word with owner := runtimeType "System.String" } = none := by decide +kernel
-example : catalog.siteAgrees {} {} (site (spanLength (runtimeType "System.Byte")))
+example : catalog.siteAgrees {} {} (site (spanLength (.primitive .byte)))
     (.call (spanLength word)) = false := by decide +kernel
 example : catalog.siteAgrees {} {} (site bigMul 115) (.call bigMul) = false := by
   decide +kernel
@@ -393,7 +393,7 @@ example : ¬ ManagedCallsValid [] [] (callModelled body) (method ⟨0, 40, .call
 
 /-- `Span<int>(ref int)`, a construction the runtime table models. -/
 private def spanReference : MethodRef :=
-  let int := runtimeType "System.Int32"
+  let int := .primitive .int32
   { owner := .apply (.constructor runtimeScope "System.Span`1") int, name := name!".ctor",
     hasThis := true, genericArity := 0, returnType := .void, parameters := [.byref int] }
 
@@ -437,7 +437,7 @@ example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site unknown))
     (emitting (.call unknown {}) []) := by decide +kernel
 
 -- The integer helpers of `System.Math` and of each integer type.
-private def int : TypeExpr := runtimeType "System.Int32"
+private def int : TypeExpr := .primitive .int32
 private def mathOwner : TypeExpr := runtimeType "System.Math"
 
 /-- `owner::name` taking `arity` values of `type` and returning `result`. -/
@@ -450,7 +450,7 @@ private def mathMin : MethodRef := helper name!"Min" int 2
 private def mathMax : MethodRef := helper name!"Max" int 2
 private def mathClamp : MethodRef := helper name!"Clamp" int 3
 private def mathAbs : MethodRef := helper name!"Abs" int 1
-private def mathSign : MethodRef := helper name!"Sign" (runtimeType "System.Int64") 1 int
+private def mathSign : MethodRef := helper name!"Sign" (.primitive .int64) 1 int
 
 -- Each helper resolves to its scalar intrinsic at the width and signedness of its type.
 example : runtimeModel {} .call mathMin = some (.intrinsic (.scalar (.math .min 32 true)) 2) := by
@@ -465,9 +465,9 @@ example : runtimeModel {} .call mathSign =
     some (.intrinsic (.scalar (.math .sign 64 true)) 1) := by decide +kernel
 example : runtimeModel {} .call (helper name!"Min" word 2) =
     some (.intrinsic (.scalar (.math .min 64 false)) 2) := by decide +kernel
-example : runtimeModel {} .call (helper name!"Max" (runtimeType "System.IntPtr") 2) =
+example : runtimeModel {} .call (helper name!"Max" (.primitive .intPtr) 2) =
     some (.intrinsic (.scalar (.math .max 64 true)) 2) := by decide +kernel
-example : runtimeModel {} .call (helper name!"Max" (runtimeType "System.Byte") 2) =
+example : runtimeModel {} .call (helper name!"Max" (.primitive .byte) 2) =
     some (.intrinsic (.scalar (.math .max 8 false)) 2) := by decide +kernel
 -- The integer type that declares a helper is modelled like `System.Math`.
 example : runtimeModel {} .call (helper name!"Max" int 2 (owner := int)) =
@@ -481,22 +481,22 @@ example : runtimeModel {} .call { mathMax with methodArguments := [int] } = none
   decide +kernel
 example : runtimeModel {} .call (helper name!"Max" int 3) = none := by decide +kernel
 example : runtimeModel {} .call (helper name!"Abs" int 2) = none := by decide +kernel
-example : runtimeModel {} .call { mathMax with parameters := [int, runtimeType "System.Int64"] } =
+example : runtimeModel {} .call { mathMax with parameters := [int, .primitive .int64] } =
     none := by decide +kernel
-example : runtimeModel {} .call (helper name!"Max" (runtimeType "System.Boolean") 2) = none := by
+example : runtimeModel {} .call (helper name!"Max" (.primitive .boolean) 2) = none := by
   decide +kernel
 example : runtimeModel {} .call (helper name!"Max" (.atom "Fixture" "System.Int32") 2) = none := by
   decide +kernel
-example : runtimeModel {} .call { mathMax with returnType := runtimeType "System.Int64" } =
+example : runtimeModel {} .call { mathMax with returnType := .primitive .int64 } =
     none := by decide +kernel
 example : runtimeModel {} .call (helper name!"Sign" int 1) = some
     (.intrinsic (.scalar (.math .sign 32 true)) 1) := by decide +kernel
-example : runtimeModel {} .call (helper name!"Sign" (runtimeType "System.Int16") 1) = none := by
+example : runtimeModel {} .call (helper name!"Sign" (.primitive .int16) 1) = none := by
   decide +kernel
 example : runtimeModel {} .call (helper name!"Abs" word 1) = none := by decide +kernel
 example : runtimeModel {} .call (helper name!"Abs" word 1 (owner := word)) = none := by
   decide +kernel
-example : runtimeModel {} .call (helper name!"Max" int 2 (owner := runtimeType "System.Int64")) =
+example : runtimeModel {} .call (helper name!"Max" int 2 (owner := .primitive .int64)) =
     none := by decide +kernel
 example : runtimeModel {} .call
     (helper name!"Max" int 2 (owner := .atom "Fixture" "System.Math")) = none := by decide +kernel
@@ -722,7 +722,7 @@ private def member (owner : TypeExpr) (name : MetadataName) (result : TypeExpr)
     returnType := result, parameters, methodArguments := arguments }
 
 /-- The scalar element in the generic memory helpers is a runtime byte. -/
-private def byte := TypeExpr.atom runtimeScope "System.Byte"
+private def byte := TypeExpr.primitive .byte
 
 /-- The byte spans carry the closed element type in their return or parameter signature. -/
 private def span (writable : Bool) := TypeExpr.apply (spanHead writable) byte
@@ -742,7 +742,7 @@ theorem platform_result : run platformBody [] =
 
 cil_decoded_method binaryReadBody := wrapper FeatureProfile.scalar layouts
   (member (.atom spanMemoryScope "System.Buffers.Binary.BinaryPrimitives")
-    name!"ReadInt16BigEndian" (.atom runtimeScope "System.Int16") [span false])
+    name!"ReadInt16BigEndian" (.primitive .int16) [span false])
 
 /-- Reading the two static bytes as a big-endian Int16 gives 0x0707. -/
 theorem binaryRead_result :
@@ -874,7 +874,7 @@ theorem nullRef_result : run nullRefBody [] =
 #print axioms nullRef_result
 
 cil_decoded_method offsetBody := wrapper FeatureProfile.scalar layouts
-  (member unsafeOwner name!"ByteOffset" (.atom runtimeScope "System.IntPtr")
+  (member unsafeOwner name!"ByteOffset" (.primitive .intPtr)
     [.byref byte, .byref byte] [byte])
 
 /-- The two references differ by four bytes. -/
@@ -894,7 +894,7 @@ theorem loadByte_result : run loadByteBody [Tests.reference] staticMemory =
 
 cil_decoded_method blockInitBody := wrapper FeatureProfile.scalar layouts
   (member unsafeOwner name!"InitBlockUnaligned" .void
-    [.byref byte, byte, .atom runtimeScope "System.UInt32"])
+    [.byref byte, byte, .primitive .uint32])
 
 /-- A one-byte block initialization succeeds in writable caller memory. -/
 theorem blockInit_result :

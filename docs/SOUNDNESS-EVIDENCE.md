@@ -277,11 +277,13 @@ What `MetadataResolution` and `MetadataBinding` check:
   `missingSlice`, so a pinned type or call, or one of another version of a pinned assembly, is
   never read as a platform one.
 - Each `.type`, `.field`, `.call`, `.indirectCall` and string operand of the token table is
-  checked against its token. The extractor chooses among `atom`, `object`, `aggregate` and `enum`
-  for a type, and Lean accepts the choices that name the same scoped type with a form its kind
-  allows. For a closed generic aggregate, the identity must match the resolved instance, and every
-  argument must be a primitive value, an enum, a value-like named type or another value-like
-  instance whose arguments meet the same rule. Lean rejects an argument it resolves as a class at
+  checked against its token. The extractor chooses among `primitive`, `atom`, `object`,
+  `aggregate` and `enum` for a type, and Lean accepts the choices that name the same scoped type
+  with a form its kind allows. A `System.Runtime` primitive has only the `primitive` form: Lean
+  selects it by its namespace and name columns and refuses the `System.Runtime` atom of a
+  primitive's name (`runtimePrimitiveAtom`). For a closed generic aggregate, the identity must
+  match the resolved instance, and every argument must be a primitive value, an enum, a
+  value-like named type or another value-like instance whose arguments meet the same rule. Lean rejects an argument it resolves as a class at
   any depth, including when an array or a byref contains the aggregate. For an unpinned platform
   type, Lean trusts the signature's kind marker. A `VALUETYPE` marker can therefore admit a class
   from that assembly as a value argument when the aggregate identity matches.
@@ -381,8 +383,8 @@ What `MetadataResolution` and `MetadataBinding` check:
   argument. A type outside the carried slices has no rows to count.
 - A local signature containing a custom modifier fails at the local's index. An external generic
   aggregate with a named argument must include that argument's assembly in the claimed type.
-  A remaining limitation affects type names with punctuation. The default local check can accept
-  the same atom for a type named `Value` in namespace `N` and a type whose simple name is
+  A remaining limitation affects type names with punctuation other than the runtime primitives.
+  The default local check can accept the same atom for a type named `Value` in namespace `N` and a type whose simple name is
   `N.Value` in the empty namespace (#610).
 - A table or signature form the checker does not read is an explicit error: tables other than
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,

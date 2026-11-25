@@ -112,8 +112,8 @@ def raw : RawMethod :=
   let b := decoded.toOption.getD { maxStack := 0, initLocals := false, localSignature := 0, code := [], statics := [] }
   { token := 100664308, owner := (assembly0Metadata.identity ++ "::Examples.Throws"),
     hasThis := false, explicitThis := false, callingConvention := 0, attributes := 150,
-    implementation := 0, returnType := .atom runtimeScope "System.UInt32",
-    parameters := [.atom runtimeScope "System.UInt32"], locals := [], initLocals := b.initLocals,
+    implementation := 0, returnType := .primitive .uint32,
+    parameters := [.primitive .uint32], locals := [], initLocals := b.initLocals,
     maxStack := b.maxStack, genericParameters := [], code := b.code }
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/

@@ -5,9 +5,7 @@ import Tests.Support
 namespace Tests.ImportEvidence
 open CIL CIL.Extraction
 
-def word : TypeExpr := .atom
-  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-  "System.UInt64"
+def word : TypeExpr := .primitive .uint64
 def addToIdentity : String :=
   "Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::System.Void Library.Adder::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)"
 def callee : RawMethod := {

@@ -10,7 +10,7 @@ namespace Tests.UnsafeCallEvidence
 private def scope :=
   "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
 private def unsafeType : TypeExpr := .atom scope "System.Runtime.CompilerServices.Unsafe"
-private def word : TypeExpr := .atom scope "System.UInt64"
+private def word : TypeExpr := .primitive .uint64
 private def call : CallSite := {
   declared := { convention := 0x10, parameters := [.byref (.parameter 0)] },
   method := {
@@ -67,11 +67,11 @@ private def localUnsafe : TypeExpr := .atom "Fixture" "System.Runtime.CompilerSe
 /-- A managed generic AreSame method in the fixture's assembly. -/
 private def localAreSame : CallSite := {
   declared := {
-    convention := 0x10, returnType := .atom runtimeScope "System.Boolean",
+    convention := 0x10, returnType := .primitive .boolean,
     parameters := [.byref (.parameter 0), .byref (.parameter 0)] }
   method := {
     owner := localUnsafe, name := name!"AreSame", hasThis := false, genericArity := 1,
-    methodArguments := [word], returnType := .atom runtimeScope "System.Boolean",
+    methodArguments := [word], returnType := .primitive .boolean,
     parameters := [.byref word, .byref word] }
   name := "AreSame", target := .managed 23, typeArguments := [word],
   parameterCount := 2, returnsValue := true }

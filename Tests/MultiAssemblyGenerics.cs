@@ -236,8 +236,8 @@ partial class Program
 
                 /-- The exact managed signature of `delegate*<ulong, ulong>`. -/
                 def signature : CIL.ManagedSignature :=
-                  ⟨.atom CIL.Extraction.runtimeScope "System.UInt64",
-                    [.atom CIL.Extraction.runtimeScope "System.UInt64"]⟩
+                  ⟨.primitive .uint64,
+                    [.primitive .uint64]⟩
 
                 /-- A catalogued handler runs; `LocalAlgo<ulong>.Run`, addressed by no extracted body, does not. -/
                 theorem correctness :

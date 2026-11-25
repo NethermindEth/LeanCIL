@@ -258,7 +258,8 @@ theorem imported_owner_has_no_storage (frame : Frame) (named : NamedType) (expr 
     (opaqueKind : named.kind = .importedOwner) :
     frame.admits (.named named) expr = false := by
   cases expr <;>
-    simp [Frame.admits, typeAdmits, opaqueKind, objectNamed, valueLike, NamedType.isEnum]
+    simp [Frame.admits, typeAdmits, opaqueKind, objectNamed, valueLike, NamedType.isEnum,
+      TypeKind.reference?]
 
 #print axioms imported_owner_has_no_storage
 
@@ -292,12 +293,14 @@ private def numberPlatform : PlatformTable := platform_table%
 
 /-- Whether the type `spelled` of `E` with the name parts of `Number`, resolved outside the
     carried slices, is admitted under `platform` as an enum over the runtime's type `name`. -/
-private def admitsNumber (platform : PlatformTable) (name : String) (spelled := "Number") : Bool :=
+private def admitsNumber (platform : PlatformTable) (name : PrimitiveType) (spelled := "Number") :
+    Bool :=
   let frame : Frame :=
     { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
   let env := MetadataEnv.ofSlices [] (platform := platform)
   match env.externalNamed 0 enumColumns (bytesOf spelled) [[], bytesOf "Number"] none with
-  | .ok named => frame.admits (.named named) (.enum (Tests.enumIdentity spelled (Tests.enumAssembly name!"E")) (.atom runtimeScope name))
+  | .ok named => frame.admits (.named named)
+    (.enum (Tests.enumIdentity spelled (Tests.enumAssembly name!"E")) (.primitive name))
   | .error _ => false
 
 /-- A platform enum cannot use aggregate storage at any layout index. -/
@@ -316,24 +319,23 @@ theorem missing_closed_argument_definition (method : Nat) :
 #print axioms missing_closed_argument_definition
 
 /-- The eight integer element types, by code from `0x04`, and the other scalar ones. -/
-private def integerNames : List (Nat × String) :=
-  [(0x04, "System.SByte"), (0x05, "System.Byte"), (0x06, "System.Int16"),
-   (0x07, "System.UInt16"), (0x08, "System.Int32"), (0x09, "System.UInt32"),
-   (0x0A, "System.Int64"), (0x0B, "System.UInt64")]
+private def integerNames : List (Nat × PrimitiveType) :=
+  [(0x04, .sbyte), (0x05, .byte), (0x06, .int16), (0x07, .uint16), (0x08, .int32),
+   (0x09, .uint32), (0x0A, .int64), (0x0B, .uint64)]
 /-- Scalar names whose element codes cannot supply enum storage. -/
-private def otherNames : List (Nat × String) :=
-  [(0x02, "System.Boolean"), (0x03, "System.Char"), (0x0C, "System.Single"),
-   (0x0D, "System.Double"), (0x18, "System.IntPtr"), (0x19, "System.UIntPtr")]
+private def otherNames : List (Nat × PrimitiveType) :=
+  [(0x02, .boolean), (0x03, .char), (0x0C, .single), (0x0D, .double), (0x18, .intPtr),
+   (0x19, .uintPtr)]
 
 /-- An external enum admits the element type its definition states and no other: none without
     the definition, none when it states a value type, none when it states an enum over a type no
     enum may have, and none for a type whose parts name another type's definition. -/
 theorem external_enums_take_their_underlying_type_from_the_definition :
-    admitsNumber numberPlatform "System.Int32" = true ∧
-    admitsNumber numberPlatform "System.Byte" = false ∧
-    admitsNumber numberPlatform "System.Int32" (spelled := "Other") = false ∧
-    admitsNumber (removing numberPlatform "Number") "System.Int32" = false ∧
-    admitsNumber (restating numberPlatform "Number" .valueType) "System.Int32" = false ∧
+    admitsNumber numberPlatform .int32 = true ∧
+    admitsNumber numberPlatform .byte = false ∧
+    admitsNumber numberPlatform .int32 (spelled := "Other") = false ∧
+    admitsNumber (removing numberPlatform "Number") .int32 = false ∧
+    admitsNumber (restating numberPlatform "Number" .valueType) .int32 = false ∧
     (integerNames.all fun (code, name) =>
       admitsNumber (restating numberPlatform "Number" (.enumType code)) name) = true ∧
     (otherNames.any fun (code, name) =>

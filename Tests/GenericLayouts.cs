@@ -359,9 +359,9 @@ foreach (var (name, signature) in new[]
         foreach (var (label, before, after) in new[]
         {
             ("owner-arity", "arity := 1", "arity := 2"),
-            ("argument-scope", "arguments := [.atom Extraction.runtimeScope", "arguments := [.atom \"Forged\""),
+            ("argument-scope", "arguments := [.primitive .uint64", "arguments := [.atom \"Forged\" \"System.UInt64\""),
             ("original-field", "fields := [.parameter 0, .parameter 0]",
-                "fields := [.atom Extraction.runtimeScope \"System.UInt32\", .parameter 0]"),
+                "fields := [.primitive .uint32, .parameter 0]"),
             ("reference-constraint", "constraints := [(24,", "constraints := [(28,"),
             ("unbound-field", "fields := [.parameter 0, .parameter 0]", "fields := [.parameter 1, .parameter 0]"),
             ("explicit-layout", "explicit := false", "explicit := true")

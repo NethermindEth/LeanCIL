@@ -180,6 +180,16 @@ private theorem typeStorage_span {layouts : List RawLayout} {type : TypeExpr}
     cases constructor
     case constructor scope name => exact typeStorage_apply_span stored
     all_goals simp [typeStorage, typeStorageAt] at stored
+  case primitive primitive =>
+    cases primitive <;> cases storage <;>
+      simp_all [typeStorage, typeStorageAt, PrimitiveType.fieldType?, spanStored, spanLocal,
+        spanStorage]
+  case pointer element =>
+    simp only [spanLocal, spanStorage]
+    cases element <;> simp only [typeStorage, typeStorageAt] at stored <;>
+      (repeat' split at stored) <;> first | (cases stored; rfl) | simp_all [spanStored]
+    obtain ⟨_, -, found⟩ := Option.bind_eq_some_iff.mp stored
+    split at found <;> cases found <;> rfl
   all_goals unfold typeStorage typeStorageAt at stored
   all_goals (try split at stored) <;> cases storage <;>
     simp_all [spanStored, spanLocal, spanStorage, bind, Option.bind_eq_some_iff]

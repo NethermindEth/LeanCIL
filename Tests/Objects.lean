@@ -224,7 +224,7 @@ theorem reference_field_checks_slot :
 
 /-- `Account.limit`, the `int64` field 0, in the slot at model offset 0. -/
 private def limitField : Extraction.FieldRef :=
-  { owner := account.identity, index := 0, type := .atom Extraction.runtimeScope "System.Int64",
+  { owner := account.identity, index := 0, type := .primitive .int64,
     name := name!"limit" }
 
 /-- `Account.next`, the `Account` field 1, in the reference slot at model offset 8. -/
@@ -309,12 +309,12 @@ example (memory : CIL.Safety.Memory) (object : Reference) :
 
 /-- `Account.offset`, an `int16` field 0. -/
 private def signedShort : Extraction.FieldRef :=
-  { owner := account.identity, index := 0, type := .atom Extraction.runtimeScope "System.Int16",
+  { owner := account.identity, index := 0, type := .primitive .int16,
     name := name!"offset" }
 
 /-- The same slot read as a `uint16`. -/
 private def unsignedShort : Extraction.FieldRef :=
-  { owner := account.identity, index := 0, type := .atom Extraction.runtimeScope "System.UInt16",
+  { owner := account.identity, index := 0, type := .primitive .uint16,
     name := name!"offset" }
 
 /-- The 2-byte word in the slot at model offset 0 of an `Account`. -/
@@ -344,7 +344,7 @@ theorem narrow_field_loads_extend_by_sign {memory : CIL.Safety.Memory} {object :
 
 /-- `Account.balance`, the `int64` field 1, in the slot at model offset 8. -/
 def balanceField : Extraction.FieldRef :=
-  { owner := account.identity, index := 1, type := .atom Extraction.runtimeScope "System.Int64",
+  { owner := account.identity, index := 1, type := .primitive .int64,
     name := name!"balance" }
 
 cil_field_shape accounts balanceField
@@ -516,12 +516,12 @@ theorem named_reference_load_evidence (memory otherMemory : CIL.Safety.Memory)
 /-- A receiver check selects a Boolean-returning instance call or an explicit exception. -/
 @[cil_code] private def checkedReceiverProgram : CIL.Program := [
   {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   returnsValue := true, locals := [], code := [
     .ldarg 0, .brtrue 3, .throw (some .nullReference), .ldarg 0, .ldc_i4 1,
     .callvirt (.arity 1), .ret], links := [(5, .direct 1)] },
   {
-  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  declared := { returnType := .primitive .boolean },
   returnsValue := true, locals := [], code := [.ldarg 1, .ret] }]
 
 /-- A symbolic live receiver decides the branch and passes the call's closed argument guard. -/
@@ -542,14 +542,14 @@ theorem checked_receiver_throws (memory : CIL.Safety.Memory) (frame : Frame) :
 
 /-- `Account.open`, the Boolean field 0, in the slot at model offset 0. -/
 private def openField : Extraction.FieldRef :=
-  { owner := account.identity, index := 0, type := .atom Extraction.runtimeScope "System.Boolean",
+  { owner := account.identity, index := 0, type := .primitive .boolean,
     name := name!"open" }
 
 /-- A Boolean parameter, read narrowed, is written through its receiver's one-byte field. -/
 @[cil_code] private def narrowStore : CIL.Method :=
   { returnsValue := false, locals := [],
     declared := { parameters := [.atom CIL.Extraction.runtimeScope "System.Object",
-      .atom CIL.Extraction.runtimeScope "System.Boolean"] },
+      .primitive .boolean] },
     code := [.ldarg 0, .ldarg 1, .stfld openField, .ret] }
 
 /-- The narrowing store alone. -/

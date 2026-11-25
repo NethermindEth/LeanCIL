@@ -84,7 +84,7 @@ object MethodIn(string identity, object frame, int[] linked, params object[] ops
 object Method(string identity, params object[] ops) => MethodIn(identity, FrameOf(false), [], ops);
 object Linked(string identity, int target, params object[] ops) => MethodIn(identity, FrameOf(false), [target], ops);
 var avx2Getter = new FixtureSite(".call { owner := .atom Extraction.intrinsicsScope \"System.Runtime.Intrinsics.X86.Avx2\", " +
-    "name := name!\"get_IsSupported\", hasThis := false, genericArity := 0, returnType := .atom Extraction.runtimeScope \"System.Boolean\", parameters := [] }", Feature: "Avx2");
+    "name := name!\"get_IsSupported\", hasThis := false, genericArity := 0, returnType := .primitive .boolean, parameters := [] }", Feature: "Avx2");
 var variants = new Dictionary<string, object>(StringComparer.Ordinal)
 {
     [first] = Variant(first, false, [Method("Caller", avx2Getter, ".nop", ".ret")]),
@@ -248,13 +248,13 @@ object ValueName() => Model("MetadataName").GetMethod("OfText", BindingFlags.Sta
 // Both template alternatives bind the closed runtime member that the compiled call names.
 string ScalarCall(string owner, string name, string result, params string[] parameters)
 {
-    static string Word(string type) => $".atom Extraction.runtimeScope \"System.{type}\"";
-    return $$""".call { owner := {{Word(owner)}}, name := name!"{{name}}", hasThis := false, genericArity := 0, returnType := {{Word(result)}}, parameters := [{{string.Join(", ", parameters.Select(Word))}}] }""";
+    static string Word(string primitive) => $".primitive .{primitive}";
+    return $$""".call { owner := .atom Extraction.runtimeScope "System.{{owner}}", name := name!"{{name}}", hasThis := false, genericArity := 0, returnType := {{Word(result)}}, parameters := [{{string.Join(", ", parameters.Select(Word))}}] }""";
 }
 var merged = new (string Identity, string Code)[]
 {
-    ("BigMul", ScalarCall("Math", "BigMul", "Int64", "Int32", "Int32")),
-    ("PopCount", ScalarCall("Numerics.BitOperations", "PopCount", "Int32", "UInt32"))
+    ("BigMul", ScalarCall("Math", "BigMul", "int64", "int32", "int32")),
+    ("PopCount", ScalarCall("Numerics.BitOperations", "PopCount", "int32", "uint32"))
 };
 foreach (var (identity, code) in merged)
 {
@@ -265,7 +265,7 @@ foreach (var (identity, code) in merged)
 // A decoded field reference carries the whole operand, including its metadata name.
 string Store(int index, string name) =>
     $".stfld {{ owner := .object \"Fixture\" \"Owner\", index := {index}, " +
-    $"type := .atom Extraction.runtimeScope \"System.UInt32\", name := name!\"{name}\" }}";
+    $"type := .primitive .uint32, name := name!\"{name}\" }}";
 var store = Store(0, "word");
 var sharedStore = Merge("Store", [".nop", store, ".ret"], [".nop", $"id ({store} : Instruction)", ".ret"]);
 if (!sharedStore.Contains("cil_template_code% (Input0.method0.code)", StringComparison.Ordinal))

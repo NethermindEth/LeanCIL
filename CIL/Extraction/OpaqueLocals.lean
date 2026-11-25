@@ -10,8 +10,8 @@ namespace CIL.Extraction
 /-- Whether a raw local is the whole-vector type eligible for opaque storage. -/
 private def opaqueLocalType : Option TypeExpr → Bool
   | some (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
-      (.atom elementScope "System.UInt64")) =>
-    scope == intrinsicsScope && elementScope == runtimeScope
+      (.primitive .uint64)) =>
+    scope == intrinsicsScope
   | _ => false
 
 /-- Every eligible local, in index order; addresses are taken by `ldloca` (18 or 0xFE0D). -/
@@ -26,8 +26,8 @@ theorem opaqueLocalIndices_eq_scan (closed : RawMethod) :
     opaqueLocalIndices closed = (List.range closed.locals.length).filter (fun index =>
       (match (closed.locals[index]? : Option TypeExpr) with
       | some (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
-          (.atom elementScope "System.UInt64")) =>
-        scope == intrinsicsScope && elementScope == runtimeScope
+          (.primitive .uint64)) =>
+        scope == intrinsicsScope
       | _ => false) && !(closed.code.filterMap (fun instruction =>
         if instruction.opcode == 18 || instruction.opcode == 65037 then localIndex instruction
         else none)).contains index) := by

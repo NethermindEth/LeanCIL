@@ -189,7 +189,7 @@ foreach (var (name, selector, method, code) in new[]
     ("SameText", "Strings::SameText()", 0,
         """[.ldstr "x", .ldstr "x", .ceq, .ret]"""),
     ("WordFlag", "GenericReceivers::CountWide(ulong)", 2, """
-        (let word := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.UInt64"
+        (let word := CIL.Extraction.TypeExpr.primitive .uint64
          let getType := CIL.Extraction.getTypeFromHandle.method
          [.ldtoken (.type word), .call getType, .ldtoken (.type word), .call getType,
           .call (CIL.Extraction.runtimeTypeComparison true).method, .ret])

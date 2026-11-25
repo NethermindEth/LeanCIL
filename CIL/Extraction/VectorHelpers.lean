@@ -19,9 +19,9 @@ private def vectorOwnerName (width : Nat) := s!"System.Runtime.Intrinsics.Vector
 /-- A signature component and the text the external member reference spells for it. -/
 private abbrev VectorOperand := TypeExpr × String
 
-/-- The named runtime primitive. -/
-private def primitiveOperand (name : String) : VectorOperand :=
-  (.atom runtimeScope name, name)
+/-- The runtime primitive and its full name. -/
+private def primitiveOperand (type : PrimitiveType) : VectorOperand :=
+  (.primitive type, type.display)
 
 /-- The vector constructor applied to an open parameter or concrete element. -/
 private def vectorOperand (width : Nat) (element : VectorOperand) : VectorOperand :=
@@ -30,7 +30,7 @@ private def vectorOperand (width : Nat) (element : VectorOperand) : VectorOperan
 
 /-- The single-word broadcast used by the AVX2 execution lemmas. -/
 def broadcast256Method : MethodRef :=
-  let word := TypeExpr.atom runtimeScope "System.UInt64"
+  let word := TypeExpr.primitive .uint64
   { owner := .atom intrinsicsScope "System.Runtime.Intrinsics.Vector256",
     name := name!"Create", hasThis := false, genericArity := 0,
     returnType := .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector256`1") word,
@@ -41,20 +41,20 @@ private def VectorMember.signature (member : VectorMember) (element : VectorOper
     VectorOperand × List VectorOperand :=
   match member with
   | .create width bits count =>
-    let word := primitiveOperand (if bits == 32 then "System.UInt32" else "System.UInt64")
+    let word := primitiveOperand (if bits == 32 then .uint32 else .uint64)
     (vectorOperand width word, List.replicate count word)
   | .combine =>
-    let word := primitiveOperand "System.UInt64"
+    let word := primitiveOperand .uint64
     (vectorOperand 512 word, List.replicate 2 (vectorOperand 256 word))
   | .span width =>
     (vectorOperand width element, [(.apply (.constructor runtimeScope "System.ReadOnlySpan`1")
       element.1, s!"System.ReadOnlySpan`1<{element.2}>")])
   | .equal width =>
-    (primitiveOperand "System.Boolean", List.replicate 2 (vectorOperand width element))
+    (primitiveOperand .boolean, List.replicate 2 (vectorOperand width element))
   | .transfer store offset =>
     let vector := vectorOperand 128 element
     let address := (TypeExpr.byref element.1, element.2 ++ "&")
-    let tail := if offset then [primitiveOperand "System.UIntPtr"] else []
+    let tail := if offset then [primitiveOperand .uintPtr] else []
     (if store then (.void, "System.Void") else vector,
       (if store then [vector, address] else [address]) ++ tail)
 
@@ -75,9 +75,9 @@ private def VectorMember.element (member : VectorMember) (method : MethodRef) :
   match member with
   | .equal _ => do
     guard (integerVectorWidth method.owner).isSome
-    let .apply _ (.atom _ name) := method.owner | none
-    return primitiveOperand name
-  | _ => some (primitiveOperand "System.Byte")
+    let .apply _ (.primitive element) := method.owner | none
+    return primitiveOperand element
+  | _ => some (primitiveOperand .byte)
 
 /-- The open operand and disjoint closed signature for one declaration in a reserved slot. -/
 private def VectorMember.row (member : VectorMember) (width : Nat) (key : MetadataName)

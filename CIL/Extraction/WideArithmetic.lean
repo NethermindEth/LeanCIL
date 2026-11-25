@@ -11,15 +11,15 @@ def integerPairIdentity (element : String) : String :=
 
 /-- The closed tuple resulting from DivRem, with its fields at offsets zero and one word. -/
 def integerPairResult (environment : CallLayouts) (type : TypeExpr)
-    (name : String) (width : Nat) : Bool :=
+    (element : PrimitiveType) (width : Nat) : Bool :=
   match type with
   | .aggregate identity index =>
     let validRaw := (layoutAt? environment.indexedRaw index).any fun raw =>
       match raw.fields with
       | [first, second] => raw.identity == identity && raw.packing <= 0 &&
-        (primitiveField name).any fun kind => first.type == kind && second.type == kind
+        element.fieldType?.any fun kind => first.type == kind && second.type == kind
       | _ => false
-    identity == integerPairIdentity name && validRaw &&
+    identity == integerPairIdentity element.display && validRaw &&
       (layoutAt? environment.layouts index).any fun entry =>
         entry.alignment == width && entry.layout.size == 2 * width &&
           match entry.layout.fields with
@@ -43,21 +43,24 @@ private def Form.model (form : Form) (width : Nat) (signed : Bool) : RuntimeMode
   | .productOut => .memory (.bigMul64 signed)
 
 /-- One concrete declaration, including the environment-local index of a tuple result. -/
-private def arithmeticRow (name : String) (form : Form) (element : String) (width : Nat)
+private def arithmeticRow (name : String) (form : Form) (element : PrimitiveType) (width : Nat)
     (signed : Bool) : ModelOverload :=
-  let word := TypeExpr.atom runtimeScope element
+  let word := TypeExpr.primitive element
   let out := form == .remainderOut || form == .productOut
   let parameters := if out then [word, word, .byref word] else [word, word]
-  let result := match form with
-    | .tuple => s!"System.ValueTuple`2<{element},{element}>"
-    | .product => if signed then "System.Int64" else "System.UInt64"
+  let resultType : PrimitiveType := match form with
+    | .product => if signed then .int64 else .uint64
     | _ => element
-  let argumentNames := if out then s!"{element},{element},{element}&" else s!"{element},{element}"
+  let spelled := element.display
+  let result := match form with
+    | .tuple => s!"System.ValueTuple`2<{spelled},{spelled}>"
+    | _ => resultType.display
+  let argumentNames := if out then s!"{spelled},{spelled},{spelled}&" else s!"{spelled},{spelled}"
   let target := s!"{runtimeScope}::{result} System.Math::{name}({argumentNames})"
   let returns := fun (type : TypeExpr) => match form, type with
-    | .tuple, .aggregate identity _ => identity == integerPairIdentity element
+    | .tuple, .aggregate identity _ => identity == integerPairIdentity spelled
     | .tuple, _ => false
-    | _, _ => type == .atom runtimeScope result
+    | _, _ => type == .primitive resultType
   -- These declarations are non-generic, so their raw types equal the selected closed types.
   { operand := .external (fun method => method.signature 0) name (fun _ => some target)
     accepts := fun method => !method.hasThis && method.genericArity == 0 &&
@@ -73,13 +76,11 @@ def wideArithmeticEntries : List ModelEntry :=
   let division := arithmeticRow "DivRem"
   let multiply := arithmeticRow "BigMul"
   [{ opcode := .call, owner, name := name!"DivRem", ownsName := true
-     overloads := (mathIntegers.map fun (name, width, signed) => division .tuple name width signed)
-       ++ [division .remainderOut "System.Int32" 32 true,
-           division .remainderOut "System.Int64" 64 true] },
+     overloads := (mathIntegers.map fun (type, width, signed) => division .tuple type width signed)
+       ++ [division .remainderOut .int32 32 true, division .remainderOut .int64 64 true] },
    { opcode := .call, owner, name := name!"BigMul", ownsName := true
-     overloads := [multiply .product "System.Int32" 32 true,
-       multiply .product "System.UInt32" 32 false, multiply .productOut "System.Int64" 64 true,
-       multiply .productOut "System.UInt64" 64 false] }]
+     overloads := [multiply .product .int32 32 true, multiply .product .uint32 32 false,
+       multiply .productOut .int64 64 true, multiply .productOut .uint64 64 false] }]
 
 /-- Every admitted arithmetic overload runs an intrinsic or a checked memory operation. -/
 theorem wideArithmeticEntries_yields {property : RuntimeModel → Prop}

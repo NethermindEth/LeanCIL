@@ -108,21 +108,21 @@ foreach (var (name, type, expected) in new[]
     }
     if (type.Contains('`'))
     {
-        const string arguments = "ownerArguments := [.atom Extraction.runtimeScope \"System.Int32\"]";
+        const string arguments = "ownerArguments := [.primitive .int32]";
         if (!narrowed.Contains(arguments, StringComparison.Ordinal))
             throw new Exception("Missing generic dispatch owner mutation target");
         var wrongOwner = Path.Combine(root, name + "-wrong-owner.lean");
         File.WriteAllText(wrongOwner, narrowed.Replace(arguments,
-            "ownerArguments := [.atom Extraction.runtimeScope \"System.Int64\"]", StringComparison.Ordinal));
+            "ownerArguments := [.primitive .int64]", StringComparison.Ordinal));
         rejected.Add(wrongOwner, "PASS forged constrained owner specialization: " + name, "ConstrainedCallsValid");
     }
     if (name == "ClosedBoth")
     {
         var forgedOwner = Path.Combine(root, name + "-wrong-interface.lean");
-        var overrides = Regex.Match(narrowed, @"overrides := \[\(\d+, \.apply \([^\r\n]+?System.Int32""\)\)\]");
+        var overrides = Regex.Match(narrowed, @"overrides := \[\(\d+, \.apply \([^\r\n]+?\.primitive \.int32\)\)\]");
         if (!overrides.Success) throw new Exception("Missing closed interface override mutation target");
         File.WriteAllText(forgedOwner, narrowed.Replace(overrides.Value,
-            overrides.Value.Replace("System.Int32", "System.Int64", StringComparison.Ordinal),
+            overrides.Value.Replace(".primitive .int32", ".primitive .int64", StringComparison.Ordinal),
             StringComparison.Ordinal));
         rejected.Add(forgedOwner, "PASS wrong closed interface override with identical signature",
             "ConstrainedCallsValid");
@@ -287,12 +287,12 @@ foreach (var (type, name, pruned, assume) in new (string, string, bool?, bool)[]
 // The receiver's catalog lists the interface instantiated at its own type argument; listing another
 // instantiation leaves the slot unimplemented.
 const string narrowWidth = "interfaces := [.apply (.objectConstructor \"Examples, Version=1.0.0.0, Culture=neutral, " +
-    "PublicKeyToken=null\" \"Examples.IWidth\\u00601\") (.atom Extraction.runtimeScope \"System.UInt32\")";
+    "PublicKeyToken=null\" \"Examples.IWidth\\u00601\") (.primitive .uint32)";
 if (widthNarrow?.Contains(narrowWidth, StringComparison.Ordinal) != true)
     throw new Exception("Missing generic receiver interface mutation target");
 var wrongInstance = Path.Combine(root, "WidthNarrow-wrong-instance.lean");
 File.WriteAllText(wrongInstance, Narrowed(widthNarrow, out _).Replace(narrowWidth,
-    narrowWidth.Replace("System.UInt32", "System.UInt64"), StringComparison.Ordinal));
+    narrowWidth.Replace(".primitive .uint32", ".primitive .uint64"), StringComparison.Ordinal));
 rejected.Add(wrongInstance, "PASS forged generic receiver interface instantiation", "ConstrainedCallsValid");
 
 // A recursive pair of getters never folds; extraction terminates and rejects the recursion.

@@ -137,6 +137,7 @@ private def plainSpelling? (name : ClassName) : Option String := do
 
 /-- A named type as its referencing scope and full name. -/
 def namedType : TypeExpr → Option (List Char × List Char)
+  | .primitive type => leaf (metadataChars runtimeScope) (metadataChars type.display)
   | .atom scope name => leaf (metadataChars scope) (metadataChars name)
   | .constructor scope name | .objectConstructor scope name => do
     leaf (metadataChars scope) (metadataChars (← plainSpelling? name))
@@ -151,6 +152,7 @@ def namedType : TypeExpr → Option (List Char × List Char)
 /-- The fast metadata decoder retains the original named-type rule, including Unicode. -/
 theorem namedType_eq_original (type : TypeExpr) : namedType type =
     match type with
+    | .primitive type => leaf runtimeScope.toList type.display.toList
     | .atom scope name => leaf scope.toList name.toList
     | .constructor scope name | .objectConstructor scope name => do
       leaf scope.toList (← plainSpelling? name).toList
@@ -262,6 +264,7 @@ theorem sameRuntimeType_aggregate_self (identity : String) (layout : Nat) :
 
 /-- The separate assembly name on a metadata type head. Flat owners carry it inside the name. -/
 def TypeExpr.explicitHeadScope : TypeExpr → Option String
+  | .primitive _ => some runtimeScope
   | .atom scope _ | .object scope _ | .constructor scope _ | .objectConstructor scope _ =>
     some scope
   | .apply head _ => head.explicitHeadScope

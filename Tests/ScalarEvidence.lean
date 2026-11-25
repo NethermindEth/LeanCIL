@@ -22,9 +22,9 @@ example : scalarType (.atom coreLibraryScope "System.Int32") = .word32 ∧
     scalarType (.atom coreLibraryScope "System.IntPtr") = .native ∧
     scalarType (.atom "System.Private.CoreLib" "System.Int32") = .other := by decide +kernel
 
-private def word : TypeExpr := .atom runtime "System.UInt64"
-private def intType : TypeExpr := .atom runtime "System.Int32"
-private def nativeType : TypeExpr := .atom runtime "System.IntPtr"
+private def word : TypeExpr := .primitive .uint64
+private def intType : TypeExpr := .primitive .int32
+private def nativeType : TypeExpr := .primitive .intPtr
 private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction := ⟨0, opcode, operand⟩
 /-- The pinned assembly owning `Scope::Fixture`; every certificate attributes its bodies to it. -/
 private def scope : AssemblyPin :=
@@ -656,7 +656,7 @@ theorem pointer_local_storage :
   decide +kernel
 #print axioms pointer_local_storage
 
-private def byteSpanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.Byte")
+private def byteSpanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.primitive .byte)
 private def byteSpanSite : CallSite := {
   declared := { convention := 0x20, parameters := [.pointer .void, intType] },
   method := {
@@ -742,7 +742,7 @@ private theorem tuple_field_cases :
 
 #print axioms tuple_field_cases
 
-private def spanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.UInt32")
+private def spanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.primitive .uint32)
 private def spanSite : CallSite := {
   declared := {
     convention := 0x20,
@@ -970,9 +970,9 @@ private def block (opcode : Nat) (emitted : Instruction) (prefixes : List RawIns
     IndirectCase :=
   { pops := 3, pushed := none, prefixes, access := i opcode, emitted }
 private def unaligned (alignment : Int) : RawInstruction := i 65042 (.integer alignment)
-private def sbyteType : TypeExpr := .atom runtime "System.SByte"
+private def sbyteType : TypeExpr := .primitive .sbyte
 private def aggregateType : TypeExpr := .aggregate "S" 0
-private def enumType : TypeExpr := .enum (Tests.enumIdentity "E") (.atom runtime "System.Int16")
+private def enumType : TypeExpr := .enum (Tests.enumIdentity "E") (.primitive .int16)
 private def vectorType : TypeExpr :=
   .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1") intType
 /-- An `ldobj` (113) or `stobj` (129) of `type`, pushing the kind the scalar check gives it. -/
@@ -1051,9 +1051,9 @@ private def indirectForged : List IndirectCase := [
     and `stobj`, field accesses at operand types extraction refuses, and calls emitting an
     `ldind` or `stind`. -/
 private def objectForged : List IndirectCase := [
-  load 113 (.ldobj (.atom runtime "System.UInt16")) (operand := .type intType),
-  load 113 (.ldobj (.atom runtime "System.UInt32")) (operand := .type intType),
-  load 113 (.ldobj (.atom runtime "System.Byte")) (operand := .type sbyteType),
+  load 113 (.ldobj (.primitive .uint16)) (operand := .type intType),
+  load 113 (.ldobj (.primitive .uint32)) (operand := .type intType),
+  load 113 (.ldobj (.primitive .byte)) (operand := .type sbyteType),
   load 113 (.ldind .i8) .word64 (operand := .type word),
   store 129 (.stind .i1) (operand := .type intType),
   store 129 (.stind .i8) (operand := .type sbyteType),
@@ -1061,8 +1061,8 @@ private def objectForged : List IndirectCase := [
   typed 113 enumType (.ldind .u2), typed 113 vectorType (.ldobj (.apply
     (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector256`1") intType)),
   -- Floating-point and pointer operands, which extraction refuses.
-  typed 113 (.atom runtime "System.Double") (.ldfld tupleItem1),
-  typed 129 (.atom runtime "System.Single") (.stfld tupleItem1),
+  typed 113 (.primitive .double) (.ldfld tupleItem1),
+  typed 129 (.primitive .single) (.stfld tupleItem1),
   typed 113 (.pointer intType) (.ldfld tupleItem1),
   load 40 (.ldind .i8) .word64 (operand := .call loadSite),
   store 40 (.stind .i8) (operand := .call storeSite)]
@@ -1168,7 +1168,7 @@ theorem forged_field_loads_refused :
     EvidenceRefuses fieldRaw
       (fieldCode (.ldfld { balance with owner := .object "Scope" "Scope.Other" })) ∧
     EvidenceRefuses fieldRaw
-      (fieldCode (.ldfld { balance with type := .atom runtime "System.Int32" })) ∧
+      (fieldCode (.ldfld { balance with type := .primitive .int32 })) ∧
     EvidenceRefuses fieldRaw (fieldCode (.ldfld { balance with name := name!"limit" })) ∧
     EvidenceRefuses nextRaw (fieldCode (.ldfld { next with index := 0 })) ∧
     EvidenceRefuses nextRaw (fieldCode (.ldfld { next with owner := account })) :=
@@ -1234,22 +1234,21 @@ private def storesInto (type : TypeExpr) (value : ScalarKind) : Bool :=
   scalarEmissionMatches none none (i 125 (.field node 0 type name!"value" false))
     [value, .object] (.stfld { owner := node, index := 0, type, name := name!"value" })
 /-- The runtime primitive type `name`. -/
-private def primitive (name : String) : TypeExpr := .atom runtime name
 -- A stored integer has the field's stack kind, `int32` up to 4 bytes and `int64` or native for
 -- 8, since the step reads an `int32` only into a narrow slot and an `int64` only into a wide one.
-example : storesInto (primitive "System.SByte") .word64 = false := by decide
-example : storesInto (primitive "System.Int16") .word64 = false := by decide
-example : storesInto (primitive "System.Int32") .word64 = false := by decide
-example : storesInto (primitive "System.Int32") .native = false := by decide
-example : storesInto (primitive "System.Int64") .word32 = false := by decide
-example : storesInto (primitive "System.IntPtr") .word32 = false := by decide
-example : storesInto (.enum (Tests.enumIdentity "E") (primitive "System.Int64")) .word32 = false := by decide
-example : storesInto (primitive "System.Int32") .word32 = true := by decide
-example : storesInto (primitive "System.Boolean") .word32 = true := by decide
-example : storesInto (primitive "System.Char") .word32 = true := by decide
-example : storesInto (.enum (Tests.enumIdentity "E") (primitive "System.Int16")) .word32 = true := by decide
-example : storesInto (primitive "System.Int64") .native = true := by decide
-example : storesInto (primitive "System.IntPtr") .word64 = true := by decide
+example : storesInto (.primitive .sbyte) .word64 = false := by decide
+example : storesInto (.primitive .int16) .word64 = false := by decide
+example : storesInto (.primitive .int32) .word64 = false := by decide
+example : storesInto (.primitive .int32) .native = false := by decide
+example : storesInto (.primitive .int64) .word32 = false := by decide
+example : storesInto (.primitive .intPtr) .word32 = false := by decide
+example : storesInto (.enum (Tests.enumIdentity "E") (.primitive .int64)) .word32 = false := by decide
+example : storesInto (.primitive .int32) .word32 = true := by decide
+example : storesInto (.primitive .boolean) .word32 = true := by decide
+example : storesInto (.primitive .char) .word32 = true := by decide
+example : storesInto (.enum (Tests.enumIdentity "E") (.primitive .int16)) .word32 = true := by decide
+example : storesInto (.primitive .int64) .native = true := by decide
+example : storesInto (.primitive .intPtr) .word64 = true := by decide
 -- A field typed as an array of a class holds the array's reference, stored as an object or null;
 -- a value array field stores only an array.
 private def itemsField : RawOperand := .field node 1 (.array node) name!"items" false
@@ -1272,7 +1271,7 @@ example : scalarEmissionMatches none none (i 125 samplesField)
 example : scalarEmissionMatches none none (i 123 samplesField) [.object]
     (.ldfld samples) = true := by decide
 example : scalarEmissionMatches none none (i 123 samplesField) [.object]
-    (.ldfld { samples with type := .array (.atom runtime "System.Int64") }) = false := by
+    (.ldfld { samples with type := .array (.primitive .int64) }) = false := by
   decide
 example : scalarEmissionMatches none none (i 123 samplesField) [.object]
     (.ldfld { samples with index := 0 }) = false := by decide
@@ -1369,7 +1368,7 @@ private def guardSite (name : String) (element : TypeExpr) (comparison := false)
 
 /-- Every guard keeps its exact call. A different shape or a floating element is refused. -/
 theorem guard_decoding :
-    let uint := TypeExpr.atom runtimeScope "System.UInt32"
+    let uint := TypeExpr.primitive .uint32
     let unary := ["ThrowIfZero", "ThrowIfNegative", "ThrowIfNegativeOrZero"]
     let binary := ["ThrowIfEqual", "ThrowIfNotEqual", "ThrowIfGreaterThan", "ThrowIfLessThan",
       "ThrowIfGreaterThanOrEqual", "ThrowIfLessThanOrEqual"]
@@ -1377,11 +1376,11 @@ theorem guard_decoding :
     (unary.all (fun name => Tests.ModelOperands.checks (guardSite name uint))) = true ∧
     (binary.all (fun name => Tests.ModelOperands.checks (guardSite name uint true))) = true ∧
     (unary ++ binary).all (fun name => decide (Tests.ModelOperands.decoded
-      (guardSite name (.atom runtimeScope "System.Double") (binary.contains name)) =
+      (guardSite name (.primitive .double) (binary.contains name)) =
         liveHoleAt 0 40)) = true ∧
     runtimeModel {} .call (guardSite "ThrowIfNegative" uint).method =
       some (.memory (.zeroGuard .negative 32 false)) ∧
-    runtimeModel {} .call (guardSite "ThrowIfNegative" (.atom runtimeScope "System.Int32")).method =
+    runtimeModel {} .call (guardSite "ThrowIfNegative" (.primitive .int32)).method =
       some (.memory (.zeroGuard .negative 32 true)) ∧
     runtimeModel {} .call (guardSite "ThrowIfNull" uint).method = some (.memory .throwIfNull) := by
   decide +kernel
@@ -1548,7 +1547,7 @@ theorem closed_generic_fill_signature :
 /-- The ECMA-335 augments make int32-to-`native unsigned int` coercion sign-extending, unlike
     the 2012 text; scalar flow admits no implicit int32-to-native coercion in either direction. -/
 theorem no_implicit_native_coercion :
-    let unsignedNative : TypeExpr := .atom runtime "System.UIntPtr"
+    let unsignedNative : TypeExpr := .primitive .uintPtr
     ([nativeType, unsignedNative].all fun home =>
       let method := { addRaw with locals := [home], parameters := [home], returnType := home }
       let call := i 40 (.call { site with parameterCount := 1, method.parameters := [home] })

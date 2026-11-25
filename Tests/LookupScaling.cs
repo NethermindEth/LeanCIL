@@ -279,7 +279,7 @@ void ReturnResolutionCosts(bool stepOnly = false)
                   logInfo m!"resolution {label.getString} {after - before} heartbeats"
 
                 """);
-            var type = ".atom runtimeScope \"System.Byte\"";
+            var type = ".primitive .byte";
             var expected = "some .unsigned8";
             if (dimension == "layouts")
             {
@@ -368,7 +368,7 @@ void ArgumentResolutionCosts()
     const double AllowedArgumentGrowth = 1.35;
     var resolutionDirectory = At("artifacts/LookupScaling/ArgumentResolution");
     Directory.CreateDirectory(resolutionDirectory);
-    const string Int32Type = ".atom runtimeScope \"System.Int32\"";
+    const string Int32Type = ".primitive .int32";
     foreach (var homed in new[] { false, true })
     {
         var samples = new List<(int Size, long Facts, long Reads)>();
@@ -813,7 +813,7 @@ string RunShapeFixture(string directory, string name, int size, bool spread, boo
         operands.AppendLine(value
             ? $"def operand{operand} : TypeExpr := .aggregate \"T::S{owner}\" {owner}"
             : $"def operand{operand} : FieldRef := {{ owner := .aggregate \"T::S{owner}\" {owner}, " +
-                $"index := {(spread ? 0 : operand)}, type := .atom runtimeScope \"System.Int32\", " +
+                $"index := {(spread ? 0 : operand)}, type := .primitive .int32, " +
                 $"name := name!\"f{operand}\" }}");
         if (!admissionOnly) facts.Append("#resolution_cost \"fact\" in ");
         facts.AppendLine($"cil_{(value ? "value" : "field")}_shape environment " +
@@ -955,10 +955,10 @@ void CheckNarrowedResolution()
         open CIL CIL.Extraction
         def method0 : Method :=
           { code := [], locals := [], returnsValue := true,
-            declared := { returnType := .atom runtimeScope "System.Byte" } }
+            declared := { returnType := .primitive .byte } }
         theorem method0_returnsValue : method0.returnsValue = true := rfl
         theorem method0_declared :
-          method0.declared = { returnType := .atom runtimeScope "System.Byte" } := rfl
+          method0.declared = { returnType := .primitive .byte } := rfl
         cil_resolution_facts method0
         theorem selected : True := True.intro
         #print axioms method0_returnsValue
@@ -1122,7 +1122,7 @@ void PrefixEntryCosts()
             {{KernelCostCommand}}
             namespace PrefixEntryCost
             /-- The element type of every address. -/
-            def intType : TypeExpr := .atom runtimeScope "System.Int32"
+            def intType : TypeExpr := .primitive .int32
             /-- Each segment branches to the prefix at the given destination. -/
             def segment (destination index : Nat) : List RawInstruction :=
               let start := {{SegmentLength}} * index
@@ -1192,7 +1192,7 @@ void MethodDecodeCosts()
             namespace DecodedMethodCost
             {{ValueBody(instructions)}}
             /-- The type of every parameter and local. -/
-            def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
+            def uint32 : TypeExpr := .primitive .uint32
             /-- A static method with four parameters, four zero-initialized locals and {{instructions}} raw
                 instructions. -/
             def source : RawMethod :=
@@ -1265,7 +1265,7 @@ void DecodedDefinitionCosts()
             def source : RawMethod :=
               { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
                 attributes := 0, implementation := 0, returnType := .void, parameters := [],
-                locals := List.replicate 4 (.atom runtimeScope "System.UInt32"), initLocals := true,
+                locals := List.replicate 4 (.primitive .uint32, initLocals := true,
                 maxStack := 8, genericParameters := [],
                 code := (List.range {{instructions / SegmentLength}}).flatMap segment }
             #command_cost "decoded definition {{instructions}}"
@@ -1814,7 +1814,7 @@ void ClosedArgumentsCosts()
             def raw : RawMethod := {
               token := 0, owner := "Scaling", hasThis := false, explicitThis := false,
               callingConvention := 0, attributes := 150, implementation := 0, returnType := .void,
-              parameters := List.replicate {{parameters}} (.atom runtimeScope "System.UInt32"),
+              parameters := List.replicate {{parameters}} (.primitive .uint32,
               locals := [], initLocals := false, maxStack := 1, genericParameters := [],
               code := [.mk 0 42 .none] }
             /-- Primitive argument storage does not inspect unrelated layouts. -/
@@ -2092,7 +2092,7 @@ void PlatformTableCosts()
               { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
             return frame.admits (.named head)
               (.enum { assembly := runtimeAssembly, typeNamespace := name!"", name := name!"Number" }
-                (.atom runtimeScope "System.Int32"))).toOption = some true)
+                (.primitive .int32)).toOption = some true)
         #kernel_cost "platform pair {{size}}"
           ((env{{size}}.platformField 0
             { owner := .genericInst (named "System.ValueTuple`2" {{Parts("System", "ValueTuple`2")}})
@@ -2294,7 +2294,7 @@ void ModelTableCosts()
         /-- Only the final position in each layout table carries the eight-byte target. -/
         def sizeRef (position : Nat) : MethodRef :=
           { owner := unsafeOwner, name := name!"SizeOf", hasThis := false, genericArity := 1,
-            parameters := [], returnType := .atom runtimeScope "System.Int32",
+            parameters := [], returnType := .primitive .int32,
             methodArguments := [.aggregate "Target" position] }
         /-- The raw row binds a size query to its named type. -/
         def row (identity : String) (size : Nat) : RawLayout :=
@@ -3275,7 +3275,7 @@ void IndirectTargetCosts()
             import CIL.Safety.Execution
             import CIL.Extraction.KernelEquation
             def signature : CIL.ManagedSignature :=
-              ⟨.atom CIL.Extraction.runtimeScope "System.Int32", [.atom CIL.Extraction.runtimeScope "System.Int32"]⟩
+              ⟨.primitive .int32, [.primitive .int32]⟩
             """ + "\n";
         var statement = $$"""
             CIL.Safety.indirectTarget signature [⟨⟨"other", 6, []⟩, 2⟩, ⟨{{identity}}, 1⟩]
@@ -3350,7 +3350,7 @@ long ArrayAddressCost(bool prefixed, int sites)
         set_option maxHeartbeats 0
         namespace ArrayAddresses
         open CIL CIL.Extraction
-        def intType : TypeExpr := .atom runtimeScope "System.Int32"
+        def intType : TypeExpr := .primitive .int32
         def width (prefixed : Bool) : Nat := if prefixed then 6 else 5
         def bytes (prefixed : Bool) : Nat := if prefixed then 12 else 10
         def segment (prefixed : Bool) (index : Nat) : List RawInstruction :=
@@ -3420,7 +3420,7 @@ void IndirectAccessCosts()
             set_option maxHeartbeats 0
             namespace IndirectAccesses
             open CIL CIL.Extraction
-            def word : TypeExpr := .atom runtimeScope "System.UInt64"
+            def word : TypeExpr := .primitive .uint64
             def width (prefixed : Bool) : Nat := if prefixed then 6 else 5
             def bytes (prefixed : Bool) : Nat := if prefixed then 10 else 7
             def segment (prefixed : Bool) (index : Nat) : List RawInstruction :=
@@ -3488,7 +3488,7 @@ long LocalAccessCost(int accesses)
         set_option maxHeartbeats 0
         namespace LocalAccesses
         open CIL CIL.Extraction
-        def intType : TypeExpr := .atom runtimeScope "System.Int32"
+        def intType : TypeExpr := .primitive .int32
         def localCount : Nat := 4
         def segment (index : Nat) : List RawInstruction :=
           [⟨0, 17, .local (index % localCount)⟩, ⟨0, 19, .local ((index + 1) % localCount)⟩,
@@ -3533,7 +3533,7 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
 {
     var pointers = slots == LocalSlots.Pointer;
     var addressed = slots == LocalSlots.Addressed;
-    var slotType = pointers ? "System.IntPtr" : "System.Int32";
+    var slotType = pointers ? "intPtr" : "int32";
     var kind = pointers ? ".methodPointer signature" : ".word32";
     var push = pointers ? "65030, .call handler" : "22, .none";
     var load = addressed ? "18, .local index" : "17, .local index";
@@ -3552,7 +3552,7 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
         set_option maxHeartbeats 0
         namespace LocalSlots
         open CIL CIL.Extraction
-        def slotType : TypeExpr := .atom runtimeScope "{{slotType}}"
+        def slotType : TypeExpr := .primitive .{{slotType}}
         def handler : CallSite :=
           { declared := { convention := 0 }, method := {
               owner := .atom "T" "Scaling", name := name!"", hasThis := false, genericArity := 0,
@@ -3618,7 +3618,7 @@ long FeatureLocalCost(int count)
         set_option maxHeartbeats 0
         namespace FeatureLocals
         open CIL CIL.Extraction
-        def intType : TypeExpr := .atom runtimeScope "System.Int32"
+        def intType : TypeExpr := .primitive .int32
         def localCount : Nat := {{count}}
         def segment (index : Nat) : List RawInstruction :=
           [⟨0, 17, .local (index % localCount)⟩, ⟨0, 19, .local ((index + 1) % localCount)⟩,
@@ -3696,7 +3696,7 @@ long KnownFactCost(int facts, int rounds)
         set_option maxHeartbeats 0
         namespace KnownFacts
         open CIL CIL.Extraction
-        def intType : TypeExpr := .atom runtimeScope "System.Int32"
+        def intType : TypeExpr := .primitive .int32
         def facts : Nat := {{facts}}
         def rounds : Nat := {{rounds}}
         def raw : RawMethod := {

@@ -43,7 +43,7 @@ def spanOwnerName? (head : TypeExpr) : Option String :=
 private def SpanMember.signature (member : SpanMember) (writable openType : Bool)
     (element : TypeExpr) : OpenSignature := Id.run do
   let owner := TypeExpr.apply (spanHead writable) element
-  let int := TypeExpr.atom runtimeScope "System.Int32"
+  let int := TypeExpr.primitive .int32
   let reference := if writable then TypeExpr.byref element else if openType then
       .modified true runtimeScope "System.Runtime.InteropServices.InAttribute" (.byref element)
     else .atom runtimeScope "!0& modreq(System.Runtime.InteropServices.InAttribute)"
@@ -51,7 +51,7 @@ private def SpanMember.signature (member : SpanMember) (writable openType : Bool
     | .item => ⟨0x20, reference, [int]⟩
     | .pinnable => ⟨0x20, reference, []⟩
     | .length => ⟨0x20, int, []⟩
-    | .isEmpty => ⟨0x20, .atom runtimeScope "System.Boolean", []⟩
+    | .isEmpty => ⟨0x20, .primitive .boolean, []⟩
     | .slice counted => ⟨0x20, owner, if counted then [int, int] else [int]⟩
     | .readOnly => ⟨0, .apply (spanHead false) element, [owner]⟩
     | .array => ⟨0, owner, [.array element]⟩

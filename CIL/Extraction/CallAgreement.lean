@@ -195,6 +195,7 @@ private def localStaticOwner (methodOwner : String) (owner : TypeExpr) : Bool :=
   if scope.isEmpty || !ownedBy scope methodOwner then false else
   match owner with
   | .object assembly _ | .atom assembly _ => scope == assembly
+  | .primitive _ => scope == runtimeScope
   | .aggregate identity _ => ownedBy scope identity
   | _ => false
 

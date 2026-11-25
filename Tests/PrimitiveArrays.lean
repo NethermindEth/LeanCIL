@@ -12,13 +12,13 @@ private def rawArray (opcode : Nat) (operand : CIL.Extraction.RawOperand := .non
     CIL.Extraction.RawInstruction := ⟨0, opcode, operand⟩
 
 /-- The element type `System.Int32`. -/
-private def int32 : CIL.Extraction.TypeExpr := .atom CIL.Extraction.runtimeScope "System.Int32"
+private def int32 : CIL.Extraction.TypeExpr := .primitive .int32
 
 /-- The struct `Record`, at layout index 0. -/
 private def record : CIL.Extraction.TypeExpr := .aggregate "Record" 0
 
 /-- The element type `System.UInt32`. -/
-private def uint32 : CIL.Extraction.TypeExpr := .atom CIL.Extraction.runtimeScope "System.UInt32"
+private def uint32 : CIL.Extraction.TypeExpr := .primitive .uint32
 
 /-- A static method without arguments; the stack transfers below read none of its fields. -/
 private def holder : CIL.Extraction.RawMethod := {
@@ -351,10 +351,10 @@ theorem byref_like_layout_containment :
 /-- Native length operands certify, while raw int64 stack kinds do not. -/
 theorem allocation_native_kind :
     CIL.Extraction.scalarOpMatches none
-      (rawArray 141 (.type (.atom CIL.Extraction.runtimeScope "System.Int32")))
+      (rawArray 141 (.type (.primitive .int32)))
       [.native] (.newarr int32) = true ∧
     CIL.Extraction.scalarOpMatches none
-      (rawArray 141 (.type (.atom CIL.Extraction.runtimeScope "System.Int32")))
+      (rawArray 141 (.type (.primitive .int32)))
       [.word64] (.newarr int32) = false := by decide +kernel
 #print axioms allocation_native_kind
 
@@ -362,7 +362,7 @@ theorem allocation_native_kind :
     the same struct under another identity or layout index, does not match it. -/
 theorem allocation_token_mismatch :
     CIL.Extraction.scalarOpMatches none (rawArray 141 (.type int32)) [.word32]
-      (.newarr (.atom CIL.Extraction.runtimeScope "System.UInt32")) = false ∧
+      (.newarr (.primitive .uint32)) = false ∧
     CIL.Extraction.scalarOpMatches none (rawArray 141 (.type record)) [.word32]
       (.newarr (.aggregate "Other" 0)) = false ∧
     CIL.Extraction.scalarOpMatches none (rawArray 141 (.type record)) [.word32]

@@ -14,7 +14,7 @@ namespace Tests.SpanModels
 open CIL CIL.Extraction
 
 /-- The fixture's primitive and span type identities. -/
-private def int32 : TypeExpr := .atom runtimeScope "System.Int32"
+private def int32 : TypeExpr := .primitive .int32
 
 /-- A closed or open span of the specified element. -/
 private def span (writable : Bool) (element : TypeExpr) : TypeExpr :=
@@ -34,7 +34,7 @@ private def overloads (writable : Bool) (element : TypeExpr) (width : Nat) : Lis
   let owner := span writable element
   let var := TypeExpr.ownerParameter 0
   let openOwner := span writable var
-  let boolean := TypeExpr.atom runtimeScope "System.Boolean"
+  let boolean := TypeExpr.primitive .boolean
   let modified := fun type => TypeExpr.modified true runtimeScope
     "System.Runtime.InteropServices.InAttribute" (.byref type)
   let openRef := if writable then TypeExpr.byref var else modified var
@@ -88,7 +88,7 @@ private def resolves (env : LayoutEnvironment) (element : TypeExpr) (width : Nat
 /-- Primitive, enum, vector and aggregate elements retain their own storage widths. -/
 theorem elementWidths :
     resolves {} int32 4 ∧
-    resolves {} (.enum (Tests.enumIdentity "Small") (.atom runtimeScope "System.Byte")) 1 ∧
+    resolves {} (.enum (Tests.enumIdentity "Small") (.primitive .byte)) 1 ∧
     resolves {} (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
       int32) 16 ∧ resolves (environment 1) aggregate 4 ∧
     resolves (environment 3) aggregate 12 := by
@@ -99,10 +99,10 @@ theorem elementWidths :
 /-- Every rejected element, including an unbound aggregate, misses the production model table. -/
 theorem unsupportedElements :
     ([TypeExpr.void, .object runtimeScope "System.String", .byref int32, .array int32,
-      .atom runtimeScope "System.Double", .atom "Fixture" "System.Int32",
-      .enum (Tests.enumIdentity "Bad") (.atom runtimeScope "System.Boolean"),
+      .primitive .double, .atom "Fixture" "System.Int32",
+      .enum (Tests.enumIdentity "Bad") (.primitive .boolean),
       .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
-        (.atom runtimeScope "System.Single"), .aggregate "Other::Words" 0,
+        (.primitive .single), .aggregate "Other::Words" 0,
       .aggregate "Fixture::Words" 1].all fun type =>
         (rows type 0).all fun row => (runtimeModel (environment 1) .call row.method).isNone) := by
   decide +kernel
@@ -115,6 +115,7 @@ private def spelling : TypeExpr → String
   | .byref (.ownerParameter 0) => "!0&"
   | .modified true _ name (.byref (.ownerParameter 0)) => s!"!0& modreq({name})"
   | .apply (.constructor _ owner) (.ownerParameter 0) => s!"{owner.signatureName?.getD "?"}<!0>"
+  | .primitive type => type.display
   | .atom _ name => name
   | _ => "?"
 

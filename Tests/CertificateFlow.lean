@@ -99,7 +99,7 @@ theorem lengths_rejected :
 /-- Each instruction prefix, with an operand of the form it takes. -/
 private def prefixes : List RawInstruction :=
   [⟨1, 65042, .integer 1⟩, ⟨1, 65043, .none⟩, ⟨1, 65044, .none⟩,
-    ⟨1, 65046, .type (.atom runtimeScope "System.Int32")⟩, ⟨1, 65049, .integer 1⟩,
+    ⟨1, 65046, .type (.primitive .int32)⟩, ⟨1, 65049, .integer 1⟩,
     ⟨1, 65054, .none⟩]
 
 /-- `branch; prefix; nop; ret`: the instruction at pc 1 modifies the one at pc 2. -/
@@ -123,7 +123,7 @@ theorem prefix_entry_rejected :
 theorem unprefixed_entry_accepted :
     PrefixEntryFree (prefixed ⟨0, 43, .target 2⟩ ⟨1, 0, .none⟩) ∧
     PrefixEntryFree (prefixed ⟨0, 43, .target 2⟩
-      ⟨1, 65045, .type (.atom runtimeScope "System.Int32")⟩) := by decide
+      ⟨1, 65045, .type (.primitive .int32)⟩) := by decide
 #print axioms unprefixed_entry_accepted
 
 end Tests.CertificateFlow

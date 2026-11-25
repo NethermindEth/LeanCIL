@@ -108,7 +108,7 @@ theorem assembly_literals_are_lists :
 #print axioms assembly_literals_are_lists
 
 /-- The unsigned 64-bit integer. -/
-def word : TypeExpr := .atom runtimeScope "System.UInt64"
+def word : TypeExpr := .primitive .uint64
 def method0Original : RawMethod :=
   { token := 100663802,
     owner :=

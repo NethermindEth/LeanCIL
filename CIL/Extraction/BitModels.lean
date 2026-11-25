@@ -27,10 +27,10 @@ inductive BitOwner where
   | bitOperations | integer | binaryPrimitives
 
 /-- `System.Boolean`, the result of `IsPow2`. -/
-def booleanType : TypeExpr := .atom runtimeScope "System.Boolean"
+def booleanType : TypeExpr := .primitive .boolean
 
 /-- `System.Int32`, a rotation's count and the result of a count of `BitOperations`. -/
-def int32Type : TypeExpr := .atom runtimeScope "System.Int32"
+def int32Type : TypeExpr := .primitive .int32
 
 /-- The result `owner` declares for `helper` on the integer `type` of `width` bits and
     `signed`ness, with the intrinsic the helper runs as; `none` where the owner declares no
@@ -75,9 +75,8 @@ def bitOperation (owner : BitOwner) (helper : BitHelper) (fixed : Option TypeExp
   let rotation := match helper with | .rotateLeft | .rotateRight => true | _ => false
   if parameters != (if rotation then [type, int32Type] else [type]) then none
   if fixed.any (· != type) then none
-  let .atom scope name := type | none
-  if scope != runtimeScope then none
-  let (width, signed) ← mathIntegers.lookup name
+  let .primitive primitive := type | none
+  let (width, signed) ← mathIntegers.lookup primitive
   let (result, operation) ← bitHelperModel owner helper type width signed
   if returned != result then none
   some operation
@@ -111,8 +110,8 @@ def bitEntry (owner : BitOwner) (declaring : TypeExpr) (fixed : Option TypeExpr)
 def bitEntries : List ModelEntry :=
   bitHelpers.map
       (bitEntry .bitOperations (.atom runtimeScope "System.Numerics.BitOperations") none) ++
-    mathIntegers.flatMap (fun (name, width, signed) =>
-      let type := TypeExpr.atom runtimeScope name
+    mathIntegers.flatMap (fun (primitive, width, signed) =>
+      let type := TypeExpr.primitive primitive
       (bitHelpers.filter fun helper =>
         (bitHelperModel .integer helper.2 type width signed).isSome).map
           (bitEntry .integer type (some type))) ++

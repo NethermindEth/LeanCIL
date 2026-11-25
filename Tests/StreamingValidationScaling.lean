@@ -32,7 +32,7 @@ def indexedConstrained (raw : RawMethod) (reachable : List Bool) (emitted : Meth
 /-- Eligible vector-local metadata. -/
 def vector : TypeExpr := .apply
   (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
-  (.atom runtimeScope "System.UInt64")
+  (.primitive .uint64)
 
 /-- No address instructions obscure the positional local lookup cost. -/
 def locals (count : Nat) := { raw [] with locals := List.replicate count vector }
@@ -45,8 +45,7 @@ def indexedOpaque (closed : RawMethod) : List Nat :=
   (List.range closed.locals.length).filter fun index =>
     (match types.get? index with
       | some (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
-          (.atom elementScope "System.UInt64")) =>
-        scope == intrinsicsScope && elementScope == runtimeScope
+          (.primitive .uint64)) => scope == intrinsicsScope
       | _ => false) && !addressed.contains index
 
 /-- Indexed reference at 128 instructions. -/

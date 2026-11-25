@@ -84,7 +84,7 @@ theorem outsideAllocation : code 0 =
     pointer to a reference type receive no primitive-pointer storage. -/
 theorem scopeBindings :
     typeStorage [] (.pointer (.atom coreLibraryScope "System.IntPtr")) = some .reference ∧
-    typeStorage [] (.pointer (.atom runtimeScope "System.IntPtr")) = some .reference ∧
+    typeStorage [] (.pointer (.primitive .intPtr)) = some .reference ∧
     typeStorage [] (.pointer (.atom "System.Private.CoreLib" "System.IntPtr")) = none ∧
     typeStorage [] (.pointer (.atom coreLibraryScope "System.IntPtq")) = none ∧
     typeStorage [] (.pointer (.object coreLibraryScope "System.Object")) = none := by

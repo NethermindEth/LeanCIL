@@ -89,11 +89,11 @@ foreach (var name in new[] { "Identity", "Combined", "Nested", "NestedHelper", "
         var cases = new (string Name, string Source)[]
         {
             ("swapped", ChangeDefinition(specialization, "method1TypeArgumentsRaw", line =>
-                line.Replace("System.UInt32", "TemporaryType", StringComparison.Ordinal)
-                    .Replace("System.UInt64", "System.UInt32", StringComparison.Ordinal)
-                    .Replace("TemporaryType", "System.UInt64", StringComparison.Ordinal))),
+                line.Replace(".primitive .uint32", "TemporaryType", StringComparison.Ordinal)
+                    .Replace(".primitive .uint64", ".primitive .uint32", StringComparison.Ordinal)
+                    .Replace("TemporaryType", ".primitive .uint64", StringComparison.Ordinal))),
             ("omitted", ChangeDefinition(specialization, "method1TypeArgumentsRaw", line =>
-                line.Replace(", .atom Extraction.runtimeScope \"System.UInt64\"", "", StringComparison.Ordinal))),
+                line.Replace(", .primitive .uint64", "", StringComparison.Ordinal))),
             ("arity", ChangeDefinition(calls, "method0Closed", line =>
                 line.Replace("ownerArgumentCount := 1", "ownerArgumentCount := 0", StringComparison.Ordinal))),
             ("owner", ChangeDefinition(calls, "method0Closed", line =>
@@ -243,8 +243,8 @@ foreach (var (name, fixture, definition, change) in targetCases)
         /-- The entry `TableFirst<ulong>` calls the catalogued `OwnerHelper<uint>.Identity`. -/
         theorem generic_table_entry :
             (CIL.Safety.invoke Extracted.program 64 0
-              [.methodTable ⟨⟨.atom CIL.Extraction.runtimeScope "System.UInt32",
-                [.atom CIL.Extraction.runtimeScope "System.UInt32"]⟩, some #[{{target.Groups[1].Value}}], none, 1,
+              [.methodTable ⟨⟨.primitive .uint32,
+                [.primitive .uint32]⟩, some #[{{target.Groups[1].Value}}], none, 1,
                 by decide⟩,
                 .scalar (.i32 42)]
               { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,

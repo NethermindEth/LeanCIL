@@ -70,9 +70,9 @@ theorem address_shapes_refused :
 /-- A same-width element token does not justify a different typed element address. -/
 theorem wrong_address_token :
     CIL.Extraction.scalarOpMatches none
-      ⟨0, 143, .type (.atom CIL.Extraction.runtimeScope "System.Int32")⟩
+      ⟨0, 143, .type (.primitive .int32)⟩
       [.word32, .array .signed32]
-      (.ldelema (.atom CIL.Extraction.runtimeScope "System.UInt32") false) = false := by
+      (.ldelema (.primitive .uint32) false) = false := by
   decide +kernel
 #print axioms wrong_address_token
 
