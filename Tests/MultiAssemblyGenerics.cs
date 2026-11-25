@@ -231,7 +231,7 @@ partial class Program
                     "Precondition: the catalog must hold LocalAlgo<Mine>.Run: " + name);
             string identity = catalogued.Groups[1].Value;
             string uncatalogued = Regex.Replace(identity, @"arguments := \[.*\]",
-                "arguments := [.atom CIL.Extraction.runtimeScope \"System.UInt64\"]");
+                "arguments := [.primitive .uint64]");
             string theorems = $$"""
 
                 /-- The exact managed signature of `delegate*<ulong, ulong>`. -/

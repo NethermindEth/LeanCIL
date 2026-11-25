@@ -58,7 +58,7 @@ foreach (var name in new[] { "Element", "Read", "Write" })
     var scalars = NarrowEvidence(source, "method0_scalars_validated");
     if (!scalars.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing address mutation target");
     var forged = Path.Combine(root, "ForgedElement.lean");
-    File.WriteAllText(forged, scalars.Replace(target, target.Replace("Int32", "UInt32", StringComparison.Ordinal),
+    File.WriteAllText(forged, scalars.Replace(target, target.Replace(".int32", ".uint32", StringComparison.Ordinal),
         StringComparison.Ordinal));
     var rejection = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
     if (rejection.Code == 0 || !rejection.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))

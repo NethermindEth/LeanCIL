@@ -304,19 +304,17 @@ ReturnMutations();
 void ReturnMutations()
 {
     foreach (var (name, replacement) in new[]
-        { ("missing-return-narrowing", "System.Int32"), ("wrong-return-signedness", "System.Byte") })
+        { ("missing-return-narrowing", ".primitive .int32"), ("wrong-return-signedness", ".primitive .byte") })
         // The callee is defined from its decoder, so the forged declared return is a forged decoder's value.
-        RejectDeclared(9, name, 1, source => ForgeDecodedReturnType(source, 1, "\"System.SByte\"",
-            JsonSerializer.Serialize(replacement)));
+        RejectDeclared(9, name, 1, source => ForgeDecodedReturnType(source, 1, ".primitive .sbyte", replacement));
 }
 
 // The declared signature, call links and layout environment are each checked against their own evidence.
-const string word = "Extraction.runtimeScope \"System.UInt64\"";
 // The caller is defined from its decoder, so each forged declared signature is the value of a forged decoder.
 RejectDeclared(0, "wrong-declared-parameter", 0, source => ForgeDecodedMethod(source, 0,
-    $"declared := {{ method.declared with parameters := [.atom {word.Replace("UInt64", "UInt32")}] }}"));
+    "declared := { method.declared with parameters := [.primitive .uint32] }"));
 RejectDeclared(0, "wrong-declared-return", 0, source => ForgeDecodedMethod(source, 0,
-    $"declared := {{ method.declared with returnType := .atom {word.Replace("UInt64", "UInt32")} }}"));
+    "declared := { method.declared with returnType := .primitive .uint32 }"));
 RejectDeclared(0, "wrong-declared-init-flag", 0, source => ForgeDecodedMethod(source, 0,
     "declared := { method.declared with initLocals := true }"));
 // The instance method is defined from its decoder, so its forged receiver is the value of a forged decoder.

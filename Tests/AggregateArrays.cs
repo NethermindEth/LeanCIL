@@ -105,7 +105,7 @@ foreach (var (name, before, after, theorem) in new[]
     ("Read", "/Pair\" 0) }", "/Other\" 0) }", "method0_scalars_validated"),
     // The raw token names the struct's checked layout by index, which the layout coverage binds.
     ("Read", pairToken + "0)", pairToken + "1)", "method0_coverage_validated"),
-    ("ReadVector", "\"System.UInt64\")) }", "\"System.Int64\")) }", "method0_scalars_validated"),
+    ("ReadVector", ".primitive .uint64)) }", ".primitive .int64)) }", "method0_scalars_validated"),
     // The address flag is decoded from the raw prefix, so a writable forgery drops the prefix from the raw body,
     // which its bytes bind.
     ("ReadOnlyAddress", "opcode := 65054, operand := .none }", "opcode := 0, operand := .none }",

@@ -150,11 +150,11 @@ foreach (var (name, parameters) in new[]
         var returnEvidence = NarrowEvidence(source, "method0_declared_validated");
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, returnEvidence,
             ["method0_declared_validated"], 1));
-        foreach (var replacement in new[] { "System.Int32", "System.UInt16" })
+        foreach (var replacement in new[] { ".primitive .int32", ".primitive .uint16" })
         {
             // The method is defined from its decoder, so the forged declared return is a forged decoder's value.
-            var forgedSource = ForgeDecodedReturnType(returnEvidence, 0, "\"System.Int16\"", $"\"{replacement}\"");
-            var widthChanged = replacement == "System.Int32";
+            var forgedSource = ForgeDecodedReturnType(returnEvidence, 0, ".primitive .int16", replacement);
+            var widthChanged = replacement == ".primitive .int32";
             var forged = Path.Combine(output, "ForgedReturn" + widthChanged + ".lean");
             File.WriteAllText(forged, forgedSource);
             rejected.Add(forged, "PASS independent enum return width/signedness rejection", "DeclaredValid");
