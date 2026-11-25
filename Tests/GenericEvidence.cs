@@ -304,9 +304,9 @@ ReturnMutations();
 void ReturnMutations()
 {
     foreach (var (name, replacement) in new[]
-        { ("missing-return-narrowing", ".primitive .int32"), ("wrong-return-signedness", ".primitive .byte") })
+        { ("missing-return-narrowing", ".signed32"), ("wrong-return-signedness", ".unsigned8") })
         // The callee is defined from its decoder, so the forged declared return is a forged decoder's value.
-        RejectDeclared(9, name, 1, source => ForgeDecodedReturnType(source, 1, ".primitive .sbyte", replacement));
+        RejectDeclared(9, name, 1, source => ForgeDecodedReturnType(source, 1, ".signed8", replacement));
 }
 
 // The declared signature, call links and layout environment are each checked against their own evidence.
