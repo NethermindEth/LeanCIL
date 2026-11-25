@@ -129,20 +129,22 @@ foreach (var (name, parameters) in new[]
         var storageEvidence = NarrowEvidence(source, "method0_specialization_validated");
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, storageEvidence,
             ["method0_specialization_validated"], 0));
-        var (pointee, constructor) = name == "ReadCharacter" ? ("System.Char", "char") : ("System.Int16", "int16");
-        var target = $".primitive .{constructor}";
-        foreach (var (mutation, replacement) in new[]
+        // An enum pointee carries only its integer storage, so its forgery is another encoding stated
+        // consistently in every claim; only the method's signature bytes refuse it.
+        var isEnum = name == "ReadEnum";
+        var (target, forgedSource, refusal) = isEnum
+            ? (".signed16", source, "methodMismatch")
+            : (".primitive .char", storageEvidence, "closedArguments");
+        var mutations = isEnum
+            ? new[] { ("signedness", ".unsigned16"), ("width", ".signed32") }
+            : [("scope", ".atom \"forged\" \"System.Char\""), ("storage", ".primitive .boolean")];
+        foreach (var (mutation, replacement) in mutations)
         {
-            ("scope", $".atom \"forged\" \"{pointee}\""),
-            ("storage", ".primitive .boolean")
-        })
-        {
-            if (!storageEvidence.Contains(target, StringComparison.Ordinal))
+            if (!forgedSource.Contains(target, StringComparison.Ordinal))
                 throw new InvalidOperationException("Missing pointee storage evidence: " + name);
             var forged = Path.Combine(output, "Forged-" + mutation + ".lean");
-            File.WriteAllText(forged, storageEvidence.Replace(target, replacement, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS independent pointee storage rejection: " + name + "/" + mutation,
-                "closedArguments");
+            File.WriteAllText(forged, forgedSource.Replace(target, replacement, StringComparison.Ordinal));
+            rejected.Add(forged, "PASS independent pointee storage rejection: " + name + "/" + mutation, refusal);
         }
     }
     if (name == "ReadEnum")
@@ -150,11 +152,11 @@ foreach (var (name, parameters) in new[]
         var returnEvidence = NarrowEvidence(source, "method0_declared_validated");
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, returnEvidence,
             ["method0_declared_validated"], 1));
-        foreach (var replacement in new[] { ".primitive .int32", ".primitive .uint16" })
+        foreach (var replacement in new[] { ".signed32", ".unsigned16" })
         {
             // The method is defined from its decoder, so the forged declared return is a forged decoder's value.
-            var forgedSource = ForgeDecodedReturnType(returnEvidence, 0, ".primitive .int16", replacement);
-            var widthChanged = replacement == ".primitive .int32";
+            var forgedSource = ForgeDecodedReturnType(returnEvidence, 0, ".signed16", replacement);
+            var widthChanged = replacement == ".signed32";
             var forged = Path.Combine(output, "ForgedReturn" + widthChanged + ".lean");
             File.WriteAllText(forged, forgedSource);
             rejected.Add(forged, "PASS independent enum return width/signedness rejection", "DeclaredValid");
