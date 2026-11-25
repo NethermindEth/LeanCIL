@@ -967,7 +967,7 @@ theorem instantiates_owners_with_only_carried_classes_as_objects :
 theorem binds_closed_enum_argument :
     (receiverIdentity "Object" false false false true
       (argument := .named (.platform runtimeColumns [systemNamespace, bytesOf "DayOfWeek"]))
-      (claimed := .enum (Tests.enumIdentity "System.DayOfWeek" runtimeAssembly) int32)
+      (claimed := .enum (Tests.enumIdentity "System.DayOfWeek" runtimeAssembly) .signed32)
       (platform := platform_table%
         [runtimeType "Object" .objectRoot, runtimeType "DayOfWeek" (.enumType 8)])).isOk =
       true := by decide +kernel
@@ -1445,8 +1445,8 @@ private def acceptedPairings : List (ResolvedType × TypeExpr) := [
   (.named (namedIn "L" "N" .valueType), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external (some true))), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external none)), .aggregate "L::N" 0),
-  (.named (enumRow (.enumType 8) true), .enum enumE int32Atom),
-  (.named platformEnum, .enum enumE int32Atom),
+  (.named (enumRow (.enumType 8) true), .enum enumE .signed32),
+  (.named platformEnum, .enum enumE .signed32),
   -- Generic parameters: the method's first, then the owner's.
   (.mvar 0, .parameter 0), (.var 0, .parameter 1),
   -- Element types, element by element.
@@ -1480,7 +1480,7 @@ private def refusedPairings : List (ResolvedType × TypeExpr) := [
   (.primitive 8, .void), (.primitive 1, .atom "C" "System.Void"),
   (.primitive 8, .atom "D" "System.Int32"), (.primitive 8, .atom "C" "System.UInt32"),
   (.primitive 0x0E, .object "C" "System.Object"), (.primitive 0x1C, .object "C" "System.Object"),
-  (.primitive 8, .object "C" "System.Int32"), (.primitive 8, .enum (Tests.enumIdentity "System.Int32" (Tests.enumAssembly name!"C")) int32Atom),
+  (.primitive 8, .object "C" "System.Int32"), (.primitive 8, .enum (Tests.enumIdentity "System.Int32" (Tests.enumAssembly name!"C")) .signed32),
   -- Named types.
   (.named (namedIn "L" "N" .valueType), .atom "L" "M"),
   (.named (namedIn "L" "N" .valueType), .atom "K" "N"),
@@ -1495,11 +1495,11 @@ private def refusedPairings : List (ResolvedType × TypeExpr) := [
   (.named (namedIn "L" "N" .classType), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external (some false))), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" .valueType), .aggregate "L::M" 0),
-  (.named (enumRow (.enumType 8) true), .enum enumE (.atom "C" "System.Int64")),
-  (.named platformEnum, .enum enumE (.atom "C" "System.Byte")),
-  (.named (enumRow (.external none)), .enum enumE int32Atom),
-  (.named (enumRow .classType), .enum enumE int32Atom),
-  (.named (enumRow (.external (some false))), .enum enumE int32Atom),
+  (.named (enumRow (.enumType 8) true), .enum enumE .signed64),
+  (.named platformEnum, .enum enumE .unsigned8),
+  (.named (enumRow (.external none)), .enum enumE .signed32),
+  (.named (enumRow .classType), .enum enumE .signed32),
+  (.named (enumRow (.external (some false))), .enum enumE .signed32),
   (.named (namedIn "L" "N" .valueType), .constructor "L" "N"),
   (.named (namedIn "L" "N" .valueType), .parameter 0),
   -- Generic parameters.

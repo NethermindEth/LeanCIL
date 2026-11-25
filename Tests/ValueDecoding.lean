@@ -418,7 +418,7 @@ theorem block_alignments :
 theorem object_prefixes :
     let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1") int32
     let pair := TypeExpr.aggregate "Pair" 0
-    let types := [int32, .enum (Tests.enumIdentity "Signed8") (.primitive .sbyte), pair, span] ++
+    let types := [int32, .enum (Tests.enumIdentity "Signed8") .signed8, pair, span] ++
       [128, 256, 512].map (fun bits =>
         .apply (.constructor intrinsicsScope s!"System.Runtime.Intrinsics.Vector{bits}`1") int32)
     let check := fun (operand : RawOperand) (type : TypeExpr) =>

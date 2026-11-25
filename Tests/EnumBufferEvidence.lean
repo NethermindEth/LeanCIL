@@ -8,7 +8,7 @@ open CIL CIL.Extraction
 
 /-- Two same-width enums deliberately differ only in their metadata name. -/
 private def element (name : String) : TypeExpr :=
-  .enum (Tests.enumIdentity name) (.primitive .sbyte)
+  .enum (Tests.enumIdentity name) .signed8
 
 /-- A writable enum span over the supplied element type. -/
 private def span (name : String) : TypeExpr :=
@@ -23,20 +23,20 @@ private def method : RawMethod := {
 
 /-- All eight legal enum bases retain their exact identity and existing integer width. -/
 theorem enum_storage_checked :
-    [(PrimitiveType.sbyte, EnumStorage.signed8), (.byte, .unsigned8), (.int16, .signed16),
-     (.uint16, .unsigned16), (.int32, .signed32), (.uint32, .unsigned32), (.int64, .signed64),
-     (.uint64, .unsigned64)].all
-      (fun (underlying, storage) =>
-        arrayElementType (.enum (Tests.enumIdentity "Choice") (.primitive underlying)) ==
+    [EnumStorage.signed8, .unsigned8, .signed16, .unsigned16, .signed32, .unsigned32, .signed64,
+     .unsigned64].all
+      (fun storage =>
+        arrayElementType (.enum (Tests.enumIdentity "Choice") storage) ==
           some (.enumeration (Tests.enumIdentity "Choice") storage)) = true := by decide +kernel
 #print axioms enum_storage_checked
 
-/-- An Int32 enum widens to a word, while an enum over an Int32 byref has no scalar kind. -/
-theorem enumScalarNeedsInteger :
-    let int32 := TypeExpr.primitive .int32
-    (scalarType (.enum (Tests.enumIdentity "E") (.byref int32)), scalarType (.enum (Tests.enumIdentity "E") int32)) =
-      (.other, .word32) := by decide +kernel
-#print axioms enumScalarNeedsInteger
+/-- An enum takes the stack kind of its storage: a word for 32 bits, a double word for 64. -/
+theorem enumScalarFollowsStorage :
+    (scalarType (.enum (Tests.enumIdentity "E") .unsigned8),
+      scalarType (.enum (Tests.enumIdentity "E") .signed32),
+      scalarType (.enum (Tests.enumIdentity "E") .unsigned64)) = (.word32, .word32, .word64) := by
+  decide +kernel
+#print axioms enumScalarFollowsStorage
 
 /-- Exact enum identity survives local stores and returns instead of becoming only a width. -/
 theorem span_identity_checked :

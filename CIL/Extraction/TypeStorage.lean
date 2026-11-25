@@ -62,7 +62,7 @@ def arrayElementType (type : TypeExpr) (aggregateWidth : Nat := 0) : Option Arra
   | type@(.apply (.constructor _ name) (.primitive element)) => do
     let width ← integerVectorWidth type
     return .vector ((← name.signatureName?) ++ "<" ++ element.display ++ ">") width
-  | .enum identity (.primitive underlying) => .enumeration identity <$> underlying.enumStorage
+  | .enum identity storage => some (.enumeration identity storage)
   | .primitive type => type.arrayElement?
   | _ => none
 /-- Primitive/vector widths are intrinsic; aggregate widths come from checked layout uses. -/
@@ -97,7 +97,7 @@ def callableType : TypeExpr → TypeExpr
 /-- Function pointers admit checked aggregates, integer vectors and integer/reference types. -/
 def managedParameter : TypeExpr → Bool
   | .primitive type => type.fieldType?.isSome
-  | .enum _ underlying => (enumUnderlyingField underlying).isSome
+  | .enum .. => true
   | .byref element => match element with
       | .primitive _ | .enum .. | .aggregate .. | .apply .. => managedParameter element
       | _ => false
@@ -169,7 +169,7 @@ def typeStorageAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Option St
     let metadata ← layoutAt index
     letI := identityEq metadata.identity identity
     if metadata.identity = identity then return .field (.aggregate index) else none
-  | .enum _ underlying => StorageType.field <$> enumUnderlyingField underlying
+  | .enum _ storage => some (.field storage.fieldType)
   | .byref _ => some .reference
   -- An array of class references is itself an object on the heap.
   | .array (.object _ _) => some .object
@@ -189,8 +189,7 @@ def typeStorageAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Option St
         name ∈ ["System.SByte", "System.Byte", "System.Int16",
         "System.UInt16", "System.Char", "System.Int32", "System.UInt32", "System.Int64",
         "System.UInt64", "System.IntPtr", "System.UIntPtr"] then some .reference else none
-  | .pointer (.enum _ underlying) =>
-    if (enumUnderlyingField underlying).isSome then some .reference else none
+  | .pointer (.enum ..) => some .reference
   | .pointer (.aggregate identity index) => do
     let metadata ← layoutAt index
     if metadata.identity == identity then some .reference else none

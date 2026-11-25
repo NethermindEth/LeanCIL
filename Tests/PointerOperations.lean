@@ -11,11 +11,10 @@ open CIL.Safety
 theorem pointer_storage_kinds :
     let storage := CIL.Extraction.typeStorage []
     storage (.pointer (.primitive .char)) = some .reference ∧
-    storage (.pointer (.enum (Tests.enumIdentity "Example") (.primitive .int16))) =
+    storage (.pointer (.enum (Tests.enumIdentity "Example") .signed16)) =
       some .reference ∧
-    storage (.pointer (.enum (Tests.enumIdentity "Example") (.primitive .uint64))) =
+    storage (.pointer (.enum (Tests.enumIdentity "Example") .unsigned64)) =
       some .reference ∧
-    storage (.pointer (.enum (Tests.enumIdentity "Example") (.primitive .boolean))) = none ∧
     storage (.pointer (.atom "forged" "System.Char")) = none ∧
     storage (.pointer (.primitive .double)) = none ∧
     storage (.pointer (.byref (.primitive .int32))) = none ∧

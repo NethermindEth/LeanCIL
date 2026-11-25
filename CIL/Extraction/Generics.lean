@@ -156,8 +156,7 @@ theorem substituteStorageType_span {layouts : List RawLayout} {arguments : List 
 /-- Whether a type mentions a generic parameter of the method being instantiated. -/
 private def mentionsParameter : TypeExpr → Bool
   | .parameter _ => true
-  | .byref element | .pointer element | .array element | .enum _ element
-  | .modified _ _ _ element =>
+  | .byref element | .pointer element | .array element | .modified _ _ _ element =>
     mentionsParameter element
   | .functionPointer result parameters .. | .signatureParameter result parameters =>
     mentionsParameter result || mentionsParameter parameters

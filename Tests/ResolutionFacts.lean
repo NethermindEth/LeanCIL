@@ -71,26 +71,21 @@ example : declaredNarrow [] (.primitive .double) = none :=
   declaredNarrow_primitive [] .double
 
 -- An enum narrows as its underlying integer type.
-example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Small") (.primitive .int16)) =
+example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Small") .signed16) =
     some .signed16 :=
-  (declaredNarrow_enum [] _ .int16).trans rfl
-example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Flags") (.primitive .byte)) =
+  (declaredNarrow_enum [] _ .signed16).trans rfl
+example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Flags") .unsigned8) =
     some .unsigned8 :=
-  (declaredNarrow_enum [] _ .byte).trans rfl
-example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Signed") (.primitive .sbyte)) =
+  (declaredNarrow_enum [] _ .unsigned8).trans rfl
+example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Signed") .signed8) =
     some .signed8 :=
-  (declaredNarrow_enum [] _ .sbyte).trans rfl
-example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Wide") (.primitive .uint16)) =
+  (declaredNarrow_enum [] _ .signed8).trans rfl
+example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Wide") .unsigned16) =
     some .unsigned16 :=
-  (declaredNarrow_enum [] _ .uint16).trans rfl
+  (declaredNarrow_enum [] _ .unsigned16).trans rfl
 example :
-    declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Plain") (.primitive .int32)) = none :=
-  (declaredNarrow_enum [] _ .int32).trans rfl
-
--- An enum over a type `typeStorage` does not admit as an enum's underlying type has no storage.
-example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Truth") (.primitive .boolean)) =
-    none :=
-  (declaredNarrow_enum [] _ .boolean).trans rfl
+    declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Plain") .signed32) = none :=
+  (declaredNarrow_enum [] _ .signed32).trans rfl
 
 /-- A struct layout for the aggregate return below. -/
 def pointLayout : RawLayout :=
@@ -139,11 +134,11 @@ example : byteReturn.returnsValue = true :=
 /-- A method returning an enum over `System.Int16`. -/
 def enumReturn : Method :=
   { code := [.ldc_i4 7, .ret], locals := [], returnsValue := true,
-    declared := { returnType := .enum (Tests.enumIdentity "Examples.Small") (.primitive .int16) } }
+    declared := { returnType := .enum (Tests.enumIdentity "Examples.Small") .signed16 } }
 
 /-- A method whose return value narrows as its enum's underlying type. -/
 theorem enumReturn_returnNarrow : enumReturn.returnNarrow = some .signed16 :=
-  Method.returnNarrow_of_declared rfl rfl ((declaredNarrow_enum _ _ .int16).trans rfl)
+  Method.returnNarrow_of_declared rfl rfl ((declaredNarrow_enum _ _ .signed16).trans rfl)
 
 /-- info: 'Tests.ResolutionFacts.enumReturn_returnNarrow' depends on axioms: [propext] -/
 #guard_msgs in
@@ -215,65 +210,12 @@ elab "resolution_fixture " name:ident " : " type:term " returns " returns:term
 
 resolution_fixture primitive : (.primitive .byte)
   returns true narrows (some .unsigned8)
-resolution_fixture enumeration : (.enum (Tests.enumIdentity "Small") (.primitive .int16))
+resolution_fixture enumeration : (.enum (Tests.enumIdentity "Small") .signed16)
   returns true narrows (some .signed16)
-resolution_fixture invalidEnumeration : (.enum (Tests.enumIdentity "Truth") (.primitive .boolean))
-  returns true narrows none
-resolution_fixture nestedEnumeration :
-  (.enum (Tests.enumIdentity "Outer") (.enum (Tests.enumIdentity "Inner") (.primitive .byte)))
-  returns true narrows none
 resolution_fixture noValue : (.primitive .byte) returns false narrows none
 resolution_fixture aggregate : (.aggregate "Examples.Point" 0) returns true narrows none
 resolution_fixture foreign : (.atom "Other" "System.Byte") returns true narrows none
 resolution_fixture misspelled : (.atom runtimeScope "System.Bytex") returns true narrows none
-
-/-- Enum storage over an aggregate stays unresolved as storage, but its narrowing is known. -/
-def aggregateEnum (layouts : List RawLayout) : Method :=
-  { code := [], locals := [], returnsValue := true, environment := { rawLayouts := layouts },
-    declared := { returnType := .enum (Tests.enumIdentity "Bad") (.aggregate "Point" 0) } }
-
-/-- The aggregate enum fixture returns a value. -/
-theorem aggregateEnum_returnsValue (layouts : List RawLayout) :
-    (aggregateEnum layouts).returnsValue = true := rfl
-#print axioms aggregateEnum_returnsValue
-
-/-- The aggregate enum fixture retains its exact declared type. -/
-theorem aggregateEnum_declared (layouts : List RawLayout) :
-    (aggregateEnum layouts).declared =
-      { returnType := .enum (Tests.enumIdentity "Bad") (.aggregate "Point" 0) } := rfl
-#print axioms aggregateEnum_declared
-
-cil_resolution_facts aggregateEnum
-#print axioms aggregateEnum_returnNarrow
-
-/-- Enum narrowing over an aggregate does not inspect a symbolic layout table. -/
-theorem aggregateEnum_simplified (layouts : List RawLayout) :
-    (aggregateEnum layouts).returnNarrow = none := by simp only [cil_step]
-#print axioms aggregateEnum_simplified
-
-/-- Nested enum metadata over an aggregate array retains an arbitrary layout table. -/
-def arrayEnum (layouts : List RawLayout) : Method :=
-  { code := [], locals := [], returnsValue := true, environment := { rawLayouts := layouts },
-    declared := { returnType := .enum (Tests.enumIdentity "Outer") (.enum (Tests.enumIdentity "Bad") (.array (.aggregate "Point" 0))) } }
-
-/-- The aggregate array enum fixture returns a value. -/
-theorem arrayEnum_returnsValue (layouts : List RawLayout) :
-    (arrayEnum layouts).returnsValue = true := rfl
-#print axioms arrayEnum_returnsValue
-
-/-- The aggregate array enum fixture retains its exact declared type. -/
-theorem arrayEnum_declared (layouts : List RawLayout) :
-    (arrayEnum layouts).declared =
-      { returnType := .enum (Tests.enumIdentity "Outer") (.enum (Tests.enumIdentity "Bad") (.array (.aggregate "Point" 0))) } := rfl
-#print axioms arrayEnum_declared
-
-cil_resolution_facts arrayEnum
-#print axioms arrayEnum_returnNarrow
-
-/-- Nested enum narrowing over an aggregate array does not inspect a symbolic layout table. -/
-theorem arrayEnum_simplified (layouts : List RawLayout) :
-    (arrayEnum layouts).returnNarrow = none := by simp only [cil_step]
-#print axioms arrayEnum_simplified
 
 /-- info: 'Tests.ResolutionFacts.Generated.primitive_returnNarrow' depends on axioms: [propext] -/
 #guard_msgs in
@@ -463,7 +405,7 @@ info: 'Tests.ResolutionFacts.twoParameters_argumentAccess1' depends on axioms:
 def instanceSignature : DeclaredSignature :=
   { receiver := some .reference,
     parameters := [.primitive .int16,
-      .enum (Tests.enumIdentity "Examples.Flags") (.primitive .byte)] }
+      .enum (Tests.enumIdentity "Examples.Flags") .unsigned8] }
 
 /-- An instance method: `this` is stored to, so it has the home; its parameters follow. -/
 def instanceMethod : Method :=
@@ -810,16 +752,11 @@ example (body : Method) : body.elementShape (.primitive .double) =
     .unsupported ElementShape.unsupportedType :=
   Method.elementShape_primitive body .double
 
--- An enum array holds the enum's storage over its underlying integer type, and an enum over a
--- type no enum may have as its underlying type has no shape.
+-- An enum array holds the enum's integer storage.
 example (body : Method) :
-    body.elementShape (.enum (Tests.enumIdentity "Examples.Small") (.primitive .int16)) =
+    body.elementShape (.enum (Tests.enumIdentity "Examples.Small") .signed16) =
       .value (.enumeration (Tests.enumIdentity "Examples.Small") .signed16) :=
-  Method.elementShape_enum body _ .int16
-example (body : Method) :
-    body.elementShape (.enum (Tests.enumIdentity "Examples.Truth") (.primitive .boolean)) =
-      .unsupported ElementShape.unsupportedType :=
-  Method.elementShape_enum body _ .boolean
+  Method.elementShape_enum body _ .signed16
 
 -- A class array holds references.
 example (body : Method) :
@@ -878,7 +815,7 @@ def arraysClosed : RawMethod :=
     callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
     parameters := [], locals := [], initLocals := true, maxStack := 3, genericParameters := [],
     code := [⟨0, 141, .type int32Type⟩, ⟨5, 163, .type int32Type⟩,
-      ⟨10, 163, .type (.enum (Tests.enumIdentity "Examples.Small") (.primitive .int16))⟩,
+      ⟨10, 163, .type (.enum (Tests.enumIdentity "Examples.Small") .signed16)⟩,
       ⟨15, 164, .type (.aggregate "Examples.Point" 0)⟩,
       ⟨20, 143, .type (.aggregate "Examples.SpanLike" 1)⟩,
       ⟨25, 141, .type (.object "Examples" "Examples.Box")⟩,
@@ -896,7 +833,7 @@ theorem arrays_declared : arrays.declared = {} := rfl
 cil_resolution_facts arrays
 
 example : arrays.elementShape int32Type = .value .signed32 := arrays_elementShape0
-example : arrays.elementShape (.enum (Tests.enumIdentity "Examples.Small") (.primitive .int16)) =
+example : arrays.elementShape (.enum (Tests.enumIdentity "Examples.Small") .signed16) =
     .value (.enumeration (Tests.enumIdentity "Examples.Small") .signed16) := arrays_elementShape1
 example : arrays.elementShape (.aggregate "Examples.Point" 0) =
     .value (.aggregate "Examples.Point" 2) := arrays_elementShape2

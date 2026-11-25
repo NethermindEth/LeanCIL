@@ -240,7 +240,7 @@ def sameRuntimeType : TypeExpr → TypeExpr → Option Bool
   | .pointer x, .pointer y | .byref x, .byref y | .array x, .array y => sameRuntimeType x y
   | .apply f x, .apply g y => both (sameRuntimeType f g) (sameRuntimeType x y)
   | .enum a x, .enum b y =>
-    if a.levels != b.levels then some false else if a == b then sameRuntimeType x y else none
+    if a.levels != b.levels then some false else if a == b then some (x == y) else none
   | .constructor s a, .constructor t b | .objectConstructor s a, .objectConstructor t b =>
     if a != b then some false else if s == t then some true else none
   | .constructor .., .objectConstructor .. | .objectConstructor .., .constructor .. => some false

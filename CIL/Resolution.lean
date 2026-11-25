@@ -44,11 +44,6 @@ def PrimitiveType.narrow : PrimitiveType → Option NarrowKind
   | .uint16 | .char => some .unsigned16
   | .int32 | .uint32 | .int64 | .uint64 | .single | .double | .intPtr | .uintPtr => none
 
-/-- Whether `typeStorage` admits the primitive as an enum's underlying type. -/
-def PrimitiveType.enumUnderlying : PrimitiveType → Bool
-  | .sbyte | .byte | .int16 | .uint16 | .int32 | .uint32 | .int64 | .uint64 => true
-  | .boolean | .char | .single | .double | .intPtr | .uintPtr => false
-
 namespace Extraction
 
 /-- Whether `declaredNarrow` can be `some` for the type's head: a primitive, an atom or an
@@ -73,10 +68,9 @@ theorem declaredNarrow_primitive (layouts : List RawLayout) (type : PrimitiveTyp
 /-- An enum narrows as its underlying primitive when `typeStorage` admits that primitive as an
     enum's underlying type, and not at all otherwise. -/
 theorem declaredNarrow_enum (layouts : List RawLayout) (identity : TypeIdentity)
-    (type : PrimitiveType) :
-    declaredNarrow layouts (.enum identity type.typeExpr) =
-      if type.enumUnderlying then type.narrow else none := by
-  cases type <;> rfl
+    (storage : EnumStorage) :
+    declaredNarrow layouts (.enum identity storage) = storage.primitive.narrow := by
+  cases storage <;> rfl
 
 #print axioms declaredNarrow_enum
 
@@ -174,19 +168,6 @@ theorem declaredNarrow_of_not_candidate (layouts : List RawLayout) (type : TypeE
   simp [declaredNarrow, shape]
 
 #print axioms declaredNarrow_of_not_candidate
-
-/-- An enum cannot introduce narrowing when its underlying storage does not narrow. -/
-theorem declaredNarrow_enum_of_none (layouts : List RawLayout) (identity : TypeIdentity)
-    (type : TypeExpr) (narrow : declaredNarrow layouts type = none) :
-    declaredNarrow layouts (.enum identity type) = none := by
-  cases type <;> try rfl
-  case primitive type =>
-    cases type <;> first
-      | rfl
-      | simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, typeStorageAt,
-          PrimitiveType.fieldType?, StorageType.narrow] at narrow
-
-#print axioms declaredNarrow_enum_of_none
 
 end Extraction
 
@@ -595,12 +576,6 @@ def PrimitiveType.elementShape : PrimitiveType → ElementShape
   | .intPtr => .value .nativeInt | .uintPtr => .value .nativeUInt
   | .single | .double => .unsupported ElementShape.unsupportedType
 
-/-- The shape of an array of the enum `identity` over the primitive. -/
-def PrimitiveType.enumElementShape (identity : TypeIdentity) (type : PrimitiveType) : ElementShape :=
-  match type.enumStorage with
-  | some storage => .value (.enumeration identity storage)
-  | none => .unsupported ElementShape.unsupportedType
-
 /-- An array of a primitive holds the primitive's storage, whatever the layouts. -/
 theorem Method.elementShape_primitive (body : Method) (type : PrimitiveType) :
     body.elementShape type.typeExpr = type.elementShape := by
@@ -610,9 +585,10 @@ theorem Method.elementShape_primitive (body : Method) (type : PrimitiveType) :
 
 /-- An array of an enum over a primitive holds the enum's storage where `typeStorage` admits
     the primitive as an enum's underlying type, whatever the layouts. -/
-theorem Method.elementShape_enum (body : Method) (identity : TypeIdentity) (type : PrimitiveType) :
-    body.elementShape (.enum identity type.typeExpr) = type.enumElementShape identity := by
-  cases type <;> rfl
+theorem Method.elementShape_enum (body : Method) (identity : TypeIdentity)
+    (storage : EnumStorage) :
+    body.elementShape (.enum identity storage) = .value (.enumeration identity storage) := by
+  cases storage <;> rfl
 
 #print axioms Method.elementShape_enum
 

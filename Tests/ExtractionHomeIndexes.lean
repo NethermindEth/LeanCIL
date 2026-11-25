@@ -84,21 +84,22 @@ theorem first_static_wins :
 #print axioms first_static_wins
 
 /-- A scalar static load with matching enum identities and a descriptor of the given width. -/
-private def enumLoad (underlying : PrimitiveType) (width : Nat)
+private def enumLoad (storage : EnumStorage) (width : Nat)
     (scalar : Option Bool := some false) :
     Bool :=
-  let field := { loaded with type := .enum (Tests.enumIdentity "E") (.primitive underlying) }
+  let field := { loaded with type := .enum (Tests.enumIdentity "E") storage }
   let operand := RawOperand.field field.owner field.index field.type field.name true
   let site := { descriptor with field, bytes := List.replicate width 0, scalar }
   methodShapeInstructions { raw with code := [{ load with operand }] }
     { body [(0, site)] with code := [.ldsfld field] }
 
-/-- The load admits an Int32 enum and rejects Boolean, Char and native integer bases. -/
-theorem staticEnumNeedsInteger :
-    [enumLoad .boolean 1, enumLoad .char 2, enumLoad .intPtr 8, enumLoad .boolean 1 none,
-      enumLoad .int32 4] =
-      [false, false, false, false, true] := by decide +kernel
-#print axioms staticEnumNeedsInteger
+/-- The load admits an enum whose descriptor width is its storage's and refuses another width or
+    a descriptor without the scalar flag. -/
+theorem staticEnumWidthFollowsStorage :
+    [enumLoad .signed32 4, enumLoad .unsigned8 1, enumLoad .signed64 8, enumLoad .signed32 8,
+      enumLoad .signed32 4 none] =
+      [true, true, true, false, false] := by decide +kernel
+#print axioms staticEnumWidthFollowsStorage
 
 /-- Missing raw instructions, absent descriptors and wrong raw opcodes cannot pass. -/
 theorem missing_static_rejects :

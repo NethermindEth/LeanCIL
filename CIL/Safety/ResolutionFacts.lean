@@ -54,26 +54,13 @@ def declaredProof? (layouts type : Expr) : MetaM (Option Expr) := withDefault do
   if let some primitive := primitive? head then
     return some (← mkAppM ``CIL.Extraction.declaredNarrow_primitive
       #[layouts, mkConst primitive])
-  if let (``CIL.Extraction.TypeExpr.enum, #[identity, underlying]) := head.getAppFnArgs then
-    if let some primitive := primitive? (← withDefault <| whnf underlying) then
-      return some (← mkAppM ``CIL.Extraction.declaredNarrow_enum
-        #[layouts, identity, mkConst primitive])
-  let mut terminal := head
-  let mut identities := #[]
-  repeat
-    let (``CIL.Extraction.TypeExpr.enum, #[identity, underlying]) := terminal.getAppFnArgs
-      | break
-    identities := identities.push identity
-    terminal ← withDefault <| whnf underlying
+  if let (``CIL.Extraction.TypeExpr.enum, #[identity, storage]) := head.getAppFnArgs then
+    return some (← mkAppM ``CIL.Extraction.declaredNarrow_enum #[layouts, identity, storage])
+  let terminal := head
   let candidate := mkApp (mkConst ``CIL.Extraction.TypeExpr.narrowCandidate) terminal
   if (← withDefault <| whnf candidate).isConstOf ``Bool.false then
-    let mut proof ← mkAppM ``CIL.Extraction.declaredNarrow_of_not_candidate
-      #[layouts, terminal, ← mkEqRefl (mkConst ``Bool.false)]
-    for identity in identities.reverse do
-      proof ← mkAppM ``CIL.Extraction.declaredNarrow_enum_of_none
-        #[layouts, identity, terminal, proof]
-      terminal := mkApp2 (mkConst ``CIL.Extraction.TypeExpr.enum) identity terminal
-    return some proof
+    return some (← mkAppM ``CIL.Extraction.declaredNarrow_of_not_candidate
+      #[layouts, terminal, ← mkEqRefl (mkConst ``Bool.false)])
   unless terminal.isAppOf ``CIL.Extraction.TypeExpr.primitive ||
       terminal.isAppOf ``CIL.Extraction.TypeExpr.atom do return none
   let narrowType := mkConst ``CIL.NarrowKind
@@ -476,9 +463,8 @@ def elementProof? (method type : Expr) (reads : LayoutReads) :
     | (``CIL.Extraction.TypeExpr.primitive, _) =>
       pure ((primitive? head).map fun primitive =>
         mkApp2 (mkConst ``CIL.Method.elementShape_primitive) method (mkConst primitive))
-    | (``CIL.Extraction.TypeExpr.enum, #[identity, underlying]) =>
-      pure ((primitive? (← whnf underlying)).map fun primitive =>
-        mkApp3 (mkConst ``CIL.Method.elementShape_enum) method identity (mkConst primitive))
+    | (``CIL.Extraction.TypeExpr.enum, #[identity, storage]) =>
+      pure (some (mkApp3 (mkConst ``CIL.Method.elementShape_enum) method identity storage))
     | (``CIL.Extraction.TypeExpr.object, #[scope, name]) => do
       if ← isDefEq name (mkConst ``CIL.ElementShape.rootObjectName) then pure none else
       let derived ← mkDecideProof

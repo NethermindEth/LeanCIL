@@ -55,7 +55,7 @@ theorem default_pin_rejected : AttributionValid [({}, "::Fixture.Application")] 
 /-- A generic argument's scope does not change the declaring aggregate's or enum's scope. -/
 theorem flat_scopes :
     (TypeExpr.aggregate "Lib::Box<App::Value>" 0).headScope = some "Lib" ∧
-    (TypeExpr.enum (Tests.enumIdentity "Flag" (Tests.enumAssembly name!"Λ")) (.atom "Other" "Byte")).headScope = some "Λ, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" := by
+    (TypeExpr.enum (Tests.enumIdentity "Flag" (Tests.enumAssembly name!"Λ")) .unsigned8).headScope = some "Λ, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" := by
   decide +kernel
 #print axioms flat_scopes
 

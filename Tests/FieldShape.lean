@@ -59,15 +59,6 @@ def computedLayouts : Array ComputedLayout := #[
 theorem layouts_valid : LayoutsValid rawLayouts computedLayouts .x64 := by decide +kernel
 #print axioms layouts_valid
 
-/-- An enum over another enum has neither metadata storage nor a declared field kind. -/
-theorem nestedEnumHasNoFieldKind :
-    let nested :=
-      TypeExpr.enum (Tests.enumIdentity "E")
-        (.enum (Tests.enumIdentity "Inner") (.primitive .int32))
-    And (typeStorage rawLayouts nested = none) (fieldKind? rawLayouts nested = none) := by
-  decide +kernel
-#print axioms nestedEnumHasNoFieldKind
-
 /-- The environment every method of the test shares. -/
 @[cil_code] def environment : LayoutEnvironment :=
   { rawLayouts := rawLayouts, layouts := computedLayouts }

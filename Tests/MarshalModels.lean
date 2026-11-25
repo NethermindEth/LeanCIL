@@ -113,7 +113,7 @@ theorem marshal_resolutions :
 /-- Narrow signed integers and enums keep their sign. Boolean and Char use unsigned storage. -/
 theorem marshal_scalar_storage :
     resolves {} (fixtures (.primitive .int16) int32Type 2 4 (.scalar 2 true)) ∧
-    resolves {} (fixtures (.enum (Tests.enumIdentity "Kind") (.primitive .sbyte))
+    resolves {} (fixtures (.enum (Tests.enumIdentity "Kind") .signed8)
       int32Type 1 4 (.scalar 1 true)) ∧
     resolves {} (fixtures booleanType int32Type 1 4 (.scalar 1 false)) ∧
     resolves {} (fixtures (.primitive .char) int32Type 2 4 (.scalar 2 false)) := by

@@ -1,5 +1,6 @@
 import Std
 import CIL.Identity
+import CIL.ArrayTypes
 import CIL.Extraction.KernelEquation
 
 /-!
@@ -119,7 +120,9 @@ inductive TypeExpr where
   /-- A type by its assembly scope and full name. -/
   | atom (scope name : String)
   | aggregate (identity : String) (index : Nat)
-  | enum (identity : TypeIdentity) (underlying : TypeExpr)
+  /-- An enum by its typed identity and integer storage; an enum over an enum or over a
+      non-integer type cannot be written. -/
+  | enum (identity : TypeIdentity) (storage : EnumStorage)
   | parameter (index : Nat)
   | byref (element : TypeExpr)
   | pointer (element : TypeExpr)
@@ -170,7 +173,6 @@ def substituteType (arguments : List TypeExpr) : TypeExpr → Option TypeExpr
       (← substituteType arguments parameters) convention hasThis explicitThis
   | .signatureParameter head tail => do
     return .signatureParameter (← substituteType arguments head) (← substituteType arguments tail)
-  | .enum identity underlying => TypeExpr.enum identity <$> substituteType arguments underlying
   | .modified required scope name element =>
     .modified required scope name <$> substituteType arguments element
   | .apply constructor argument => do
@@ -239,9 +241,9 @@ def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
   | .atom scope name, rest => keyBytes "atom" :: keyBytes scope :: keyBytes name :: rest
   | .aggregate identity index, rest =>
     keyBytes "aggregate" :: keyBytes identity :: keyBytes (toString index) :: rest
-  | .enum identity underlying, rest =>
-    keyBytes "enum" :: columnKey identity.assembly.name ::
-      ClassName.keyInto ⟨identity.levels⟩ (typeKeyInto underlying rest)
+  | .enum identity storage, rest =>
+    keyBytes "enum" :: columnKey identity.assembly.name :: ClassName.keyInto ⟨identity.levels⟩
+      (keyBytes "primitive" :: keyBytes (toString storage.primitive.elementType) :: rest)
   | .parameter index, rest => keyBytes "parameter" :: keyBytes (toString index) :: rest
   | .ownerParameter index, rest => keyBytes "ownerParameter" :: keyBytes (toString index) :: rest
   | .byref element, rest => keyBytes "byref" :: typeKeyInto element rest

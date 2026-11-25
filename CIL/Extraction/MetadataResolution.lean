@@ -1446,13 +1446,13 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
     | .named named, .aggregate identity index =>
       bytesOf identity == named.scope ++ [58, 58] ++ named.name && valueLike named.kind &&
         !named.fixedStorage && frame.layoutMatches index identity named none
-    | .named named, .enum identity underlying =>
+    | .named named, .enum identity storage =>
       (named.assembly.any (·.matches identity.assembly) &&
         declarationMatches identity.levels named.parts) &&
         match named.kind with
         | .enumType code =>
           (named.pinned || partsName named.parts == some named.name) && !named.fixedStorage &&
-            integerElement code && typeAdmits frame fuel (.primitive code) underlying
+            integerElement code && storage.primitive.elementType == code
         | _ => false
     | .var index, .ownerParameter number =>
       frame.rawIndices && index < frame.ownerArity && number == index
@@ -1583,8 +1583,8 @@ theorem typeAdmits_runtimePrimitiveAtom {frame : Frame} {fuel : Nat} {type : Res
 
 /-- Every admitted enum parameter has the assembly columns of its resolved definition or reference. -/
 theorem typeAdmits_enum_assembly {frame : Frame} {fuel : Nat} {named : NamedType}
-    {identity : TypeIdentity} {underlying : TypeExpr}
-    (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity underlying) = true) :
+    {identity : TypeIdentity} {storage : EnumStorage}
+    (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity storage) = true) :
     ∃ columns, named.assembly = some columns ∧ columns.matches identity.assembly = true := by
   cases row : named.assembly with
   | none => simp [typeAdmits, row] at admitted
@@ -1597,14 +1597,14 @@ theorem typeAdmits_enum_assembly {frame : Frame} {fuel : Nat} {named : NamedType
 theorem typeAdmits_external_enum {env : MetadataEnv} {token : Nat} {scope : AssemblyColumns}
     {name : List Nat}
     {parts : List (List Nat)} {hint : Option Bool} {frame : Frame} {fuel : Nat}
-    {named : NamedType} {identity : TypeIdentity} {underlying : TypeExpr}
+    {named : NamedType} {identity : TypeIdentity} {storage : EnumStorage}
     (resolved : env.externalNamed token scope name parts hint = .ok named)
-    (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity underlying) = true) :
+    (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity storage) = true) :
     partsName named.parts = some named.name ∧
       Exists fun code => Membership.mem env.platform.definitions
         { scope := named.scope, parts := named.parts, kind := .enumType code named.platformArity }
         /\ integerElement code = true /\
-        typeAdmits frame fuel (.primitive code) underlying = true := by
+        storage.primitive.elementType = code := by
   cases env.externalNamed_ok resolved with
   | intro kind facts =>
     have known := facts.2.2.1

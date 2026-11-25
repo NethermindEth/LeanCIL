@@ -270,16 +270,15 @@ foreach (var (name, element, width) in allocations)
     }
     if (name == "AllocateSigned8")
     {
-        // The token names the enum and its underlying type; its storage is resolved from them.
+        // The token names the enum and its integer storage.
         var identity = ExampleEnumIdentity("Signed8");
-        const string underlying = ".primitive .sbyte";
-        var target = $".type (.enum {identity} ({underlying}))";
+        var target = $".type (.enum {identity} .signed8)";
         foreach (var (mutation, replacement) in new[]
         {
             ("identity", target.Replace(identity, ExampleEnumIdentity("Unsigned8"), StringComparison.Ordinal)),
-            ("underlying", target.Replace(".primitive .sbyte", ".primitive .byte", StringComparison.Ordinal)),
-            ("width", target.Replace(".primitive .sbyte", ".primitive .int16", StringComparison.Ordinal)),
-            ("primitive", $".type ({underlying})")
+            ("underlying", target.Replace(".signed8", ".unsigned8", StringComparison.Ordinal)),
+            ("width", target.Replace(".signed8", ".signed16", StringComparison.Ordinal)),
+            ("primitive", ".type (.primitive .sbyte)")
         })
         {
             if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing enum newarr target");

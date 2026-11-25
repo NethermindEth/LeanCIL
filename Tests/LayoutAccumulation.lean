@@ -291,30 +291,26 @@ def vectorOfWords : TypeExpr :=
   .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
     (.primitive .uint64)
 
-/-- `S::Wrap1<E>` for an enum `E` over `underlying`, stored with the one field `kind`. -/
-def enumWrap (underlying : TypeExpr) (kind : FieldType) : RawLayout := {
+/-- `S::Wrap1<E>` for an enum `E` with `storage`, stored with the one field `kind`. -/
+def enumWrap (storage : EnumStorage) (kind : FieldType) : RawLayout := {
   identity := "S::Wrap1`1<Fixture, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::E>", explicit := false, packing := 0, declaredSize := 0,
   declaration := [⟨name!"", name!"Wrap1`1"⟩],
   generic := some {
-    owner := .constructor "S" "Wrap1`1", arity := 1, arguments := [.enum (Tests.enumIdentity "E") underlying],
+    owner := .constructor "S" "Wrap1`1", arity := 1, arguments := [.enum (Tests.enumIdentity "E") storage],
     fields := [.parameter 0], constraints := [(0, [])] },
   fields := [⟨kind, none⟩] }
 
-/-- An enum argument requires an immediate integer atom. The indexed and propositional checks
-    reject the same four-byte claim for a nested enum. -/
-theorem enumArgumentNeedsIntegerUnderlying :
-    let int32 := TypeExpr.primitive .int32
-    let integer := enumWrap int32 .signed32
-    let nested := enumWrap (.enum (Tests.enumIdentity "Inner") int32) .signed32
-    let aggregate := enumWrap (.aggregate leaf.identity 0) (.aggregate 0)
+/-- An enum argument's field kind is its storage's. The indexed and propositional checks refuse
+    the same claim of another kind. -/
+theorem enumArgumentFieldFollowsStorage :
+    let integer := enumWrap .signed32 .signed32
+    let widened := enumWrap .signed32 .signed64
     let computed : Array ComputedLayout := #[.mk (.mk 4 [.mk 0 4 false]) 4]
     [genericLayoutValid (.ofList [integer]) integer,
-      genericLayoutValid (.ofList [nested]) nested,
-      genericLayoutValid (.ofList [leaf, aggregate]) aggregate,
-      genericLayoutValid (.ofList []) (enumWrap vectorOfWords (.vector128 .unsigned64)),
+      genericLayoutValid (.ofList [widened]) widened,
       layoutsValidIndexed [integer] computed .scalar,
-      layoutsValidIndexed [nested] computed .scalar,
-      decide (LayoutsValid [nested] computed .scalar)] =
-      [true, false, false, false, true, false, false] := by decide +kernel
-#print axioms enumArgumentNeedsIntegerUnderlying
+      layoutsValidIndexed [widened] computed .scalar,
+      decide (LayoutsValid [widened] computed .scalar)] =
+      [true, false, true, false, false] := by decide +kernel
+#print axioms enumArgumentFieldFollowsStorage
 end Tests.LayoutAccumulation

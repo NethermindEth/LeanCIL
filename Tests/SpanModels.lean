@@ -88,7 +88,7 @@ private def resolves (env : LayoutEnvironment) (element : TypeExpr) (width : Nat
 /-- Primitive, enum, vector and aggregate elements retain their own storage widths. -/
 theorem elementWidths :
     resolves {} int32 4 ∧
-    resolves {} (.enum (Tests.enumIdentity "Small") (.primitive .byte)) 1 ∧
+    resolves {} (.enum (Tests.enumIdentity "Small") .unsigned8) 1 ∧
     resolves {} (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
       int32) 16 ∧ resolves (environment 1) aggregate 4 ∧
     resolves (environment 3) aggregate 12 := by
@@ -100,7 +100,6 @@ theorem elementWidths :
 theorem unsupportedElements :
     ([TypeExpr.void, .object runtimeScope "System.String", .byref int32, .array int32,
       .primitive .double, .atom "Fixture" "System.Int32",
-      .enum (Tests.enumIdentity "Bad") (.primitive .boolean),
       .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
         (.primitive .single), .aggregate "Other::Words" 0,
       .aggregate "Fixture::Words" 1].all fun type =>

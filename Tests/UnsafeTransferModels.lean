@@ -116,7 +116,7 @@ private def vector (width : String) : TypeExpr :=
 theorem integerTransfers :
     resolves {} (.primitive .uint64) (.scalar 8 false) 8 &&
     resolves {} (.primitive .int16) (.scalar 2 true) 2 &&
-    resolves {} (.enum (Tests.enumIdentity "Flag") (.primitive .sbyte)) (.scalar 1 true) 1 &&
+    resolves {} (.enum (Tests.enumIdentity "Flag") .signed8) (.scalar 1 true) 1 &&
     resolves {} (vector "128") (.snapshot .vector128) 16 &&
     resolves {} (vector "256") (.snapshot .vector256) 32 &&
     resolves {} (vector "512") (.snapshot .vector512) 64 := by decide +kernel

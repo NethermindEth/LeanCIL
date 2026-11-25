@@ -546,7 +546,7 @@ theorem init_vector_admission :
 
 /-- An enum-span copy reads its own direct home and clears the reference flag on the value. -/
 theorem enum_span_copy :
-    let element := TypeExpr.enum (Tests.enumIdentity "Signed8") (.primitive .sbyte)
+    let element := TypeExpr.enum (Tests.enumIdentity "Signed8") .signed8
     let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1") element
     let load := RawInstruction.mk 0 2 .none
     let copy := RawInstruction.mk 1 0x71 (.type span)

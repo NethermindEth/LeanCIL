@@ -260,7 +260,7 @@ void ReturnResolutionCosts(bool stepOnly = false)
         WithinGrowth(controlSizes.Select(size => (size, (double)size)).ToArray(), perItem: false))
         throw new InvalidOperationException("Return resolution growth check failed its normalization controls.");
     var dimensions = stepOnly ? new[] { "step-methods", "step-body" } :
-        ["methods", "depth", "body", "layouts", "enum-depth", "enum-layouts", "step-methods", "step-body"];
+        ["methods", "body", "layouts", "enum-layouts", "step-methods", "step-body"];
     foreach (var dimension in dimensions)
     {
         var samples = new List<(int Size, long Facts, long Simplifier)>();
@@ -286,17 +286,13 @@ void ReturnResolutionCosts(bool stepOnly = false)
                 type = ".aggregate \"Point\" 0";
                 expected = "none";
             }
-            if (dimension is "depth" or "enum-depth" or "enum-layouts")
+            if (dimension == "enum-layouts")
             {
-                var depth = dimension == "enum-layouts" ? 1 : size;
-                var underlying = dimension == "depth" ? type : ".array (.aggregate \"Point\" 0)";
                 source.AppendLine("""
-                    private def nestedEnum : TypeIdentity :=
-                      { assembly := runtimeAssembly, typeNamespace := name!"", name := name!"Nested" }
+                    private def smallEnum : TypeIdentity :=
+                      { assembly := runtimeAssembly, typeNamespace := name!"", name := name!"Small" }
                     """);
-                var heads = string.Concat(Enumerable.Repeat(".enum nestedEnum (", depth));
-                type = $"""{heads}{underlying}{new string(')', depth)}""";
-                expected = "none";
+                type = ".enum smallEnum .unsigned8";
             }
             var instructions = dimension is "body" or "step-body"
                 ? string.Join(", ", Enumerable.Repeat(".nop", size)) : "";
@@ -351,7 +347,7 @@ void ReturnResolutionCosts(bool stepOnly = false)
             var measured = samples.Select(sample =>
                 (sample.Size, (double)(simplifier ? sample.Simplifier : sample.Facts))).ToArray();
             if (!WithinGrowth(measured,
-                perItem: dimension is "methods" or "depth" or "enum-depth" or "step-methods"))
+                perItem: dimension is "methods" or "step-methods"))
                 throw new InvalidOperationException($"Superlinear return resolution {dimension}: " +
                     string.Join("; ", measured));
             Console.WriteLine($"PASS return resolution {(simplifier ? "simplifier" : "fact")} {dimension}: " +
@@ -2092,7 +2088,7 @@ void PlatformTableCosts()
               { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
             return frame.admits (.named head)
               (.enum { assembly := runtimeAssembly, typeNamespace := name!"", name := name!"Number" }
-                (.primitive .int32))).toOption = some true)
+                .signed32)).toOption = some true)
         #kernel_cost "platform pair {{size}}"
           ((env{{size}}.platformField 0
             { owner := .genericInst (named "System.ValueTuple`2" {{Parts("System", "ValueTuple`2")}})

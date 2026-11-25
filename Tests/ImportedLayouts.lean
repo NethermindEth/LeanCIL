@@ -48,14 +48,6 @@ theorem rejection_4 : ¬ LayoutProjectionValid artifactRaw artifactComputed publ
     #[leafLayout, { pairLayout with alignment := 4 }] [1, 2] .scalar := by decide +kernel
 #print axioms rejection_4
 
-/-- Matching published and actual rows cannot certify four bytes for an enum over an enum. -/
-theorem nestedEnumCatalogRejected :
-    let underlying := TypeExpr.enum (Tests.enumIdentity "Inner") (.primitive .int32)
-    let rows := [Tests.LayoutAccumulation.enumWrap underlying .signed32]
-    let imported := ImportLayoutCatalog.mk rows rows #[privateLayout]
-    Not (imported.Valid .scalar) := by decide +kernel
-#print axioms nestedEnumCatalogRejected
-
 def catalog : ImportLayoutCatalog := ⟨publicRaw, publicRaw, publicComputed⟩
 def copySignature : ImportSignature := ⟨owner, "Copy", [], .void, [.byref pair, .byref pair]⟩
 def copySlot : ImportSlot := {

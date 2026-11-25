@@ -243,7 +243,7 @@ theorem reference_content_boundary :
     query (.primitive .boolean) = some 0 ∧
     query (.primitive .char) = some 0 ∧
     query (.primitive .uintPtr) = some 0 ∧
-    query (.enum (Tests.enumIdentity "enum") integer) = some 0 ∧
+    query (.enum (Tests.enumIdentity "enum") .signed32) = some 0 ∧
     query (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector256`1")
       integer) = some 0 ∧
     query (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector512`1")

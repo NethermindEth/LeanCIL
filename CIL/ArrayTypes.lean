@@ -17,6 +17,11 @@ def EnumStorage.width : EnumStorage → Nat
   | .signed32 | .unsigned32 => 4
   | .signed64 | .unsigned64 => 8
 
+/-- The integer primitive an enum with this storage is encoded as. -/
+def EnumStorage.primitive : EnumStorage → PrimitiveType
+  | .signed8 => .sbyte | .unsigned8 => .byte | .signed16 => .int16 | .unsigned16 => .uint16
+  | .signed32 => .int32 | .unsigned32 => .uint32 | .signed64 => .int64 | .unsigned64 => .uint64
+
 /-- Only narrow signed enum loads need sign extension to the evaluation-stack width. -/
 def EnumStorage.signed : EnumStorage → Bool
   | .signed8 | .signed16 => true

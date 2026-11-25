@@ -117,14 +117,11 @@ theorem _root_.CIL.PrimitiveType.fieldType?_eq_primitiveField (type : PrimitiveT
   cases type <;> rfl
 #print axioms CIL.PrimitiveType.fieldType?_eq_primitiveField
 
-/-- The field kind of an enum whose immediate underlying type is a runtime integer primitive. -/
-def enumUnderlyingField : TypeExpr -> Option FieldType
-  | .primitive type =>
-    type.fieldType?.filter fun kind => match kind with
-      | .signed8 | .unsigned8 | .signed16 | .unsigned16 | .signed32 | .unsigned32
-      | .signed64 | .unsigned64 => true
-      | _ => false
-  | _ => none
+/-- The field kind of an enum with this integer storage. -/
+def _root_.CIL.EnumStorage.fieldType : EnumStorage → FieldType
+  | .signed8 => .signed8 | .unsigned8 => .unsigned8 | .signed16 => .signed16
+  | .unsigned16 => .unsigned16 | .signed32 => .signed32 | .unsigned32 => .unsigned32
+  | .signed64 => .signed64 | .unsigned64 => .unsigned64
 
 /-- The lane of a vector whose elements have field kind `kind`; `none` for a kind no vector
     field holds. -/
@@ -511,7 +508,7 @@ theorem closeLayoutType_span (layouts : List RawLayout) (scope : String) (name :
 /-- Field storage is derived from substituted metadata, including exact aggregate identities. -/
 private def genericFieldType (table : LayoutTable) (type : TypeExpr) : Option FieldType :=
   match closeLayoutTypeWith table type with
-  | .enum _ underlying => enumUnderlyingField underlying
+  | .enum _ storage => some storage.fieldType
   | .aggregate identity index =>
     if (table.entry index).any (·.identity == identity) then some (.aggregate index) else none
   | .primitive type => type.fieldType?

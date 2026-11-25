@@ -9,7 +9,7 @@ open CIL CIL.Extraction
 /-- An enum parameter in the fixture assembly with the given TypeDef columns. -/
 private def enumParam (ns name : MetadataName) : TypeExpr :=
   .enum { assembly := ⟨name!"Examples", ⟨1, 0, 0, 0⟩, name!"", none⟩,
-          typeNamespace := ns, name } (.primitive .int32)
+          typeNamespace := ns, name } .signed32
 
 /-- Substituting the other enum in both signatures must fail at the original call token. -/
 private def rejectsParameter (selected replacement : TypeExpr) : Bool := Id.run do

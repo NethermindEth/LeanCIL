@@ -59,6 +59,20 @@ internal static class EnumTypes
         return Cached(reference, ValidateStorage);
     }
 
+    /// <summary>The Lean `EnumStorage` of an enum's integer underlying type.</summary>
+    internal static string StorageLean(TypeReference underlying) => underlying.FullName switch
+    {
+        "System.SByte" => ".signed8",
+        "System.Byte" => ".unsigned8",
+        "System.Int16" => ".signed16",
+        "System.UInt16" => ".unsigned16",
+        "System.Int32" => ".signed32",
+        "System.UInt32" => ".unsigned32",
+        "System.Int64" => ".signed64",
+        "System.UInt64" => ".unsigned64",
+        var name => throw new InvalidDataException($"Unsupported enum underlying type: {name}")
+    };
+
     // Cecil's display name selects candidates. Only the physical declaring rows identify the enum.
     static bool UniqueDefinition(TypeDefinition type)
     {

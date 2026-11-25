@@ -46,13 +46,13 @@ theorem coveredEnumEntries_each {images : List PreparedImage} {entries : List Pl
 /-- The element code an extracted enum operand admits is the code in its physical backing field. -/
 theorem externalEnum_physicalStorage {images : List PreparedImage} {env : MetadataEnv} {token : Nat}
     {scope : AssemblyColumns} {name : List Nat} {parts : List (List Nat)} {hint : Option Bool} {frame : Frame}
-    {fuel : Nat} {named : NamedType} {identity : TypeIdentity} {underlying : TypeExpr}
+    {fuel : Nat} {named : NamedType} {identity : TypeIdentity} {storage : EnumStorage}
     (resolved : env.externalNamed token scope name parts hint = .ok named)
-    (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity underlying) = true)
+    (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity storage) = true)
     (checked : coveredEnumEntries images env.platform.definitions = .ok true) :
     ∃ code image row, PinnedDefinitionAt images named.parts named.scope image row ∧
       physicalEnumCode image row = .ok code ∧ integerElement code = true ∧
-      typeAdmits frame fuel (.primitive code) underlying = true := by
+      storage.primitive.elementType = code := by
   obtain ⟨_, code, member, integer, representation⟩ := typeAdmits_external_enum resolved admitted
   have covered := coveredEnumEntries_each checked member
   simp only [coveredEnumEntry, bind, Except.bind] at covered

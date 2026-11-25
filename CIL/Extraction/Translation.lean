@@ -214,10 +214,6 @@ private theorem substituteType_headScope {arguments : List TypeExpr} {owner clos
       Option.some.injEq] at substituted
     obtain ⟨newHead, ready, _, _, rfl⟩ := substituted
     exact ih (closed := newHead) ready named
-  | enum name base _ =>
-    simp [substituteType, Option.map_eq_some_iff] at substituted
-    obtain ⟨_, _, rfl⟩ := substituted
-    exact named
   | _ =>
     first
     | solve | cases named

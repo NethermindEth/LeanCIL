@@ -338,7 +338,7 @@ theorem bulk_call_elements :
 
 /-- The signed backing and nominal identity survive both array fill overloads. -/
 theorem bulk_enum_models :
-    let element := TypeExpr.enum (Tests.enumIdentity "Tag") (.primitive .sbyte)
+    let element := TypeExpr.enum (Tests.enumIdentity "Tag") .signed8
     let storage := ArrayElement.enumeration (Tests.enumIdentity "Tag") .signed8
     let operations : List MemoryOp := [.spanFill 1 true, .spanFill 1 false, .spanCopy 1 false,
       .spanCopy 1 true, .spanCopy 1 false, .spanCopy 1 true, .arrayFill storage false,

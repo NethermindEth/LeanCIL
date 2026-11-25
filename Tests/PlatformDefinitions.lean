@@ -292,15 +292,15 @@ private def numberPlatform : PlatformTable := platform_table%
   [{ scope := enumScope, parts := [[], bytesOf "Number"], kind := .enumType 8 }]
 
 /-- Whether the type `spelled` of `E` with the name parts of `Number`, resolved outside the
-    carried slices, is admitted under `platform` as an enum over the runtime's type `name`. -/
-private def admitsNumber (platform : PlatformTable) (name : PrimitiveType) (spelled := "Number") :
+    carried slices, is admitted under `platform` as an enum with `storage`. -/
+private def admitsNumber (platform : PlatformTable) (storage : EnumStorage) (spelled := "Number") :
     Bool :=
   let frame : Frame :=
     { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
   let env := MetadataEnv.ofSlices [] (platform := platform)
   match env.externalNamed 0 enumColumns (bytesOf spelled) [[], bytesOf "Number"] none with
   | .ok named => frame.admits (.named named)
-    (.enum (Tests.enumIdentity spelled (Tests.enumAssembly name!"E")) (.primitive name))
+    (.enum (Tests.enumIdentity spelled (Tests.enumAssembly name!"E")) storage)
   | .error _ => false
 
 /-- A platform enum cannot use aggregate storage at any layout index. -/
@@ -318,28 +318,26 @@ theorem missing_closed_argument_definition (method : Nat) :
   rfl
 #print axioms missing_closed_argument_definition
 
-/-- The eight integer element types, by code from `0x04`, and the other scalar ones. -/
-private def integerNames : List (Nat × PrimitiveType) :=
-  [(0x04, .sbyte), (0x05, .byte), (0x06, .int16), (0x07, .uint16), (0x08, .int32),
-   (0x09, .uint32), (0x0A, .int64), (0x0B, .uint64)]
-/-- Scalar names whose element codes cannot supply enum storage. -/
-private def otherNames : List (Nat × PrimitiveType) :=
-  [(0x02, .boolean), (0x03, .char), (0x0C, .single), (0x0D, .double), (0x18, .intPtr),
-   (0x19, .uintPtr)]
+/-- The eight integer element types, by code from `0x04`, with their enum storage. -/
+private def integerNames : List (Nat × EnumStorage) :=
+  [(0x04, .signed8), (0x05, .unsigned8), (0x06, .signed16), (0x07, .unsigned16), (0x08, .signed32),
+   (0x09, .unsigned32), (0x0A, .signed64), (0x0B, .unsigned64)]
+/-- Scalar element codes that cannot supply enum storage. -/
+private def otherCodes : List Nat := [0x02, 0x03, 0x0C, 0x0D, 0x18, 0x19]
 
 /-- An external enum admits the element type its definition states and no other: none without
-    the definition, none when it states a value type, none when it states an enum over a type no
-    enum may have, and none for a type whose parts name another type's definition. -/
+    the definition, none when it states a value type, no storage when it states an enum over a
+    type no enum may have, and none for a type whose parts name another type's definition. -/
 theorem external_enums_take_their_underlying_type_from_the_definition :
-    admitsNumber numberPlatform .int32 = true ∧
-    admitsNumber numberPlatform .byte = false ∧
-    admitsNumber numberPlatform .int32 (spelled := "Other") = false ∧
-    admitsNumber (removing numberPlatform "Number") .int32 = false ∧
-    admitsNumber (restating numberPlatform "Number" .valueType) .int32 = false ∧
-    (integerNames.all fun (code, name) =>
-      admitsNumber (restating numberPlatform "Number" (.enumType code)) name) = true ∧
-    (otherNames.any fun (code, name) =>
-      admitsNumber (restating numberPlatform "Number" (.enumType code)) name) = false := by
+    admitsNumber numberPlatform .signed32 = true ∧
+    admitsNumber numberPlatform .unsigned8 = false ∧
+    admitsNumber numberPlatform .signed32 (spelled := "Other") = false ∧
+    admitsNumber (removing numberPlatform "Number") .signed32 = false ∧
+    admitsNumber (restating numberPlatform "Number" .valueType) .signed32 = false ∧
+    (integerNames.all fun (code, storage) =>
+      admitsNumber (restating numberPlatform "Number" (.enumType code)) storage) = true ∧
+    (otherCodes.any fun code => integerNames.any fun (_, storage) =>
+      admitsNumber (restating numberPlatform "Number" (.enumType code)) storage) = false := by
   decide +kernel
 #print axioms external_enums_take_their_underlying_type_from_the_definition
 

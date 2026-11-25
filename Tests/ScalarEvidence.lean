@@ -974,7 +974,7 @@ private def block (opcode : Nat) (emitted : Instruction) (prefixes : List RawIns
 private def unaligned (alignment : Int) : RawInstruction := i 65042 (.integer alignment)
 private def sbyteType : TypeExpr := .primitive .sbyte
 private def aggregateType : TypeExpr := .aggregate "S" 0
-private def enumType : TypeExpr := .enum (Tests.enumIdentity "E") (.primitive .int16)
+private def enumType : TypeExpr := .enum (Tests.enumIdentity "E") .signed16
 private def vectorType : TypeExpr :=
   .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1") intType
 /-- An `ldobj` (113) or `stobj` (129) of `type`, pushing the kind the scalar check gives it. -/
@@ -1245,12 +1245,12 @@ example : storesInto (.primitive .int32) .native = false := by decide
 example : storesInto (.primitive .int64) .word32 = false := by decide
 example : storesInto (.primitive .intPtr) .word32 = false := by decide
 example :
-    storesInto (.enum (Tests.enumIdentity "E") (.primitive .int64)) .word32 = false := by decide
+    storesInto (.enum (Tests.enumIdentity "E") .signed64) .word32 = false := by decide
 example : storesInto (.primitive .int32) .word32 = true := by decide
 example : storesInto (.primitive .boolean) .word32 = true := by decide
 example : storesInto (.primitive .char) .word32 = true := by decide
 example :
-    storesInto (.enum (Tests.enumIdentity "E") (.primitive .int16)) .word32 = true := by decide
+    storesInto (.enum (Tests.enumIdentity "E") .signed16) .word32 = true := by decide
 example : storesInto (.primitive .int64) .native = true := by decide
 example : storesInto (.primitive .intPtr) .word64 = true := by decide
 -- A field typed as an array of a class holds the array's reference, stored as an object or null;
@@ -1291,7 +1291,7 @@ example : scalarEmissionMatches none none (i 125 samplesField) [.object, .object
 /-- `Scope.Pair`, a struct at layout 0, with fields of each kind the step resolves: an integer,
     an enum, a vector, a nested struct and a generic struct instance. -/
 private def pairType : TypeExpr := .aggregate "Scope::Scope.Pair" 0
-private def modeType : TypeExpr := .enum (Tests.enumIdentity "Scope.Mode" (Tests.enumAssembly name!"Scope")) intType
+private def modeType : TypeExpr := .enum (Tests.enumIdentity "Scope.Mode" (Tests.enumAssembly name!"Scope")) .signed32
 private def laneType : TypeExpr :=
   .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1") word
 private def innerType : TypeExpr := .aggregate "Scope::Scope.Inner" 1
