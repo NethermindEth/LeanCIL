@@ -1008,7 +1008,7 @@ static void ScalingChecks()
     if (!Rejects(() => CheckGrowth(reduced, linearInArguments with { KernelHeartbeats = 16 * 6400 }, true)))
         throw new InvalidOperationException("The argument budget accepted a per-instruction quadratic mutant.");
     var fieldBody = baseline with { Workload = "structfields", Size = 16, Instructions = 14,
-        FrontendHeartbeats = 3_763_975, KernelHeartbeats = 86_336 };
+        FrontendHeartbeats = 3_880_175, KernelHeartbeats = 83_853 };
     CheckReferenceBudget(fieldBody);
     if (!Rejects(() => CheckReferenceBudget(fieldBody with { KernelHeartbeats = 2 * fieldBody.KernelHeartbeats })) ||
         !Rejects(() => CheckReferenceBudget(fieldBody with { FrontendHeartbeats = 2 * fieldBody.FrontendHeartbeats })))
@@ -1027,20 +1027,20 @@ static void ScalingChecks()
     throw new InvalidOperationException("The hypothesis budget accepted a cost that grows with the hypotheses.");
 }
 
-// Lean 4.35.0 checked-theorem heartbeats: field fixtures at 8cc33b38 and typed Math.Max calls at 9c53e7f5.
+// Lean 4.35.0 checked-theorem heartbeats at 3c7f6b5a, where every frame carries its handler resumptions.
 static void CheckReferenceBudget(SteppingMeasurement decoded)
 {
     var (instructions, frontend, kernel) = (decoded.Workload, decoded.Size) switch
     {
-        ("structfields", 16) => (14, 3_763_975, 86_336),
-        ("structfields", 64) => (62, 9_767_942, 194_175),
-        ("structfields", 256) => (254, 33_653_612, 625_474),
-        ("structfieldscontract", 16) => (14, 3_335_564, 86_060),
-        ("structfieldscontract", 64) => (62, 9_598_624, 192_821),
-        ("structfieldscontract", 256) => (254, 34_710_632, 619_863),
-        ("intrinsiccalls", 16) => (14, 3_434_418, 87_411),
-        ("intrinsiccalls", 64) => (62, 9_828_778, 200_230),
-        ("intrinsiccalls", 256) => (254, 35_106_686, 651_597),
+        ("structfields", 16) => (14, 3_880_175, 83_853),
+        ("structfields", 64) => (62, 9_868_186, 192_761),
+        ("structfields", 256) => (254, 33_709_768, 628_304),
+        ("structfieldscontract", 16) => (14, 3_431_647, 83_568),
+        ("structfieldscontract", 64) => (62, 9_681_966, 191_398),
+        ("structfieldscontract", 256) => (254, 34_770_033, 622_713),
+        ("intrinsiccalls", 16) => (14, 3_480_200, 87_919),
+        ("intrinsiccalls", 64) => (62, 9_893_499, 201_217),
+        ("intrinsiccalls", 256) => (254, 35_238_547, 654_510),
         _ => throw new InvalidOperationException($"Missing reference baseline for {decoded.Workload} {decoded.Size}.")
     };
     if (decoded.Instructions != instructions)
