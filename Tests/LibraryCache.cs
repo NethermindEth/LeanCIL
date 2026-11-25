@@ -171,11 +171,15 @@ try
             Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(fixture, name))!);
             File.Copy(At(name), Path.Combine(fixture, name));
         }
-        foreach (var folder in new[] { "Examples", "Tests", "Extractor", "scripts" })
+        foreach (var folder in new[] { "Examples", "Tests", "Extractor", "scripts", "StrictBinding" })
             Directory.CreateDirectory(Path.Combine(fixture, folder));
         void Write(string name, string text) => File.WriteAllText(Path.Combine(fixture, name), text);
         Write("lakefile.toml", "name = \"leancil\"\n\n[[lean_lib]]\nname = \"CIL\"\n" +
+            "\n[[lean_lib]]\nname = \"StrictBinding\"\n" +
             "\n[[lean_exe]]\nname = \"leancil-audit\"\nroot = \"CIL.OleanAudit\"\n");
+        // The certified library builds the binding audit with the framework, so the fixture has one.
+        Write("StrictBinding/Base.lean", "theorem StrictBinding.base : True := True.intro\n");
+        Write("StrictBinding.lean", "import StrictBinding.Base\n");
         Write("CIL/Inside.lean", "import CIL.Base\ntheorem CIL.inside : True := CIL.base\n");
         Write("CIL/Base.lean", "theorem CIL.base : True := True.intro\n");
         Write("CIL/Outside.lean", "theorem CIL.outside : True := True.intro\n");

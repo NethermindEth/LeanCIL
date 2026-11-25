@@ -422,9 +422,12 @@ try
     Reject("foreign extraction", "Compiled artifacts changed", "deep checks", session =>
         File.Copy(Path.Combine(verification.library!, ".lake/build/lib/lean/CIL.olean"), Path.Combine(session,
             ".lake/packages/leancil_generated/.lake/build/lib/lean/Extracted.olean"), true));
+    // The session builds no StrictBinding, so the stray artifact joins the library's module family.
     Reject("prepared binding", "prepared StrictBinding library changed", "kernel replay", _ =>
-        File.WriteAllBytes(Path.Combine(verification.session!,
-            ".lake/build/lib/lean/StrictBinding.olean.unexpected"), [0]));
+    {
+        var built = Directory.CreateDirectory(Path.Combine(verification.session!, ".lake/build/lib/lean"));
+        File.WriteAllBytes(Path.Combine(built.FullName, "StrictBinding.olean.unexpected"), [0]);
+    });
     File.Delete(Path.Combine(verification.session!, ".lake/build/lib/lean/StrictBinding.olean.unexpected"));
     verification.fullImportAudit = (_, session, _, _) =>
     {

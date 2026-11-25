@@ -494,7 +494,7 @@ try
             throw new InvalidOperationException("The certified library changed after " + after + ": " + certified);
     }
     // Lake lists a source directory once per library, so test libraries would crowd LEAN_SRC_PATH toward
-    // Lean's Windows environment limit; the package adds one each for CIL and the editor library.
+    // Lean's Windows environment limit; the package adds one each for CIL, StrictBinding and the editor library.
     var sourcePath = Run(["lake", "env"], standalone).Split('\n', StringSplitOptions.TrimEntries)
         .Single(line => line.StartsWith("LEAN_SRC_PATH=", StringComparison.Ordinal))["LEAN_SRC_PATH=".Length..];
     string[] expectedSources = [Path.GetFullPath(certified),
@@ -502,9 +502,9 @@ try
     var packageSources = sourcePath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
         .Select(Path.GetFullPath).Where(entry => expectedSources.Any(expected =>
             entry.StartsWith(expected, StringComparison.OrdinalIgnoreCase))).ToArray();
-    if (packageSources.Length != 2)
+    if (packageSources.Length != 3)
         throw new InvalidOperationException($"The package adds {packageSources.Length} source directories " +
-            "to LEAN_SRC_PATH instead of one each for CIL and the editor library: " + sourcePath);
+            "to LEAN_SRC_PATH instead of one each for CIL, StrictBinding and the editor library: " + sourcePath);
     Run(["lake", "lean", scratchProof], standalone);
     // What an editor does on opening the file and what a user may run in the package.
     Run(["lake", "setup-file", scratchProof], standalone);
