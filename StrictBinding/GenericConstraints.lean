@@ -46,7 +46,8 @@ def primitiveScope (image : PreparedImage) : Except AuditError String := do
   return core
 
 /-- The extracted type of a non-void primitive in a physical signature. In the supported
-    System.Runtime reference scope, STRING is a managed string and OBJECT is a scoped atom. -/
+    System.Runtime reference scope, a value primitive is `.primitive`, STRING is a managed string
+    and OBJECT is a scoped atom. -/
 def primitiveElement (scope : String) (code : Nat) : Except AuditError TypeExpr := do
   let some name := (primitiveName code).bind spelled? | throw .uncoveredConstraint
   if code == 1 then throw .uncoveredConstraint
@@ -54,6 +55,8 @@ def primitiveElement (scope : String) (code : Nat) : Except AuditError TypeExpr 
     unless scope == runtimeScope do throw .uncoveredConstraint
     return .object scope name
   if code == 0x1C && scope == coreLibraryScope then throw .uncoveredConstraint
+  if scope == runtimeScope then
+    if let some type := CIL.PrimitiveType.ofElementType? code then return .primitive type
   return .atom scope name
 
 /-- A top-level simple name cannot include a namespace separator or a constructed type suffix. -/
@@ -280,11 +283,17 @@ private def layoutTypeArguments (image : PreparedImage) (token : Nat) (layout : 
   parameterDeclarations image token (generic.constraints.map fun (flags, types) => { flags, types })
   let core ← primitiveScope image
   let names ← generic.arguments.mapM fun argument => do
-    let .atom scope name := argument | throw .uncoveredConstraint
-    unless scope == core && primitiveCodes.any (fun code =>
-        code != 0x01 && (primitiveName code).bind spelled? == some name) do
-      throw .uncoveredConstraint
-    return scope ++ "::" ++ name
+    match argument with
+    | .primitive type =>
+      unless core == runtimeScope do throw .uncoveredConstraint
+      let some name := (primitiveName type.elementType).bind spelled? | throw .uncoveredConstraint
+      return core ++ "::" ++ name
+    | .atom scope name =>
+      unless scope == core && primitiveCodes.any (fun code =>
+          code != 0x01 && (primitiveName code).bind spelled? == some name) do
+        throw .uncoveredConstraint
+      return scope ++ "::" ++ name
+    | _ => throw .uncoveredConstraint
   return some names
 
 /-- Direct interfaces of a concrete argument are the InterfaceImpl rows the physical type owns. -/

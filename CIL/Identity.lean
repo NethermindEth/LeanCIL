@@ -792,6 +792,11 @@ def PrimitiveType.elementType : PrimitiveType → Nat
   | .uint16 => 0x07 | .int32 => 0x08 | .uint32 => 0x09 | .int64 => 0x0A | .uint64 => 0x0B
   | .single => 0x0C | .double => 0x0D | .intPtr => 0x18 | .uintPtr => 0x19
 
+/-- The primitive whose element type code is `code`, if any. -/
+def PrimitiveType.ofElementType? (code : Nat) : Option PrimitiveType :=
+  [.boolean, .char, .sbyte, .byte, .int16, .uint16, .int32, .uint32, .int64, .uint64, .single,
+    .double, .intPtr, .uintPtr].find? (·.elementType == code)
+
 /-- What metadata says a named type is. -/
 inductive TypeKind where
   | valueType
