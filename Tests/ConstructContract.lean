@@ -26,31 +26,38 @@ theorem layouts_valid : Extraction.LayoutsValid fieldEnvironment.rawLayouts fiel
 #print axioms layouts_valid
 
 def pairLow : Extraction.FieldRef :=
-  { owner := .aggregate "Constructs.Pair" 0, index := 0, name := name!"Low", type := .primitive .uint64 }
+  { owner := .aggregate "Constructs.Pair" 0, index := 0, name := name!"Low",
+    type := .primitive .uint64 }
 cil_field_shape fieldEnvironment pairLow
 
 def pairHigh : Extraction.FieldRef :=
-  { owner := .aggregate "Constructs.Pair" 0, index := 1, name := name!"High", type := .primitive .uint64 }
+  { owner := .aggregate "Constructs.Pair" 0, index := 1, name := name!"High",
+    type := .primitive .uint64 }
 cil_field_shape fieldEnvironment pairHigh
 
 def limb0 : Extraction.FieldRef :=
-  { owner := .aggregate "Constructs.Word" 1, index := 0, name := name!"U0", type := .primitive .uint64 }
+  { owner := .aggregate "Constructs.Word" 1, index := 0, name := name!"U0",
+    type := .primitive .uint64 }
 cil_field_shape fieldEnvironment limb0
 
 def limb1 : Extraction.FieldRef :=
-  { owner := .aggregate "Constructs.Word" 1, index := 1, name := name!"U1", type := .primitive .uint64 }
+  { owner := .aggregate "Constructs.Word" 1, index := 1, name := name!"U1",
+    type := .primitive .uint64 }
 cil_field_shape fieldEnvironment limb1
 
 def limb2 : Extraction.FieldRef :=
-  { owner := .aggregate "Constructs.Word" 1, index := 2, name := name!"U2", type := .primitive .uint64 }
+  { owner := .aggregate "Constructs.Word" 1, index := 2, name := name!"U2",
+    type := .primitive .uint64 }
 cil_field_shape fieldEnvironment limb2
 
 def limb3 : Extraction.FieldRef :=
-  { owner := .aggregate "Constructs.Word" 1, index := 3, name := name!"U3", type := .primitive .uint64 }
+  { owner := .aggregate "Constructs.Word" 1, index := 3, name := name!"U3",
+    type := .primitive .uint64 }
 cil_field_shape fieldEnvironment limb3
 
 def loggedValue : Extraction.FieldRef :=
-  { owner := .aggregate "Constructs.Logged" 2, index := 0, name := name!"Value", type := .primitive .uint64 }
+  { owner := .aggregate "Constructs.Logged" 2, index := 0, name := name!"Value",
+    type := .primitive .uint64 }
 cil_field_shape fieldEnvironment loggedValue
 
 def method0Signature : String := "System.UInt64 Constructs.Calls::Root(System.UInt64,System.UInt64)"

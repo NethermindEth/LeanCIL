@@ -83,7 +83,8 @@ example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Signed") (.prim
 example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Wide") (.primitive .uint16)) =
     some .unsigned16 :=
   (declaredNarrow_enum [] _ .uint16).trans rfl
-example : declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Plain") (.primitive .int32)) = none :=
+example :
+    declaredNarrow [] (.enum (Tests.enumIdentity "Examples.Plain") (.primitive .int32)) = none :=
   (declaredNarrow_enum [] _ .int32).trans rfl
 
 -- An enum over a type `typeStorage` does not admit as an enum's underlying type has no storage.

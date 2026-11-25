@@ -302,7 +302,9 @@ example : catalog.siteAgrees {} {} (site divRem) (.call bigMul) = false := by
 example : catalog.table.find {} .newobj bigMul = none := by decide +kernel
 example : catalog.table.find {} .call { bigMul with owner := runtimeType "System.Maths" } =
     none := by decide +kernel
-example : catalog.siteAgrees {} {} (site (spanLength word)) (.call (spanLength (.primitive .byte))) = false := by
+example :
+    catalog.siteAgrees {} {} (site (spanLength word)) (.call (spanLength (.primitive .byte))) =
+      false := by
   decide +kernel
 example : catalog.table.find {} .call
     { spanLength word with owner := runtimeType "System.String" } = none := by decide +kernel

@@ -84,7 +84,8 @@ theorem first_static_wins :
 #print axioms first_static_wins
 
 /-- A scalar static load with matching enum identities and a descriptor of the given width. -/
-private def enumLoad (underlying : PrimitiveType) (width : Nat) (scalar : Option Bool := some false) :
+private def enumLoad (underlying : PrimitiveType) (width : Nat)
+    (scalar : Option Bool := some false) :
     Bool :=
   let field := { loaded with type := .enum (Tests.enumIdentity "E") (.primitive underlying) }
   let operand := RawOperand.field field.owner field.index field.type field.name true

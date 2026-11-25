@@ -116,7 +116,8 @@ theorem closed_generic_call :
     validateImportCall [] [identitySlot] 40 identitySite identitySlot.identity 0 1 = true := by decide +kernel
 #print axioms closed_generic_call
 
-theorem rejection_12 : validateImportCall [] [identitySlot] 40 { identitySite with typeArguments := [.primitive .uint32] }
+theorem rejection_12 : validateImportCall [] [identitySlot] 40
+    { identitySite with typeArguments := [.primitive .uint32] }
     identitySlot.identity 0 1 = false := by decide +kernel
 #print axioms rejection_12
 theorem rejection_13 : validateImportCall [] [identitySlot] 40 { identitySite with typeArguments := [.parameter 0] }

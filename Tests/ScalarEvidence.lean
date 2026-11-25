@@ -656,7 +656,8 @@ theorem pointer_local_storage :
   decide +kernel
 #print axioms pointer_local_storage
 
-private def byteSpanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.primitive .byte)
+private def byteSpanType : TypeExpr :=
+  .apply (.constructor runtime "System.ReadOnlySpan`1") (.primitive .byte)
 private def byteSpanSite : CallSite := {
   declared := { convention := 0x20, parameters := [.pointer .void, intType] },
   method := {
@@ -742,7 +743,8 @@ private theorem tuple_field_cases :
 
 #print axioms tuple_field_cases
 
-private def spanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.primitive .uint32)
+private def spanType : TypeExpr :=
+  .apply (.constructor runtime "System.ReadOnlySpan`1") (.primitive .uint32)
 private def spanSite : CallSite := {
   declared := {
     convention := 0x20,
@@ -1242,11 +1244,13 @@ example : storesInto (.primitive .int32) .word64 = false := by decide
 example : storesInto (.primitive .int32) .native = false := by decide
 example : storesInto (.primitive .int64) .word32 = false := by decide
 example : storesInto (.primitive .intPtr) .word32 = false := by decide
-example : storesInto (.enum (Tests.enumIdentity "E") (.primitive .int64)) .word32 = false := by decide
+example :
+    storesInto (.enum (Tests.enumIdentity "E") (.primitive .int64)) .word32 = false := by decide
 example : storesInto (.primitive .int32) .word32 = true := by decide
 example : storesInto (.primitive .boolean) .word32 = true := by decide
 example : storesInto (.primitive .char) .word32 = true := by decide
-example : storesInto (.enum (Tests.enumIdentity "E") (.primitive .int16)) .word32 = true := by decide
+example :
+    storesInto (.enum (Tests.enumIdentity "E") (.primitive .int16)) .word32 = true := by decide
 example : storesInto (.primitive .int64) .native = true := by decide
 example : storesInto (.primitive .intPtr) .word64 = true := by decide
 -- A field typed as an array of a class holds the array's reference, stored as an object or null;

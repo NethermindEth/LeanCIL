@@ -322,7 +322,8 @@ example : ¬ RuntimeModelsAgree (raw call0) [true]
 
 example : ¬ ({ profile with architecture := .arm64 } : FeatureProfile).Valid := by decide +kernel
 
-private def vector128 : TypeExpr := .apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.primitive .uint64)
+private def vector128 : TypeExpr :=
+  .apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.primitive .uint64)
 private def withLocal : RawMethod := { raw call10 with locals := [vector128], code := [] }
 private def createsBody : Method := body [.call createScalarUnsafeMethod {}]
 

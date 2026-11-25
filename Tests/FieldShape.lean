@@ -61,7 +61,9 @@ theorem layouts_valid : LayoutsValid rawLayouts computedLayouts .x64 := by decid
 
 /-- An enum over another enum has neither metadata storage nor a declared field kind. -/
 theorem nestedEnumHasNoFieldKind :
-    let nested := TypeExpr.enum (Tests.enumIdentity "E") (.enum (Tests.enumIdentity "Inner") (.primitive .int32))
+    let nested :=
+      TypeExpr.enum (Tests.enumIdentity "E")
+        (.enum (Tests.enumIdentity "Inner") (.primitive .int32))
     And (typeStorage rawLayouts nested = none) (fieldKind? rawLayouts nested = none) := by
   decide +kernel
 #print axioms nestedEnumHasNoFieldKind
