@@ -296,17 +296,15 @@ string[] Receipts() => Directory.Exists(SuccessCacheRoot)
     ? [.. Directory.EnumerateFiles(SuccessCacheRoot, "receipt.json", SearchOption.AllDirectories)
         .Select(path => path + "=" + Sha(path)).Order(StringComparer.Ordinal)] : [];
 
-foreach (var name in new[] { "source", "toolchain" })
+// The certified library's StrictBinding sources are mutated only in the private copy Tests/DeepSession.cs opens.
+var sessionToolchain = Path.Combine(verification.session!, "lean-toolchain");
+var originalToolchain = File.ReadAllBytes(sessionToolchain);
+try
 {
-    var path = Path.Combine(verification.session!, name == "source" ? "StrictBinding.lean" : "lean-toolchain");
-    var original = File.ReadAllBytes(path);
-    try
-    {
-        Reject("prepared " + name + " mutation", "Deep-check sources, toolchain", "extraction integrity", _ =>
-            File.AppendAllText(path, "\n"));
-    }
-    finally { File.WriteAllBytes(path, original); }
+    Reject("prepared toolchain mutation", "Deep-check sources, toolchain", "extraction integrity", _ =>
+        File.AppendAllText(sessionToolchain, "\n"));
 }
+finally { File.WriteAllBytes(sessionToolchain, originalToolchain); }
 
 // Each input of a deep result key, the StrictBinding sources by content alone, selects another key.
 void CheckDeepResultKey()

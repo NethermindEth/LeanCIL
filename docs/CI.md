@@ -87,9 +87,9 @@ narrows a local run to the named cases of that group. `loops`, `structoutlines`,
 
 ## Certified library
 
-The `prepare` job provides one kernel-replayed `CIL` library per workflow attempt and passes its
-artifact ID, the run that uploaded it, its archive digest and its manifest digest to the suite jobs
-as job outputs. A rerun of failed suite jobs keeps the producer's artifact ID.
+The `prepare` job provides one kernel-replayed library of `CIL` and `StrictBinding` per workflow
+attempt and passes its artifact ID, the run that uploaded it, its archive digest and its manifest
+digest to the suite jobs as job outputs. A rerun of failed suite jobs keeps the producer's artifact ID.
 
 ### Donors
 
@@ -147,10 +147,11 @@ modules came from those sources.
 
 ### Identity
 
-A library's identity covers the toolchain, `CIL.lean`, `CIL/`, `lake-manifest.json` and the library
-view of `lakefile.toml`, which is the file the library is built from: the checkout lakefile without
-blank lines, comments and plain `[[lean_lib]]` tables naming a library outside CIL. Package
-settings, dependencies, the `CIL` library, the `leancil-audit` executable and any library with
+A library's identity covers the toolchain, `CIL.lean`, `CIL/`, `StrictBinding.lean`, `StrictBinding/`,
+`lake-manifest.json` and the library view of `lakefile.toml`, which is the file the library is built
+from: the checkout lakefile without blank lines, comments and plain `[[lean_lib]]` tables naming a
+library other than `CIL` and `StrictBinding`. Package settings, dependencies, those two libraries,
+the `leancil-audit` executable and any library with
 further keys stay in the library view. Adding or removing a test library therefore keeps both the
 identity and incremental donors; checkout inputs, such as session cache keys, hash the complete
 lakefile. `Tests/LibraryConfiguration.cs` checks both directions.

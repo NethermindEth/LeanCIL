@@ -481,8 +481,8 @@ partial class Program
                     !File.Exists(Path.Combine(Toolchain, "lib/lean", import.Replace('.', '/') + ".olean")))
                     invalid.Add(import);
             invalid = DependentModules(graph, invalid);
-            result.UnionWith(manifest.Modules.Keys.Where(name => !invalid.Contains(name) && name != "CIL" &&
-                !name.StartsWith("CIL.", StringComparison.Ordinal) &&
+            result.UnionWith(manifest.Modules.Keys.Where(name => !invalid.Contains(name) &&
+                !IsCertifiedLibraryModule(name) &&
                 name is not ("Extracted" or "ExtractedSymbols" or "ExtractionAudit") && !SelectionModules.Is(name) &&
                 !name.StartsWith("LeanCILProof", StringComparison.Ordinal)));
         }
@@ -833,7 +833,7 @@ partial class Program
         finally { Directory.Delete(publication, true); }
     }
 
-    bool ExternalConsumerModule(string name) => name == "CIL" || name.StartsWith("CIL.", StringComparison.Ordinal) ||
+    bool ExternalConsumerModule(string name) => IsCertifiedLibraryModule(name) ||
         File.Exists(Path.Combine(Toolchain, "lib/lean", name.Replace('.', '/') + ".olean"));
 
     // Binds extraction-dependent support to the generated program text, not to the assembly bytes.
@@ -940,7 +940,7 @@ partial class Program
             .ToArray();
         var record = new SortedDictionary<string, ConsumerSupportModule>(StringComparer.Ordinal);
         foreach (var (name, path) in modules.Where(pair => !excluded.Contains(pair.Key) &&
-            pair.Key != "CIL" && !pair.Key.StartsWith("CIL.", StringComparison.Ordinal)))
+            !IsCertifiedLibraryModule(pair.Key)))
         {
             var files = new SortedSet<string>(StringComparer.Ordinal);
             var stem = Path.GetFileNameWithoutExtension(path);
@@ -1130,8 +1130,7 @@ partial class Program
         while (pending.TryDequeue(out var module))
         {
             if (excluded.Contains(module) || SelectionModules.Is(module) || imports.ContainsKey(module) ||
-                module == "CIL" ||
-                module.StartsWith("CIL.", StringComparison.Ordinal)) continue;
+                IsCertifiedLibraryModule(module)) continue;
             var relative = module.Replace('.', Path.DirectorySeparatorChar) + ".lean";
             if (File.Exists(Path.Combine(toolchainModules, Path.ChangeExtension(relative, ".olean")))) continue;
             var sources = sourceDirectories.Select(directory => Path.Combine(directory, relative))
@@ -1639,8 +1638,7 @@ partial class Program
                 PrepareBindingLibrary(this.session!);
             }
             certifiedLibrary = library!;
-            certifiedBase = baseModules!.Where(pair =>
-                ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
+            certifiedBase = baseModules!.Where(pair => IsCertifiedLibraryModule(ModuleName(pair.Key))).ToDictionary();
             dependencies = fullBundleDependencies ?? ConsumerDependencies(root);
             trusted = TrustedConsumerSupport(root, before[live[0]]);
             // Resolve lazily initialized identities before any parallel work.
@@ -1767,14 +1765,11 @@ partial class Program
             {
                 if (deepChecks is not null) RequirePreparedBindingLibrary();
             }
-            var bindingModules = deepChecks is null ? null : CertifiedModuleDirectory(bindingSession!);
+            // The certified library's directory, already on the consumer path, holds the StrictBinding modules.
             (string[] Directories, string LeanPath) ImportDirectories()
             {
-                var resolved = ConsumerImportDirectories(session);
-                if (bindingModules is null) return resolved;
                 RequireDeepBindingStable();
-                return ([.. resolved.Directories, bindingModules],
-                    resolved.LeanPath + Path.PathSeparator + bindingModules);
+                return ConsumerImportDirectories(session);
             }
             var components = componentPlans[members[0]];
             bool checkRejectedProofs = members.Any(index => requests[index].ExpectRejection);
@@ -1856,7 +1851,7 @@ partial class Program
             else
             {
                 initialImportDirectories = ImportDirectories().Directories;
-                relativeImportDirectories = initialImportDirectories.Where(path => path != bindingModules)
+                relativeImportDirectories = initialImportDirectories
                     .Select(path => Path.GetRelativePath(session, path)).ToArray();
                 // Lean sources are bound per module inside each generation, not by this key.
                 var configuration = prepared.Copied.Where(pair => Path.GetFileName(pair.Key) is "lakefile.toml" or "lakefile.lean" or "lake-manifest.json" or "lean-toolchain")
@@ -2210,8 +2205,6 @@ partial class Program
             var baseUnchanged = importDirectories.Any(path => LocationComparer.Equals(path, frameworkModules));
             var certifiedCounts = ConsumerArtifactCounts(certifiedBase.Keys);
             var interfaceCounts = ConsumerArtifactCounts(acceptedInterfaceArtifacts.Keys);
-            var preparedArtifacts = bindingPreparation?.SessionArtifacts;
-            var preparedCounts = ConsumerArtifactCounts(preparedArtifacts?.Keys ?? Enumerable.Empty<string>());
             var moduleNames = new HashSet<string>(StringComparer.Ordinal);
             var discovered = new List<(string Name, bool Certified)>();
             foreach (var (directory, artifacts) in artifactSnapshots)
@@ -2224,18 +2217,11 @@ partial class Program
                     var unchanged = LocationComparer.Equals(directory, frameworkModules) &&
                         module.Count() == certifiedCounts.GetValueOrDefault(module.Key) &&
                         module.All(pair => certifiedBase.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
-                    bool preparedBinding = bindingModules is not null &&
-                        LocationComparer.Equals(directory, bindingModules) &&
-                        module.Count() == preparedCounts.GetValueOrDefault(module.Key) &&
-                        module.All(pair => preparedArtifacts!.TryGetValue(pair.Key, out var hash) &&
-                            hash == pair.Value);
-                    if (deep is not null && !preparedBinding &&
-                        (module.Key == "StrictBinding" ||
-                            module.Key.StartsWith("StrictBinding.", StringComparison.Ordinal)))
+                    if (deep is not null && !unchanged && (module.Key == BindingLibrary ||
+                            module.Key.StartsWith(BindingLibrary + ".", StringComparison.Ordinal)))
                         throw new InvalidDataException(
                             "Consumer module shadows the prepared StrictBinding library: " + module.Key);
-                    if (!unchanged && (module.Key == "CIL" || module.Key.StartsWith("CIL.", StringComparison.Ordinal)))
-                        baseUnchanged = false;
+                    if (!unchanged && IsCertifiedLibraryModule(module.Key)) baseUnchanged = false;
                     var certifiedSupport = supportUnchanged && module.All(pair =>
                     {
                         var relative = Path.GetRelativePath(session, Path.Combine(directory, pair.Key));
@@ -2247,7 +2233,7 @@ partial class Program
                         module.Any(pair => !acceptedInterfaceArtifacts.TryGetValue(pair.Key, out string? accepted) || accepted != pair.Value)))
                         throw new InvalidDataException("Published contract interface artifacts changed after their closure audit: " + module.Key);
                     discovered.Add((module.Key,
-                        unchanged || preparedBinding || certifiedSupport || publishedInterface));
+                        unchanged || certifiedSupport || publishedInterface));
                 }
             }
             if (!moduleNames.Contains("Extracted") || (checkRejectedProofs && !moduleNames.Contains("ExtractionAudit")) ||
@@ -2313,8 +2299,8 @@ partial class Program
             var premiseIdentity = JsonSerializer.Serialize(premise);
             var replayedNames = replayTargets.ToHashSet(StringComparer.Ordinal);
             // Duplicate declarations in skipped support must not select another request's proof body.
-            bool completeConsumerReplay = discovered.All(module => module.Name == "CIL" ||
-                module.Name.StartsWith("CIL.", StringComparison.Ordinal) || replayedNames.Contains(module.Name));
+            bool completeConsumerReplay = discovered.All(module => IsCertifiedLibraryModule(module.Name) ||
+                replayedNames.Contains(module.Name));
             string[] AuditModules(int index) => [requestModules[index], "Extracted",
                 .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>(),
                 .. deep?.Modules.Where(module => module != "Extracted") ?? []];
@@ -2535,11 +2521,7 @@ partial class Program
                 // Extraction-dependent modules are recorded too, bound to this Extracted; export uses only the others.
                 // Records bind no PDB names, so importers of ExtractedSymbols stay unbound and are never cached.
                 var excluded = DependentModules(graph, names);
-                if (deep is not null)
-                {
-                    excluded.UnionWith(deep.Modules.Where(module => module != "Extracted"));
-                    excluded.UnionWith(preparedCounts.Keys);
-                }
+                if (deep is not null) excluded.UnionWith(deep.Modules.Where(module => module != "Extracted"));
                 excluded.Add("ExtractedSymbols");
                 excluded.UnionWith(members.SelectMany(member => selections[member]).Where(SelectionModules.IsSymbols));
                 var collected = UseSuccessCache || share || exporting
@@ -2615,7 +2597,7 @@ partial class Program
                     requests[i].Theorem, audits[i].Axioms, audits[i].Audit, before[i],
                     deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
                         deep!.Requests, new(bindingSourcesKey!,
-                            File.ReadAllText(Path.Combine(bindingSession!, "lean-toolchain")).Trim(),
+                            File.ReadAllText(Path.Combine(bindingPreparation!.Session, "lean-toolchain")).Trim(),
                             Sha(LeanExecutable)), audits[i].Result, deep.Uncovered),
                     libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0

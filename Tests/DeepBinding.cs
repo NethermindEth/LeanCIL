@@ -37,7 +37,13 @@ partial class Program
         if (methods < 2) throw new InvalidOperationException("The binding fixture requires two method pages");
 
         var sources = Path.Combine(root, "binding-sources");
-        CopyBindingSources(sources);
+        foreach (var source in Directory.EnumerateFiles(At("StrictBinding"), "*.lean", SearchOption.AllDirectories)
+            .Append(At("StrictBinding.lean")))
+        {
+            var destination = Path.Combine(sources, Path.GetRelativePath(Root, source));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(source, destination, true);
+        }
         var sourceKey = BindingSourcesKey(sources);
         File.AppendAllText(Path.Combine(sources, "StrictBinding", "Bind.lean"), "\n-- changed\n");
         if (sourceKey != BindingSourcesKey(Root) || sourceKey == BindingSourcesKey(sources))

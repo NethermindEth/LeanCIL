@@ -1450,14 +1450,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     {
         var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
 
-        foreach (var name in new[] { "lean-toolchain", "lake-manifest.json", "CIL.lean" })
+        foreach (var name in CertifiedLibraryRoots.Select(root => root + ".lean")
+            .Prepend("lake-manifest.json").Prepend("lean-toolchain"))
             result[name] = Sha(At(name));
         // Checkout identities see every declaration; the certified library sees only what builds it.
         var lakefile = File.ReadAllBytes(At("lakefile.toml"));
         result[CheckoutLakefileInput] = Convert.ToHexStringLower(SHA256.HashData(lakefile));
         result["lakefile.toml"] = ContentKey(LibraryLakefile(Encoding.UTF8.GetString(lakefile)));
 
-        var folders = new List<(string, string[])> { ("CIL", [".lean"]) };
+        var folders = CertifiedLibraryRoots.Select(root => (root, new[] { ".lean" })).ToList();
 #if !LEANCIL_TOOL
         // The repository's examples and tests are checkout inputs; the tool ships only the framework.
         foreach (var name in new[] { "global.json", "Directory.Build.props", "Directory.Packages.props", ".editorconfig" })
@@ -1483,7 +1484,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     /// <summary>
     /// The lakefile the certified library is built from: the checkout's, without blank lines, comments,
-    /// the editor library, or any plain <c>[[lean_lib]]</c> table that declares only a library outside CIL.
+    /// the editor library, or any plain <c>[[lean_lib]]</c> table that declares only a library outside
+    /// <see cref="CertifiedLibraryRoots"/>.
     /// </summary>
     static string LibraryLakefile(string lakefile)
     {
@@ -1501,7 +1503,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         static string? OtherLibrary(List<string> table) =>
             table is ["[[lean_lib]]", var declaration] &&
             LibraryName.Match(declaration) is { Success: true } match && match.Groups[1].Value is var name &&
-            name != "CIL" && !name.StartsWith("CIL.", StringComparison.Ordinal) ? name : null;
+            !IsCertifiedLibraryModule(name) ? name : null;
         // A certificate must never resolve Extracted to the editor's sources.
         static bool EditorLibrary(List<string> table) =>
             table is ["[[lean_lib]]", var declaration, ..] && declaration == $"name = \"{EditorLibraryName}\"";
@@ -1672,8 +1674,22 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     static SortedDictionary<string, string> LibrarySources(SortedDictionary<string, string> snapshot) =>
-        new(snapshot.Where(p => p.Key.StartsWith("CIL/", StringComparison.Ordinal) ||
-            p.Key is "CIL.lean" or "lakefile.toml" or "lake-manifest.json" or "lean-toolchain").ToDictionary(), StringComparer.Ordinal);
+        new(snapshot.Where(p => IsCertifiedLibrarySource(p.Key) ||
+            p.Key is "lakefile.toml" or "lake-manifest.json" or "lean-toolchain").ToDictionary(), StringComparer.Ordinal);
+
+    /// <summary>The libraries a certified library builds and kernel-replays: the framework and the binding audit.</summary>
+    static readonly string[] CertifiedLibraryRoots = ["CIL", BindingLibrary];
+
+    /// <summary>The binding audit library, whose propositions the deep checks prove about pinned images.</summary>
+    const string BindingLibrary = "StrictBinding";
+
+    /// <summary>Whether `module` is a root of <see cref="CertifiedLibraryRoots"/> or a module below one.</summary>
+    static bool IsCertifiedLibraryModule(string module) => CertifiedLibraryRoots.Any(root =>
+        module == root || module.StartsWith(root + ".", StringComparison.Ordinal));
+
+    /// <summary>Whether the checkout-relative `path` is a source file of a certified library root.</summary>
+    static bool IsCertifiedLibrarySource(string path) => CertifiedLibraryRoots.Any(root =>
+        path == root + ".lean" || path.StartsWith(root + "/", StringComparison.Ordinal));
 
     static SortedDictionary<string, string> CacheFiles(string directory) =>
         HashFiles(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
@@ -2635,8 +2651,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     if (Sha(destination) != hash)
                         throw new InvalidOperationException("Library source changed while copying: " + name);
                 }
-                // Modules outside the CIL aggregate are built here too, so importing one never builds into a shared library.
-                var frameworkModules = sources.Keys.Where(name => name.StartsWith("CIL/", StringComparison.Ordinal) &&
+                // Modules no root imports are built here too, so importing one never builds into a shared library.
+                var sourceModules = sources.Keys.Where(name => IsCertifiedLibrarySource(name) &&
                     name.EndsWith(".lean", StringComparison.Ordinal)).Select(name => "+" + name[..^".lean".Length].Replace('/', '.'));
 #if LEANCIL_TOOL
                 Console.Error.WriteLine("Building the certified Lean verification library from the framework sources " +
@@ -2644,7 +2660,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         ? "This run does not cache it."
                         : "Later runs reuse it from " + cached + "."));
 #endif
-                Run(["lake", "build", "CIL", "leancil-audit", .. frameworkModules], library, streamOutput: true,
+                Run(["lake", "build", .. CertifiedLibraryRoots, "leancil-audit", .. sourceModules], library, streamOutput: true,
                     progress: "Building fresh Lean verification library");
                 // An incremental build replays donor modules too: an unchanged olean may import changed ones.
                 ReplayLibrary(library, (incrementalLibrary is null ? "fresh" : "incremental") +
@@ -2687,7 +2703,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         if (publishedEntry) EvictUnusedLibraries(cacheRoot, libraryKey!);
         // Lake compiles a dependency's missing modules into its own build directory, so a library
         // extended with uncompiled sources is read from a private copy; a complete one is never written.
-        var incomplete = manifest.Keys.Any(name => name.StartsWith("CIL/", StringComparison.Ordinal) &&
+        var incomplete = manifest.Keys.Any(name => IsCertifiedLibrarySource(name) &&
             name.EndsWith(".lean", StringComparison.Ordinal) &&
             !manifest.ContainsKey(CompiledLibraryPrefix + name[..^".lean".Length] + ".olean"));
         if (!ownsLibrary && (incomplete || writes))
@@ -3015,8 +3031,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     /// <summary>
-    /// A fresh package holding the given checkout sources and every non-CIL library of the checkout
-    /// lakefile, with the base as a read-only path dependency. Lake writes only below this package.
+    /// A fresh package holding the given checkout sources and every library of the checkout lakefile outside
+    /// the certified library, with the base as a read-only path dependency. Lake writes only below this package.
     /// </summary>
     static string CreateSession(string certified, IEnumerable<string> extraSources)
     {
@@ -3067,8 +3083,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         Path.Combine(directory, ".lake/build/lib/lean") + Path.PathSeparator + Path.Combine(library!, ".lake/build/lib/lean");
 
     /// <summary>
-    /// A package named leancil whose only library is CIL, read in place from the certified library,
-    /// so no other target of the certified lakefile can claim a requiring package's own modules.
+    /// A package named leancil whose only libraries are <see cref="CertifiedLibraryRoots"/>, read in place from
+    /// the certified library, so no other target of the certified lakefile can claim a requiring package's own
+    /// modules.
     /// `requirements` are further lakefile tables, such as a package this one brings into the workspace.
     /// </summary>
     // Lake's module traces name the package, so under another name it rebuilds every module into the library.
@@ -3081,7 +3098,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var root = Path.GetFullPath(certified).Replace('\\', '/');
         WriteIfChanged(Path.Combine(directory, "lakefile.toml"),
             $"name = \"leancil\"\nsrcDir = {JsonSerializer.Serialize(root)}\nbuildDir = " +
-            $"{JsonSerializer.Serialize(root + "/.lake/build")}\n\n[[lean_lib]]\nname = \"CIL\"\n" + requirements);
+            $"{JsonSerializer.Serialize(root + "/.lake/build")}\n" +
+            string.Concat(CertifiedLibraryRoots.Select(name => $"\n[[lean_lib]]\nname = \"{name}\"\n")) + requirements);
         WriteIfChanged(Path.Combine(directory, "lean-toolchain"), File.ReadAllText(Path.Combine(certified, "lean-toolchain")));
         return directory;
     }
@@ -3140,10 +3158,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         "\n[[require]]\nname = \"leancil\"\npath = " + JsonSerializer.Serialize(
             Path.GetRelativePath(owner, FrameworkPackage(owner, certified, pin: pin)).Replace('\\', '/')) + "\n";
 
-    /// <summary>Declarations of every library in a lakefile except the framework's CIL and editor libraries.</summary>
+    /// <summary>Declarations of every library in a lakefile except the certified library roots and the editor's.</summary>
     static string LibraryDeclarations(string lakefile) => string.Concat(
         Regex.Matches(File.ReadAllText(lakefile), @"^\[\[lean_lib\]\]\r?\nname = ""([^""]+)""", RegexOptions.Multiline)
-            .Select(match => match.Groups[1].Value).Where(name => name is not ("CIL" or EditorLibraryName))
+            .Select(match => match.Groups[1].Value)
+            .Where(name => name != EditorLibraryName && !IsCertifiedLibraryModule(name))
             .Select(name => $"\n[[lean_lib]]\nname = \"{name}\"\n"));
 
     // Rewriting an unchanged configuration would make Lake reconfigure packages that later builds reuse.
@@ -3437,8 +3456,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 var name = CompiledName(compiled, path);
                 if (name is null || !name.EndsWith(".olean", StringComparison.Ordinal)) return Conservative();
                 var imported = name[..^6].Replace('/', '.');
-                // All certified CIL sources are already bound by libraryKey.
-                if (imported != "CIL" && !imported.StartsWith("CIL.", StringComparison.Ordinal)) pending.Enqueue(imported);
+                // All certified library sources are already bound by libraryKey.
+                if (!IsCertifiedLibraryModule(imported)) pending.Enqueue(imported);
                 else if (!certifiedModules!.ContainsKey(name)) pending.Enqueue(imported);
             }
         }
@@ -4830,7 +4849,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
         // Use a source-bound build; CI and --rebuild-library bypass the local library cache.
         stage?.Invoke("Lean library build");
-        var closureRoots = ClosureRoots(proofSource, output, symbolsSource, extraction);
+        // A closure entry holds no StrictBinding build, so deep checks open the whole library.
+        var closureRoots = deepChecks is null ? ClosureRoots(proofSource, output, symbolsSource, extraction) : null;
         var session = Library(before, closureRoots: closureRoots);
         if (deepChecks is not null) PrepareBindingLibrary(session);
         void RequireDeepBindingStable()
@@ -5090,7 +5110,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (deep is null) return;
                 deep.RequireStable();
                 if (!Same(built, OleanHashes(fresh, session)) ||
-                    bindingSourcesKey != BindingSourcesKey(session) ||
+                    bindingSourcesKey != BindingSourcesKey(library!) ||
                     bindingPreparation!.Toolchain != BindingToolchainKey(session))
                     throw new InvalidOperationException("Deep-check sources, toolchain or compiled artifacts changed");
                 RequireDeepBindingStable();

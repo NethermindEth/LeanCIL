@@ -423,9 +423,9 @@ try
         File.Copy(Path.Combine(verification.library!, ".lake/build/lib/lean/CIL.olean"), Path.Combine(session,
             ".lake/packages/leancil_generated/.lake/build/lib/lean/Extracted.olean"), true));
     Reject("prepared binding", "prepared StrictBinding library changed", "kernel replay", _ =>
-        File.WriteAllBytes(Path.Combine(verification.bindingSession!,
+        File.WriteAllBytes(Path.Combine(verification.session!,
             ".lake/build/lib/lean/StrictBinding.olean.unexpected"), [0]));
-    File.Delete(Path.Combine(verification.bindingSession!, ".lake/build/lib/lean/StrictBinding.olean.unexpected"));
+    File.Delete(Path.Combine(verification.session!, ".lake/build/lib/lean/StrictBinding.olean.unexpected"));
     verification.fullImportAudit = (_, session, _, _) =>
     {
         File.AppendAllText(Path.Combine(session, ".deep-checks/BindingAudit/Images.lean"), "\n-- changed\n");

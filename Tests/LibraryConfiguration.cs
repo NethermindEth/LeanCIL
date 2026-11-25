@@ -13,13 +13,14 @@ var checkout = File.ReadAllText(At("lakefile.toml")).ReplaceLineEndings("\n");
 var library = LibraryLakefile(checkout);
 const string cilLibrary = "[[lean_lib]]\nname = \"CIL\"\n";
 Require(library.Contains(cilLibrary, StringComparison.Ordinal) &&
+    library.Contains("[[lean_lib]]\nname = \"StrictBinding\"\n", StringComparison.Ordinal) &&
     library.Contains("[[lean_exe]]\nname = \"leancil-audit\"\nroot = \"CIL.OleanAudit\"\n",
         StringComparison.Ordinal) &&
     library.StartsWith("name = \"leancil\"\n", StringComparison.Ordinal) &&
     library.Contains("defaultTargets = [\"CIL\"]\n", StringComparison.Ordinal),
-    "Library lakefile lost the package, CIL or auditor configuration:\n" + library);
+    "Library lakefile lost the package, CIL, StrictBinding or auditor configuration:\n" + library);
 Require(!library.Contains("Tests.", StringComparison.Ordinal), "Library lakefile declares a test library");
-Console.WriteLine("PASS library lakefile keeps the package, CIL and auditor and omits test libraries");
+Console.WriteLine("PASS library lakefile keeps the package, CIL, StrictBinding and auditor and omits test libraries");
 
 const string added = "\n[[lean_lib]]\nname = \"Tests.Added\"\n";
 const string firstTest = "[[lean_lib]]\nname = \"Tests.Support\"\n\n";

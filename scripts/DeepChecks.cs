@@ -656,19 +656,25 @@ partial class Program
 
     static int BindingPageCount(int methods, int pageSize) => Math.Max(1, (methods + pageSize - 1) / pageSize);
 
-    string? bindingSession, bindingSourcesKey, bindingLeanVersion;
+    string? bindingSourcesKey;
     BindingLibraryPreparation? bindingPreparation;
 
-    /// <summary>The exact library and session artifacts certified for the strict binding sources.</summary>
-    sealed record BindingLibraryPreparation(string Library, string LibraryKey, string Toolchain,
+    /// <summary>
+    /// The certified library and session a deep run checks against, with the toolchain and the compiled modules of
+    /// each when it was prepared. The library's modules include StrictBinding, built and kernel-replayed with it.
+    /// </summary>
+    sealed record BindingLibraryPreparation(string Library, string LibraryKey, string Session, string Toolchain,
         SortedDictionary<string, string> BaseArtifacts, SortedDictionary<string, string> SessionArtifacts,
         SortedDictionary<string, string> CertifiedArtifacts);
 
-    /// <summary>Builds and replays StrictBinding in the caller's selected, certified library session.</summary>
+    /// <summary>
+    /// Selects the StrictBinding build that the caller's certified library holds, after rehashing the library's
+    /// compiled modules against its manifest, so the session neither builds nor replays StrictBinding itself.
+    /// </summary>
     void PrepareBindingLibrary(string package)
     {
         if (session is null || library is null || libraryKey is null || certifiedModules is null ||
-            !SameLocation(package, session))
+            libraryManifest is null || !SameLocation(package, session))
             throw new InvalidOperationException("StrictBinding requires the selected certified library session");
         RequireUnchangedLibrary();
         if (bindingPreparation is not null)
@@ -677,52 +683,38 @@ partial class Program
                 throw new InvalidOperationException("The certified library changed before preparing StrictBinding");
             return;
         }
-        var beforeBase = ModuleArtifacts(library);
-        var beforeSession = ModuleArtifacts(session);
-        var current = new SortedDictionary<string, string>(beforeBase, StringComparer.Ordinal);
-        foreach (var (name, hash) in beforeSession) current[name] = hash;
+        // A closure entry holds no StrictBinding, and a module without its compiled form would build unreplayed.
+        var sources = BindingSources(libraryManifest);
+        if (sources.Count == 0 || sources.Keys.Any(source =>
+                !baseModules!.ContainsKey(source[..^".lean".Length] + ".olean")))
+            throw new InvalidOperationException(
+                "The certified library " + libraryKey + " holds no complete StrictBinding build");
+        var baseArtifacts = ModuleArtifacts(library);
+        var sessionArtifacts = ModuleArtifacts(session);
+        var current = new SortedDictionary<string, string>(baseArtifacts, StringComparer.Ordinal);
+        foreach (var (name, hash) in sessionArtifacts) current[name] = hash;
+        var sourcesKey = BindingSourcesKey(sources);
         if (!Same(current, certifiedModules) ||
-            baseModules!.Any(pair => !beforeBase.TryGetValue(pair.Key, out var hash) || hash != pair.Value))
+            baseModules!.Any(pair => !baseArtifacts.TryGetValue(pair.Key, out var hash) || hash != pair.Value) ||
+            sourcesKey != BindingSourcesKey(library))
             throw new InvalidOperationException("The certified library changed before preparing StrictBinding");
-        var toolchain = BindingToolchainKey(session);
-        CopyBindingSources(session);
-        var sourcesKey = BindingSourcesKey(session);
-        var leanVersion = Run([LeanExecutable, "--version"]).Trim();
-        Run(["lake", "build", "StrictBinding"], session, progress: "Building the strict binding library");
-        var afterBase = ModuleArtifacts(library);
-        var afterSession = ModuleArtifacts(session);
-        current = new(afterBase, StringComparer.Ordinal);
-        foreach (var (name, hash) in afterSession) current[name] = hash;
-        if (!Same(beforeBase, afterBase) ||
-            !ModuleArtifactsPreserved(beforeSession, afterSession) ||
-            !ModuleArtifactsPreserved(certifiedModules, current))
-            throw new InvalidOperationException("The certified library changed while building StrictBinding");
-        string[] added =
-            [.. current.Keys.Where(name => !certifiedModules.ContainsKey(name)).Select(ModuleName).Distinct()];
-        if (sourcesKey != BindingSourcesKey(session) || toolchain != BindingToolchainKey(session))
-            throw new InvalidOperationException("The strict binding sources or toolchain changed during preparation");
-        if (added.Length != 0)
-            ReplayCheckedModules(added, SessionLeanPath(session), "Kernel replay of the strict binding library");
-        if (!Same(afterBase, ModuleArtifacts(library)) || !Same(afterSession, ModuleArtifacts(session)) ||
-            sourcesKey != BindingSourcesKey(session) || toolchain != BindingToolchainKey(session))
-            throw new InvalidOperationException("The strict binding library changed during preparation");
-        certifiedModules = current;
-        bindingSession = session;
         bindingSourcesKey = sourcesKey;
-        bindingLeanVersion = leanVersion;
-        bindingPreparation = new(library, libraryKey, toolchain, afterBase, afterSession,
-            new(current, StringComparer.Ordinal));
+        bindingPreparation = new(library, libraryKey, session, BindingToolchainKey(session), baseArtifacts,
+            sessionArtifacts, current);
     }
 
-    /// <summary>The prepared library retains its sources, toolchain and every original artifact family.</summary>
+    /// <summary>
+    /// The prepared library and session retain their StrictBinding sources, toolchain and every original artifact
+    /// family; a session module never takes the place of a library module.
+    /// </summary>
     SortedDictionary<string, string> RequirePreparedBindingLibrary()
     {
         var prepared = bindingPreparation ??
             throw new InvalidOperationException("StrictBinding has not been prepared");
         RequireUnchangedLibrary();
-        if (session is null || bindingSession != session || prepared.Library != library ||
+        if (session is null || prepared.Session != session || prepared.Library != library ||
             prepared.LibraryKey != libraryKey || prepared.Toolchain != BindingToolchainKey(session) ||
-            bindingSourcesKey != BindingSourcesKey(session))
+            bindingSourcesKey != BindingSourcesKey(library!))
             throw new InvalidOperationException("The prepared StrictBinding library changed");
         var baseArtifacts = ModuleArtifacts(library!);
         var sessionArtifacts = ModuleArtifacts(session);
@@ -750,22 +742,9 @@ partial class Program
         return true;
     }
 
-    /// <summary>The toolchain declaration and compiler bytes used to prepare the binding library.</summary>
+    /// <summary>The toolchain declaration of a session and the compiler bytes its deep modules build with.</summary>
     string BindingToolchainKey(string package) => ContentKey(Sha(Path.Combine(package, "lean-toolchain")) +
         "\n" + Toolchain + "\n" + Sha(LeanExecutable));
-
-    /// <summary>Copies the StrictBinding library's sources into a package, below the same relative paths.</summary>
-    static void CopyBindingSources(string package)
-    {
-        var sources = Directory.EnumerateFiles(At("StrictBinding"), "*.lean", SearchOption.AllDirectories)
-            .Append(At("StrictBinding.lean"));
-        foreach (var source in sources)
-        {
-            var destination = Path.Combine(package, Path.GetRelativePath(Root, source));
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(source, destination, true);
-        }
-    }
 
     /// <summary>Derives a coverage bit from the physical checks and proves its value for the selected methods.</summary>
     static string CoverageSource(string check, string proposition, string theorem, string macro, string module,
@@ -1315,11 +1294,22 @@ partial class Program
         return failures;
     }
 
-    static string BindingSourcesKey(string root) => ContentKey(string.Join("\n", Directory
-        .EnumerateFiles(Path.Combine(root, "StrictBinding"), "*.lean", SearchOption.AllDirectories)
-        .Append(Path.Combine(root, "StrictBinding.lean"))
-        .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/') + "=" + Sha(path))
-        .Order(StringComparer.Ordinal)));
+    /// <summary>The content key of the StrictBinding sources below `root`.</summary>
+    static string BindingSourcesKey(string root) => BindingSourcesKey(Directory
+        .EnumerateFiles(Path.Combine(root, BindingLibrary), "*.lean", SearchOption.AllDirectories)
+        .Append(Path.Combine(root, BindingLibrary + ".lean"))
+        .ToDictionary(path => Path.GetRelativePath(root, path).Replace('\\', '/'), path => Sha(path)));
+
+    /// <summary>The content key of StrictBinding sources given by relative path and SHA-256.</summary>
+    static string BindingSourcesKey(IEnumerable<KeyValuePair<string, string>> sources) => ContentKey(
+        string.Join("\n", sources.Select(pair => pair.Key + "=" + pair.Value).Order(StringComparer.Ordinal)));
+
+    /// <summary>The StrictBinding sources a certified library manifest records, by relative path.</summary>
+    static SortedDictionary<string, string> BindingSources(SortedDictionary<string, string> manifest) =>
+        new(manifest.Where(pair => pair.Key.EndsWith(".lean", StringComparison.Ordinal) &&
+                (pair.Key == BindingLibrary + ".lean" ||
+                    pair.Key.StartsWith(BindingLibrary + "/", StringComparison.Ordinal))).ToDictionary(),
+            StringComparer.Ordinal);
 
     /// <summary>The first error of a Lean message, flattened and shortened for a report line.</summary>
     static string BindingDiagnostic(string output)

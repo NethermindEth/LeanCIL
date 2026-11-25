@@ -142,9 +142,20 @@ if (!Same(preparedArtifacts, verification.SessionModules(package)) ||
     !Same(retainedExtraction, BindingArtifactHashes([extractedOlean])))
     throw new InvalidOperationException("Repeated binding preparation changed compiled artifacts");
 ExpectFailure(() => verification.PrepareBindingLibrary(session), "selected certified library session");
-var bindingArtifact = Path.Combine(package, ".lake/build/lib/lean/StrictBinding.olean");
+// The library is this process's private copy, so its StrictBinding build can be substituted without a cache.
+if (File.Exists(Path.Combine(package, "StrictBinding.lean")) ||
+    Directory.Exists(Path.Combine(package, ".lake/build/lib/lean/StrictBinding")))
+    throw new InvalidOperationException("The session built or copied StrictBinding instead of reusing the library's");
+var bindingArtifact = Path.Combine(verification.library!, ".lake/build/lib/lean/StrictBinding.olean");
 var bindingBytes = File.ReadAllBytes(bindingArtifact);
-File.WriteAllBytes(bindingArtifact, [0]);
+// A substitute that is itself a valid olean: only its certified hash distinguishes it.
+var substitute = File.ReadAllBytes(Path.Combine(verification.library!, ".lake/build/lib/lean/StrictBinding/Pe.olean"));
+verification.bindingPreparation = null;
+File.WriteAllBytes(bindingArtifact, substitute);
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "certified library changed");
+File.WriteAllBytes(bindingArtifact, bindingBytes);
+verification.PrepareBindingLibrary(package);
+File.WriteAllBytes(bindingArtifact, substitute);
 ExpectFailure(() => verification.PrepareBindingLibrary(package), "prepared StrictBinding library changed");
 File.WriteAllBytes(bindingArtifact, bindingBytes);
 var addedCompanion = bindingArtifact + ".unexpected";
@@ -154,13 +165,20 @@ File.Delete(addedCompanion);
 File.Delete(bindingArtifact);
 ExpectFailure(() => verification.PrepareBindingLibrary(package), "prepared StrictBinding library changed");
 File.WriteAllBytes(bindingArtifact, bindingBytes);
-var bindingSource = Path.Combine(package, "StrictBinding.lean");
-var bindingSourceText = File.ReadAllText(bindingSource);
+// The session's build directory precedes the library's on the Lean path, so its module would be imported instead.
+var shadow = Path.Combine(package, ".lake/build/lib/lean/StrictBinding.olean");
+Directory.CreateDirectory(Path.GetDirectoryName(shadow)!);
+File.WriteAllBytes(shadow, substitute);
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "prepared StrictBinding library changed");
+File.Delete(shadow);
+var bindingSource = Path.Combine(verification.library!, "StrictBinding.lean");
+var bindingSourceBytes = File.ReadAllBytes(bindingSource);
 File.AppendAllText(bindingSource, "\n");
 ExpectFailure(() => verification.PrepareBindingLibrary(package), "prepared StrictBinding library changed");
-File.WriteAllText(bindingSource, bindingSourceText);
+File.WriteAllBytes(bindingSource, bindingSourceBytes);
 verification.PrepareBindingLibrary(package);
-Console.WriteLine("PASS binding preparation reuses the selected library and rejects artifact and source mutations");
+Console.WriteLine("PASS binding preparation reuses the library's StrictBinding build and rejects a substituted, " +
+    "added, removed or shadowing module and a changed source");
 CheckClosureWork();
 var proofSource = Path.Combine(session, "Proof.lean");
 File.WriteAllText(proofSource, """

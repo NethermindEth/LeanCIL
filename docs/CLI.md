@@ -930,7 +930,8 @@ END Building fresh Lean verification library (exit 0, 501.7s)
 
 ### Library cache
 
-The certified library is the compiled framework. It holds every `CIL` module, and each module is
+The certified library is the compiled framework. It holds every `CIL` module and every module of
+`StrictBinding`, the library that `--deep-checks` states its theorems with, and each module is
 kernel-replayed. The library
 certifies every proof and proof dependency for one framework version, and building it takes
 several minutes. It is cached in the directory `LEANCIL_CACHE_DIR` names, by default
