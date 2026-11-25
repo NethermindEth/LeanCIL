@@ -86,6 +86,26 @@ theorem countdown_terminates :
 
 #print axioms countdown_terminates
 
+/-- The countdown changes no caller memory: a read of earlier memory returns the same bytes and
+    every earlier allocation is still live when the loop exits. -/
+theorem countdown_preserves_reads (args : List Value) (before : SegmentState) (value : W32)
+    (counter : before.stack = [.scalar (.i32 value)]) (formed : before.memory.WellFormed)
+    {reference : Reference} {width alignment : Nat} {bytes : List (BitVec 8)}
+    (loaded : read before.memory reference width alignment = .ok bytes) :
+    ∃ after, (SegmentExit.reaches 5 after).Exhibited [countdown] 0 0 args before ∧
+      after.memory.allocations = before.memory.allocations ∧
+      read after.memory reference width alignment = .ok bytes := by
+  obtain ⟨exit, ran, post, kept⟩ := countdown_terminates.preserves (arguments := args)
+    ⟨value, counter⟩ formed loaded (fun _ none => nomatch none)
+  cases exit with
+  | reaches pc after =>
+    obtain ⟨rfl, rfl⟩ := post
+    obtain ⟨_, _, same⟩ := kept _ rfl
+    exact ⟨_, ran, rfl, same⟩
+  | returns | faults | diverges => exact post.elim
+
+#print axioms countdown_preserves_reads
+
 /-- Without a decreasing measure no summary can be given: the self-loop never reaches pc 1. -/
 theorem spin_has_no_exit_summary :
     ¬ (SegmentContract.continuing 1 (fun _ _ => True) (fun _ _ _ => True)

@@ -508,6 +508,11 @@ diverge, fault or return. `DecodedSegmentSummary.loop` gives the same result as 
 from the loop's binding, placement and model listing. A loop that only returns to its head has no
 such summary, since its run exhausts every fuel budget.
 
+`SegmentContract.Holds.preserves` reads caller memory, lifetime and aliasing out of any segment
+contract, including `summary.holds resolved` of a decoded summary. At each continuing or
+returning exit, every earlier allocation keeps its identity and stays live, and a checked read of
+earlier memory apart from every footprint entry returns the same bytes.
+
 A reusable summary takes the containing method and a `CodeAt` premise for its exact instructions.
 Instructions that read the method's declared signature, environment, links or runtime profile
 require the corresponding facts in the theorem. Branch targets depend on the placement pc.

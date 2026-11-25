@@ -669,6 +669,49 @@ theorem SegmentContract.Holds.loop {program : CIL.Program} {method head finish :
 
 #print axioms SegmentContract.Holds.loop
 
+/-- The memory a continuing or returning exit leaves; faults and divergence leave none. -/
+def SegmentExit.memory? : SegmentExit -> Option Memory
+  | .reaches _ after => some after.memory
+  | .returns memory _ => some memory
+  | .faults _ | .diverges => none
+
+/-- A segment summary preserves caller memory, lifetime and aliasing at every exit it allows:
+    each earlier allocation stays live with its identity, and a checked read of earlier memory
+    apart from every footprint entry returns the same bytes. -/
+theorem SegmentContract.Holds.preserves {contract : SegmentContract} {program : CIL.Program}
+    {method start : Nat} {arguments : List Value} {before : SegmentState}
+    {reference : Reference} {width alignment : Nat} {bytes : List (BitVec 8)}
+    (holds : contract.Holds program method start) (permitted : contract.pre arguments before)
+    (formed : before.memory.WellFormed)
+    (loaded : read before.memory reference width alignment = .ok bytes)
+    (apart : forall entry, List.Mem entry (contract.footprint arguments before) ->
+      Apart reference width entry) :
+    Exists fun exit => And (exit.Exhibited program method start arguments before)
+      (And (contract.post arguments before exit) (forall after, exit.memory? = some after ->
+        And (before.memory.nextIdentity <= after.nextIdentity)
+          (And (forall id, id < before.memory.nextIdentity ->
+              after.allocations id = before.memory.allocations id)
+            (read after reference width alignment = .ok bytes)))) := by
+  obtain ⟨exit, ran, framed, post⟩ := holds arguments before permitted
+  have kept (after : Memory)
+      (confined : Confined (contract.footprint arguments before) before.memory after) :
+      And (before.memory.nextIdentity <= after.nextIdentity)
+        (And (forall id, id < before.memory.nextIdentity ->
+            after.allocations id = before.memory.allocations id)
+          (read after reference width alignment = .ok bytes)) :=
+    ⟨confined.grows, confined.allocations, confined.read_apart formed loaded apart⟩
+  refine ⟨exit, ran, post, fun after left => ?_⟩
+  cases exit with
+  | reaches pc state =>
+    cases left
+    exact kept _ framed
+  | returns memory values =>
+    cases left
+    exact kept _ framed
+  | faults | diverges => cases left
+
+#print axioms SegmentContract.Holds.preserves
+
 /-- A validated branch exposes its selected successor and preserves the incoming memory. -/
 theorem SegmentContract.branch {program : CIL.Program} {method pc target : Nat}
     {body : CIL.Method} {op : CIL.Instruction}
