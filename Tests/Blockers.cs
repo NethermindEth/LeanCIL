@@ -137,6 +137,7 @@ var summary = Run(["dotnet", ExtractorPath, "blockers", assembly, "--manifest", 
 var json = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(report));
 var entries = json.GetProperty("entries").EnumerateArray().ToArray();
 var blockers = json.GetProperty("blockers").EnumerateArray().ToArray();
+var methodNames = json.GetProperty("methods").EnumerateArray().Select(method => method.GetString()!).ToArray();
 var checks = 0;
 
 void Require(bool condition, string message)
@@ -158,7 +159,7 @@ const string helper = "System.Int32 Fixture::Helper(System.Int32)";
 const string excluded = "System.UInt64 Fixture::Excluded(System.UInt64,System.UInt64)";
 JsonElement Blocker(string construct) => blockers.Single(b => b.GetProperty("construct").GetString() == construct);
 string[] Reached(JsonElement blocker) => blocker.GetProperty("entries").EnumerateArray()
-    .Select(e => e.GetProperty("profile").GetString() + " " + string.Join(" -> ", e.GetProperty("chains").EnumerateArray().Single().EnumerateArray().Select(m => m.GetString())))
+    .Select(e => e.GetProperty("profile").GetString() + " " + string.Join(" -> ", e.GetProperty("chains").EnumerateArray().Single().EnumerateArray().Select(m => methodNames[m.GetInt32()])))
     .Order(StringComparer.Ordinal).ToArray();
 string Id(JsonElement blocker) => blocker.GetProperty("id").GetString()!;
 Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(StringComparer.Ordinal)

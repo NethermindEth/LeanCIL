@@ -270,9 +270,14 @@ internal static partial class Blockers
         foreach (var outcome in outcomes) outcome.Findings.Sort((left, right) => ranks[left].CompareTo(ranks[right]));
 
         batch.RequireUnchanged();
+        // A chain names each method by its index in `methods`, so a name is written once however many chains hold it.
+        string[] methodTable = [.. ordered.SelectMany(f => f.Entries).SelectMany(r => r.Chains).SelectMany(chain => chain)
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+        var methodIndex = methodTable.Select((name, index) => (name, index))
+            .ToDictionary(pair => pair.name, pair => pair.index, StringComparer.Ordinal);
         var report = new
         {
-            schema = 1,
+            schema = 2,
             note = Disclaimer,
             assemblyPath = Path.GetFullPath(assemblyPath),
             assemblyIdentity = identity,
@@ -295,11 +300,16 @@ internal static partial class Blockers
                 decodedMethods = o.DecodedMethods,
                 blockers = o.Findings.Select(f => f.Id)
             }),
+            methods = methodTable,
             blockers = ordered.Select(f => new
             {
                 id = f.Id, construct = f.Construct,
                 sites = f.Sites.Select(s => new { method = s.Method, ilOffset = s.IlOffset, instruction = s.Instruction, source = s.Source, message = s.Message }),
-                entries = f.Entries.Select(r => new { signature = r.Signature, profile = r.Profile, chains = r.Chains })
+                entries = f.Entries.Select(r => new
+                {
+                    signature = r.Signature, profile = r.Profile,
+                    chains = r.Chains.Select(chain => chain.Select(name => methodIndex[name]))
+                })
             })
         };
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
@@ -307,7 +317,7 @@ internal static partial class Blockers
         using (var stream = File.Create(outputPath))
         {
             JsonSerializer.Serialize(stream, report,
-                new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+                new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
             stream.WriteByte((byte)'\n');
         }
         Console.Write(Summary(identity, outcomes, ordered, outputPath));

@@ -264,7 +264,8 @@ from the decoder's instruction). Dead pcs decode to holes carrying their raw opc
 Each blocker is one unsupported construct (instruction, call, type, layout, method metadata or
 static constructor). It lists every site, with method, IL offset, instruction and the PDB source
 location when one is present, and every affected entry with the call chains from it to those
-sites.
+sites. A chain lists its methods as indexes into the report's `methods` table, which names each
+method once.
 
 - A condition found by two checks, such as an entry's modifier and the type that carries it, is
   reported once, by the more specific check.
