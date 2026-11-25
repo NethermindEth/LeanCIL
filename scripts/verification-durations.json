@@ -1,5 +1,5 @@
 {
-  "source": "Suite durations in seconds from successful suite stages in Verification run 44916855622 on 4834ae8d. Assemblies and audit use run 44997113180 on 400710a2, assigning the 856.5-second DeepVerify stage to audit. The core duration is its successful verification step. Blockers completed in run 44909487654 on 46c6fb4d. Pool retains its successful measurement from run 43850929917 on fee86cd9.",
+  "source": "Suite durations in seconds from successful suite stages in Verification run 44916855622 on 4834ae8d. Assemblies and audit use run 44997113180 on 400710a2, assigning the 856.5-second DeepVerify stage to audit. The core duration is its successful verification step. Blockers completed in run 44909487654 on 46c6fb4d. Pool retains its successful measurement from run 43850929917 on fee86cd9. Evidence replaces the 68-second Throws stage of run 44916855622 with its successful 2,650-second stage in run 45524360387 on 14840499, where checking generated fixtures costs more.",
   "seconds": {
     "assemblies": 2385,
     "arguments": 79,
@@ -24,7 +24,7 @@
     "stepping": 729,
     "enums": 142,
     "dispatch": 927,
-    "evidence": 1894,
+    "evidence": 4476,
     "exceptionlint": 17,
     "excluded": 104,
     "exports": 188,
