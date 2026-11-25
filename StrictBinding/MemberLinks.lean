@@ -227,11 +227,11 @@ def memberLinkBound (prepared : List PreparedImage) (source target : PreparedIma
 /-- Whether the claim's link resolves in the images: `true` when checked, `false` when a form
     or an image it needs is not covered; a conflicting link is an error. -/
 def linkCovered (prepared : List PreparedImage) (claim : LinkClaim) : Except AuditError Bool := do
-  let source ← located prepared claim.source
-  let target ← located prepared claim.target
+  let some source := prepared.find? (·.identity == claim.source) | return false
+  let some target := prepared.find? (·.identity == claim.target) | return false
   return (← (memberLinkBound prepared source target claim.memberRef claim.definition).run).isSome
 
-/-- The member lists of each image a claim links into ascend, each image checked once. -/
+/-- The member lists of each supplied image a claim links into ascend, each image checked once. -/
 def targetsAscend (prepared : List PreparedImage) (claims : List LinkClaim) :
     Except AuditError Unit := do
   let mut targets : Std.TreeMap (List Nat) Unit := {}
@@ -239,7 +239,8 @@ def targetsAscend (prepared : List PreparedImage) (claims : List LinkClaim) :
     let key := bytesOf claim.target
     if targets.contains key then continue
     targets := targets.insert key ()
-    memberListsAscend (← located prepared claim.target)
+    if let some target := prepared.find? (·.identity == claim.target) then
+      memberListsAscend target
 
 /-- Check every distinct MemberRef link of the metadata against one preparation of the images.
     Complete when there is at least one link and each is covered. Each target image's member

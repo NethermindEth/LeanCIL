@@ -22,7 +22,7 @@ partial class Program
                 binding.GetProperty("facts").EnumerateArray().Count(fact =>
                     fact.GetProperty("status").GetString() == "reconfirmed") != 4)
                 throw new InvalidOperationException("Unexpected joint binding report: " + result.Stdout);
-            Console.WriteLine("PASS joint CLI verification reports image digests and all thirteen facts");
+            Console.WriteLine("PASS joint CLI verification reports image digests and all fourteen facts");
         }
         var inputs = DeepCheckInputs.Read(manifest);
         var identity = ExtractionIdentity.Read(extraction);

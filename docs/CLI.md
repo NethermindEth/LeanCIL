@@ -338,7 +338,7 @@ arguments. The verifier retains the checked bytes and matches pins after any req
 rebuild. Each request must explicitly supply the option; saved verification settings contain no
 deep-check input. Batch verification, gates, watch and workspace reject the option.
 
-The report lists thirteen binding facts. Default verification lists them as `trusted` and performs
+The report lists fourteen binding facts. Default verification lists them as `trusted` and performs
 no image binding work. Deep verification reconfirms `body-bytes`, `metadata-rows`, `static-data` and the
 digests of pinned images, and `member-links` when the evidence carries MemberRef links into supplied
 images. For RVA fields the audit reads the field signature, packing, class
