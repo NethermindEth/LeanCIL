@@ -5,10 +5,10 @@
     "template": "Binding.lean.in",
     "rows": [
       { "case": "WrongWidth", "method": "Equal(uint,uint)", "name": "Equal", "managed": "System.UInt64",
-        "returnType": "System.Boolean", "width": "64", "body": "equalityBody Extracted.profile Extracted.environment declared true",
+        "returnType": "System.Boolean", "primitive": "uint64", "result": "boolean", "width": "64", "body": "equalityBody Extracted.profile Extracted.environment declared true",
         "value": ".i32 (if left = right then 1 else 0)", "fuel": "5", "shared": "equal32" },
       { "case": "WrongSignedness", "method": "Equal(uint,uint)", "name": "Equal", "managed": "System.Int32",
-        "returnType": "System.Boolean", "width": "32", "body": "equalityBody Extracted.profile Extracted.environment declared true",
+        "returnType": "System.Boolean", "primitive": "int32", "result": "boolean", "width": "32", "body": "equalityBody Extracted.profile Extracted.environment declared true",
         "value": ".i32 (if left = right then 1 else 0)", "fuel": "5", "shared": "equal32" }
     ],
     "gate": {

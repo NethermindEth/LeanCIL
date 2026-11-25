@@ -9,8 +9,8 @@ theorem signature : Extracted.method0Signature =
 /-- The declared types retain the exact managed width and signedness; the fixture methods declare
     no locals, so their bodies carry no localsinit flag. -/
 def declared : CIL.DeclaredSignature := {
-  parameters := [.atom CIL.Extraction.runtimeScope "@managed@", .atom CIL.Extraction.runtimeScope "@managed@"]
-  returnType := .atom CIL.Extraction.runtimeScope "@returnType@"
+  parameters := [.primitive .@primitive@, .primitive .@primitive@]
+  returnType := .primitive .@result@
   initLocals := false }
 /-- The complete extracted body retains the reviewed operation and polarity. -/
 theorem binding : Extracted.program[0]? =
