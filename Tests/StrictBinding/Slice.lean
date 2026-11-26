@@ -129,21 +129,11 @@ theorem accepts_interior_offset :
     ok (checkedHeap [0, 3, 1, 0, 0] 5 [(2, [1, 0])]) = true := by decide +kernel
 #print axioms accepts_interior_offset
 
-/-- A second image differs in the Assembly row's major version. -/
-private def otherImage : Except AuditError PreparedImage :=
-  prepareOne
-    { identity := "StrictFixture, Version=0.2.3.4, Culture=neutral, PublicKeyToken=null",
-      image := flipByte StrictFixture.image 1420 1 }
-
-/-- The Assembly block copied from that second image, with its own heap numbering. -/
+/-- The Assembly block of a second image whose Assembly row differs in its major version, with its
+    own heap numbering; `Tests.StrictBinding.Metadata.blocks` binds it to that image. -/
 private def otherAssembly : CIL.Extraction.AssemblyMetadata :=
   { StrictFixture.assemblyBlock with
     assemblyRow := flipAt StrictFixture.assemblyBlock.assemblyRow 4 1 }
-
-/-- The second block belongs to its own image. -/
-theorem accepts_other_assembly :
-    ok (otherImage >>= fun image => assemblyBound image otherAssembly) = true := by decide +kernel
-#print axioms accepts_other_assembly
 
 /-- A block from the second image is refused even though every carried method row is unchanged. -/
 theorem rejects_other_assembly :
