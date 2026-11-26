@@ -74,7 +74,7 @@ with a failing limit.
 
 A single caller whose throw is bound to a CoreLib constructor defines `boundPackage` with
 `cil_evaluated` (see [proof binding](../PROOFS-BINDING.md)). The kernel evaluates the binding
-once, in `boundPackage_eq`, and checks the package rows once, in `translation_valid`. Every
+once, in `boundPackage_eq`, and checks the package rows once, in `Extracted.translation_valid`. Every
 later check, in the extraction or in a consumer proof, reads the literal. A proof that reduces
 `managedPackage` rather than `boundPackage` evaluates the binding again, about 6 s per check.
 
@@ -94,8 +94,8 @@ range over four runs:
 | Declaration | Kernel time |
 | --- | --- |
 | `boundPackage_eq` | 5.2 to 8.6 s |
-| `translation_valid` | 6.4 to 10.1 s |
+| `Extracted.translation_valid` | 6.4 to 10.1 s |
 | All of `Extracted.lean` | 12.1 to 19.5 s |
 | All of `BoundaryProof.lean` (four `translation_valid.invoke` goals and one program lookup) | 0.7 to 1.3 s |
 
-Checking the eight rows, the caller and seven CoreLib methods, takes about 6 s of `translation_valid`.
+Checking the eight rows, the caller and seven CoreLib methods, takes about 6 s of `Extracted.translation_valid`.

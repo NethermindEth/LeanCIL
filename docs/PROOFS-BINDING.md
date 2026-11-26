@@ -832,7 +832,7 @@ operand as its listed constant. The method can then use the facts from `cil_fiel
 `cil_evaluated name : type := term` defines `name` as the value of a closed `Extraction.RawMethod`,
 `List String` or `Extraction.ManagedPackage` term, written as a literal, and the kernel checks
 `name_eq : term = name` by reduction. For a term of type `Option type` the value must be `some`,
-and `name_eq` states `term = some name`. A package literal writes each value that a definition of
+and the checked equation is `name_eq : term = some name`. A package literal writes each value that a definition of
 the current module also denotes, such as the caller assembly's metadata or the extraction's
 profile, as that constant. Compiled code reads the package from `term` through `name.compiled`,
 so the literal adds no compiled code. The command refuses a term that depends on `sorryAx`. The
