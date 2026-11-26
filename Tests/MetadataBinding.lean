@@ -66,7 +66,8 @@ private def memberCall (owner : TypeExpr) (name : MetadataName) (text identity :
 
 /-- The SizeOf call states Int32 as its only method argument. -/
 private def sizeCall (arity : Nat) (arguments : List TypeExpr) : CallSite :=
-  memberCall (.atom runtimeScope "System.Runtime.CompilerServices.Unsafe") name!"SizeOf" "SizeOf"
+  memberCall (.atom runtimeScope "System.Runtime.CompilerServices.Unsafe"
+      .classType) name!"SizeOf" "SizeOf"
     "System.Int32 System.Runtime.CompilerServices.Unsafe::SizeOf()" arity arguments
     { convention := 0x10, returnType := int32 } int32 []
 
@@ -74,7 +75,8 @@ private def sizeCall (arity : Nat) (arguments : List TypeExpr) : CallSite :=
 private def referenceEqualsCall (declared closed : TypeExpr) : CallSite :=
   let root := TypeExpr.object runtimeScope "System.Object"
   let result := TypeExpr.primitive .boolean
-  memberCall (.atom runtimeScope "System.Object") name!"ReferenceEquals" "ReferenceEquals"
+  memberCall (.atom runtimeScope "System.Object" .classType) name!"ReferenceEquals"
+      "ReferenceEquals"
     "System.Boolean System.Object::ReferenceEquals(System.Object,System.Object)" 0 []
     { convention := 0, returnType := result, parameters := [declared, root] } result [closed, root]
 
@@ -94,7 +96,7 @@ theorem binds_root_object_parameters :
 
 /-- An absent instantiation is valid for Min. A present instantiation must have positive arity. -/
 private def minCall : CallSite :=
-  memberCall (.atom runtimeScope "System.Math") name!"Min" "Min"
+  memberCall (.atom runtimeScope "System.Math" .classType) name!"Min" "Min"
     "System.Int32 System.Math::Min(System.Int32,System.Int32)" 0 []
     { convention := 0, returnType := int32, parameters := [int32, int32] } int32 [int32, int32]
 
@@ -152,7 +154,7 @@ example :
 /-- The signed BigMul(int,int) operand has a concrete Int64 result before substitution. -/
 private def signedProduct (declared : TypeExpr) (identity : String) : CallSite :=
   let result := TypeExpr.primitive .int64
-  memberCall (.atom runtimeScope "System.Math") name!"BigMul" "BigMul"
+  memberCall (.atom runtimeScope "System.Math" .classType) name!"BigMul" "BigMul"
     (identity ++ " System.Math::BigMul(System.Int32,System.Int32)") 0 []
     { convention := 0, returnType := declared, parameters := [int32, int32] } result [int32, int32]
 
@@ -184,7 +186,8 @@ private def mutateBlob (slice : MetadataSlice) (offset : Nat) (change : List Nat
 /-! ## Operands that match their metadata -/
 
 theorem accepts_type_operand :
-    passes own.1 lib tokens.objectRef (.type (.atom runtimeScope "System.Object")) = true := by
+    passes own.1 lib tokens.objectRef (.type (.atom runtimeScope "System.Object"
+        .classType)) = true := by
   decide +kernel
 theorem accepts_external_call :
     passes own.1 lib tokens.writeLine (.call writeLineSite) = true := by decide +kernel
@@ -199,16 +202,19 @@ theorem static_slot_requires_metadata :
       (.operandMismatch tokens.getRef) := by decide +kernel
 #print axioms static_slot_requires_metadata
 
-/-- Both the interface owner and the virtual method flag are required for a static slot. -/
+/-- Both the interface owner and the virtual method flag are required for a static slot. The
+    owner's atom states the head kind its row has, an interface once the row is marked one. -/
 theorem static_slot_flags :
     let markInterface := fun (slice : MetadataSlice) =>
       mutateRow slice (tokenOf Table.typeDef 2) fun bytes => bytes.set 0 0xA1
     let markVirtual := fun (slice : MetadataSlice) =>
       mutateRow slice (tokenOf Table.methodDef 1) fun bytes => bytes.set 6 0xD6
-    let slot := RawOperand.call { getSite with staticVirtualInterfaceSlot := true }
-    passes own.1 (markVirtual (markInterface lib)) tokens.getRef slot &&
-      !passes own.1 (markVirtual lib) tokens.getRef slot &&
-      !passes own.1 (markInterface lib) tokens.getRef slot := by
+    let slot (kind : HeadKind) := RawOperand.call { getSite with
+      staticVirtualInterfaceSlot := true, method.owner := .atom libScope "Lib.Box" kind }
+    passes own.1 (markVirtual (markInterface lib)) tokens.getRef (slot .interfaceType) &&
+      !passes own.1 (markVirtual (markInterface lib)) tokens.getRef (slot .classType) &&
+      !passes own.1 (markVirtual lib) tokens.getRef (slot .classType) &&
+      !passes own.1 (markInterface lib) tokens.getRef (slot .interfaceType) := by
   decide +kernel
 #print axioms static_slot_flags
 theorem accepts_generic_call :
@@ -220,7 +226,8 @@ theorem accepts_indirect :
   decide +kernel
 theorem accepts_fields :
     passes own.1 lib tokens.totalField
-      (.field (.atom "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Program")
+      (.field (.atom "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Program"
+          .classType)
         1 int32 name!"total" true) = true ∧
     passes own.1 lib tokens.countField countOperand = true := by decide +kernel
 /-! ## Operands whose metadata or claim changed -/
@@ -247,7 +254,7 @@ theorem managed_call_binds_both_primitive_scopes :
       "PublicKeyToken=b03f5f7f11d50a3a"
     let declaredObject := TypeExpr.object runtimeScope "System.Object"
     let closedObject := TypeExpr.object scope "System.Object"
-    let closedResult := TypeExpr.atom scope "System.Int32"
+    let closedResult := TypeExpr.atom scope "System.Int32" .valueType
     let call := { getSite with
       declared.parameters := [declaredObject], parameterCount := 1
       method.parameters := [closedObject], method.returnType := closedResult }
@@ -274,7 +281,8 @@ private def dangling : MetadataSlice :=
   mutateRow own.1 tokens.consoleRef fun bytes => bytes.take 2 ++ [0xFF, 0x7F] ++ bytes.drop 4
 
 theorem rejects_a_row_byte_that_names_another_string :
-    rejects renamedConsole lib tokens.consoleRef (.type (.atom runtimeScope "System.Console"))
+    rejects renamedConsole lib tokens.consoleRef (.type (.atom runtimeScope "System.Console"
+        .classType))
       (.operandMismatch tokens.consoleRef) = true := by decide +kernel
 #print axioms rejects_a_row_byte_that_names_another_string
 
@@ -285,7 +293,7 @@ theorem rejects_a_signature_byte_that_changes_a_parameter :
 #print axioms rejects_a_signature_byte_that_changes_a_parameter
 
 theorem rejects_a_heap_offset_with_no_entry :
-    rejects dangling lib tokens.consoleRef (.type (.atom runtimeScope "System.Console"))
+    rejects dangling lib tokens.consoleRef (.type (.atom runtimeScope "System.Console" .classType))
       (.missingHeap 0 0x7FFF) = true := by decide +kernel
 #print axioms rejects_a_heap_offset_with_no_entry
 
@@ -297,7 +305,7 @@ theorem rejects_a_generic_argument_that_differs_from_the_specification :
 /-- `System.Console` as an assembly of version 9 would define it. -/
 private def olderConsole : TypeExpr :=
   .atom "System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-    "System.Console"
+    "System.Console" .classType
 
 theorem rejects_an_owner_scope_with_another_version :
     rejects own.1 lib tokens.writeLine (.call { writeLineSite with method.owner := olderConsole })
@@ -306,20 +314,20 @@ theorem rejects_an_owner_scope_with_another_version :
 
 theorem rejects_a_field_index_the_metadata_does_not_give :
     rejects own.1 lib tokens.countField
-      (.field (.atom ownScope "Program") 1 int32 name!"count" false)
+      (.field (.atom ownScope "Program" .classType) 1 int32 name!"count" false)
       (.fieldIndexMismatch tokens.countField 1 0) = true := by decide +kernel
 #print axioms rejects_a_field_index_the_metadata_does_not_give
 
 /-- The count field's token with the operand naming `total`, the static field after it. -/
 theorem rejects_a_field_operand_named_for_another_row :
     rejects own.1 lib tokens.countField
-      (.field (.atom ownScope "Program") 0 int32 name!"total" false)
+      (.field (.atom ownScope "Program" .classType) 0 int32 name!"total" false)
       (.operandMismatch tokens.countField) = true := by decide +kernel
 #print axioms rejects_a_field_operand_named_for_another_row
 
 theorem rejects_a_static_field_claimed_as_an_instance_field :
     rejects own.1 lib tokens.totalField
-      (.field (.atom ownScope "Program") 1 int32 name!"total" false)
+      (.field (.atom ownScope "Program" .classType) 1 int32 name!"total" false)
       (.operandMismatch tokens.totalField) = true := by decide +kernel
 #print axioms rejects_a_static_field_claimed_as_an_instance_field
 
@@ -367,9 +375,11 @@ private def modifiedLocal (version marker : Nat) : MetadataSlice :=
 /-- A flat local name cannot bind the assembly of either kind of custom modifier. -/
 theorem rejects_local_modifiers_from_either_assembly :
     [7, 8].all (fun version =>
-      localsFail (modifiedLocal version 0x1F) [.atom runtimeScope "System.UInt64 modreq(System.Console)"]
+      localsFail (modifiedLocal version 0x1F) [.spelledModified runtimeScope
+          "System.UInt64 modreq(System.Console)"]
         (.localMismatch 0) &&
-      localsFail (modifiedLocal version 0x20) [.atom runtimeScope "System.UInt64 modopt(System.Console)"]
+      localsFail (modifiedLocal version 0x20) [.spelledModified runtimeScope
+          "System.UInt64 modopt(System.Console)"]
         (.localMismatch 0)) = true := by decide +kernel
 #print axioms rejects_local_modifiers_from_either_assembly
 
@@ -510,7 +520,8 @@ theorem holds_opaque_objects_only_in_class_instance_fields :
       (countHolding (.array (.object runtimeScope "System.Object")))
       (.operandMismatch tokens.countField) = true ∧
     rejects (fieldsHolding [0x12, typeRefCoded tokens.shapeRef]) lib tokens.totalField
-      (.field (.atom ownScope "Program") 1 (.object libScope "Lib.IShape") name!"total" true)
+      (.field (.atom ownScope "Program" .classType) 1 (.object libScope "Lib.IShape") name!"total"
+          true)
       (.operandMismatch tokens.totalField) = true := by decide +kernel
 #print axioms holds_opaque_objects_only_in_class_instance_fields
 
@@ -518,12 +529,13 @@ theorem holds_opaque_objects_only_in_class_instance_fields :
 
 theorem rejects_a_row_of_the_wrong_length :
     rejects (mutateRow own.1 tokens.consoleRef fun bytes => bytes.take 5) lib tokens.consoleRef
-      (.type (.atom runtimeScope "System.Console")) (.rowLength tokens.consoleRef 6 5) = true := by
+      (.type (.atom runtimeScope "System.Console" .classType)) (.rowLength tokens.consoleRef 6
+          5) = true := by
   decide +kernel
 #print axioms rejects_a_row_of_the_wrong_length
 
 theorem rejects_row_zero :
-    rejects own.1 lib 0x01000000 (.type (.atom runtimeScope "System.Console"))
+    rejects own.1 lib 0x01000000 (.type (.atom runtimeScope "System.Console" .classType))
       (.tokenOutOfScope 0x01000000) = true := by decide +kernel
 #print axioms rejects_row_zero
 
@@ -548,10 +560,10 @@ theorem rejects_another_string_than_the_user_string :
 
 /-- A call site's typed fields read its method, so they keep the values the fixtures state. -/
 theorem call_site_fields_read_the_method :
-    writeLineSite.declaringType = .atom runtimeScope "System.Console" ∧
+    writeLineSite.declaringType = .atom runtimeScope "System.Console" .classType ∧
       writeLineSite.hasThis = false ∧ writeLineSite.returnType = .void ∧
       writeLineSite.parameterTypes = [int32] ∧ writeLineSite.method.argumentCount = 1 ∧
-    getSite.declaringType = .atom libScope "Lib.Box" ∧ getSite.returnType = int32 ∧
+    getSite.declaringType = .atom libScope "Lib.Box" .classType ∧ getSite.returnType = int32 ∧
       getSite.parameterTypes = [] ∧
     idSite.method.methodArguments = idSite.typeArguments ∧ idSite.method.genericArity = 1 := by
   decide
@@ -649,7 +661,7 @@ private def rejectsWithoutLibSlice (token : Nat) (operand : RawOperand) (error :
 /-- A reference into a pinned assembly whose slice is left out is refused, not read as a platform
     type or call. -/
 theorem rejects_a_pinned_assembly_whose_slice_is_missing :
-    rejectsWithoutLibSlice tokens.boxRef (.type (.atom libScope "Lib.Box"))
+    rejectsWithoutLibSlice tokens.boxRef (.type (.atom libScope "Lib.Box" .classType))
       (.missingSlice tokens.boxRef) = true ∧
     rejectsWithoutLibSlice tokens.getRef (.call getSite) (.missingSlice tokens.boxRef) = true := by
   decide +kernel
@@ -661,8 +673,9 @@ private def libWithoutCorlib : MetadataSlice := { lib with corlib := 0 }
 /-- The struct is a value type from its base reference alone, whatever `corlib` says, so a claim
     that it is a class is refused with or without the number. -/
 theorem decides_a_struct_without_the_corlib_number :
-    passes own.1 lib tokens.pairRef (.type (.atom libScope "Lib.Pair")) = true ∧
-    passes own.1 libWithoutCorlib tokens.pairRef (.type (.atom libScope "Lib.Pair")) = true ∧
+    passes own.1 lib tokens.pairRef (.type (.atom libScope "Lib.Pair" .valueType)) = true ∧
+    passes own.1 libWithoutCorlib tokens.pairRef (.type (.atom libScope "Lib.Pair"
+        .valueType)) = true ∧
     rejects own.1 lib tokens.pairRef (.type (.object libScope "Lib.Pair"))
       (.operandMismatch tokens.pairRef) = true ∧
     rejects own.1 libWithoutCorlib tokens.pairRef (.type (.object libScope "Lib.Pair"))
@@ -714,10 +727,11 @@ theorem rejects_another_publishers_value_type :
 /-- A field of a struct in a pinned assembly is read from that assembly's slice: without the
     slice it is refused, not taken for a platform field. -/
 theorem rejects_a_pinned_struct_field_whose_slice_is_missing :
-    passes own.1 lib tokens.firstRef (.field (.atom libScope "Lib.Pair") 0 int32 name!"first" false)
+    passes own.1 lib tokens.firstRef (.field (.atom libScope "Lib.Pair" .valueType) 0 int32
+        name!"first" false)
       = true ∧
     rejectsWithoutLibSlice tokens.firstRef
-      (.field (.atom libScope "Lib.Pair") 0 int32 name!"first" false)
+      (.field (.atom libScope "Lib.Pair" .valueType) 0 int32 name!"first" false)
       (.missingSlice tokens.pairRef) = true := by decide +kernel
 #print axioms rejects_a_pinned_struct_field_whose_slice_is_missing
 
@@ -870,9 +884,9 @@ private def ownWithGappedFields : MetadataSlice :=
     the token is refused, not read as the first instance field. -/
 theorem rejects_a_field_after_a_gap_in_the_carried_field_rows :
     passes own.1 lib tokens.secondField
-      (.field (.atom ownScope "Program") 1 int32 name!"second" false) = true ∧
+      (.field (.atom ownScope "Program" .classType) 1 int32 name!"second" false) = true ∧
     rejects ownWithGappedFields lib tokens.secondField
-      (.field (.atom ownScope "Program") 1 int32 name!"second" false)
+      (.field (.atom ownScope "Program" .classType) 1 int32 name!"second" false)
       (.unresolvedMember tokens.secondField) = true := by decide +kernel
 #print axioms rejects_a_field_after_a_gap_in_the_carried_field_rows
 
@@ -883,9 +897,10 @@ theorem rejects_a_field_access_that_disagrees_with_the_field_row :
     checkSite 0x7B { staticField := some true } countOperand = false ∧
     checkSite 0x7B { staticField := some false } countOperand = true ∧
     checkSite 0x7B { staticField := some false }
-      (.field (.atom ownScope "Program") 0 int32 name!"count" false) = true ∧
+      (.field (.atom ownScope "Program" .classType) 0 int32 name!"count" false) = true ∧
     checkSite 0x7E { staticField := some true }
-      (.field (.atom ownScope "Program") 1 int32 name!"total" true) = true := by decide +kernel
+      (.field (.atom ownScope "Program" .classType) 1 int32 name!"total" true) = true := by
+  decide +kernel
 #print axioms rejects_a_field_access_that_disagrees_with_the_field_row
 
 /-! ## The method definition -/
@@ -1291,7 +1306,7 @@ example :
   decide +kernel
 
 /-- `System.Int32` of the primitive assembly. -/
-private def int32Atom : TypeExpr := .atom "C" "System.Int32"
+private def int32Atom : TypeExpr := .atom "C" "System.Int32" .valueType
 
 /-- The tested enum declaration supplies its actual scope and both TypeDef name columns. -/
 private def enumRow (kind : Extraction.TypeKind) (pinned := false) : NamedType :=
@@ -1434,14 +1449,17 @@ theorem refuses_nonvalue_arguments_of_an_external_struct :
 private def acceptedPairings : List (ResolvedType × TypeExpr) := [
   -- Primitives: `void`, an atom of the primitive assembly, and a string as an object.
   (.primitive 1, .void), (.primitive 8, int32Atom),
-  (.primitive 0x0E, .atom "C" "System.String"), (.primitive 0x1C, .atom "C" "System.Object"),
+  (.primitive 0x0E, .atom "C" "System.String" .classType), (.primitive 0x1C,
+      .atom "C" "System.Object" .classType),
   (.primitive 0x0E, .object "C" "System.String"),
   -- Named types: an atom unless a carried enum, an object if a carried class or the runtime's
   -- string, an aggregate if value-like, and an enum over the underlying type its carried row
   -- or its platform definition states.
-  (.named (namedIn "L" "N" .valueType), .atom "L" "N"),
-  (.named (namedIn "L" "N" .classType), .atom "L" "N"),
-  (.named (namedIn "L" "N" (.external none)), .atom "L" "N"),
+  (.named (namedIn "L" "N" .valueType), .atom "L" "N" .valueType),
+  (.named (namedIn "L" "N" .classType), .atom "L" "N" .classType),
+  (.named (namedIn "L" "N" .interfaceType), .atom "L" "N" .interfaceType),
+  (.named (namedIn "L" "N" (.external (some true))), .atom "L" "N" .valueType),
+  (.named (namedIn "L" "N" (.external (some false))), .atom "L" "N" .classType),
   (.named { namedIn "L" "N" .classType true with parts := [[], bytesOf "N"] }, .object "L" "N"),
   (.named { namedIn runtimeScope "System.String" (.external (some false)) with
       parts := [bytesOf "System", bytesOf "String"] }, .object runtimeScope "System.String"),
@@ -1472,24 +1490,32 @@ private def acceptedPairings : List (ResolvedType × TypeExpr) := [
   (.functionPointer 0x20 (.primitive 8) .nil, .functionPointer int32Atom .void 0 true false),
   -- A modified type as an atom of the anchor, spelled with its modifier.
   (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 8),
-    .atom "A" "System.Int32 modreq(Mod)"),
+    .spelledModified "A" "System.Int32 modreq(Mod)"),
   (.modified false (namedIn "M" "Mod" (.external none)) (.primitive 8),
-    .atom "A" "System.Int32 modopt(Mod)")]
+    .spelledModified "A" "System.Int32 modopt(Mod)")]
 
 /-- For each accepting arm, a pairing that changes the scope, the name, the kind, the index, the
     element, the convention or the constructor; and pairings of constructors no arm relates. -/
 private def refusedPairings : List (ResolvedType × TypeExpr) := [
   -- Primitives.
-  (.primitive 8, .void), (.primitive 1, .atom "C" "System.Void"),
-  (.primitive 8, .atom "D" "System.Int32"), (.primitive 8, .atom "C" "System.UInt32"),
+  (.primitive 8, .void), (.primitive 1, .atom "C" "System.Void" .valueType),
+  (.primitive 8, .atom "D" "System.Int32" .valueType), (.primitive 8,
+      .atom "C" "System.UInt32" .valueType),
   (.primitive 0x0E, .object "C" "System.Object"), (.primitive 0x1C, .object "C" "System.Object"),
   (.primitive 8, .object "C" "System.Int32"),
   (.primitive 8,
     .enum (Tests.enumIdentity "System.Int32" (Tests.unsignedAssembly name!"C")) .signed32),
   -- Named types.
-  (.named (namedIn "L" "N" .valueType), .atom "L" "M"),
-  (.named (namedIn "L" "N" .valueType), .atom "K" "N"),
-  (.named (namedIn "L" "N" (.enumType 8)), .atom "L" "N"),
+  (.named (namedIn "L" "N" .valueType), .atom "L" "M" .valueType),
+  (.named (namedIn "L" "N" .valueType), .atom "K" "N" .valueType),
+  (.named (namedIn "L" "N" (.enumType 8)), .atom "L" "N" .valueType),
+  -- An atom claiming a head kind its definition does not state, or naming a modifier.
+  (.named (namedIn "L" "N" .valueType), .atom "L" "N" .classType),
+  (.named (namedIn "L" "N" .classType), .atom "L" "N" .valueType),
+  (.named (namedIn "L" "N" .interfaceType), .atom "L" "N" .classType),
+  (.named (namedIn "L" "N" (.external (some true))), .atom "L" "N" .classType),
+  (.named (namedIn "L" "N" (.external (some false))), .atom "L" "N" .valueType),
+  (.named (namedIn "L" "N" (.external none)), .atom "L" "N" .classType),
   (.named (namedIn "L" "N" .valueType), .object "L" "N"),
   (.named (namedIn "L" "N" (.external (some true))), .object "L" "N"),
   (.named (namedIn "L" "N" .classType), .object "L" "N"),
@@ -1518,7 +1544,8 @@ private def refusedPairings : List (ResolvedType × TypeExpr) := [
   -- Instances.
   (instanceOf .valueType true, .aggregate "L::G`1<System.Int32>" 0),
   (instanceOf .classType, .aggregate "L::G`1<System.Int32>" 0),
-  (instanceOf .classType, .apply (.objectConstructor "L" "G`1") (.atom "C" "System.UInt32")),
+  (instanceOf .classType,
+      .apply (.objectConstructor "L" "G`1") (.atom "C" "System.UInt32" .valueType)),
   (instanceOf .classType, .apply (.objectConstructor "K" "G`1") int32Atom),
   (instanceOf .classType, .objectConstructor "L" "G`1"),
   -- A head of the other kind, and a kind the metadata leaves open.
@@ -1529,7 +1556,7 @@ private def refusedPairings : List (ResolvedType × TypeExpr) := [
   (instanceOf (.external (some true)), .apply (.objectConstructor "L" "G`1") int32Atom),
   (instanceOf (.external none), .apply (.constructor "L" "G`1") int32Atom),
   (instanceOf (.external none), .apply (.objectConstructor "L" "G`1") int32Atom),
-  (instanceOf .classType, .atom "L" "G`1<System.Int32>"),
+  (instanceOf .classType, .atom "L" "G`1<System.Int32>" .classType),
   -- Function pointers.
   (.functionPointer 0 (.primitive 8) (.cons (.primitive 8) .nil),
     .functionPointer int32Atom (.signatureParameter int32Atom .void) 1 false false),
@@ -1537,11 +1564,11 @@ private def refusedPairings : List (ResolvedType × TypeExpr) := [
   (.functionPointer 0 (.primitive 8) .nil, int32Atom),
   -- Modified types.
   (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 8),
-    .atom "B" "System.Int32 modreq(Mod)"),
+    .spelledModified "B" "System.Int32 modreq(Mod)"),
   (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 8),
-    .atom "A" "System.Int32 modopt(Mod)"),
+    .spelledModified "A" "System.Int32 modopt(Mod)"),
   (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 9),
-    .atom "A" "System.Int32 modreq(Mod)"),
+    .spelledModified "A" "System.Int32 modreq(Mod)"),
   (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 8),
     .object "A" "System.Int32 modreq(Mod)")]
 
@@ -1737,7 +1764,7 @@ theorem refuses_a_class_named_as_a_primitive :
       !pairFrame.admits (runtimeInt32 (.external none)) (.primitive .int32) &&
       pairFrame.admits (runtimeInt32 (.external (some true))) (.primitive .int32) &&
       pairFrame.admits (.named (namedIn runtimeScope "System.Console" .classType))
-        (.atom runtimeScope "System.Console") := by
+        (.atom runtimeScope "System.Console" .classType) := by
   decide +kernel
 #print axioms refuses_a_class_named_as_a_primitive
 
@@ -1758,31 +1785,33 @@ private def flattenedInt32 : ResolvedType :=
 theorem runtime_primitive_atoms_are_refused :
     runtimeFrame.admits (.primitive 8) (.primitive .int32) &&
       !runtimeFrame.admits (.primitive 8) (.primitive .uint32) &&
-      !runtimeFrame.admits (.primitive 8) (.atom runtimeScope "System.Int32") &&
-      pairFrame.admits (.primitive 8) (.atom "C" "System.Int32") &&
+      !runtimeFrame.admits (.primitive 8) (.atom runtimeScope "System.Int32" .valueType) &&
+      pairFrame.admits (.primitive 8) (.atom "C" "System.Int32" .valueType) &&
       !pairFrame.admits (.primitive 8) (.primitive .int32) &&
       runtimeFrame.admits (runtimeInt32 (.external (some true))) (.primitive .int32) &&
       !runtimeFrame.admits (runtimeInt32 (.external (some true))) (.primitive .uint32) &&
       [Extraction.TypeKind.external (some true), .external (some false), .external none,
         .valueType, .classType, .interfaceType].all (fun kind =>
-          !runtimeFrame.admits (runtimeInt32 kind) (.atom runtimeScope "System.Int32")) &&
+          !runtimeFrame.admits (runtimeInt32 kind) (.atom runtimeScope "System.Int32" .valueType))
+              &&
       !runtimeFrame.admits flattenedInt32 (.primitive .int32) &&
-      !runtimeFrame.admits flattenedInt32 (.atom runtimeScope "System.Int32") := by
+      !runtimeFrame.admits flattenedInt32 (.atom runtimeScope "System.Int32" .valueType) := by
   decide +kernel
 #print axioms runtime_primitive_atoms_are_refused
 
 /-- The runtime-scope atom of a primitive's name has no storage; the typed primitive and the core
     library's own atom keep theirs. -/
 theorem runtime_primitive_atoms_have_no_storage :
-    typeStorage [] (.atom runtimeScope "System.Int32") = none ∧
+    typeStorage [] (.atom runtimeScope "System.Int32" .valueType) = none ∧
       typeStorage [] (.primitive .int32) = some (.field .signed32) ∧
-      typeStorage [] (.atom coreLibraryScope "System.Int32") = some (.field .signed32) := by
+      typeStorage [] (.atom coreLibraryScope "System.Int32" .valueType) =
+        some (.field .signed32) := by
   decide +kernel
 #print axioms runtime_primitive_atoms_have_no_storage
 
 /-- Every resolved type refuses the runtime-scope atom of `System.UInt64`. -/
 example (frame : Frame) (fuel : Nat) (type : ResolvedType) :
-    typeAdmits frame fuel type (.atom runtimeScope "System.UInt64") = false :=
+    typeAdmits frame fuel type (.atom runtimeScope "System.UInt64" .valueType) = false :=
   typeAdmits_runtimePrimitiveAtom (by decide +kernel)
 
 /-- An owner parameter past the owner's arity is refused, even where its extractor index would
@@ -1800,7 +1829,8 @@ private def consoleInModuleReference : MetadataSlice :=
 
 theorem refuses_a_type_reference_scoped_by_a_module_reference :
     rejects consoleInModuleReference lib tokens.consoleRef
-      (.type (.atom runtimeScope "System.Console")) (.unsupportedScope tokens.consoleRef) =
+      (.type (.atom runtimeScope "System.Console" .classType)) (.unsupportedScope
+          tokens.consoleRef) =
       true := by decide +kernel
 #print axioms refuses_a_type_reference_scoped_by_a_module_reference
 
@@ -1815,9 +1845,10 @@ private def ownWithBoxLinkIntoItself : MetadataSlice :=
         { link with slice := 0 } else link }
 
 theorem refuses_a_reference_into_a_pinned_slice_without_its_definition_link :
-    rejects ownWithoutBoxLink lib tokens.boxRef (.type (.atom libScope "Lib.Box"))
+    rejects ownWithoutBoxLink lib tokens.boxRef (.type (.atom libScope "Lib.Box" .classType))
       (.unresolvedType tokens.boxRef) = true ∧
-    rejects ownWithBoxLinkIntoItself lib tokens.boxRef (.type (.atom libScope "Lib.Box"))
+    rejects ownWithBoxLinkIntoItself lib tokens.boxRef (.type (.atom libScope "Lib.Box"
+        .classType))
       (.unresolvedType tokens.boxRef) = true := by decide +kernel
 #print axioms refuses_a_reference_into_a_pinned_slice_without_its_definition_link
 
@@ -1922,10 +1953,10 @@ theorem stored_strings_are_their_literals :
 /-- The type operand check accepts the stored name of the type and refuses another, as it
     refuses the other literal. -/
 theorem type_operand_check_reads_stored_strings :
-    passes own.1 lib tokens.objectRef (.type (.atom runtimeScope objectText)) = true ∧
-    rejects own.1 lib tokens.objectRef (.type (.atom runtimeScope consoleText))
+    passes own.1 lib tokens.objectRef (.type (.atom runtimeScope objectText .classType)) = true ∧
+    rejects own.1 lib tokens.objectRef (.type (.atom runtimeScope consoleText .classType))
       (.operandMismatch tokens.objectRef) = true ∧
-    rejects own.1 lib tokens.objectRef (.type (.atom runtimeScope "System.Console"))
+    rejects own.1 lib tokens.objectRef (.type (.atom runtimeScope "System.Console" .classType))
       (.operandMismatch tokens.objectRef) = true := by decide +kernel
 #print axioms type_operand_check_reads_stored_strings
 
@@ -1933,9 +1964,10 @@ theorem type_operand_check_reads_stored_strings :
     scope of another version, as it refuses that scope's literal. -/
 theorem call_operand_check_reads_stored_strings :
     passes own.1 lib tokens.writeLine
-      (.call { writeLineSite with method.owner := .atom runtimeScope consoleText }) = true ∧
+      (.call { writeLineSite with
+        method.owner := .atom runtimeScope consoleText .classType }) = true ∧
     rejects own.1 lib tokens.writeLine
-      (.call { writeLineSite with method.owner := .atom olderRuntimeText consoleText })
+      (.call { writeLineSite with method.owner := .atom olderRuntimeText consoleText .classType })
       (.scopeMismatch tokens.writeLine) = true := by decide +kernel
 #print axioms call_operand_check_reads_stored_strings
 
@@ -1943,29 +1975,32 @@ theorem call_operand_check_reads_stored_strings :
     owner, as it refuses the other literal. -/
 theorem field_operand_check_reads_stored_strings :
     passes own.1 lib tokens.totalField
-      (.field (.atom ownText programText) 1 int32 name!"total" true) = true ∧
-    rejects own.1 lib tokens.totalField (.field (.atom ownText boxText) 1 int32 name!"total" true)
+      (.field (.atom ownText programText .classType) 1 int32 name!"total" true) = true ∧
+    rejects own.1 lib tokens.totalField
+      (.field (.atom ownText boxText .classType) 1 int32 name!"total" true)
       (.operandMismatch tokens.totalField) = true ∧
     rejects own.1 lib tokens.totalField
-      (.field (.atom ownScope "Lib.Box") 1 int32 name!"total" true)
+      (.field (.atom ownScope "Lib.Box" .classType) 1 int32 name!"total" true)
       (.operandMismatch tokens.totalField) = true := by decide +kernel
 #print axioms field_operand_check_reads_stored_strings
 
 /-- The method definition check refuses a stored return type the row does not give, as it
     refuses the literal. -/
 theorem method_definition_check_reads_stored_strings :
-    identityFails own.1 { mainMethod with returnType := .atom runtimeScope int32Text }
+    identityFails own.1 { mainMethod with returnType := .atom runtimeScope int32Text .valueType }
       (.methodMismatch tokens.main) = true ∧
-    identityFails own.1 { mainMethod with returnType := .atom runtimeScope "System.Int32" }
+    identityFails own.1 { mainMethod with
+      returnType := .atom runtimeScope "System.Int32" .valueType }
       (.methodMismatch tokens.main) = true := by decide +kernel
 #print axioms method_definition_check_reads_stored_strings
 
 /-- `Frame.admits` names a primitive by its stored name and refuses another stored name, as it
     refuses the other literal. -/
 theorem admits_reads_stored_strings :
-    pairFrame.admits (.primitive 8) (.atom primitiveScopeText int32Text) = true ∧
-    pairFrame.admits (.primitive 8) (.atom primitiveScopeText uint32Text) = false ∧
-    pairFrame.admits (.primitive 8) (.atom "C" "System.UInt32") = false := by decide +kernel
+    pairFrame.admits (.primitive 8) (.atom primitiveScopeText int32Text .valueType) = true ∧
+    pairFrame.admits (.primitive 8) (.atom primitiveScopeText uint32Text .valueType) = false ∧
+    pairFrame.admits (.primitive 8) (.atom "C" "System.UInt32" .valueType) = false := by
+  decide +kernel
 #print axioms admits_reads_stored_strings
 
 /-- The names the row of `mainMethod` gives. -/

@@ -21,7 +21,7 @@ cil_value_shape layouts vector256UInt64
 
 private def member (owner : String) (name : MetadataName) (result : TypeExpr)
     (parameters : List TypeExpr) : MethodRef :=
-  { owner := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner),
+  { owner := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner) .classType,
     name, hasThis := false, genericArity := 0, returnType := result, parameters }
 
 def add64 := member "X86.Avx2" name!"Add" vector256UInt64 [vector256UInt64, vector256UInt64]

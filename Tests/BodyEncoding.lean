@@ -96,7 +96,7 @@ def encodeCode (offsets : List Nat) : List (RawInstruction × Nat) → Option (L
 def typeBytes (arity : Nat) : TypeExpr → Option (List Nat)
   | .void => some [0x01]
   | .primitive type => some [type.elementType]
-  | .atom scope name =>
+  | .atom scope name _ =>
     if scope == runtimeScope && name == "System.Object" then some [0x1C] else none
   | .object scope name =>
     if scope == runtimeScope && name == "System.String" then some [0x0E] else none

@@ -15,7 +15,7 @@ namespace CIL.Extraction
 
 /-- `instance void [System.Runtime]System.Object::.ctor()`. -/
 def objectConstructorMethod : MethodRef :=
-  { owner := .atom runtimeScope "System.Object", name := name!".ctor", hasThis := true,
+  { owner := .atom runtimeScope "System.Object" .classType, name := name!".ctor", hasThis := true,
     genericArity := 0, returnType := .void, parameters := [] }
 
 /-- A `call` of the `System.Object` constructor only consumes its receiver. -/

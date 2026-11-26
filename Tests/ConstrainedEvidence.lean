@@ -16,18 +16,18 @@ theorem named_metadata_decoding :
     namedType (.aggregate "Fixture::Counter" 0) =
       some ("Fixture".toList, "Counter".toList) ∧
     namedType (.aggregate "Σcope::Counter" 0) = some ("Σcope".toList, "Counter".toList) ∧
-    namedType (.atom "Fixturé" "Counter") = some ("Fixturé".toList, "Counter".toList) ∧
-    namedType (.atom "Fixture" "Countér") = none ∧
+    namedType (.atom "Fixturé" "Counter" .classType) = some ("Fixturé".toList, "Counter".toList) ∧
+    namedType (.atom "Fixture" "Countér" .classType) = none ∧
     namedType (.aggregate "Fixture:Counter" 0) = none ∧
     namedType (.aggregate "Fixture::Counter[]" 0) = none ∧
-    namedType (.atom "" "Counter") = none := by decide +kernel
+    namedType (.atom "" "Counter" .classType) = none := by decide +kernel
 #print axioms named_metadata_decoding
 
 /-- The assembly every fixture type is declared in. -/
 private def fixturePin : AssemblyPin := ⟨fixtureAssembly⟩
 private def integer : TypeExpr := .primitive .int32
 private def receiver : TypeExpr := .aggregate (fixtureScope ++ "::Counter") 0
-private def interface : TypeExpr := .atom fixtureScope "IValue"
+private def interface : TypeExpr := .atom fixtureScope "IValue" .interfaceType
 private def slot : DispatchMethod := {
   token := 5, name := "Read", hasThis := true, isPublic := true, isAbstract := true,
   isVirtual := true, hasBody := false, genericArity := 0, explicitThis := false,
@@ -350,10 +350,10 @@ theorem static_interface_closure_rejected :
       allowance defaultSite = none := by decide +kernel
 #print axioms static_interface_closure_rejected
 
-private def scaleInterface : TypeExpr := .atom fixtureScope "IScale"
-private def moreInterface : TypeExpr := .atom fixtureScope "IScaleMore"
-private def mostInterface : TypeExpr := .atom fixtureScope "IScaleMost"
-private def sideInterface : TypeExpr := .atom fixtureScope "IScaleSide"
+private def scaleInterface : TypeExpr := .atom fixtureScope "IScale" .interfaceType
+private def moreInterface : TypeExpr := .atom fixtureScope "IScaleMore" .interfaceType
+private def mostInterface : TypeExpr := .atom fixtureScope "IScaleMost" .interfaceType
+private def sideInterface : TypeExpr := .atom fixtureScope "IScaleSide" .interfaceType
 private def scaled : TypeExpr := .aggregate (fixtureScope ++ "::Scaled") 2
 /-- `static virtual int Scale()` with a body, declared on `IScale`. -/
 private def scaleSlot : DispatchMethod := {
@@ -580,7 +580,8 @@ theorem indexed_type_identity :
     (DispatchIndex.ofTypes [concrete, declared]).resolve
       (.aggregate (fixtureScope ++ "::Counter") 1) site = none ∧
     (DispatchIndex.ofTypes [concrete, declared]).resolve receiver
-      { site with method.owner := .atom "Other" "IValue" } = none := by decide +kernel
+      { site with method.owner := .atom "Other" "IValue" .interfaceType } = none := by
+  decide +kernel
 #print axioms indexed_type_identity
 
 /-- Repeated override tokens do not duplicate one implementation; explicit still wins. -/

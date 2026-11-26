@@ -4,7 +4,9 @@ using Mono.Cecil;
 
 namespace Nethermind.LeanCIL;
 
-internal sealed record ContractType(string Kind, string Scope, string Name, ContractType? Element = null)
+// An atom carries the head kind its definition states; other kinds carry none.
+internal sealed record ContractType(string Kind, string Scope, string Name, ContractType? Element = null,
+    TypeHead? Head = null)
 {
     internal static ContractType Read(TypeReference type)
     {
@@ -14,7 +16,7 @@ internal sealed record ContractType(string Kind, string Scope, string Name, Cont
             throw new InvalidDataException("Unsupported imported signature type: " + type.FullName);
         if (type.MetadataType == MetadataType.Void) RuntimeModels.ValidateTypeIdentity(type, type.Module);
         return type.MetadataType == MetadataType.Void ? new("void", "", "") :
-            new("atom", LayoutEvidence.Scope(type), type.FullName);
+            new("atom", LayoutEvidence.Scope(type), type.FullName, Head: GenericEvidence.HeadKind(type));
     }
 
     // A runtime primitive has one Lean form; the wire format keeps its scope and full name.
@@ -25,7 +27,8 @@ internal sealed record ContractType(string Kind, string Scope, string Name, Cont
     internal string Lean => Kind switch
     {
         "void" => ".void",
-        "atom" => RuntimePrimitive ?? $".atom {IdentityText.Quote(Scope)} {IdentityText.Quote(Name)}",
+        "atom" when Head is { } head =>
+            RuntimePrimitive ?? $".atom {IdentityText.Quote(Scope)} {IdentityText.Quote(Name)} {head.ToLean()}",
         "byref" when Element is not null => ".byref (" + Element.Lean + ")",
         _ => throw new InvalidDataException("Invalid imported type metadata.")
     };
@@ -87,8 +90,9 @@ internal static class ContractMethodMetadata
     internal static void ValidateType(ContractType type)
     {
         if (type is null || type.Kind is not ("atom" or "byref" or "void") ||
-            (type.Kind == "atom" && (string.IsNullOrWhiteSpace(type.Scope) || string.IsNullOrWhiteSpace(type.Name) || type.Element is not null)) ||
-            (type.Kind != "atom" && (type.Scope != "" || type.Name != "")) ||
+            (type.Kind == "atom" && (string.IsNullOrWhiteSpace(type.Scope) || string.IsNullOrWhiteSpace(type.Name) ||
+                type.Element is not null || type.Head is not { } head || !Enum.IsDefined(head))) ||
+            (type.Kind != "atom" && (type.Scope != "" || type.Name != "" || type.Head is not null)) ||
             (type.Kind == "void" && type.Element is not null) || (type.Kind == "byref" && type.Element is null))
             throw new InvalidDataException("Invalid imported type metadata.");
         if (type.Element is not null) ValidateType(type.Element);

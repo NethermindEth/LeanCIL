@@ -132,7 +132,8 @@ theorem opaque_class_fields_bound :
 theorem misstated_class_fields_refused :
     check tokens.static (.field holder 0 systemObject name!"S" true) =
       some (.operandMismatch tokens.static) ∧
-    check tokens.static (.field holder 0 (.atom runtimeScope "System.Object") name!"S" true) =
+    check tokens.static (.field holder 0 (.atom runtimeScope "System.Object" .classType) name!"S"
+        true) =
       none ∧
     check tokens.object (field 0 (.object runtimeScope "System.String") name!"O") =
       some (.operandMismatch tokens.object) ∧

@@ -126,7 +126,7 @@ private def tokenBytes : List Nat :=
     token tokens.objectRef ++ [0x22, 0x00, 0x00, 0x80, 0xBF, 0x23, 0, 0, 0, 0, 0, 0, 0, 0xC0, 0x2A]
 
 /-- The system type `ldtoken` names in `tokenBytes`. -/
-def objectType : TypeExpr := .atom runtimeScope "System.Object"
+def objectType : TypeExpr := .atom runtimeScope "System.Object" .classType
 
 /-- The token table of `tokenBytes`: a method, a user string and a type. -/
 private def tokenOperands : List (Nat × RawOperand) :=
@@ -156,7 +156,7 @@ private def someField : RawOperand := countOperand
 
 /-- The static field `ldtoken` names in `formsBytes`. -/
 private def staticField : RawOperand :=
-  .field (.atom ownScope "Program") 1 int32 name!"total" true
+  .field (.atom ownScope "Program" .classType) 1 int32 name!"total" true
 
 /-- The signature `calli` names in `formsBytes`. -/
 private def someSignature : RawOperand := .indirectCall .void [int32] false false 0
@@ -317,7 +317,8 @@ theorem rejects_token_with_different_operand :
     field with the name `total`. -/
 theorem rejects_a_field_operand_named_for_another_row :
     failsWith (evidence ([0x16, 0x7B] ++ token tokens.countField)
-        [(tokens.countField, .field (.atom ownScope "Program") 0 int32 name!"total" false)])
+        [(tokens.countField,
+            .field (.atom ownScope "Program" .classType) 0 int32 name!"total" false)])
       (.metadata (.operandMismatch tokens.countField)) = true := by decide +kernel
 #print axioms rejects_a_field_operand_named_for_another_row
 
@@ -742,9 +743,10 @@ private def rejectsWithLibPinned (ownSlice : MetadataSlice) (token : Nat) (opera
     is carried, so it is never read as a platform type. -/
 theorem rejects_another_version_of_a_pinned_assembly :
     rejectsWithLibPinned ownWithLibVersion2 tokens.boxRef
-      (.type (.atom "Lib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" "Lib.Box"))
+      (.type (.atom "Lib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" "Lib.Box"
+          .classType))
       (.missingSlice tokens.boxRef) = true ∧
-    rejectsWithLibPinned own.1 tokens.boxRef (.type (.atom libScope "Lib.Box"))
+    rejectsWithLibPinned own.1 tokens.boxRef (.type (.atom libScope "Lib.Box" .classType))
       (.missingSlice tokens.boxRef) = false := by decide +kernel
 #print axioms rejects_another_version_of_a_pinned_assembly
 

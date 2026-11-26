@@ -12,7 +12,8 @@ open CIL CIL.Safety
 
 /-- The field of `owner`'s table, an eight-byte static. -/
 private def tableRef (owner : String) : Extraction.FieldRef :=
-  { owner := .atom owner (owner ++ ".Holder"), index := 0, type := .atom owner (owner ++ ".Table"),
+  { owner := .atom owner (owner ++ ".Holder") .classType, index := 0,
+    type := .atom owner (owner ++ ".Table") .valueType,
     name := name!"Table" }
 
 private def appField : StaticDescriptor :=

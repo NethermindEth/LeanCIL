@@ -257,8 +257,9 @@ open CIL
 
 /-- The one-argument method both bodies call. -/
 def helper : Extraction.MethodRef :=
-  { owner := .atom "Doc" "Doc", name := name!"Helper", hasThis := false, genericArity := 0,
-    returnType := .atom "Doc" "Word", parameters := [.atom "Doc" "Word"] }
+  { owner := .atom "Doc" "Doc" .classType, name := name!"Helper", hasThis := false,
+    genericArity := 0, returnType := .atom "Doc" "Word" .valueType,
+    parameters := [.atom "Doc" "Word" .valueType] }
 
 /-- What an extraction emits: a dead block puts the call, linked to method 1, at pc 3. -/
 def emitted : Method :=
@@ -694,12 +695,12 @@ abbrev unreachable : CIL.Instruction := .unadmitted 0
 
 /-- The parameterless method the body calls under AVX2. -/
 def helper : CIL.Extraction.MethodRef :=
-  { owner := .atom "Doc" "Doc", name := name!"Helper", hasThis := false, genericArity := 0,
-    returnType := .atom "Doc" "Word", parameters := [] }
+  { owner := .atom "Doc" "Doc" .classType, name := name!"Helper", hasThis := false,
+    genericArity := 0, returnType := .atom "Doc" "Word" .valueType, parameters := [] }
 
 /-- The external AVX2 feature getter that the call resolves in the model. -/
 def avx2Getter : CIL.Extraction.MethodRef :=
-  { owner := .atom CIL.Extraction.intrinsicsScope "System.Runtime.Intrinsics.X86.Avx2",
+  { owner := .atom CIL.Extraction.intrinsicsScope "System.Runtime.Intrinsics.X86.Avx2" .classType,
     name := name!"get_IsSupported", hasThis := false, genericArity := 0,
     returnType := .primitive .boolean, parameters := [] }
 

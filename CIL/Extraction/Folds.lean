@@ -53,7 +53,7 @@ def typeTestInstruction (instruction : RawInstruction) : Bool :=
   (instruction.opcode == 208 && instruction.operand matches .type _) ||
     match instruction.operand with
     | .call site => match site.declaringType with
-      | .atom _ "System.Type" =>
+      | .atom _ "System.Type" .classType =>
         site.name == "GetTypeFromHandle" || site.name == "op_Equality" ||
           site.name == "op_Inequality"
       | _ => false
@@ -68,10 +68,10 @@ private def messageLoad : RawInstruction → Bool
 def messageParameter : TypeExpr := .object runtimeScope "System.String"
 
 /-- The `System.Exception` parameter of an exception constructor: the inner exception. -/
-def innerParameter : TypeExpr := .atom runtimeScope "System.Exception"
+def innerParameter : TypeExpr := .atom runtimeScope "System.Exception" .classType
 
 /-- The `System.Object` parameter of an exception constructor: the actual argument value. -/
-def actualParameter : TypeExpr := .atom runtimeScope "System.Object"
+def actualParameter : TypeExpr := .atom runtimeScope "System.Object" .classType
 
 /-- The parameter lists of the constructors a folded `throw` may call for each member; the
     members only instructions raise admit none. -/
@@ -103,7 +103,7 @@ def exceptionConstructor? (site : CallSite) : Option ExceptionType := do
   let names := site.parameterTypes.map fun type =>
     match type with
     | .primitive type => type.display
-    | .atom _ name => name
+    | .atom _ name _ => name
     | .object .. => "System.String" -- The only class parameter in admittedParameters.
     | _ => ""
   guard (signature == runtimeScope ++ "::System.Void " ++ raised.ownerName ++ "::.ctor(" ++

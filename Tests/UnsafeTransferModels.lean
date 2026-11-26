@@ -171,7 +171,7 @@ theorem refusedElementsAndReferences :
           (fun type => rejected type id) &&
       rejected word (fun method => { method with owner := .apply unsafeOwner word }) &&
       rejected word (fun method => { method with
-        owner := .atom "Other" "System.Runtime.CompilerServices.Unsafe" }) &&
+        owner := .atom "Other" "System.Runtime.CompilerServices.Unsafe" .classType }) &&
       rejected word (fun method => { method with hasThis := true }) &&
       rejected word (fun method => { method with genericArity := 2 }) &&
       rejected word (fun method => { method with methodArguments := [] })) = true := by

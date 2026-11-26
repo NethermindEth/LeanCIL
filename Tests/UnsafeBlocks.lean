@@ -16,7 +16,7 @@ private def site (name : String) (key : MetadataName) (copy pointer : Bool) : Ca
   let types := s!"{addressText},{second},System.UInt32"
   let parameters := [address, if copy then address else byte, .primitive .uint32]
   let method : MethodRef :=
-    { owner := .atom runtimeScope owner, name := key, hasThis := false,
+    { owner := .atom runtimeScope owner .classType, name := key, hasThis := false,
       genericArity := 0, returnType := .void, parameters }
   { method, name, declared := { convention := 0, parameters },
     target := .external s!"{runtimeScope}::System.Void {owner}::{name}({types})",
@@ -48,7 +48,8 @@ theorem block_emission : cases.all (fun (call, operation) =>
 theorem block_refusals : cases.all (fun (call, _) =>
     let word := TypeExpr.primitive .uint32
     let invalid : List CallSite := [
-      { call with method.owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe" },
+      { call with
+        method.owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe" .classType },
       { call with method.name := name!"Other" }, { call with name := "Other" },
       { call with method.hasThis := true }, { call with method.genericArity := 1 },
       { call with method.parameters := call.method.parameters.set 0 (.byref word) },

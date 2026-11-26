@@ -85,7 +85,7 @@ object MethodIn(string identity, object frame, int[] linked, params object[] ops
 }
 object Method(string identity, params object[] ops) => MethodIn(identity, FrameOf(false), [], ops);
 object Linked(string identity, int target, params object[] ops) => MethodIn(identity, FrameOf(false), [target], ops);
-var avx2Getter = new FixtureSite(".call { owner := .atom Extraction.intrinsicsScope \"System.Runtime.Intrinsics.X86.Avx2\", " +
+var avx2Getter = new FixtureSite(".call { owner := .atom Extraction.intrinsicsScope \"System.Runtime.Intrinsics.X86.Avx2\" .classType, " +
     "name := name!\"get_IsSupported\", hasThis := false, genericArity := 0, returnType := .primitive .boolean, parameters := [] }", Feature: "Avx2");
 var variants = new Dictionary<string, object>(StringComparer.Ordinal)
 {
@@ -228,7 +228,7 @@ Console.WriteLine("PASS template dispatch, callable pointer and initializer meth
 
 var dispatchDifference = Rejected(() => SharedBody("DifferentReceiver", target =>
     Linked("Caller", target, ".nop", new FixtureSite(".callvirt (.arity 0)",
-        $".virtual [(.atom \"Fixture\" \"Receiver{target}\", {target})]"), ".ret")));
+        $".virtual [(.atom \"Fixture\" \"Receiver{target}\" .classType, {target})]"), ".ret")));
 if (!dispatchDifference.Contains("different instructions: Caller at pc 1", StringComparison.Ordinal))
     throw new Exception("Equal call instructions with different receiver tables were merged: " + dispatchDifference);
 Console.WriteLine("PASS differing dispatch metadata names the call pc after target renumbering");
@@ -251,7 +251,7 @@ object ValueName() => Model("MetadataName").GetMethod("OfText", BindingFlags.Sta
 string ScalarCall(string owner, string name, string result, params string[] parameters)
 {
     static string Word(string primitive) => $".primitive .{primitive}";
-    return $$""".call { owner := .atom Extraction.runtimeScope "System.{{owner}}", name := name!"{{name}}", hasThis := false, genericArity := 0, returnType := {{Word(result)}}, parameters := [{{string.Join(", ", parameters.Select(Word))}}] }""";
+    return $$""".call { owner := .atom Extraction.runtimeScope "System.{{owner}}" .classType, name := name!"{{name}}", hasThis := false, genericArity := 0, returnType := {{Word(result)}}, parameters := [{{string.Join(", ", parameters.Select(Word))}}] }""";
 }
 var merged = new (string Identity, string Code)[]
 {

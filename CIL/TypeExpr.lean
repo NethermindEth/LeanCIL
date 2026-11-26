@@ -116,14 +116,25 @@ def assemblyScope? (assembly : AssemblyName) : Option String := do
 def enumSignatureName? (identity : TypeIdentity) : Option String :=
   ClassName.signatureName? ⟨identity.levels⟩
 
+/-- Whether a named type's instances are values, class references or interface references, as its
+    declaring TypeDef or its platform definition states. -/
+inductive HeadKind where
+  | valueType
+  | classType
+  | interfaceType
+  deriving DecidableEq, Repr
+
 /-- Scoped metadata types shared by extraction and typed import slots. -/
 inductive TypeExpr where
   | void
   /-- A primitive of `runtimeAssembly`, the only form of one; resolution refuses the atom of a
       primitive's name in `runtimeScope`. -/
   | primitive (type : PrimitiveType)
-  /-- A type by its assembly scope and full name. -/
-  | atom (scope name : String)
+  /-- A type by its assembly scope, full name and head kind. -/
+  | atom (scope name : String) (kind : HeadKind)
+  /-- A custom-modified type of a call site's signature as Cecil spells it in the scope of the
+      calling assembly, such as `!0& modreq(...)`; it names no type definition. -/
+  | spelledModified (scope spelling : String)
   | aggregate (identity : String) (index : Nat)
   /-- An enum by its typed identity and integer storage; an enum over an enum or over a
       non-integer type cannot be written. -/
@@ -243,7 +254,9 @@ def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
       typeKeyInto element rest
   | .void, rest => keyBytes "void" :: rest
   | .primitive type, rest => keyBytes "primitive" :: keyBytes (toString type.elementType) :: rest
-  | .atom scope name, rest => keyBytes "atom" :: keyBytes scope :: keyBytes name :: rest
+  | .atom scope name _, rest => keyBytes "atom" :: keyBytes scope :: keyBytes name :: rest
+  | .spelledModified scope spelling, rest =>
+    keyBytes "spelledModified" :: keyBytes scope :: keyBytes spelling :: rest
   | .aggregate identity index, rest =>
     keyBytes "aggregate" :: keyBytes identity :: keyBytes (toString index) :: rest
   | .enum identity storage, rest =>

@@ -113,7 +113,7 @@ private def EndianMember.entry (member : EndianMember) : ModelEntry :=
   let arguments := s!"{spanName}<System.Byte>{suffix}"
   let target := s!"{spanMemoryScope}::{resultName} {owner}::{name}({arguments})"
   let expected : MethodRef :=
-    { owner := .atom spanMemoryScope owner, name := member.key, hasThis := false,
+    { owner := .atom spanMemoryScope owner .classType, name := member.key, hasThis := false,
       genericArity := 0, parameters, returnType := result }
   { opcode := .call, owner := expected.owner, name := member.key, ownsName := true,
     overloads := [

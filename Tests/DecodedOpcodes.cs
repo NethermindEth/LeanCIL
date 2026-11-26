@@ -359,7 +359,7 @@ static void CheckClassAddress(string directory)
             let literal : ManagedIdentity := {{ManagedPointers.IdentityEvidence(target)}}
             Instruction.ofRaw? none ⟨0, 0xfe06, .call site⟩ =
                 some (.ldftn literal ⟨.void, []⟩) ∧
-              literal.arguments ≠ [.atom scope "Examples.Account"] := by
+              literal.arguments ≠ [.atom scope "Examples.Account" .classType] := by
               constructor
               · rfl
               · decide +kernel

@@ -8,7 +8,7 @@ namespace CIL.Extraction
     `methodName` is the metadata name spelling `name`. -/
 private def typeMethod (name : String) (methodName : MetadataName) (signature : String)
     (parameters : Nat) : CallSite :=
-  let type := TypeExpr.atom runtimeScope (metadata_text% "System.Type")
+  let type := TypeExpr.atom runtimeScope (metadata_text% "System.Type") .classType
   let fromHandle := methodName == name!"GetTypeFromHandle"
   let method : MethodRef := {
     owner := type, name := methodName, hasThis := false,
@@ -16,7 +16,7 @@ private def typeMethod (name : String) (methodName : MetadataName) (signature : 
     returnType := if fromHandle then type else
       .primitive .boolean,
     parameters := if fromHandle then
-        [.atom runtimeScope (metadata_text% "System.RuntimeTypeHandle")]
+        [.atom runtimeScope (metadata_text% "System.RuntimeTypeHandle") .valueType]
       else [type, type] }
   { method, declared := method.signature 0, name,
     target := .external (runtimeScope ++ "::" ++ signature), typeArguments := [],

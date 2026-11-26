@@ -60,7 +60,8 @@ theorem expired_element_rejected :
 /-- An address needs inline element storage: a class element is an ill-typed state, and no heap
     array holds a by-ref-like struct. -/
 theorem address_shapes_refused :
-    elementAddressInstruction (.reference (.atom CIL.Extraction.runtimeScope "System.String"))
+    elementAddressInstruction (.reference (.atom CIL.Extraction.runtimeScope "System.String"
+        .classType))
       false [.scalar (.i32 0), .array array] memory = .error .invalidState ∧
     elementAddressInstruction (.unsupported CIL.ElementShape.byRefLikeElement) true
       [.scalar (.i32 0), .array array] memory =

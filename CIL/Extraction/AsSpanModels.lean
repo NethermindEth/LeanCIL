@@ -9,7 +9,7 @@ The checked array element and the method's parameter types determine the writabl
 namespace CIL.Extraction
 
 /-- All array overloads belong to the same nongeneric type in System.Memory. -/
-private def owner : TypeExpr := .atom spanMemoryScope "System.MemoryExtensions"
+private def owner : TypeExpr := .atom spanMemoryScope "System.MemoryExtensions" .classType
 
 /-- The number of int32 parameters determines which part of the array the call exposes. -/
 private def signature (range : ArraySpanRange) (element : TypeExpr) : OpenSignature :=

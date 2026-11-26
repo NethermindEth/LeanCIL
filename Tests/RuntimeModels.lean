@@ -192,7 +192,7 @@ example : [CIL.MemoryOp.copyBlock 1, .initBlock 1, .load128, .load256, .load512,
 namespace Table
 open CIL CIL.Extraction
 
-private def runtimeType (name : String) : TypeExpr := .atom runtimeScope name
+private def runtimeType (name : String) : TypeExpr := .atom runtimeScope name .classType
 private def word : TypeExpr := .primitive .uint64
 
 /-- `Math.BigMul(UInt64, UInt64, out UInt64)` as a closed call site states it. -/
@@ -335,7 +335,7 @@ example : ModelTable :=
     ModelEntry.exact .call bigMul (bigMul.signature 0) (.memory (.bigMul64 true))]
 
 /-- A multiply member outside the runtime owner has no model. -/
-private def unknown := { bigMul with owner := .atom "Fixture" "System.Math" }
+private def unknown := { bigMul with owner := .atom "Fixture" "System.Math" .classType }
 
 -- The runtime table distinguishes the exact constructor and wide multiplication calls.
 example : runtimeModel {} .call objectConstructorMethod = some .objectConstructor := by
@@ -343,10 +343,11 @@ example : runtimeModel {} .call objectConstructorMethod = some .objectConstructo
 example : runtimeModel {} .call bigMul = some (.memory (.bigMul64 false)) := by decide +kernel
 example : runtimeModel {} .newobj objectConstructorMethod = none := by decide +kernel
 example : runtimeModel {} .call
-    { objectConstructorMethod with owner := .atom "Fixture" "System.Object" } = none := by
+    { objectConstructorMethod with owner := .atom "Fixture" "System.Object" .classType } =
+      none := by
   decide +kernel
 /-- `System.Object` as another assembly declares it. -/
-private def coreObject : TypeExpr := .atom "System.Private.CoreLib" "System.Object"
+private def coreObject : TypeExpr := .atom "System.Private.CoreLib" "System.Object" .classType
 example : runtimeModel {} .call { objectConstructorMethod with owner := coreObject } = none := by
   decide +kernel
 example : runtimeModel {} .call { objectConstructorMethod with hasThis := false } = none := by
@@ -487,7 +488,8 @@ example : runtimeModel {} .call { mathMax with parameters := [int, .primitive .i
     none := by decide +kernel
 example : runtimeModel {} .call (helper name!"Max" (.primitive .boolean) 2) = none := by
   decide +kernel
-example : runtimeModel {} .call (helper name!"Max" (.atom "Fixture" "System.Int32") 2) = none := by
+example : runtimeModel {} .call (helper name!"Max" (.atom "Fixture" "System.Int32" .valueType)
+    2) = none := by
   decide +kernel
 example : runtimeModel {} .call { mathMax with returnType := .primitive .int64 } =
     none := by decide +kernel
@@ -501,9 +503,11 @@ example : runtimeModel {} .call (helper name!"Abs" word 1 (owner := word)) = non
 example : runtimeModel {} .call (helper name!"Max" int 2 (owner := .primitive .int64)) =
     none := by decide +kernel
 example : runtimeModel {} .call
-    (helper name!"Max" int 2 (owner := .atom "Fixture" "System.Math")) = none := by decide +kernel
+    (helper name!"Max" int 2 (owner := .atom "Fixture" "System.Math" .classType)) = none := by
+  decide +kernel
 example : runtimeModel {} .call
-    (helper name!"Max" int 2 (owner := .atom "System.Private.CoreLib" "System.Math")) = none := by
+    (helper name!"Max" int 2 (owner := .atom "System.Private.CoreLib" "System.Math"
+        .classType)) = none := by
   decide +kernel
 example : runtimeModel {} .call (helper name!"Max" int 2 (owner := runtimeType "System.Maths")) =
     none := by decide +kernel
@@ -731,9 +735,11 @@ private def span (writable : Bool) := TypeExpr.apply (spanHead writable) byte
 
 /-- The runtime helpers share the same static owner. -/
 private def helpers := TypeExpr.atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers"
+    .classType
 
 cil_decoded_method platformBody := wrapper FeatureProfile.scalar layouts
-  (member (.atom intrinsicsScope "System.Runtime.Intrinsics.X86.Avx2") name!"get_IsSupported"
+  (member (.atom intrinsicsScope "System.Runtime.Intrinsics.X86.Avx2" .classType)
+      name!"get_IsSupported"
     booleanType)
 
 /-- The scalar profile reports AVX2 as unavailable. -/
@@ -743,7 +749,7 @@ theorem platform_result : run platformBody [] =
 #print axioms platform_result
 
 cil_decoded_method binaryReadBody := wrapper FeatureProfile.scalar layouts
-  (member (.atom spanMemoryScope "System.Buffers.Binary.BinaryPrimitives")
+  (member (.atom spanMemoryScope "System.Buffers.Binary.BinaryPrimitives" .classType)
     name!"ReadInt16BigEndian" (.primitive .int16) [span false])
 
 /-- Reading the two static bytes as a big-endian Int16 gives 0x0707. -/
@@ -772,7 +778,7 @@ theorem vectorBroadcast_result : run vectorBroadcastBody [.scalar (.i64 3)] =
 #print axioms vectorBroadcast_result
 
 cil_decoded_method populationBody := wrapper FeatureProfile.scalar layouts
-  (member (.atom runtimeScope "System.Numerics.BitOperations") name!"PopCount" int32Type
+  (member (.atom runtimeScope "System.Numerics.BitOperations" .classType) name!"PopCount" int32Type
     [Table.word])
 
 /-- The population count of seven is three. -/
@@ -782,7 +788,7 @@ theorem population_result : run populationBody [.scalar (.i64 7)] =
 #print axioms population_result
 
 cil_decoded_method asSpanBody := wrapper FeatureProfile.scalar layouts
-  (member (.atom spanMemoryScope "System.MemoryExtensions") name!"AsSpan" (span true)
+  (member (.atom spanMemoryScope "System.MemoryExtensions" .classType) name!"AsSpan" (span true)
     [.array byte] [byte])
 
 /-- The whole-array extension returns an empty writable span for a null array. -/
@@ -792,7 +798,8 @@ theorem asSpan_result : run asSpanBody [.object .null] =
 #print axioms asSpan_result
 
 cil_decoded_method fillArrayBody := wrapper FeatureProfile.scalar layouts
-  (member (.atom runtimeScope "System.Array") name!"Fill" .void [.array byte, byte] [byte])
+  (member (.atom runtimeScope "System.Array" .classType) name!"Fill" .void [.array byte,
+      byte] [byte])
 
 /-- Filling a null array faults at the call. -/
 theorem fillArray_result : run fillArrayBody [.object .null, .scalar (.i32 7)] =
@@ -801,7 +808,8 @@ theorem fillArray_result : run fillArrayBody [.object .null, .scalar (.i32 7)] =
 #print axioms fillArray_result
 
 cil_decoded_method staticSpanBody := wrapper FeatureProfile.scalar layouts
-  (member helpers name!"CreateSpan" (span false) [.atom runtimeScope "System.RuntimeFieldHandle"]
+  (member helpers name!"CreateSpan" (span false) [.atom runtimeScope "System.RuntimeFieldHandle"
+      .valueType]
     [byte])
 
 /-- The field handle exposes sixteen static bytes. -/
@@ -838,7 +846,8 @@ theorem referenceContent_result : run referenceContentBody [] =
 #print axioms referenceContent_result
 
 cil_decoded_method marshalReferenceBody := wrapper FeatureProfile.scalar layouts
-  (member (.atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal") name!"GetReference"
+  (member (.atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal" .classType)
+      name!"GetReference"
     (.byref byte) [span true] [byte])
 
 /-- The marshal helper returns the start of the span. -/

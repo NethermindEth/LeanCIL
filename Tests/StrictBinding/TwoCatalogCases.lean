@@ -72,7 +72,7 @@ private def wrongStringResult := Extracted.methodEvidence.modify 1 fun item =>
   { item with dispatchTypes := item.dispatchTypes.map fun entry =>
     { entry with methods := entry.methods.map fun method =>
       if method.name == "Label" then
-        { method with returnType := .atom runtimeScope "System.String" }
+        { method with returnType := .atom runtimeScope "System.String" .classType }
       else method } }
 
 theorem stringResultMismatch : checked [app, library] wrongStringResult =

@@ -519,7 +519,7 @@ def callOperandMatches (site : CallSite) : Instruction → Bool
 /-- Split a scoped declaring type from its ordered generic arguments. -/
 def managedOwner : TypeExpr → Option (String × List TypeExpr)
   | .primitive type => some (runtimeScope ++ "::" ++ type.display, [])
-  | .atom scope name => some (scope ++ "::" ++ name, [])
+  | .atom scope name _ => some (scope ++ "::" ++ name, [])
   | .object scope name | .constructor scope name | .objectConstructor scope name => do return (scope ++ "::" ++ (← name.signatureName?), [])
   | .aggregate identity _ => some (identity, [])
   | .apply owner argument => do
@@ -550,17 +550,22 @@ def calleeMatchesSite (site : CallSite) (token : Nat) (callee : SpecializedMetho
 
 /-- What a live `newobj` of `constructor` may be linked to. Its raw instruction is `newobj` (115)
     of a managed site naming `constructor`, and the linked method is the one the site names. A
-    value-type constructor, whose owner is no class and whose receiver is no object, is linked
-    `.aggregate`; a class constructor taking its instance as object receiver is linked `.object`
-    with the class's bases and one slot per instance field. A dead site passes. -/
+    value-type constructor, whose owner is no object or class-headed atom and whose receiver is
+    no object, is linked `.aggregate`; a class constructor taking its instance as object receiver
+    is linked `.object` with the class's bases and one slot per instance field. An
+    interface-headed owner is refused. A dead site passes. -/
 def validateConstructionWith (methods : Nat → Option SpecializedMethod) (raw : RawInstruction)
     (live : Bool) (link : Option Link) (constructor : MethodRef) : Bool :=
   if !live then true else
   match link with
   | none => false
   | some link =>
-    let isClass := match constructor.owner with | .object .. => true | _ => false
-    raw.opcode == 115 && match raw.operand with
+    let isClass := match constructor.owner with
+      | .object .. | .atom _ _ .classType => true
+      | _ => false
+    -- An interface declares no constructor.
+    !(constructor.owner matches .atom _ _ .interfaceType) && raw.opcode == 115 &&
+    match raw.operand with
     | .call site => site.method == constructor && match site.target with
       | .managed token => match link with
         | .aggregate index _ => match methods index with

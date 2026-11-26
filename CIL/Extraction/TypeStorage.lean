@@ -163,7 +163,8 @@ private def identityEq (left right : String) : Decidable (left = right) :=
 def typeStorageAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Option StorageType
   | .primitive type => .field <$> type.fieldType?
   -- CoreLib defines its own primitives; a runtime-scope atom has no storage.
-  | .atom scope name => if scope = coreLibraryScope then .field <$> primitiveField name else none
+  | .atom scope name _ =>
+    if scope = coreLibraryScope then .field <$> primitiveField name else none
   | .object _ _ => some .object
   | .aggregate identity index => do
     let metadata ← layoutAt index
@@ -184,7 +185,7 @@ def typeStorageAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Option St
   | type@(.functionPointer ..) => if callableLayoutsAt layoutAt type then
       StorageType.methodPointer <$> managedSignature type else none
   | .pointer (.primitive type) => if type.pointerStorage then some .reference else none
-  | .pointer (.atom scope name) =>
+  | .pointer (.atom scope name .valueType) =>
     if scope == coreLibraryScope &&
         name ∈ ["System.SByte", "System.Byte", "System.Int16",
         "System.UInt16", "System.Char", "System.Int32", "System.UInt32", "System.Int64",

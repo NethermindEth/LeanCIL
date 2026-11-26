@@ -137,7 +137,7 @@ foreach (var (name, parameters) in new[]
             : (".primitive .char", storageEvidence, "closedArguments");
         var mutations = isEnum
             ? new[] { ("signedness", ".unsigned16"), ("width", ".signed32") }
-            : [("scope", ".atom \"forged\" \"System.Char\""), ("storage", ".primitive .boolean")];
+            : [("scope", ".atom \"forged\" \"System.Char\" .valueType"), ("storage", ".primitive .boolean")];
         foreach (var (mutation, replacement) in mutations)
         {
             if (!forgedSource.Contains(target, StringComparison.Ordinal))

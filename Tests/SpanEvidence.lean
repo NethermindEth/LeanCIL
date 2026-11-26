@@ -27,7 +27,8 @@ private def getItem : CallSite := {
       (.byref (.ownerParameter 0)) },
   method := {
     owner := words, name := name!"get_Item", hasThis := true, genericArity := 0,
-    returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)",
+    returnType := .spelledModified runtime
+        "!0& modreq(System.Runtime.InteropServices.InAttribute)",
     parameters := [intType] },
   name := "get_Item",
   target := .external (runtime ++ "::!0& modreq(System.Runtime.InteropServices.InAttribute) \
@@ -65,7 +66,7 @@ private def arraySpanCall (range : ArraySpanRange) (element : TypeExpr) : CallSi
   let view := TypeExpr.apply (.constructor runtime "System.Span`1")
   { declared := ⟨0x10, view (.parameter 0), .array (.parameter 0) :: bounds⟩
     method := {
-      owner := .atom spanMemoryScope "System.MemoryExtensions", name := name!"AsSpan",
+      owner := .atom spanMemoryScope "System.MemoryExtensions" .classType, name := name!"AsSpan",
       hasThis := false, genericArity := 1, returnType := view element,
       parameters := .array element :: bounds, methodArguments := [element] }
     name := "AsSpan"
@@ -83,7 +84,8 @@ theorem exact_array_span_call :
       let site := arraySpanCall range intType
       let method := site.method
       let wrongOpen := site.declared.parameters.set 0 (.array (.ownerParameter 0))
-      let refused := [ { site with method.owner := .atom runtime "System.MemoryExtensions" },
+      let refused := [ { site with
+        method.owner := .atom runtime "System.MemoryExtensions" .classType },
         { site with name := "Another" }, { site with method.name := name!"Another" },
         { site with method.genericArity := 2 }, { site with method.hasThis := true },
         { site with method.parameters := method.parameters.set 0 intType },
@@ -260,7 +262,8 @@ example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [words] load
 
 -- `ldtoken` of a field is static data; only a type handle belongs to a type test.
 example : ¬ typeTestInstruction
-      (i 208 (.field (.atom owner "<PrivateImplementationDetails>") 0 intType name!"Data" true)) ∧
+      (i 208 (.field (.atom owner "<PrivateImplementationDetails>" .classType) 0 intType
+          name!"Data" true)) ∧
     typeTestInstruction (i 208 (.type intType)) := by decide
 
 /-- The eight bulk declarations instantiated at the named element type. -/
@@ -290,7 +293,8 @@ private def bulkSites (element : TypeExpr) (elementName : String) : List CallSit
   let arrays := [false, true].map fun counted =>
     let tail := if counted then [intType, intType] else []
     let params := if counted then "!!0[],!!0,System.Int32,System.Int32" else "!!0[],!!0"
-    row (.atom runtime "System.Array") "System.Array" "Fill" name!"Fill" .void "System.Void"
+    row (.atom runtime "System.Array" .classType) "System.Array" "Fill" name!"Fill" .void
+        "System.Void"
       params ([.array element, element] ++ tail) ([.array (.parameter 0), .parameter 0] ++ tail)
       true
   return [row owner spelling "Clear" name!"Clear" .void "System.Void" "" [] [],
@@ -308,7 +312,7 @@ theorem bulk_call_operands :
       let method := site.method
       let wrongOwner := match method.owner with
         | .apply (.constructor _ name) element => .apply (.constructor owner name) element
-        | _ => TypeExpr.atom owner "System.Array"
+        | _ => TypeExpr.atom owner "System.Array" .classType
       let wrongResult := if method.returnType == .void then intType else .void
       let wrongParams := match method.parameters with
         | [] => [intType] | _ :: rest => TypeExpr.void :: rest

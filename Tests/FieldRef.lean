@@ -15,7 +15,7 @@ namespace Tests.FieldRef
 open CIL CIL.Extraction Tests.MetadataWorld
 
 /-- The owner of the metadata world's fields. -/
-private def program : TypeExpr := .atom ownScope "Program"
+private def program : TypeExpr := .atom ownScope "Program" .classType
 
 /-- `T.Program.count`, the first instance field of `Program`, holding an `int32`. -/
 private def countField : FieldRef :=
@@ -24,12 +24,13 @@ private def countField : FieldRef :=
 -- A literal elaborates and compares equal to itself spelled again.
 theorem decides_a_literal :
     countField =
-      { owner := .atom ownScope "Program", index := 0,
+      { owner := .atom ownScope "Program" .classType, index := 0,
         type := .primitive .int32, name := name!"count" } := by decide +kernel
 #print axioms decides_a_literal
 
 theorem another_owner_is_another_field :
-    countField ≠ { countField with owner := .atom ownScope "Other" } := by decide +kernel
+    countField ≠ { countField with owner := .atom ownScope "Other" .classType } := by
+  decide +kernel
 #print axioms another_owner_is_another_field
 
 theorem another_index_is_another_field :

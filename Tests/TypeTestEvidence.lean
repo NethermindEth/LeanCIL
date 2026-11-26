@@ -22,15 +22,19 @@ private def typeCall (name : String) (methodName : MetadataName) (signature : St
     (parameters : Nat) : RawOperand := .call {
   declared := {
     convention := 0, returnType := if name == "GetTypeFromHandle" then .atom runtime "System.Type"
+        .classType
       else .primitive .boolean,
-    parameters := if name == "GetTypeFromHandle" then [.atom runtime "System.RuntimeTypeHandle"]
-      else [.atom runtime "System.Type", .atom runtime "System.Type"] },
+    parameters := if name == "GetTypeFromHandle" then [.atom runtime "System.RuntimeTypeHandle"
+        .valueType]
+      else [.atom runtime "System.Type" .classType, .atom runtime "System.Type" .classType] },
   method := {
-    owner := .atom runtime "System.Type", name := methodName, hasThis := false, genericArity := 0,
-    returnType := if name == "GetTypeFromHandle" then .atom runtime "System.Type"
+    owner := .atom runtime "System.Type" .classType, name := methodName, hasThis := false,
+    genericArity := 0,
+    returnType := if name == "GetTypeFromHandle" then .atom runtime "System.Type" .classType
       else .primitive .boolean,
-    parameters := if name == "GetTypeFromHandle" then [.atom runtime "System.RuntimeTypeHandle"]
-      else [.atom runtime "System.Type", .atom runtime "System.Type"] },
+    parameters := if name == "GetTypeFromHandle" then [.atom runtime "System.RuntimeTypeHandle"
+        .valueType]
+      else [.atom runtime "System.Type" .classType, .atom runtime "System.Type" .classType] },
   name, target := .external (runtime ++ "::" ++ signature),
   typeArguments := [], parameterCount := parameters, returnsValue := true }
 private def fromHandle := typeCall "GetTypeFromHandle" name!"GetTypeFromHandle"
@@ -54,9 +58,11 @@ private def state (stack : List (Option W32)) : Option FeatureState := some ⟨s
 example : sameRuntimeType marker marker = some true := by decide
 example : sameRuntimeType marker other = some false := by decide
 example : sameRuntimeType marker word = some false := by decide
-example : sameRuntimeType (.atom "Forwarder" "System.UInt64") word = none := by decide
-example : sameRuntimeType (.atom runtime "System.UInt64 modreq(X)") word = none := by decide
-example : sameRuntimeType (.atom runtime "System.UInt64[]") (.atom runtime "System.Int64[]") = none := by decide
+example : sameRuntimeType (.atom "Forwarder" "System.UInt64" .valueType) word = none := by decide
+example : sameRuntimeType (.spelledModified runtime "System.UInt64 modreq(X)") word = none := by
+  decide
+example : sameRuntimeType (.atom runtime "System.UInt64[]" .classType) (.atom runtime
+    "System.Int64[]" .classType) = none := by decide
 example : sameRuntimeType (.pointer word) word = some false := by decide
 example : sameRuntimeType (.apply (.constructor runtime "System.Nullable`1") word)
     (.apply (.constructor runtime "System.Nullable`1") intType) = some false := by decide
@@ -68,7 +74,8 @@ example : foldRoles (test marker marker) =
     [some .typeHead, some .typeOperand, some .typeOperand, some .typeOperand, some (.result true)] := by decide
 example : foldRoles (test marker other inequality) =
     [some .typeHead, some .typeOperand, some .typeOperand, some .typeOperand, some (.result true)] := by decide
-example : foldRoles (test (.atom "Forwarder" "System.UInt64") word) = List.replicate 5 none := by
+example : foldRoles (test (.atom "Forwarder" "System.UInt64" .valueType)
+    word) = List.replicate 5 none := by
   decide
 -- Any instruction between the operands breaks the exact encoding.
 example : foldRoles ((test marker marker).insertIdx 2 (i 0)) = List.replicate 6 none := by decide
@@ -124,7 +131,8 @@ example : FeatureFlowValid #[] (fun _ => none) (fun _ => none)
     ([.ldc_i4 0, .br 2] ++ typeOperands marker marker ++ [equalCall, .ret]) := by decide
 
 -- Undecided type comparisons cannot certify an emitted constant.
-private def undecidedRaw := raw (test (.atom "Forwarder" "System.UInt64") word ++ [i 42])
+private def undecidedRaw := raw (test (.atom "Forwarder" "System.UInt64" .valueType) word ++ [i
+    42])
 example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) undecidedRaw .scalar
     [state [], state [none], state [none], state [none, none], state [none, none], state [none]]
     (List.replicate 6 true) [.nop, .nop, .nop, .nop, .ldc_i4 0, .ret] := by decide
@@ -178,7 +186,7 @@ theorem reference_type_branch_rejections :
     let mask := states.map Option.isSome
     let code := branchCode true 46
     let forwarded := raw ((branchRaw true 46).code.set 2
-      (i 208 (.type (.atom "Forwarder" "System.UInt64"))))
+      (i 208 (.type (.atom "Forwarder" "System.UInt64" .valueType))))
     (¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (branchRaw true 46) .scalar states
       mask (code.set 4 (.beq 5))) ∧
     (¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (branchRaw true 47) .scalar states
@@ -279,12 +287,12 @@ private def changeSite (operand : RawOperand) (change : CallSite → CallSite) :
     type test, so the live ldtoken at pc 0 refuses the method. -/
 theorem foreign_type_members :
     let foreignOwner := changeSite fromHandle fun site =>
-      { site with method.owner := .atom "Fixture" "System.Type" }
+      { site with method.owner := .atom "Fixture" "System.Type" .classType }
     let signature := "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)"
     let foreignTarget := changeSite fromHandle fun site =>
       { site with target := .external ("Fixture::" ++ signature) }
     let forwarded := changeSite equality fun site =>
-      { site with method.owner := .atom "Forwarder" "System.Type" }
+      { site with method.owner := .atom "Forwarder" "System.Type" .classType }
     let control := test marker marker
     [control.set 1 (i 40 foreignOwner), control.set 1 (i 40 foreignTarget),
       control.set 4 (i 40 forwarded)].all (fun code =>
@@ -298,7 +306,8 @@ theorem foreign_type_members :
 /-- Same-named types in different possible forwarding scopes leave both the operator and
     the reference branch inconclusive. Neither operation reports an unequal result. -/
 theorem unresolved_runtime_identity (body : Method) (frame : Safety.Frame) (memory : Safety.Memory) :
-    let stack : List Safety.Value := [.runtimeType word, .runtimeType (.atom "Forwarder" "System.UInt64")]
+    let stack : List Safety.Value := [.runtimeType word,
+        .runtimeType (.atom "Forwarder" "System.UInt64" .valueType)]
     let failure : Safety.ExecutionResult Safety.FrameAction :=
       .error (.unsupported "Type comparison needs a resolved type identity")
     Safety.runModel body (.typeEquality true) 0 frame stack memory = failure ∧

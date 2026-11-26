@@ -341,7 +341,7 @@ File.WriteAllText(Path.Combine(constructorShared, "ConstructorProof.lean"), """
 
     example (profile : FeatureProfile) (environment : LayoutEnvironment) :
         (Templates.method0 profile environment).code[1]? = some (.call {
-          owner := .atom Extraction.runtimeScope "System.Object", name := name!".ctor",
+          owner := .atom Extraction.runtimeScope "System.Object" .classType, name := name!".ctor",
           hasThis := true, genericArity := 0, returnType := .void, parameters := [],
           methodArguments := [] } {}) := rfl
 

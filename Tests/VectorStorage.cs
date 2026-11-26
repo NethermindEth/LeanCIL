@@ -351,7 +351,7 @@ foreach (var (name, field) in new[]
 {
     ("portable-operation", """method.name := name!"op_BitwiseOr" """),
     ("portable-element", """method.parameters := [.primitive .int64]"""),
-    ("portable-scope", """method.owner := .atom "Foreign" "System.Runtime.Intrinsics.Vector128`1" """),
+    ("portable-scope", """method.owner := .atom "Foreign" "System.Runtime.Intrinsics.Vector128`1" .valueType """),
     ("portable-arity", "parameterCount := 1"),
     ("portable-target", """target := .external "Other member" """)
 })

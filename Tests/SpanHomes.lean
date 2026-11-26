@@ -313,7 +313,7 @@ private def spanRaw : RawMethod := {
 private def takes (parameter : TypeExpr) : RawInstruction := ⟨0, 40, .call {
   declared := { convention := 0, parameters := [parameter] },
   method := {
-    owner := .atom "Fixture" "Helpers", name := name!"Use", hasThis := false,
+    owner := .atom "Fixture" "Helpers" .classType, name := name!"Use", hasThis := false,
     genericArity := 0, returnType := .void, parameters := [parameter] },
   name := "Use", target := .managed 2, typeArguments := [], parameterCount := 1,
   returnsValue := false }⟩

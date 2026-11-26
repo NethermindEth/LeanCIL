@@ -64,7 +64,7 @@ def integerMathEntry (owner : TypeExpr) (fixed : Option TypeExpr)
 /-- The helpers of `System.Math`, then those each integer type declares on itself; an unsigned
     type declares no `Abs` or `Sign`. -/
 def integerMathEntries : List ModelEntry :=
-  mathOperations.map (integerMathEntry (.atom runtimeScope "System.Math") none) ++
+  mathOperations.map (integerMathEntry (.atom runtimeScope "System.Math" .classType) none) ++
     mathIntegers.flatMap fun (type, _, signed) =>
       let owner := TypeExpr.primitive type
       (mathOperations.filter fun (_, operation, _) => signed || !operation.signedOnly).map

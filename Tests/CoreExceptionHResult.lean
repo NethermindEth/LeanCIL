@@ -51,7 +51,7 @@ private def metadata : MethodMetadata := { own := {
   links := [⟨1, 0x040002b5, 0, 0x02000090⟩, ⟨1, 0x06000611, 0, 0x02000090⟩] } }
 
 private def owner := TypeExpr.object coreLibraryScope "System.Exception"
-private def int32 := TypeExpr.atom coreLibraryScope "System.Int32"
+private def int32 := TypeExpr.atom coreLibraryScope "System.Int32" .valueType
 private def resultField : FieldRef :=
   { owner, index := 13, type := int32, name := name!"_HResult" }
 private def operand := RawOperand.field owner 13 int32 name!"_HResult" false

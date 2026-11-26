@@ -15,7 +15,7 @@ namespace Tests.UnsafeModels
 open CIL CIL.Extraction CIL.Safety
 
 /-- The `System.Runtime` type `name`. -/
-private def runtimeType (name : String) : TypeExpr := .atom runtimeScope name
+private def runtimeType (name : String) : TypeExpr := .atom runtimeScope name .classType
 /-- `System.Int32`. -/
 private def int32 : TypeExpr := .primitive .int32
 
@@ -76,7 +76,7 @@ example : (runtimeModel {} .call (sizeOf vector256)).any (·.available .scalar) 
 -- Another owner, assembly or shape of the reference has no model.
 example : runtimeModel {} .call { sizeOf int32 with
     owner := .atom "Other, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-      "System.Runtime.CompilerServices.Unsafe" } = none := by decide +kernel
+      "System.Runtime.CompilerServices.Unsafe" .classType } = none := by decide +kernel
 example : runtimeModel {} .call { sizeOf int32 with owner := runtimeType "System.Unsafe" } =
     none := by decide +kernel
 example : runtimeModel {} .call { sizeOf int32 with owner := .apply unsafeOwner int32 } =

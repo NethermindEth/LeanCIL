@@ -20,6 +20,7 @@ private inductive Member where
 
 /-- The type declaring the marshal operations. -/
 private def owner := TypeExpr.atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal"
+    .classType
 
 /-- The writable or readonly runtime span constructor applied to its element. -/
 private def spanOf (writable : Bool) (element : TypeExpr) : TypeExpr :=

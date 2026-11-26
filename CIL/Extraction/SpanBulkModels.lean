@@ -97,7 +97,7 @@ def spanBulkEntries : List ModelEntry :=
   [bulkEntry (spanHead true) .fill, bulkEntry (spanHead true) .clear,
    bulkEntry (spanHead true) (.copy false), bulkEntry (spanHead false) (.copy false),
    bulkEntry (spanHead true) (.copy true), bulkEntry (spanHead false) (.copy true),
-   bulkEntry (.atom runtimeScope "System.Array") (.arrayFill false) [.arrayFill true]]
+   bulkEntry (.atom runtimeScope "System.Array" .classType) (.arrayFill false) [.arrayFill true]]
 
 /-- Every resolved bulk call executes a memory model. -/
 theorem spanBulkEntries_yields {property : RuntimeModel → Prop}

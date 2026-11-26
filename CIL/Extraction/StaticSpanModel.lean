@@ -6,7 +6,7 @@ namespace CIL.Extraction
 
 /-- The field handle is the sole parameter of the generic static member. -/
 private def staticSpanSignature (element : TypeExpr) : OpenSignature :=
-  { convention := 0x10, parameters := [.atom runtimeScope "System.RuntimeFieldHandle"],
+  { convention := 0x10, parameters := [.atom runtimeScope "System.RuntimeFieldHandle" .valueType],
     returnType := .apply (.constructor runtimeScope "System.ReadOnlySpan`1") element }
 
 /-- The closed result must have the primitive or enum element supplied to the generic method. -/
@@ -25,7 +25,7 @@ def staticSpanEntry : ModelEntry :=
   let target := s!"{runtimeScope}::System.ReadOnlySpan`1<!!0> {owner}::{name}({handle})"
   let operand := ModelOperand.external (fun _ => staticSpanSignature (.parameter 0)) name
     (fun _ => some target)
-  .single .call (.atom runtimeScope owner) name!"CreateSpan" operand
+  .single .call (.atom runtimeScope owner .classType) name!"CreateSpan" operand
     (fun reader method => RuntimeModel.memory <$> staticSpanOperation reader method) true
 
 /-- The field handle model executes a memory operation under the caller's storage checks. -/

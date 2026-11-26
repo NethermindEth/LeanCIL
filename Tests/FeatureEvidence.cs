@@ -152,7 +152,7 @@ string MutateState(string source, string update) => FeatureLayoutPattern.Feature
 
 // Each mutation checks feature flow independently, without unrelated validator proofs
 // or instruction lookup equations that could reject it for a different reason.
-Reject("wrong-feature", ForgeDecodedInstruction(baseline, 0, 3, "fun _ => .call { owner := .atom Extraction.intrinsicsScope \"System.Runtime.Intrinsics.X86.Sse2\", " +
+Reject("wrong-feature", ForgeDecodedInstruction(baseline, 0, 3, "fun _ => .call { owner := .atom Extraction.intrinsicsScope \"System.Runtime.Intrinsics.X86.Sse2\" .classType, " +
     "name := name!\"get_IsSupported\", hasThis := false, genericArity := 0, returnType := .primitive .boolean, parameters := [] }"));
 Reject("wrong-branch", ForgeDecodedInstruction(baseline, 0, 4, "fun _ => .brfalse 11"));
 Reject("forged-constant", baseline.Replace("stack := [some (BitVec.ofInt 32 (0))]", "stack := [some (BitVec.ofInt 32 (1))]"));
@@ -326,7 +326,7 @@ foreach (var obligation in new[] { featureObligation, "method0_models_validated"
         obligation == featureObligation ? "FeatureFlowValid" : "RuntimeModelsAgree");
     foreach (var (name, pc, update) in new[]
     {
-        ("scope", 0, """method.owner := .atom "forged" "System.Runtime.CompilerServices.RuntimeHelpers" """),
+        ("scope", 0, """method.owner := .atom "forged" "System.Runtime.CompilerServices.RuntimeHelpers" .classType """),
         ("byref", 0, "typeArguments := site.typeArguments.map Extraction.TypeExpr.byref"),
         ("layout", 6, """
             typeArguments := site.typeArguments.map (fun | .aggregate _ i => .aggregate "forged" i | t => t)
@@ -474,7 +474,7 @@ platformControls.Check(replay: false);
 // Lean binds the raw endianness load to System.Runtime's BitConverter Boolean and the value 1.
 var endianSource = File.ReadAllText(Path.Combine(output, "Capabilities-scalar", "Endian", "Extracted.lean"));
 var endianControls = new GeneratedEvidence(Path.Combine(output, "EndianControls"));
-const string endianOwner = ".atom Extraction.runtimeScope \"System.BitConverter\"";
+const string endianOwner = ".atom Extraction.runtimeScope \"System.BitConverter\" .classType";
 foreach (var (obligation, diagnostic) in new[]
 {
     (featureObligation, "FeatureFlowValid"), ("method0_scalars_validated", "ScalarFlowValid")
@@ -494,7 +494,7 @@ foreach (var (obligation, diagnostic) in new[]
     var changedOwner = ForgeClosedCode(endianSource, 0, """
         modify 0 (fun raw => match raw.operand with
           | .field _ index type name isStatic =>
-            { raw with operand := .field (.atom "forged" "System.BitConverter") index type name isStatic }
+            { raw with operand := .field (.atom "forged" "System.BitConverter" .classType) index type name isStatic }
           | _ => raw)
         """);
     File.WriteAllText(forgedOwner, NarrowEvidence(changedOwner, obligation));
@@ -504,7 +504,7 @@ endianControls.Check(replay: false);
 
 var refusedOwner = Path.Combine(output, "forged-endian-decoder.lean");
 var refusedEndian = ForgeDecodedOriginal(endianSource, 0, endianOwner,
-    ".atom \"forged\" \"System.BitConverter\"");
+    ".atom \"forged\" \"System.BitConverter\" .classType");
 File.WriteAllText(refusedOwner, NarrowEvidence(refusedEndian, featureObligation));
 rejected.Add(refusedOwner, "PASS forged endianness owner refuses raw decoding",
     "cil_decoded_method: the decoder gives no method");

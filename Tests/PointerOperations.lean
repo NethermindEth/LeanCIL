@@ -15,7 +15,7 @@ theorem pointer_storage_kinds :
       some .reference ∧
     storage (.pointer (.enum (Tests.enumIdentity "Example") .unsigned64)) =
       some .reference ∧
-    storage (.pointer (.atom "forged" "System.Char")) = none ∧
+    storage (.pointer (.atom "forged" "System.Char" .valueType)) = none ∧
     storage (.pointer (.primitive .double)) = none ∧
     storage (.pointer (.byref (.primitive .int32))) = none ∧
     storage (.pointer (.pointer (.primitive .int32))) = none := by decide +kernel

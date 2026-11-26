@@ -18,7 +18,7 @@ intrinsic it was lowered to, and the lowered intrinsic or another helper's is re
 namespace Tests.BitModels
 open CIL CIL.Extraction CIL.Safety
 
-private def runtimeType (name : String) : TypeExpr := .atom runtimeScope name
+private def runtimeType (name : String) : TypeExpr := .atom runtimeScope name .classType
 private def byte : TypeExpr := .primitive .byte
 private def sbyte : TypeExpr := .primitive .sbyte
 private def short : TypeExpr := .primitive .int16
@@ -29,7 +29,7 @@ private def ulong : TypeExpr := .primitive .uint64
 private def bool : TypeExpr := .primitive .boolean
 private def bitOperations : TypeExpr := runtimeType "System.Numerics.BitOperations"
 private def binaryPrimitives : TypeExpr :=
-  .atom spanMemoryScope "System.Buffers.Binary.BinaryPrimitives"
+  .atom spanMemoryScope "System.Buffers.Binary.BinaryPrimitives" .classType
 
 /-- `owner::name` taking `type`, then `System.Int32` when `rotation`, and returning `result`. -/
 private def helper (owner : TypeExpr) (name : MetadataName) (type result : TypeExpr)
@@ -118,7 +118,8 @@ example : runtimeModel {} .call (helper ulong name!"PopCount" uint uint) = none 
 example : runtimeModel {} .call (helper bitOperations name!"PopCount" bool int) = none := by
   decide +kernel
 example : runtimeModel {} .call
-    (helper bitOperations name!"PopCount" (.atom "Fixture" "System.UInt64") int) = none := by
+    (helper bitOperations name!"PopCount" (.atom "Fixture" "System.UInt64" .valueType) int) =
+      none := by
   decide +kernel
 example : runtimeModel {} .call { roundUp with returnType := int } = none := by decide +kernel
 example : runtimeModel {} .call (helper int name!"Log2" int int) = none := by decide +kernel
@@ -138,7 +139,9 @@ example : runtimeModel {} .call { reverseUlong with owner := runtimePrimitives }
   decide +kernel
 /-- `BitOperations` as `System.Memory` and as `System.Private.CoreLib` would declare it. -/
 private def memoryBits : TypeExpr := .atom spanMemoryScope "System.Numerics.BitOperations"
+    .classType
 private def coreBits : TypeExpr := .atom "System.Private.CoreLib" "System.Numerics.BitOperations"
+    .classType
 example : runtimeModel {} .call { popCount with owner := memoryBits } = none := by decide +kernel
 example : runtimeModel {} .call { popCount with owner := coreBits } = none := by decide +kernel
 example : runtimeModel {} .newobj popCount = none := by decide +kernel

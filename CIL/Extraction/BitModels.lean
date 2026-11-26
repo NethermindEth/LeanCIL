@@ -109,14 +109,15 @@ def bitEntry (owner : BitOwner) (declaring : TypeExpr) (fixed : Option TypeExpr)
     with a model. -/
 def bitEntries : List ModelEntry :=
   bitHelpers.map
-      (bitEntry .bitOperations (.atom runtimeScope "System.Numerics.BitOperations") none) ++
+      (bitEntry .bitOperations
+        (.atom runtimeScope "System.Numerics.BitOperations" .classType) none) ++
     mathIntegers.flatMap (fun (primitive, width, signed) =>
       let type := TypeExpr.primitive primitive
       (bitHelpers.filter fun helper =>
         (bitHelperModel .integer helper.2 type width signed).isSome).map
           (bitEntry .integer type (some type))) ++
     [bitEntry .binaryPrimitives
-      (.atom spanMemoryScope "System.Buffers.Binary.BinaryPrimitives") none
+      (.atom spanMemoryScope "System.Buffers.Binary.BinaryPrimitives" .classType) none
       (name!"ReverseEndianness", .reverseEndianness)]
 
 /-- Every model a bit helper entry resolves is an intrinsic, so a property every intrinsic model

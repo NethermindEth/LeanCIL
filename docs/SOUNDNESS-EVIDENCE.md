@@ -284,7 +284,10 @@ What `MetadataResolution` and `MetadataBinding` check:
 - Each `.type`, `.field`, `.call`, `.indirectCall` and string operand of the token table is
   checked against its token. The extractor chooses among `primitive`, `atom`, `object`,
   `aggregate` and `enum` for a type, and Lean accepts the choices that name the same scoped type
-  with a form its kind allows. A `System.Runtime` primitive has only the `primitive` form: Lean
+  with a form its kind allows. An `atom` states a head kind, value, class or interface, and Lean
+  accepts it only at the kind the type's definition row or platform definition states; a call
+  site's modified type is named by its Cecil spelling (`spelledModified`) and compared with the
+  modifiers Lean reads. A `System.Runtime` primitive has only the `primitive` form: Lean
   selects it by its namespace and name columns and refuses the `System.Runtime` atom of a
   primitive's name (`runtimePrimitiveAtom`). For a closed generic aggregate, the identity must
   match the resolved instance, and every argument must be a primitive value, an enum, a

@@ -458,7 +458,8 @@ void StaticFactCosts()
               let after <- IO.getNumHeartbeats
               logInfo m!"resolution {label.getString} {after - before} heartbeats"
             def field : FieldRef :=
-              { owner := .atom "Fixture" "Holder", index := 0, type := .atom "Fixture" "Pair", name := name!"Field" }
+              { owner := .atom "Fixture" "Holder" .classType, index := 0, type := .atom "Fixture" "Pair" .valueType,
+                name := name!"Field" }
             def body : Method := {
               code := [{{code}}], locals := [], returnsValue := false, declared := {},
               staticSites := [{{sites}}] }
@@ -522,7 +523,8 @@ void StaticIdentityCosts()
               let after <- IO.getNumHeartbeats
               logInfo m!"static identities {after - before} heartbeats"
             def field : FieldRef :=
-              { owner := .atom "Fixture" "Holder", index := 0, type := .atom "Fixture" "Pair", name := name!"Field" }
+              { owner := .atom "Fixture" "Holder" .classType, index := 0, type := .atom "Fixture" "Pair" .valueType,
+                name := name!"Field" }
             def body : Method := {
               code := [{{code}}], locals := [], returnsValue := false, declared := {},
               staticSites := [{{sites}}] }
@@ -911,8 +913,8 @@ void CallCheckCosts()
               returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
               genericParameters := [], code := [] }
             def callMethod : MethodRef := {
-              owner := .atom "Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Scaling", name := name!"", hasThis := false,
-              genericArity := 0, returnType := .void, parameters := [] }
+              owner := .atom "Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Scaling" .classType,
+              name := name!"", hasThis := false, genericArity := 0, returnType := .void, parameters := [] }
             def site : RawInstruction := ⟨0, 40, .call {
               method := callMethod, declared := { convention := 0 }, target := .managed 1,
               typeArguments := [], parameterCount := 0,
@@ -2286,7 +2288,7 @@ void ModelTableCosts()
         {{KernelCostCommand}}
         /-- A static method of no parameters named `name`. -/
         def method (name : MetadataName) : MethodRef :=
-          { owner := .atom "Tests" "Models", name, hasThis := false, genericArity := 0, returnType := .void,
+          { owner := .atom "Tests" "Models" .classType, name, hasThis := false, genericArity := 0, returnType := .void,
             parameters := [] }
         /-- Only the final position in each layout table carries the eight-byte target. -/
         def sizeRef (position : Nat) : MethodRef :=
@@ -2812,8 +2814,8 @@ long EmbeddingCost(string name, string definitions)
 const string EmbeddedCallees = """
 /-- A one-argument method whose result each segment pops. -/
 def callee : Extraction.MethodRef :=
-  { owner := .atom "Tests" "Embedded", name := name!"Callee", hasThis := false, genericArity := 0,
-    returnType := .atom "Tests" "Word", parameters := [.atom "Tests" "Word"] }
+  { owner := .atom "Tests" "Embedded" .classType, name := name!"Callee", hasThis := false, genericArity := 0,
+    returnType := .atom "Tests" "Word" .valueType, parameters := [.atom "Tests" "Word" .valueType] }
 """;
 
 // A hand-written body embedded into an extraction with a dead block after each return.
@@ -3552,7 +3554,7 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
         def slotType : TypeExpr := .primitive .{{slotType}}
         def handler : CallSite :=
           { declared := { convention := 0 }, method := {
-              owner := .atom "T" "Scaling", name := name!"", hasThis := false, genericArity := 0,
+              owner := .atom "T" "Scaling" .classType, name := name!"", hasThis := false, genericArity := 0,
               returnType := .void, parameters := [] },
             target := .managed 2, typeArguments := [], parameterCount := 0, returnsValue := false }
         def signature : ManagedSignature := ⟨.void, []⟩

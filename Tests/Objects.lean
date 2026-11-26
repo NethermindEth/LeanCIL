@@ -548,7 +548,7 @@ private def openField : Extraction.FieldRef :=
 /-- A Boolean parameter, read narrowed, is written through its receiver's one-byte field. -/
 @[cil_code] private def narrowStore : CIL.Method :=
   { returnsValue := false, locals := [],
-    declared := { parameters := [.atom CIL.Extraction.runtimeScope "System.Object",
+    declared := { parameters := [.atom CIL.Extraction.runtimeScope "System.Object" .classType,
       .primitive .boolean] },
     code := [.ldarg 0, .ldarg 1, .stfld openField, .ret] }
 

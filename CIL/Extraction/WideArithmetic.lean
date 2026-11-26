@@ -72,7 +72,7 @@ private def arithmeticRow (name : String) (form : Form) (element : PrimitiveType
 
 /-- The twelve division and four multiplication declarations on the runtime Math owner. -/
 def wideArithmeticEntries : List ModelEntry :=
-  let owner := TypeExpr.atom runtimeScope "System.Math"
+  let owner := TypeExpr.atom runtimeScope "System.Math" .classType
   let division := arithmeticRow "DivRem"
   let multiply := arithmeticRow "BigMul"
   [{ opcode := .call, owner, name := name!"DivRem", ownsName := true

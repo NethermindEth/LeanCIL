@@ -39,7 +39,7 @@ private def overloads (writable : Bool) (element : TypeExpr) (width : Nat) : Lis
     "System.Runtime.InteropServices.InAttribute" (.byref type)
   let openRef := if writable then TypeExpr.byref var else modified var
   let closedRef := if writable then TypeExpr.byref element else
-    .atom runtimeScope "!0& modreq(System.Runtime.InteropServices.InAttribute)"
+    .spelledModified runtimeScope "!0& modreq(System.Runtime.InteropServices.InAttribute)"
   let row (text : String) (name : MetadataName) (convention : Nat)
       (result : TypeExpr) (params : List TypeExpr) (declared forged : OpenSignature)
       (op : MemoryOp) : Overload :=
@@ -99,7 +99,7 @@ theorem elementWidths :
 /-- Every rejected element, including an unbound aggregate, misses the production model table. -/
 theorem unsupportedElements :
     ([TypeExpr.void, .object runtimeScope "System.String", .byref int32, .array int32,
-      .primitive .double, .atom "Fixture" "System.Int32",
+      .primitive .double, .atom "Fixture" "System.Int32" .valueType,
       .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
         (.primitive .single), .aggregate "Other::Words" 0,
       .aggregate "Fixture::Words" 1].all fun type =>
@@ -115,7 +115,7 @@ private def spelling : TypeExpr → String
   | .modified true _ name (.byref (.ownerParameter 0)) => s!"!0& modreq({name})"
   | .apply (.constructor _ owner) (.ownerParameter 0) => s!"{owner.signatureName?.getD "?"}<!0>"
   | .primitive type => type.display
-  | .atom _ name => name
+  | .atom _ name _ => name
   | _ => "?"
 
 /-- The raw call operand used to check a live emission and its metadata declaration. -/

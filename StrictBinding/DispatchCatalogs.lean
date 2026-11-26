@@ -158,7 +158,7 @@ private def interfaceName (image : PreparedImage) (coded : Nat) : Reading TypeEx
   guard (coded % 4 == 0 && coded / 4 > 0)
   let name ← localName image (coded / 4) .interface
   let some text := name.signatureName? | failure
-  return .atom image.identity text
+  return .atom image.identity text .interfaceType
 
 /-- Local MethodImpl rows bind the implementing MethodDef to its class and the overridden
     MethodDef to its interface. Both signatures describe the same nongeneric instance slot. -/
@@ -188,7 +188,7 @@ private def localOverrides (prepared : List PreparedImage) (image : PreparedImag
     guard (direct.contains ((interfaceToken % 2^24) * 4))
     let name ← localName image (interfaceToken % 2^24) .interface
     let some text := name.signatureName? | failure
-    let slotOwner := TypeExpr.atom image.identity text
+    let slotOwner := TypeExpr.atom image.identity text .interfaceType
     let implementation ← classMethod prepared image core (body / 2)
     let declaration ← classMethod prepared image core (slot / 2)
     guard (implementation.genericArity == 0 && declaration.genericArity == 0)

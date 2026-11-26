@@ -28,7 +28,8 @@ private def guardInteger (element : TypeExpr) : Option (Nat × Bool) := do
 private def GuardKind.signature (kind : GuardKind) (element : TypeExpr) : OpenSignature :=
   let label := TypeExpr.object runtimeScope "System.String"
   match kind with
-  | .null => { convention := 0, parameters := [.atom runtimeScope "System.Object", label] }
+  | .null => { convention := 0, parameters := [.atom runtimeScope "System.Object" .classType,
+      label] }
   | .zero _ => { convention := 0x10, parameters := [element, label] }
   | .comparison _ => { convention := 0x10, parameters := [element, element, label] }
 
@@ -62,7 +63,7 @@ private def guardEntry (key : MetadataName) (name : String) (kind : GuardKind) :
     { operand := .external (fun _ => kind.signature (.parameter 0)) name (fun _ => some target)
       accepts := kind.accepts
       resolve := fun _ method => RuntimeModel.memory <$> kind.operation method }
-  { opcode := .call, owner := .atom runtimeScope owner, name := key, ownsName := true,
+  { opcode := .call, owner := .atom runtimeScope owner .classType, name := key, ownsName := true,
     overloads := [row] }
 
 /-- The runtime row whose object parameter requires object-reference provenance on the stack. -/

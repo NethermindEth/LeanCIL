@@ -528,7 +528,7 @@ def genericOwnerIdentity (owner : TypeExpr) (arguments : List TypeExpr) : Option
         | _ => none
       let names ← arguments.mapM fun argument => match argument with
         | .primitive type => some (runtimeScope ++ "::" ++ type.display)
-        | .atom scope name => some (scope ++ "::" ++ name)
+        | .atom scope name _ => some (scope ++ "::" ++ name)
         | .aggregate identity _ => some identity
         | .enum identity _ => do
           return (← assemblyScope? identity.assembly) ++ "::" ++ (← enumSignatureName? identity)
@@ -536,8 +536,8 @@ def genericOwnerIdentity (owner : TypeExpr) (arguments : List TypeExpr) : Option
         | .apply (.objectConstructor scope name) (.primitive element) =>
           do return scope ++ "::" ++ (← name.signatureName?) ++
             "<" ++ runtimeScope ++ "::" ++ element.display ++ ">"
-        | .apply (.constructor scope name) (.atom elementScope element)
-        | .apply (.objectConstructor scope name) (.atom elementScope element) =>
+        | .apply (.constructor scope name) (.atom elementScope element _)
+        | .apply (.objectConstructor scope name) (.atom elementScope element _) =>
           do return scope ++ "::" ++ (← name.signatureName?) ++
             "<" ++ elementScope ++ "::" ++ element ++ ">"
         | _ => none

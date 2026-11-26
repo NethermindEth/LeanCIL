@@ -16,7 +16,7 @@ open CIL CIL.Safety CIL.Extraction
 set_option maxRecDepth 65536
 set_option maxHeartbeats 16000000
 
-private def pointerTo (type : String) := TypeExpr.pointer (.atom coreLibraryScope type)
+private def pointerTo (type : String) := TypeExpr.pointer (.atom coreLibraryScope type .valueType)
 
 /-- Carried owner, method and generic-boundary rows for MethodDef 0x06003b1f. -/
 private def metadata : MethodMetadata := { own := {
@@ -83,10 +83,11 @@ theorem outsideAllocation : code 0 =
 /-- Both forwarded and exact defining scopes qualify. A different scope, unknown type and
     pointer to a reference type receive no primitive-pointer storage. -/
 theorem scopeBindings :
-    typeStorage [] (.pointer (.atom coreLibraryScope "System.IntPtr")) = some .reference ∧
+    typeStorage [] (.pointer (.atom coreLibraryScope "System.IntPtr"
+        .valueType)) = some .reference ∧
     typeStorage [] (.pointer (.primitive .intPtr)) = some .reference ∧
-    typeStorage [] (.pointer (.atom "System.Private.CoreLib" "System.IntPtr")) = none ∧
-    typeStorage [] (.pointer (.atom coreLibraryScope "System.IntPtq")) = none ∧
+    typeStorage [] (.pointer (.atom "System.Private.CoreLib" "System.IntPtr" .valueType)) = none ∧
+    typeStorage [] (.pointer (.atom coreLibraryScope "System.IntPtq" .valueType)) = none ∧
     typeStorage [] (.pointer (.object coreLibraryScope "System.Object")) = none := by
   exact ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl,
     by cil_kernel_rfl⟩

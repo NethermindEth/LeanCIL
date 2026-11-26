@@ -57,7 +57,7 @@ def primitiveElement (scope : String) (code : Nat) : Except AuditError TypeExpr 
   if code == 0x1C && scope == coreLibraryScope then throw .uncoveredConstraint
   if scope == runtimeScope then
     if let some type := CIL.PrimitiveType.ofElementType? code then return .primitive type
-  return .atom scope name
+  return .atom scope name (primitiveHead code)
 
 /-- A top-level simple name cannot include a namespace separator or a constructed type suffix. -/
 def ordinaryTypeName (space name : String) : Bool :=
@@ -287,9 +287,10 @@ private def layoutTypeArguments (image : PreparedImage) (token : Nat) (layout : 
       unless core == runtimeScope do throw .uncoveredConstraint
       let some name := (primitiveName type.elementType).bind spelled? | throw .uncoveredConstraint
       return core ++ "::" ++ name
-    | .atom scope name =>
+    | .atom scope name kind =>
       unless scope == core && primitiveCodes.any (fun code =>
-          code != 0x01 && (primitiveName code).bind spelled? == some name) do
+          code != 0x01 && kind == primitiveHead code &&
+            (primitiveName code).bind spelled? == some name) do
         throw .uncoveredConstraint
       return scope ++ "::" ++ name
     | _ => throw .uncoveredConstraint

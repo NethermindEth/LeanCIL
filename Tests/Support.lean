@@ -20,7 +20,7 @@ def reference : Value := .reference (.address ⟨0, 0⟩)
 
 /-- The parameterless Boolean getter on a named ISA class in the pinned intrinsics assembly. -/
 def supportedGetter (isa : String) : CIL.Extraction.MethodRef where
-  owner := .atom CIL.Extraction.intrinsicsScope ("System.Runtime.Intrinsics." ++ isa)
+  owner := .atom CIL.Extraction.intrinsicsScope ("System.Runtime.Intrinsics." ++ isa) .classType
   name := name!"get_IsSupported"
   hasThis := false
   genericArity := 0

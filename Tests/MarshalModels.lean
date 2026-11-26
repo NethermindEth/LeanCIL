@@ -55,7 +55,7 @@ private def declarations : List OpenSignature :=
 
 /-- The closed method reference at a fixture's call. -/
 private def Fixture.method (fixture : Fixture) : MethodRef :=
-  { owner := .atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal",
+  { owner := .atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal" .classType,
     name := (MetadataName.ofBytes? (fixture.name.toList.map Char.toNat)).getD ⟨0⟩,
     hasThis := false, genericArity := fixture.arguments.length,
     methodArguments := fixture.arguments, parameters := fixture.parameters,
@@ -126,7 +126,8 @@ theorem marshal_reference_shapes :
     scalarSites.all (fun (fixture, _) =>
       let method := fixture.method
       [{ method with owner := .apply method.owner int32Type },
-       { method with owner := .atom "Other" "System.Runtime.InteropServices.MemoryMarshal" },
+       { method with
+         owner := .atom "Other" "System.Runtime.InteropServices.MemoryMarshal" .classType },
        { method with hasThis := true }, { method with genericArity := method.genericArity + 1 },
        { method with methodArguments := [] }, { method with returnType := .pointer .void },
        { method with parameters := [] }].all fun changedMethod =>
@@ -258,7 +259,8 @@ theorem linked_write_import_refused :
     let owner := "System.Runtime.InteropServices.MemoryMarshal"
     let target := s!"{runtimeScope}::System.Void {owner}::Write(System.Span`1<System.Byte>,!!0&)"
     let method : MethodRef := {
-      owner := .atom runtimeScope owner, name := name!"Write", hasThis := false, genericArity := 1,
+      owner := .atom runtimeScope owner .classType, name := name!"Write", hasThis := false,
+      genericArity := 1,
       methodArguments := [double], returnType := .void, parameters := [bytes, .byref double] }
     let site : CallSite := {
       method, name := "Write", target := .external target, typeArguments := [double],
@@ -296,7 +298,7 @@ theorem marshal_site_emissions :
 /-- An external method whose span argument and reference result fit a unary stack effect. -/
 private def unrelated : RawInstruction :=
   let method : MethodRef :=
-    { owner := .atom "Fixture" "Methods", name := name!"First"
+    { owner := .atom "Fixture" "Methods" .classType, name := name!"First"
       hasThis := false, genericArity := 0, returnType := .byref int32Type
       parameters := [view true int32Type] }
   let site : CallSite :=

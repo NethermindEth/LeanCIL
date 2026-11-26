@@ -31,7 +31,7 @@ private def vectorOperand (width : Nat) (element : VectorOperand) : VectorOperan
 /-- The single-word broadcast used by the AVX2 execution lemmas. -/
 def broadcast256Method : MethodRef :=
   let word := TypeExpr.primitive .uint64
-  { owner := .atom intrinsicsScope "System.Runtime.Intrinsics.Vector256",
+  { owner := .atom intrinsicsScope "System.Runtime.Intrinsics.Vector256" .classType,
     name := name!"Create", hasThis := false, genericArity := 0,
     returnType := .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector256`1") word,
     parameters := [word] }
@@ -98,7 +98,8 @@ private def VectorMember.row (member : VectorMember) (width : Nat) (key : Metada
     return s!"{intrinsicsScope}::{result.2} {declaring}::{name}({names})"
   let accepts (method : MethodRef) := (member.element method).any fun element =>
     let (closedResult, closedParams) := member.signature element
-    let declaring := if equal then (vectorOperand width element).1 else .atom intrinsicsScope owner
+    let declaring :=
+      if equal then (vectorOperand width element).1 else .atom intrinsicsScope owner .classType
     method.owner == declaring && method.name == key && !method.hasThis &&
       method.genericArity == (if generic then 1 else 0) &&
       method.methodArguments == (if generic then [element.1] else []) &&
@@ -112,7 +113,7 @@ private def vectorSlot (width : Nat) (key : MetadataName) (name : String)
   let owner := vectorOwnerName width
   { opcode := .call, name := key, ownsName := true,
     owner := if genericOwner then .constructor intrinsicsScope (owner ++ "`1")
-      else .atom intrinsicsScope owner,
+      else .atom intrinsicsScope owner .classType,
     overloads := members.map (fun member => member.row width key name) }
 
 /-- The four scalar and span constructions of a 128- or 256-bit vector. -/

@@ -649,7 +649,8 @@ theorem divRem_operands : CIL.X86.divRemValue [.i64 1, .i32 0, .i64 3] = .error 
 
 private def hardwareDivRem : CIL.Extraction.MethodRef :=
   let word := CIL.Extraction.TypeExpr.primitive .uint64
-  { owner := .atom CIL.Extraction.intrinsicsScope "System.Runtime.Intrinsics.X86.X86Base/X64",
+  { owner := .atom CIL.Extraction.intrinsicsScope "System.Runtime.Intrinsics.X86.X86Base/X64"
+      .classType,
     name := name!"DivRem", genericArity := 0, hasThis := false,
     returnType := .aggregate (CIL.Extraction.integerPairIdentity "System.UInt64") 0,
     parameters := [word, word, word] }

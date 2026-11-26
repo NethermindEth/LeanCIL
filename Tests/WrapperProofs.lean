@@ -29,7 +29,7 @@ macro "math_wrapper_step " model:term:max evaluated:term : tactic => `(tactic|
 
 private def minimumRef : CIL.Extraction.MethodRef :=
   let int := CIL.Extraction.TypeExpr.primitive .int32
-  { owner := .atom CIL.Extraction.runtimeScope "System.Math", name := name!"Min",
+  { owner := .atom CIL.Extraction.runtimeScope "System.Math" .classType, name := name!"Min",
     hasThis := false, genericArity := 0, returnType := int, parameters := [int, int] }
 
 /-- Returns the signed minimum of its two int arguments through the scalar math intrinsic. -/

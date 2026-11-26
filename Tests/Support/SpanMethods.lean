@@ -22,7 +22,7 @@ private def readOnlyMember (element : TypeExpr) (name : MetadataName) (result : 
 
 /-- The readonly indexer carries the required modifier on its returned reference. -/
 def item (element : TypeExpr) := readOnlyMember element name!"get_Item"
-  (.atom runtimeScope "!0& modreq(System.Runtime.InteropServices.InAttribute)") [int32]
+  (.spelledModified runtimeScope "!0& modreq(System.Runtime.InteropServices.InAttribute)") [int32]
 
 /-- The selected Slice overload takes a start and optionally a length. -/
 def slice (element : TypeExpr) (counted : Bool) := readOnlyMember element name!"Slice"
@@ -33,7 +33,7 @@ def length (element : TypeExpr) := readOnlyMember element name!"get_Length" int3
 
 /-- The generic factory constructs a writable span over a managed reference and length. -/
 def createInt32 : MethodRef :=
-  { owner := .atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal",
+  { owner := .atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal" .classType,
     name := name!"CreateSpan", hasThis := false, genericArity := 1, methodArguments := [int32],
     returnType := span true int32, parameters := [.byref int32, int32] }
 

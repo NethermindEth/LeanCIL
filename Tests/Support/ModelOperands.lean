@@ -19,10 +19,10 @@ def decoded (site : CallSite) (environment : LayoutEnvironment := {})
 
 /-- The control keeps its call. Each altered operand leaves the call a live hole at pc 0. -/
 def checks (site : CallSite) : Bool :=
-  let wrong := TypeExpr.atom "Fixture" "Other"
+  let wrong := TypeExpr.atom "Fixture" "Other" .classType
   let owner := match site.method.owner with
-    | .primitive type => TypeExpr.atom "Fixture" type.display
-    | .atom _ name => TypeExpr.atom "Fixture" name
+    | .primitive type => TypeExpr.atom "Fixture" type.display .valueType
+    | .atom _ name kind => TypeExpr.atom "Fixture" name kind
     | _ => wrong
   let parameters := match site.method.parameters with
     | [] => [wrong]

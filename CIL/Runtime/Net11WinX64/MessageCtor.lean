@@ -110,7 +110,7 @@ def body : BodyEvidence := {
         name := name!"set_HResult", hasThis := true,
         genericArity := 0,
         returnType := .void,
-        parameters := [.atom coreLibraryScope "System.Int32"],
+        parameters := [.atom coreLibraryScope "System.Int32" .valueType],
         methodArguments := [] },
         name := "set_HResult",
       target := .managed 100664849, typeArguments := [],
@@ -118,7 +118,7 @@ def body : BodyEvidence := {
       declared := {
         convention := 32,
         returnType := .void,
-        parameters := [.atom coreLibraryScope "System.Int32"] } })] }
+        parameters := [.atom coreLibraryScope "System.Int32" .valueType] } })] }
   metadata := rows
   tables := rows.tables.toOption.getD [] }
 

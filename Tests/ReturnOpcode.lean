@@ -114,7 +114,7 @@ private def pairEnvironment : LayoutEnvironment :=
 
 private def mathDivRem (element : PrimitiveType) : Extraction.MethodRef :=
   let word := Extraction.TypeExpr.primitive element
-  { owner := .atom Extraction.runtimeScope "System.Math", name := name!"DivRem",
+  { owner := .atom Extraction.runtimeScope "System.Math" .classType, name := name!"DivRem",
     genericArity := 0, hasThis := false, parameters := [word, word],
     returnType := .aggregate (Extraction.integerPairIdentity element.display) 0 }
 

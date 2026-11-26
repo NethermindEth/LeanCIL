@@ -793,7 +793,7 @@ def checkCallReference (env : MetadataEnv) (frame : Frame) (token : Nat) (site :
     throw (.scopeMismatch token)
   let located := { frame with anchor := head.scope }
   if head.kind == .importedOwner then
-    let .atom scope name := call.declaringType | throw (.operandMismatch token)
+    let .atom scope name _ := call.declaringType | throw (.operandMismatch token)
     if bytesOf scope != head.scope || bytesOf name != head.name then throw (.operandMismatch token)
   else if !(located.admits site.owner call.declaringType) then throw (.operandMismatch token)
   let declared := call.declared

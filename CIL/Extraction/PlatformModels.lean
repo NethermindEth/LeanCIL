@@ -30,19 +30,19 @@ private def getterEntry (scope : String) (owner : TypeExpr) (ownerName : String)
 private def Getter.entry : Getter → ModelEntry
   | .supported owner feature =>
     let ownerName := "System.Runtime.Intrinsics." ++ owner
-    getterEntry intrinsicsScope (.atom intrinsicsScope ownerName) ownerName name!"get_IsSupported"
-      "get_IsSupported" .boolean (.feature feature)
+    getterEntry intrinsicsScope (.atom intrinsicsScope ownerName .classType) ownerName
+      name!"get_IsSupported" "get_IsSupported" .boolean (.feature feature)
   | .accelerated owner feature =>
     let ownerName := "System.Runtime.Intrinsics." ++ owner
-    getterEntry intrinsicsScope (.atom intrinsicsScope ownerName) ownerName
+    getterEntry intrinsicsScope (.atom intrinsicsScope ownerName .classType) ownerName
       name!"get_IsHardwareAccelerated" "get_IsHardwareAccelerated" .boolean (.feature feature)
   | .size owner =>
     getterEntry runtimeScope (.primitive owner) owner.display name!"get_Size" "get_Size" .int32
       (.constant 8)
   | .processWidth =>
     let ownerName := "System.Environment"
-    getterEntry runtimeScope (.atom runtimeScope ownerName) ownerName name!"get_Is64BitProcess"
-      "get_Is64BitProcess" .boolean (.constant 1)
+    getterEntry runtimeScope (.atom runtimeScope ownerName .classType) ownerName
+      name!"get_Is64BitProcess" "get_Is64BitProcess" .boolean (.constant 1)
 
 /-- Each nested hardware owner names its own external target even when two return one flag. -/
 private def getters : List Getter := [

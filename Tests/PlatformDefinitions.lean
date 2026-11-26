@@ -60,8 +60,9 @@ theorem carried_object_lineage :
 
 /-- The defining CoreLib identity supplies Int32 storage even without a facade reference. -/
 theorem carried_primitive_storage :
-    typeStorageAt (fun _ => none) (.atom coreLibraryScope "System.Int32") = some (.field .signed32) ∧
-    typeStorageAt (fun _ => none) (.atom ownScope "System.Int32") = none :=
+    typeStorageAt (fun _ => none) (.atom coreLibraryScope "System.Int32" .valueType) = some (.field
+        .signed32) ∧
+    typeStorageAt (fun _ => none) (.atom ownScope "System.Int32" .valueType) = none :=
   ⟨rfl, rfl⟩
 #print axioms carried_primitive_storage
 
@@ -261,7 +262,7 @@ theorem imported_owner_has_no_storage (frame : Frame) (named : NamedType) (expr 
     frame.admits (.named named) expr = false := by
   cases expr <;>
     simp [Frame.admits, typeAdmits, opaqueKind, objectNamed, valueLike, NamedType.isEnum,
-      TypeKind.reference?]
+      TypeKind.reference?, TypeKind.headIs]
 
 #print axioms imported_owner_has_no_storage
 
@@ -376,15 +377,19 @@ private def valueTypeRef : Nat := 0x01000002
     base is refused, and a definition that states a plain class or the root of enums is refused
     for that name. -/
 theorem value_types_come_from_the_value_type_definition :
-    checks worldPlatform tokens.pairRef (.type (.atom libScope "Lib.Pair")) none = true ∧
+    checks worldPlatform tokens.pairRef (.type (.atom libScope "Lib.Pair"
+        .valueType)) none = true ∧
     checks worldPlatform tokens.pairRef (.type (.object libScope "Lib.Pair"))
       (some (.operandMismatch tokens.pairRef)) = true ∧
-    checks (removing worldPlatform "ValueType") tokens.pairRef (.type (.atom libScope "Lib.Pair"))
+    checks (removing worldPlatform "ValueType") tokens.pairRef (.type (.atom libScope "Lib.Pair"
+        .valueType))
       (some (.missingPlatformDefinition valueTypeRef)) = true ∧
     checks (restating worldPlatform "ValueType" .classType) tokens.pairRef
-      (.type (.atom libScope "Lib.Pair")) (some (.platformKindMismatch valueTypeRef)) = true ∧
+      (.type (.atom libScope "Lib.Pair" .valueType)) (some (.platformKindMismatch
+          valueTypeRef)) = true ∧
     checks (restating worldPlatform "ValueType" .enumRoot) tokens.pairRef
-      (.type (.atom libScope "Lib.Pair")) (some (.platformKindMismatch valueTypeRef)) = true := by
+      (.type (.atom libScope "Lib.Pair" .valueType)) (some (.platformKindMismatch
+          valueTypeRef)) = true := by
   decide +kernel
 #print axioms value_types_come_from_the_value_type_definition
 

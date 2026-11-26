@@ -11,7 +11,7 @@ def pin : AssemblyPin := ⟨⟨name!"Fixture", ⟨1, 0, 0, 0⟩, name!"", none�
 /-- The scope text of `pin` in the fixture's type names. -/
 def scope : String := "Fixture, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 /-- One interface shared by every concrete type. -/
-def iface : TypeExpr := .atom scope "IValue"
+def iface : TypeExpr := .atom scope "IValue" .interfaceType
 /-- Distinct aggregate identities within one assembly. -/
 def receiver (index : Nat) : TypeExpr := .aggregate (scope ++ "::T" ++ toString index) index
 /-- Abstract interface method with a simple void signature. -/

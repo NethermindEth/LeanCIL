@@ -218,14 +218,14 @@ private def controls := [(asSite byteType packet, MemoryOp.asRef), (cast byteTyp
 theorem exactReference : controls.all (fun (call, _) =>
     let method := call.method
     [ { method with owner := .apply unsafeOwner byteType },
-      { method with owner := .atom "Other" "System.Runtime.CompilerServices.Unsafe" },
+      { method with owner := .atom "Other" "System.Runtime.CompilerServices.Unsafe" .classType },
       { method with hasThis := true }, { method with genericArity := method.genericArity + 1 },
       { method with parameters := method.parameters ++ [byteType] },
       { method with returnType := .void } ].all
       (fun other => (runtimeModel (environment 2) .call other).isNone &&
         refuses call { call with method := other })) &&
     refuses (nullSite byteType true) { (nullSite byteType true) with
-      method.returnType := .atom "Other" "System.Boolean" } &&
+      method.returnType := .atom "Other" "System.Boolean" .valueType } &&
     (runtimeModel {} .call { (asSite byteType packet).method with
       genericArity := 1, methodArguments := [byteType], parameters := [.object runtimeScope
         "System.Object"], returnType := byteType }).isNone := by decide +kernel

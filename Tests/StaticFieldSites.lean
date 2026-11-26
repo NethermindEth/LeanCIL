@@ -37,7 +37,7 @@ private def ldtoken : Nat := 0xD0
 
 /-- The owner of `X` and `Y`: `T`'s `Fixture` when `carried`, else `Ext.Point`. -/
 private def owner (carried : Bool) : TypeExpr :=
-  if carried then .atom pinScope "Fixture" else .object extScope "Ext.Point"
+  if carried then .atom pinScope "Fixture" .classType else .object extScope "Ext.Point"
 
 /-- `X` and `Y` as the instruction names them; a carried static counts from its owner's first
     field. -/

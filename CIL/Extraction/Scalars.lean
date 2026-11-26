@@ -65,7 +65,7 @@ def scalarType : TypeExpr → ScalarKind
     | .boolean | .char | .sbyte | .byte | .int16 | .uint16 | .int32 | .uint32 => .word32
     | .single | .double => .other
   -- CoreLib defines its own primitives; a runtime-scope atom has no storage.
-  | .atom scope name =>
+  | .atom scope name _ =>
     if scope != coreLibraryScope then .other
     else if name ∈ ["System.IntPtr", "System.UIntPtr"] then .native
     else if name ∈ ["System.Int64", "System.UInt64"] then .word64
@@ -78,7 +78,7 @@ def scalarType : TypeExpr → ScalarKind
 def receiverKind (owner : TypeExpr) : ScalarKind :=
   match owner with
   | .object .. => .object
-  | _ => if owner == .atom runtimeScope "System.Object" then .object
+  | _ => if owner == .atom runtimeScope "System.Object" .classType then .object
     else scalarType (.byref owner)
 
 private def numeric (kind : ScalarKind) : Bool := kind ∈ [.word32, .word64, .native]
@@ -511,7 +511,7 @@ private def joinBytes (separator : List UInt8) : List (List UInt8) → List UInt
 private def scalarTypeBytes : TypeExpr → Option (List UInt8)
   | .void => some (signatureBytes "System.Void")
   | .primitive type => some (signatureBytes type.display)
-  | .atom _ name => some (signatureBytes name)
+  | .atom _ name _ | .spelledModified _ name => some (signatureBytes name)
   | .object _ name | .constructor _ name | .objectConstructor _ name => signatureBytes <$> name.signatureName?
   | type@(.aggregate ..) => signatureBytes <$> spanElementName type
   -- Enum names cannot contain generic owner arguments.
@@ -615,7 +615,7 @@ private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
     | .primitive type =>
       if (signatureBytes type.display ++ [32]).isPrefixOf signature then scalarType site.returnType
       else .other
-    | .atom _ name =>
+    | .atom _ name _ =>
       if (signatureBytes name ++ [32]).isPrefixOf signature then scalarType site.returnType
       else .other
     | .byref _ =>
@@ -871,7 +871,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
       else
       -- AsRef takes a formed reference even at its void-pointer overload.
       if opcode == 40 && site.method.name == name!"AsRef" &&
-          site.declaringType == .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" &&
+          site.declaringType == unsafeOwner &&
           site.parameterTypes == [.pointer .void] then [.reference] else
       if opcode == 40 && site.method.name == nullGuardEntry.name &&
           site.method.owner == nullGuardEntry.owner && nullGuardEntry.bindsSite site

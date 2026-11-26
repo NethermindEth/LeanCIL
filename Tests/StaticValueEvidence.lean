@@ -14,7 +14,8 @@ private def initializer : Method := {
 
 /-- The static field the fixtures load, as the raw operand of `rawStatic` names it. -/
 private def field : FieldRef :=
-  { owner := .atom "Fixture" "Holder", index := 0, type := .atom "Fixture" "Pair",
+  { owner := .atom "Fixture" "Holder" .classType, index := 0,
+      type := .atom "Fixture" "Pair" .valueType,
     name := name!"Zero" }
 
 private def descriptor (bytes : List (BitVec 8)) (init : Option StaticInitializer) :
@@ -25,10 +26,10 @@ private def descriptor (bytes : List (BitVec 8)) (init : Option StaticInitialize
 private def otherField : FieldRef := { field with index := 1, name := name!"One" }
 
 /-- The field's index on another holder. -/
-private def otherOwner : FieldRef := { field with owner := .atom "Fixture" "Other" }
+private def otherOwner : FieldRef := { field with owner := .atom "Fixture" "Other" .classType }
 
 /-- The field's holder and index with another stored type. -/
-private def otherType : FieldRef := { field with type := .atom "Fixture" "Word" }
+private def otherType : FieldRef := { field with type := .atom "Fixture" "Word" .valueType }
 
 /-- The field's holder, index and type under another name. -/
 private def otherName : FieldRef := { field with name := name!"Other" }

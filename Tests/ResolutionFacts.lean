@@ -108,11 +108,11 @@ example : declaredNarrow []
 
 -- A name that only resembles a primitive's, or a primitive's name in another assembly, is not
 -- that primitive and does not narrow.
-example : declaredNarrow [] (.atom runtimeScope "SByte") = none := by rfl
+example : declaredNarrow [] (.atom runtimeScope "SByte" .valueType) = none := by rfl
 /-- The assembly scope of the example application. -/
 def examplesScope : String := "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 
-example : declaredNarrow [] (.atom examplesScope "System.Byte") = none := by rfl
+example : declaredNarrow [] (.atom examplesScope "System.Byte" .valueType) = none := by rfl
 
 /-- A method that returns a byte. -/
 def byteReturn : Method :=
@@ -214,8 +214,9 @@ resolution_fixture enumeration : (.enum (Tests.enumIdentity "Small") .signed16)
   returns true narrows (some .signed16)
 resolution_fixture noValue : (.primitive .byte) returns false narrows none
 resolution_fixture aggregate : (.aggregate "Examples.Point" 0) returns true narrows none
-resolution_fixture foreign : (.atom "Other" "System.Byte") returns true narrows none
-resolution_fixture misspelled : (.atom runtimeScope "System.Bytex") returns true narrows none
+resolution_fixture foreign : (.atom "Other" "System.Byte" .valueType) returns true narrows none
+resolution_fixture misspelled : (.atom runtimeScope "System.Bytex"
+    .valueType) returns true narrows none
 
 /-- info: 'Tests.ResolutionFacts.Generated.primitive_returnNarrow' depends on axioms: [propext] -/
 #guard_msgs in
@@ -578,7 +579,7 @@ cil_resolution_facts noParameters
 /-- The descriptor of the static site with index `k`, for the `k`th static field of `Fixture`. -/
 def siteDescriptor (k : Nat) : StaticDescriptor :=
   let field : Extraction.FieldRef :=
-    { owner := .atom "Fixture" "Fixture", index := k,
+    { owner := .atom "Fixture" "Fixture" .classType, index := k,
       type := .primitive .byte, name := name!"Field" }
   { identity := k, field, bytes := [BitVec.ofNat 8 k] }
 
@@ -1004,7 +1005,7 @@ example (environment : LayoutEnvironment) (shape : ElementShape)
 -- body's lookup without one.
 /-- A static method of no parameters that no runtime model stands for. -/
 private def unmodelledMethod : MethodRef :=
-  { owner := .atom "Tests" "Models", name := name!"Unmodelled", hasThis := false,
+  { owner := .atom "Tests" "Models" .classType, name := name!"Unmodelled", hasThis := false,
     genericArity := 0, returnType := .void, parameters := [] }
 /-- A body whose only call is unmodelled. -/
 def unmodelledCaller : CIL.Method :=
@@ -1075,7 +1076,7 @@ def comparedTypes : CIL.Method :=
   let test := CIL.Instruction.call (runtimeTypeComparison true).method {}
   { locals := [], returnsValue := false, code := [
       token, getter, token, getter, test,
-      .ldtoken (.type (.atom "Forwarder" "System.UInt64")), getter, token, getter, test,
+      .ldtoken (.type (.atom "Forwarder" "System.UInt64" .valueType)), getter, token, getter, test,
       token, .call unmodelledMethod {}, token, getter, test] }
 
 cil_instruction_equations comparedTypes

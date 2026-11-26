@@ -109,7 +109,7 @@ structure FieldRef where
     slice defines that a body may name: `ldsfld` of it is the profile's endianness, never a static
     load. -/
 def littleEndianField : FieldRef :=
-  { owner := .atom runtimeScope "System.BitConverter", index := 0,
+  { owner := .atom runtimeScope "System.BitConverter" .classType, index := 0,
     type := .primitive .boolean, name := name!"IsLittleEndian" }
 
 end CIL.Extraction

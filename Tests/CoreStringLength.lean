@@ -48,7 +48,7 @@ private def metadata : MethodMetadata := { own := {
   links := [⟨1, 0x0400038b, 0, 0x020000c6⟩, ⟨1, 0x06000a25, 0, 0x020000c6⟩] } }
 
 private def owner := TypeExpr.object coreLibraryScope "System.String"
-private def int32 := TypeExpr.atom coreLibraryScope "System.Int32"
+private def int32 := TypeExpr.atom coreLibraryScope "System.Int32" .valueType
 
 /-- The getter reads the first of the two instance fields in the string definition. -/
 private def lengthField : FieldRef :=

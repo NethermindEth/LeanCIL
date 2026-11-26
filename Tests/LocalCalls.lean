@@ -17,7 +17,7 @@ open CIL.Safety
 /-- The static unsigned multiplication overload taking a low-word destination. -/
 private def multiplyMethod : CIL.Extraction.MethodRef :=
   let word := CIL.Extraction.TypeExpr.primitive .uint64
-  { owner := .atom CIL.Extraction.runtimeScope "System.Math", name := name!"BigMul",
+  { owner := .atom CIL.Extraction.runtimeScope "System.Math" .classType, name := name!"BigMul",
     hasThis := false, genericArity := 0, parameters := [word, word, .byref word],
     returnType := word }
 

@@ -17,7 +17,7 @@ open CIL CIL.Extraction
 def getter (owner member : String) : CallSite := {
   declared := { convention := 0, returnType := .primitive .boolean },
   method := {
-    owner := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner),
+    owner := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner) .classType,
     name := (MetadataName.ofBytes? (member.toUTF8.toList.map UInt8.toNat)).getD ⟨0⟩,
     hasThis := false, genericArity := 0,
     returnType := .primitive .boolean, parameters := [] }
@@ -142,7 +142,8 @@ def sizeGetter (owner : PrimitiveType) : CallSite :=
 
 /-- `Environment.get_Is64BitProcess`. -/
 def processWidth : CallSite :=
-  platform (.atom runtimeScope "System.Environment") "System.Environment" "get_Is64BitProcess"
+  platform (.atom runtimeScope "System.Environment"
+      .classType) "System.Environment" "get_Is64BitProcess"
     .boolean
 
 /-- Each supported hardware owner and each process getter keeps its call only at its exact row. -/
@@ -173,9 +174,9 @@ theorem platform_encoding (raw : RawMethod) :
     featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.call site.method {}) = true ∧
     featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.ldc_i4 4) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
-      method.owner := .atom "forged" "System.IntPtr" }⟩ (.ldc_i4 8) = false ∧
+      method.owner := .atom "forged" "System.IntPtr" .valueType }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
-      method.owner := .atom runtimeScope "System.IntPtr" }⟩ (.ldc_i4 8) = false ∧
+      method.owner := .atom runtimeScope "System.IntPtr" .valueType }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
       target := .external "forged" }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
@@ -192,17 +193,17 @@ theorem platform_encoding (raw : RawMethod) :
 
 /-- A raw static Boolean load from `owner` in `scope`. -/
 def staticBoolean (scope owner : String) : RawInstruction :=
-  ⟨0, 126, .field (.atom scope owner) 0 (.primitive .boolean)
+  ⟨0, 126, .field (.atom scope owner .classType) 0 (.primitive .boolean)
     name!"IsLittleEndian" true⟩
 
 /-- A static `BitConverter` field of another type, which is not the endianness constant. -/
 def integerField : RawOperand :=
-  .field (.atom runtimeScope "System.BitConverter") 0 (.primitive .int32)
+  .field (.atom runtimeScope "System.BitConverter" .classType) 0 (.primitive .int32)
     name!"IsLittleEndian" true
 
 /-- A static `BitConverter` Boolean with another name, which is not the endianness constant. -/
 def otherBoolean : RawOperand :=
-  .field (.atom runtimeScope "System.BitConverter") 0 (.primitive .boolean)
+  .field (.atom runtimeScope "System.BitConverter" .classType) 0 (.primitive .boolean)
     name!"IsBigEndian" true
 
 /-- Only the runtime's `BitConverter` Boolean is the little-endian constant, bound exactly. -/
@@ -225,7 +226,7 @@ theorem platform_field (raw : RawMethod) :
 def referenceQuery (type : TypeExpr) : CallSite := {
   declared := { convention := 0x10, returnType := .primitive .boolean },
   method := {
-    owner := .atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers",
+    owner := .atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers" .classType,
     name := name!"IsReferenceOrContainsReferences", hasThis := false, genericArity := 1,
     returnType := .primitive .boolean, parameters := [],
     methodArguments := [type] },
@@ -250,7 +251,7 @@ theorem reference_content_boundary :
       integer) = some 0 ∧
     query (.byref integer) = none ∧ query (.pointer integer) = none ∧
     query (.array integer) = none ∧ query (.parameter 0) = none ∧
-    query (.atom runtimeScope "System.Object") = none ∧
+    query (.atom runtimeScope "System.Object" .classType) = none ∧
     query (.primitive .single) = none ∧
     query (.apply (.constructor runtimeScope "System.Span`1") integer) = none ∧
     query (.apply (.constructor runtimeScope "System.ReadOnlySpan`1") integer) = none ∧

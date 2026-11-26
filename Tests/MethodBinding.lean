@@ -92,7 +92,8 @@ theorem reindexed_address (newIndex : Nat) :
 
 /-- The field operand of the static reads below. -/
 def fieldRef : CIL.Extraction.FieldRef :=
-  { owner := .atom "Fixture" "Fixture", index := 0, type := .atom "Fixture" "System.Int64",
+  { owner := .atom "Fixture" "Fixture" .classType, index := 0,
+      type := .atom "Fixture" "System.Int64" .valueType,
     name := name!"Value" }
 
 /-- The static field the fixtures below read. -/

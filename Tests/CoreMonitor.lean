@@ -17,7 +17,7 @@ set_option maxRecDepth 65536
 set_option maxHeartbeats 16000000
 
 private def root := TypeExpr.object coreLibraryScope "System.Object"
-private def monitor := TypeExpr.atom coreLibraryScope "System.Threading.Monitor"
+private def monitor := TypeExpr.atom coreLibraryScope "System.Threading.Monitor" .classType
 
 private def callee (name : MetadataName) (text : String) (token : Nat)
     (parameters : List TypeExpr) : RawOperand :=
@@ -35,7 +35,7 @@ private def original : RawMethod := {
   token := 0x06003d62, owner := coreLibraryScope ++ "::System.Threading.Monitor"
   hasThis := false, explicitThis := false, callingConvention := 0
   attributes := 0x96, implementation := 0x100, returnType := .void
-  parameters := [root, .byref (.atom coreLibraryScope "System.Boolean")]
+  parameters := [root, .byref (.atom coreLibraryScope "System.Boolean" .valueType)]
   locals := [], initLocals := false, maxStack := 8, genericParameters := []
   code := [⟨0,3,.none⟩, ⟨1,71,.none⟩, ⟨2,44,.target 4⟩, ⟨4,40,reject⟩, ⟨9,2,.none⟩,
            ⟨10,40,enter⟩, ⟨15,3,.none⟩, ⟨16,23,.none⟩, ⟨17,82,.none⟩, ⟨18,42,.none⟩] }

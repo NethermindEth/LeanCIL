@@ -1525,7 +1525,7 @@ static void CheckShuffleReadWidth(string proof, MethodDefinition method)
                 let vector := TypeExpr.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
                   (.primitive .byte)
                 let narrow := { site.method with
-                  owner := .atom intrinsicsScope "System.Runtime.Intrinsics.Vector128", returnType := vector }
+                  owner := .atom intrinsicsScope "System.Runtime.Intrinsics.Vector128" .classType, returnType := vector }
                 let emitted := { method0 with code := [.call narrow {}], links := [] }
                 runtimeModel environment .call narrow == some (.memory (.marshalRead (.snapshot .vector128) false)) &&
                   !(decide (RuntimeModelsAgree closed [true] emitted))

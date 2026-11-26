@@ -11,8 +11,8 @@ open CIL CIL.Extraction
 
 def library : String := "Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 def word : TypeExpr := .primitive .uint64
-def owner : TypeExpr := .atom library "Library.Methods"
-def pair : TypeExpr := .atom library "Library.Pair"
+def owner : TypeExpr := .atom library "Library.Methods" .classType
+def pair : TypeExpr := .atom library "Library.Pair" .valueType
 
 def privateRaw : RawLayout := {
   identity := library ++ "::Library.Private", explicit := false,
@@ -86,7 +86,8 @@ theorem rejection_10 : validateImportCall [] [copySlot] 40
     copySlot.identity 0 2 = false := by decide +kernel
 #print axioms rejection_10
 theorem rejection_11 : validateImportCall [] [copySlot] 40
-    { copySite with method.parameters := [.byref (.atom "Other" "Library.Pair"), .byref pair] }
+    { copySite with method.parameters := [.byref (.atom "Other" "Library.Pair" .valueType),
+        .byref pair] }
     copySlot.identity 0 2 = false := by decide +kernel
 #print axioms rejection_11
 

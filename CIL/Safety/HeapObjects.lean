@@ -142,18 +142,18 @@ def objectTest (memory : Memory) (type : CIL.Extraction.TypeExpr) (throwing : Bo
 /-- `System.Exception` as CoreLib defines it and as a reference assembly names it. -/
 def exceptionClasses : List CIL.Extraction.TypeExpr :=
   [.object CIL.Extraction.coreLibraryScope CIL.ExceptionType.baseException.ownerName,
-    .atom CIL.Extraction.runtimeScope CIL.ExceptionType.baseException.ownerName]
+    .atom CIL.Extraction.runtimeScope CIL.ExceptionType.baseException.ownerName .classType]
 
 /-- `System.Object` as CoreLib defines it and as a reference assembly names it. -/
 def objectClasses : List CIL.Extraction.TypeExpr :=
   [.object CIL.Extraction.coreLibraryScope "System.Object",
-    .atom CIL.Extraction.runtimeScope "System.Object"]
+    .atom CIL.Extraction.runtimeScope "System.Object" .classType]
 
 /-- The scope and full name of a class spelling. -/
 private def classSpelling :
     CIL.Extraction.TypeExpr → Option (String × CIL.Extraction.ClassName)
   | .object scope name => some (scope, name)
-  | .atom scope name => some (scope, .ofText name)
+  | .atom scope name .classType => some (scope, .ofText name)
   | _ => none
 
 /-- Runtime identity of two class spellings: two full names are two classes, while one full name

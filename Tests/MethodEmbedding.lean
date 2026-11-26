@@ -643,7 +643,8 @@ theorem update_rejected : ¬ Embeds viaUpdate moved [0, 1, 3, 4] :=
 
 /-- The field operand of the static reads below. -/
 def staticFieldRef : CIL.Extraction.FieldRef :=
-  { owner := .atom "Fixture" "Fixture", index := 0, type := .atom "Fixture" "System.Int64",
+  { owner := .atom "Fixture" "Fixture" .classType, index := 0,
+      type := .atom "Fixture" "System.Int64" .valueType,
     name := name!"Value" }
 
 /-- The static field the fixtures below read. -/

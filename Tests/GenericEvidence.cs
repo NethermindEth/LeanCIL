@@ -163,7 +163,7 @@ foreach (var (name, scope) in new[]
 })
     Reject(0, name, source => ChangeDefinition(source, "method1Closed", line =>
         line.Replace(".primitive .uint64",
-            $".atom {System.Text.Json.JsonSerializer.Serialize(scope)} \"System.UInt64\"")));
+            $".atom {System.Text.Json.JsonSerializer.Serialize(scope)} \"System.UInt64\" .valueType")));
 Reject(0, "wrong-type-argument", source => ChangeDefinition(source, "method1TypeArgumentsRaw",
     line => line.Replace(".primitive .uint64", ".primitive .uint32")));
 Reject(0, "wrong-closed-signature", source => ChangeDefinition(source, "method1Closed",

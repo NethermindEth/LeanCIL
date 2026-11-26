@@ -21,9 +21,9 @@ Agreement with the platform image bytes remains trusted.
 
 namespace CIL.Extraction
 
-/-- The storage kind of a named type. A resolved enum retains its integer element code.
-    Other platform types record their value-or-reference marker. A modifier read by name alone
-    has no marker. -/
+/-- The storage kind of a named type. A resolved enum retains its integer element code and a
+    platform interface is an interface. Other platform types record their value-or-reference
+    marker. A modifier read by name alone has no marker. -/
 inductive TypeKind where
   | valueType
   | enumType (underlying : Nat)
@@ -543,6 +543,7 @@ private def modifierDefinition (env : MetadataEnv) (position : Nat) :
 /-- The storage kind of a resolved platform type, including an enum's integer element code. -/
 def PlatformKind.resolvedKind : PlatformKind → TypeKind
   | .enumType code _ => .enumType code
+  | .interfaceType | .genericInterface _ => .interfaceType
   | kind => .external (some kind.isValue)
 
 /-- The kind the table states for a named type's assembly and name parts, which `fits` must
@@ -1344,12 +1345,26 @@ def objectNamed (named : NamedType) : Bool :=
       (named.kind == .external (some false) || named.kind == .classType)
 
 /-- Whether a generic definition of this kind is a reference type, when the metadata decides it:
-    a class or interface of a carried slice or a reference the signature marks as a class is one,
+    a class of a carried slice, an interface or a reference the signature marks as a class is one,
     a struct, an enum or a reference the signature marks as a value type is not. -/
 def TypeKind.reference? : TypeKind → Option Bool
   | .classType | .interfaceType | .external (some false) => some true
   | .valueType | .enumType _ | .external (some true) => some false
   | .external none | .importedOwner => none
+
+/-- Whether an atom's head kind is the one the resolved definition states. An external
+    reference that is not an interface is a class; an enum, an imported owner and a modifier read
+    by name alone have none. -/
+def TypeKind.headIs : TypeKind → HeadKind → Bool
+  | .valueType, kind | .external (some true), kind => kind == .valueType
+  | .classType, kind | .external (some false), kind => kind == .classType
+  | .interfaceType, kind => kind == .interfaceType
+  | .enumType _, _ | .importedOwner, _ | .external none, _ => false
+
+/-- The head kind of a named element type: `System.String` and `System.Object` are classes and
+    the others are values. -/
+def primitiveHead (code : Nat) : HeadKind :=
+  if code == 0x0E || code == 0x1C then .classType else .valueType
 
 /-- A value type, or an external type that may be one. -/
 def valueLike : TypeKind → Bool
@@ -1419,8 +1434,8 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
     | .primitive code, .void => code == 0x01
     | .primitive code, .primitive type =>
       frame.corlib == some runtimeScopeBytes && type.elementType == code
-    | .primitive code, .atom scope name =>
-      code != 0x01 && frame.corlib == some (bytesOf scope) &&
+    | .primitive code, .atom scope name kind =>
+      kind == primitiveHead code && code != 0x01 && frame.corlib == some (bytesOf scope) &&
         primitiveName code == some (bytesOf name) &&
         !runtimePrimitiveAtom (bytesOf scope) (bytesOf name)
     | .primitive 0x0E, .object scope name =>
@@ -1430,9 +1445,8 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
       named.scope == runtimeScopeBytes && named.parts == primitiveParts type && !named.isEnum &&
         named.kind.reference? == some false
     -- `System.String` and `System.Object` keep their atoms only as references.
-    | .named named, .atom scope name =>
-      named.scope == bytesOf scope && named.name == bytesOf name && !named.isEnum &&
-        named.kind != .importedOwner &&
+    | .named named, .atom scope name kind =>
+      named.kind.headIs kind && named.scope == bytesOf scope && named.name == bytesOf name &&
         (!named.fixedStorage || named.kind.reference? == some true &&
           (named.name == systemStringName || named.name == systemObjectName)) &&
         !runtimePrimitiveAtom (bytesOf scope) (bytesOf name)
@@ -1482,10 +1496,10 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
     | .modified required modifier element, .modified claimed scope name inner =>
       frame.rawIndices && required == claimed && modifier.scope == bytesOf scope &&
         modifier.name == bytesOf name && typeAdmits frame fuel element inner
-    | .modified required modifier element, .atom scope name =>
+    | .modified required modifier element, .spelledModified scope spelling =>
       !frame.rawIndices && bytesOf scope == frame.anchor &&
-        cecilName false fuel (.modified required modifier element) == some (bytesOf name) &&
-        !runtimePrimitiveAtom (bytesOf scope) (bytesOf name)
+        cecilName false fuel (.modified required modifier element) == some (bytesOf spelling) &&
+        !runtimePrimitiveAtom (bytesOf scope) (bytesOf spelling)
     | _, _ => false
 
 /-- A generic instance binds the constructor's scope, name and value or reference kind. -/
@@ -1549,10 +1563,10 @@ def Frame.admitsHeld (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : B
 
 /-- An application chain never admits an atom, since each prefix test admits only an application
     or a generic definition. -/
-private theorem argumentsAdmit_atom {frame : Frame} {scope name : String} :
+private theorem argumentsAdmit_atom {frame : Frame} {scope name : String} {kind : HeadKind} :
     ∀ (fuel : Nat) (arguments : ResolvedList) (prefixMatches : TypeExpr → Bool),
-      prefixMatches (.atom scope name) = false →
-      argumentsAdmit frame fuel arguments prefixMatches (.atom scope name) = false
+      prefixMatches (.atom scope name kind) = false →
+      argumentsAdmit frame fuel arguments prefixMatches (.atom scope name kind) = false
   | 0, _, _, _ => by simp [argumentsAdmit]
   | _ + 1, .nil, _, refused => by simpa [argumentsAdmit] using refused
   | fuel + 1, .cons _ rest, _, _ => by
@@ -1563,8 +1577,9 @@ private theorem argumentsAdmit_atom {frame : Frame} {scope name : String} :
 /-- Resolution refuses an atom that spells a runtime primitive, whatever the resolved type, the
     frame and the nesting bound. -/
 theorem typeAdmits_runtimePrimitiveAtom {frame : Frame} {fuel : Nat} {type : ResolvedType}
-    {scope name : String} (spelled : runtimePrimitiveAtom (bytesOf scope) (bytesOf name) = true) :
-    typeAdmits frame fuel type (.atom scope name) = false := by
+    {scope name : String} {kind : HeadKind}
+    (spelled : runtimePrimitiveAtom (bytesOf scope) (bytesOf name) = true) :
+    typeAdmits frame fuel type (.atom scope name kind) = false := by
   cases fuel with
   | zero => simp [typeAdmits]
   | succ fuel =>

@@ -83,8 +83,8 @@ private def fieldCode (opcode : Nat) (field : FieldRef)
 /-- The constant requires the exact runtime field and a little-endian profile. -/
 theorem endianFieldDecodes :
     let field := littleEndianField
-    let wrong := [{ field with owner := .atom "Foreign" "System.BitConverter" },
-      { field with owner := .atom runtimeScope "System.Other" },
+    let wrong := [{ field with owner := .atom "Foreign" "System.BitConverter" .classType },
+      { field with owner := .atom runtimeScope "System.Other" .classType },
       { field with name := name!"Other" }, { field with type := int32 }]
     fieldCode 126 field = .ok [.ldc_i4 1] ∧
       wrong.all (fun other => decide (fieldCode 126 other = liveHoleAt 0 126)) ∧
@@ -95,7 +95,8 @@ theorem endianFieldDecodes :
 
 /-- Both RVA opcodes bind the descriptor's field and require its complete declared storage. -/
 theorem rvaFieldsDecode :
-    let field : FieldRef := ⟨.object "Fixture" "Tables", 1, .atom "Fixture" "Data", name!"Words"⟩
+    let field : FieldRef := ⟨.object "Fixture" "Tables", 1, .atom "Fixture" "Data" .valueType,
+        name!"Words"⟩
     let data : StaticFieldSite :=
       ⟨{ identity := 3, field, bytes := [1, 2, 3, 4], alignment := 4 }, some 4⟩
     [(127, Instruction.ldsflda field), (208, .ldtoken (.field field))].all (fun (opcode, op) =>
@@ -274,7 +275,8 @@ theorem ordinaryStaticVolatileLoadRefused :
 /-- Each RVA guard refuses on its own: data at a platform field, an empty, misaligned,
     initialized, scalar or opaque blob, another field opcode, a prefix and a link at the pc. -/
 theorem rvaGuardsRefuse :
-    let field : FieldRef := ⟨.object "Fixture" "Tables", 1, .atom "Fixture" "Data", name!"Words"⟩
+    let field : FieldRef := ⟨.object "Fixture" "Tables", 1, .atom "Fixture" "Data" .valueType,
+        name!"Words"⟩
     let data : StaticFieldSite :=
       { descriptor := { identity := 3, field, bytes := [1, 2, 3, 4], alignment := 4 },
         rvaSize := some 4 }
@@ -304,13 +306,14 @@ theorem staticSpanDecodes :
     let span := TypeExpr.apply (.constructor runtimeScope "System.ReadOnlySpan`1")
     let site : CallSite := {
       method := {
-        owner := .atom runtimeScope owner, name := name!"CreateSpan", hasThis := false,
-        genericArity := 1, returnType := span int32, parameters := [.atom runtimeScope handle],
+        owner := .atom runtimeScope owner .classType, name := name!"CreateSpan", hasThis := false,
+        genericArity := 1, returnType := span int32,
+        parameters := [.atom runtimeScope handle .valueType],
         methodArguments := [int32] },
       name, typeArguments := [int32], parameterCount := 1, returnsValue := true,
       declared := {
         convention := 16, returnType := span (.parameter 0),
-        parameters := [.atom runtimeScope handle] },
+        parameters := [.atom runtimeScope handle .valueType] },
       target := .external
         s!"{runtimeScope}::System.ReadOnlySpan`1<!!0> {owner}::{name}({handle})" }
     let wide := TypeExpr.primitive .uint64

@@ -22,7 +22,7 @@ def site : CallSite := {
   declared := { convention := 0, parameters := [.byref word, .byref word, .byref word] },
   method := {
     owner := .atom "Library, Version=1.0.0.0, Culture=neutral, \
-      PublicKeyToken=null" "Library.Adder", name := name!"AddTo", hasThis := false,
+      PublicKeyToken=null" "Library.Adder" .classType, name := name!"AddTo", hasThis := false,
     genericArity := 0, returnType := .void,
     parameters := [.byref word, .byref word, .byref word] },
   name := "AddTo", target := .external addToIdentity, typeArguments := [], parameterCount := 3,

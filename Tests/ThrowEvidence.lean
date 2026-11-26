@@ -21,7 +21,7 @@ private def ctor (scope type : String) (parameters : Nat) : RawOperand := .call 
     convention := 0x20,
     parameters := List.replicate parameters (.object runtime "System.String") },
   method := {
-    owner := .atom scope type, name := name!".ctor", hasThis := true, genericArity := 0,
+    owner := .atom scope type .classType, name := name!".ctor", hasThis := true, genericArity := 0,
     returnType := .void,
     parameters := List.replicate parameters (.object runtime "System.String") },
   name := ".ctor",
@@ -101,7 +101,8 @@ theorem rejects_missing_constructor (first second : String) :
 private def wrongParameter : RawOperand := .call {
   declared := { convention := 0x20, parameters := [intType] },
   method := {
-    owner := .atom runtime "System.DivideByZeroException", name := name!".ctor", hasThis := true,
+    owner := .atom runtime "System.DivideByZeroException" .classType, name := name!".ctor",
+    hasThis := true,
     genericArity := 0, returnType := .void, parameters := [] },
   name := ".ctor",
   target := .external (runtime ++ "::System.Void System.DivideByZeroException::.ctor(\
@@ -156,7 +157,8 @@ theorem rejects_int32_parameter (message : String) :
 theorem rejects_foreign_exception :
     throwFold [i 115 (ctor "Fixture" "System.DivideByZeroException" 0), i 122] = none ∧
     throwFold [i 115 (changeSite divide fun site =>
-      { site with method.owner := .atom "Fixture" "System.DivideByZeroException" }), i 122] =
+      { site with method.owner := .atom "Fixture" "System.DivideByZeroException" .classType
+          }), i 122] =
       none := by decide
 #print axioms rejects_foreign_exception
 
@@ -275,7 +277,7 @@ theorem rejects_unadmitted_owners :
     foldRoles [i 115 (ctor runtime "System.PlatformNotSupportedException" 0), i 122] =
       [none, none] ∧
     foldRoles [i 115 (ctor runtime "System.InvalidCastException" 0), i 122] = [none, none] ∧
-    exceptionOwner? (.atom runtimeScope "System.Object") = none := by decide +kernel
+    exceptionOwner? (.atom runtimeScope "System.Object" .classType) = none := by decide +kernel
 #print axioms rejects_unadmitted_owners
 
 section

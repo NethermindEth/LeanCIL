@@ -55,7 +55,8 @@ theorem byteOffset_bad_site :
     let method := byteOffset native
     let site := byteSite method
     let invalid := [byteSite { method with owner := .apply unsafeOwner native },
-      byteSite { method with owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe" },
+      byteSite { method with
+        owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe" .classType },
       byteSite { method with hasThis := true }, byteSite { method with genericArity := 2 },
       { site with target := .external "Fixture" },
       { site with declared.returnType := .parameter 0 }]
@@ -217,7 +218,8 @@ theorem displacement_binding :
           { site with declared.parameters := [closedAddress, .parameter 0] }
         else { site with declared.returnType := closedAddress }
       let changed := [forged, { site with method.owner := .apply unsafeOwner int },
-        { site with method.owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe" },
+        { site with
+          method.owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe" .classType },
         { site with method.hasThis := true }, { site with method.genericArity := 2 },
         { site with target := .external "Fixture" }]
       let conventions := [0x00, 0x11, 0x30, 0x50, 0x70].map fun convention =>

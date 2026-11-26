@@ -44,7 +44,7 @@ internal static class ModelOperandChecks
                           decide (refusal features operand = some (.liveHole 0 40)) &&
                           decide (methodCode features environment [] [true] (source operand) = [.unadmitted 40])
                       let foreign := match site.method.owner with
-                        | .atom _ name => TypeExpr.atom "Foreign" name
+                        | .atom _ name kind => TypeExpr.atom "Foreign" name kind
                         | .apply (.constructor _ name) element =>
                           .apply (.constructor "Foreign" name) element
                         | owner => owner
@@ -56,7 +56,7 @@ internal static class ModelOperandChecks
                           method.returnType := result, method.parameters := parameters,
                           method.methodArguments := [floating], typeArguments := [floating] }
                       let ownerElement : Option CallSite := do
-                        let .apply head (.atom _ original) := site.method.owner | none
+                        let .apply head (.atom _ original _) := site.method.owner | none
                         let .external identity := site.target | none
                         let changed := TypeExpr.apply head floating
                         let close := fun type => if type == site.method.owner then changed else type

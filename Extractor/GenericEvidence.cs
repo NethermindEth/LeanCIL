@@ -8,6 +8,20 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
+/// <summary>The head kind of a scoped atom, as Lean's <c>HeadKind</c> states it.</summary>
+internal enum TypeHead { Value, Class, Interface }
+
+internal static class TypeHeads
+{
+    internal static string ToLean(this TypeHead head) => head switch
+    {
+        TypeHead.Value => ".valueType",
+        TypeHead.Class => ".classType",
+        TypeHead.Interface => ".interfaceType",
+        _ => throw new ArgumentOutOfRangeException(nameof(head)),
+    };
+}
+
 // Read original definitions from a separate, untouched module over the same assembly
 // bytes. The call-graph walk rewrites call operands in the working module.
 internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence layouts,
@@ -161,8 +175,24 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             return $".enum {EnumTypes.Identity(type).ToLean()} {EnumTypes.StorageLean(type)}";
         }
         if (ObjectTypes.Reference(type)) return ObjectType(type);
-        return Aggregate(localOnly: true) ?? RuntimePrimitive(type) ?? $".atom {Scope(type)} {Quote(type.FullName)}";
+        return Aggregate(localOnly: true) ?? RuntimePrimitive(type) ?? Atom(type);
     }
+
+    /// <summary>The scoped atom of a named type, with the head kind its definition states, or the Cecil
+    /// spelling of a modified type, which Lean compares with the modifiers it reads.</summary>
+    internal static string Atom(TypeReference type) => type is IModifierType
+        ? $".spelledModified {Scope(type)} {Quote(type.FullName)}"
+        : $".atom {Scope(type)} {Quote(type.FullName)} {HeadKind(type).ToLean()}";
+
+    /// <summary>The head kind of a named type: its definition's kind when it resolves, otherwise the
+    /// value-or-class marker its signature carries.</summary>
+    internal static TypeHead HeadKind(TypeReference type) => type.Resolve() switch
+    {
+        { IsInterface: true } => TypeHead.Interface,
+        { IsValueType: true } => TypeHead.Value,
+        { } => TypeHead.Class,
+        null => type.IsValueType ? TypeHead.Value : TypeHead.Class,
+    };
 
     // The head says whether the instances are values or references, as the signature's marker does.
     static string Head(GenericInstanceType generic) =>

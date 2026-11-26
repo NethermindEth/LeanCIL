@@ -17,10 +17,11 @@ open Tests.MetadataBuilder (objectPlatform)
 
 /-- The primitive assembly identity with its checked byte representation. -/
 private def runtime := runtimeScope
-example : scalarType (.atom coreLibraryScope "System.Int32") = .word32 ∧
-    scalarType (.atom coreLibraryScope "System.Int64") = .word64 ∧
-    scalarType (.atom coreLibraryScope "System.IntPtr") = .native ∧
-    scalarType (.atom "System.Private.CoreLib" "System.Int32") = .other := by decide +kernel
+example : scalarType (.atom coreLibraryScope "System.Int32" .valueType) = .word32 ∧
+    scalarType (.atom coreLibraryScope "System.Int64" .valueType) = .word64 ∧
+    scalarType (.atom coreLibraryScope "System.IntPtr" .valueType) = .native ∧
+    scalarType (.atom "System.Private.CoreLib" "System.Int32" .valueType) = .other := by
+  decide +kernel
 
 private def word : TypeExpr := .primitive .uint64
 private def intType : TypeExpr := .primitive .int32
@@ -388,7 +389,8 @@ example : ¬ ScalarFlowValid { mixedRaw with parameters := [nativeType, word] } 
 private def site : CallSite := {
   declared := { convention := 0, returnType := word, parameters := [word, word] },
   method := {
-    owner := .atom scopeText "Fixture", name := name!"", hasThis := false, genericArity := 0,
+    owner := .atom scopeText "Fixture" .classType, name := name!"", hasThis := false,
+    genericArity := 0,
     returnType := word, parameters := [word, word] },
   target := .managed 0x06000001, typeArguments := [], parameterCount := 2, returnsValue := true }
 /-- The call linked to method 0 that names `site`'s method, as the extractor emits it. -/
@@ -688,7 +690,7 @@ private theorem span_constructor_cases :
     (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
         name := "Other" })) [.word32, .reference] = none) ∧
     (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
-        method.owner := .atom runtime "Other" })) [.word32, .reference] = none) ∧
+        method.owner := .atom runtime "Other" .classType })) [.word32, .reference] = none) ∧
     (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
         method.parameters := [.pointer word, intType] })) [.word32, .reference] = none) ∧
     (scalarTransfer byteSpanRaw (i 40 (.call byteSpanSite)) [.word32, .reference, .reference] =
@@ -707,8 +709,9 @@ private def tupleSite : CallSite := {
     owner := .atom
       "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
         PublicKeyToken=cc7b13ffcd2ddd51"
-      "System.Runtime.Intrinsics.X86.X86Base/X64", name := name!"DivRem", hasThis := false,
-    genericArity := 0, returnType := tupleType, parameters := [word, word, word] },
+      "System.Runtime.Intrinsics.X86.X86Base/X64" .classType,
+    name := name!"DivRem", hasThis := false, genericArity := 0, returnType := tupleType,
+    parameters := [word, word, word] },
   name := "DivRem",
   target := .external
     "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
@@ -753,7 +756,8 @@ private def spanSite : CallSite := {
       (.byref (.ownerParameter 0)), parameters := [intType] },
   method := {
     owner := spanType, name := name!"get_Item", hasThis := true, genericArity := 0,
-    returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)",
+    returnType := .spelledModified runtime
+        "!0& modreq(System.Runtime.InteropServices.InAttribute)",
     parameters := [intType] },
   name := "get_Item",
   target := .external
@@ -1358,14 +1362,15 @@ private def guardSite (name : String) (element : TypeExpr) (comparison := false)
   let null := name == "ThrowIfNull"
   let label := TypeExpr.object runtimeScope "System.String"
   let owner := if null then "System.ArgumentNullException" else "System.ArgumentOutOfRangeException"
-  let parameters (type : TypeExpr) := if null then [.atom runtimeScope "System.Object", label]
+  let parameters (type : TypeExpr) := if null then [.atom runtimeScope "System.Object" .classType,
+      label]
     else if comparison then [type, type, label] else [type, label]
   let signature := if null then "System.Object,System.String"
     else if comparison then "!!0,!!0,System.String" else "!!0,System.String"
   let arguments := if null then [] else [element]
   { declared := { convention := if null then 0 else 0x10, parameters := parameters (.parameter 0) }
     method :=
-      { owner := .atom runtimeScope owner, name := key, hasThis := false,
+      { owner := .atom runtimeScope owner .classType, name := key, hasThis := false,
         genericArity := arguments.length, returnType := .void, parameters := parameters element,
         methodArguments := arguments }
     name, target := .external s!"{runtimeScope}::System.Void {owner}::{name}({signature})"
@@ -1451,7 +1456,8 @@ theorem sizeof_other_struct_refused :
 private def sizeOfSite (type : TypeExpr) : CallSite := {
   declared := { convention := 0x10, returnType := intType },
   method := {
-    owner := .atom runtime "System.Runtime.CompilerServices.Unsafe", name := name!"SizeOf",
+    owner := .atom runtime "System.Runtime.CompilerServices.Unsafe" .classType,
+    name := name!"SizeOf",
     hasThis := false, genericArity := 1, returnType := intType, parameters := [],
     methodArguments := [type] },
   name := "SizeOf",
@@ -1486,7 +1492,7 @@ private theorem size_identity_cases :
     (sizeAt (i 40 (.call { sizeOfSite intType with declared.returnType := .parameter 0 }))
       4 = false) ∧
     (sizeAt (i 40 (.call { sizeOfSite intType with
-        method.owner := .atom "Forged" "System.Runtime.CompilerServices.Unsafe" }))
+        method.owner := .atom "Forged" "System.Runtime.CompilerServices.Unsafe" .classType }))
       4 = false) := by
   decide +kernel
 

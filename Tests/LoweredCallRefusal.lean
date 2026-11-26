@@ -57,7 +57,7 @@ private def vectorSite (read : Bool) (element : PrimitiveType) : RawInstruction 
     else "!!1 System.Runtime.CompilerServices.Unsafe::BitCast(!!0)"
   return ⟨0, 40, .call {
     method := {
-      owner := .atom runtimeScope "System.Runtime.CompilerServices.Unsafe",
+      owner := .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" .classType,
       name := if read then name!"ReadUnaligned" else name!"BitCast", hasThis := false,
       genericArity := arguments.length, methodArguments := arguments,
       parameters := [if read then byteRef else source],
@@ -96,7 +96,7 @@ private def arithmeticChecks (env : LayoutEnvironment) (site : CallSite)
   let method := site.method
   let wrong := TypeExpr.primitive .boolean
   let refusals := [
-    { site with method.owner := .atom "Fixture" "System.Math" },
+    { site with method.owner := .atom "Fixture" "System.Math" .classType },
     { site with method.name := name!"Wrong" }, { site with name := "Wrong" },
     { site with method.genericArity := 1 }, { site with method.hasThis := true },
     { site with parameterCount := site.parameterCount + 1 },
@@ -112,7 +112,8 @@ theorem bigMulBinding :
     let site := fun (element : PrimitiveType) =>
       let word := TypeExpr.primitive element
       let method : MethodRef := {
-        owner := .atom runtimeScope "System.Math", name := name!"BigMul", hasThis := false,
+        owner := .atom runtimeScope "System.Math" .classType, name := name!"BigMul",
+        hasThis := false,
         genericArity := 0, returnType := .primitive .int64,
         parameters := [word, word] }
       let target := s!"System.Int64 System.Math::BigMul({element.display},{element.display})"
@@ -128,7 +129,8 @@ theorem bigMulBinding :
 theorem arithmetic_result_signedness :
     let unsigned := TypeExpr.primitive .uint32
     let multiply : MethodRef := {
-      owner := .atom runtimeScope "System.Math", name := name!"BigMul", hasThis := false,
+      owner := .atom runtimeScope "System.Math" .classType, name := name!"BigMul",
+      hasThis := false,
       genericArity := 0, parameters := [unsigned, unsigned],
       returnType := .primitive .int64 }
     let pair := integerPairIdentity
@@ -150,7 +152,7 @@ theorem divRemTupleLayout :
     let identity := integerPairIdentity "System.UInt64"
     let word := TypeExpr.primitive .uint64
     let method : MethodRef := {
-      owner := .atom runtimeScope "System.Math", name := name!"DivRem",
+      owner := .atom runtimeScope "System.Math" .classType, name := name!"DivRem",
       genericArity := 0, hasThis := false, returnType := .aggregate identity 1,
       parameters := [word, word] }
     let site : CallSite := {
@@ -192,7 +194,7 @@ theorem sumDeclaration :
     let word := TypeExpr.primitive .uint64
     let site : CallSite := {
       method := {
-        owner := .atom intrinsicsScope owner, name := name!"Sum", hasThis := false,
+        owner := .atom intrinsicsScope owner .classType, name := name!"Sum", hasThis := false,
         genericArity := 1, methodArguments := [word], returnType := word,
         parameters := [vector word] }
       name := "Sum", parameterCount := 1, returnsValue := true, typeArguments := [word],
@@ -250,7 +252,7 @@ theorem spanClaims :
 private def emptyEnvironment : LayoutEnvironment := {}
 
 cil_decoded_method unknownMethod := Method.ofRaw? .scalar emptyEnvironment [] [false]
-  (body 40 (.atom "Fixture" "Fixture") name!"Missing" "Missing") []
+  (body 40 (.atom "Fixture" "Fixture" .classType) name!"Missing" "Missing") []
 
 /-- The generated code retains the opcode of the dead unresolved member. -/
 theorem unknownMethodCode : unknownMethod.code = [.unadmitted 40] := rfl

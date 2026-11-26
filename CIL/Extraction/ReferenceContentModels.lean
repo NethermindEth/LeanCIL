@@ -6,7 +6,7 @@ namespace CIL.Extraction
 
 /-- The generic RuntimeHelpers member with no parameters and a Boolean result. -/
 private def queryOwner :=
-  TypeExpr.atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers"
+  TypeExpr.atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers" .classType
 
 /-- The open declaration has one method parameter and no value parameters. -/
 private def queryDeclaration : OpenSignature :=

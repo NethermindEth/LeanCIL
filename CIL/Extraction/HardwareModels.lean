@@ -55,7 +55,7 @@ private def HardwareSlot.fullOwner (slot : HardwareSlot) :=
 /-- The exact declaring type or open vector constructor used for table lookup. -/
 private def HardwareSlot.head (slot : HardwareSlot) : TypeExpr :=
   if slot.genericOwner then .constructor intrinsicsScope slot.fullOwner
-  else .atom intrinsicsScope slot.fullOwner
+  else .atom intrinsicsScope slot.fullOwner .classType
 
 /-- A static member of a vector constructor carries its element in the declaring type. -/
 private def HardwareSlot.matches (slot : HardwareSlot) (method : MethodRef) : Bool :=

@@ -218,7 +218,8 @@ def libScope : String := "Lib, Version=1.0.0.0, Culture=neutral, PublicKeyToken=
 def writeLineSite : CallSite :=
   { declared := { convention := 0, parameters := [int32] },
     method := {
-      owner := .atom runtimeScope "System.Console", name := name!"WriteLine", hasThis := false,
+      owner := .atom runtimeScope "System.Console" .classType, name := name!"WriteLine",
+      hasThis := false,
       genericArity := 0, returnType := .void, parameters := [int32] },
     name := "WriteLine",
     target := .external (runtimeScope ++ "::System.Void System.Console::WriteLine(System.Int32)"),
@@ -228,7 +229,8 @@ def writeLineSite : CallSite :=
 def getSite : CallSite :=
   { declared := { convention := 0, returnType := int32 },
     method := {
-      owner := .atom libScope "Lib.Box", name := name!"Get", hasThis := false, genericArity := 0,
+      owner := .atom libScope "Lib.Box" .classType, name := name!"Get", hasThis := false,
+      genericArity := 0,
       returnType := int32, parameters := [] },
     name := "Get", target := .managed 0x06000001, typeArguments := [], parameterCount := 0,
     returnsValue := true }
@@ -237,7 +239,8 @@ def getSite : CallSite :=
 def sumSite : CallSite :=
   { declared := { convention := 0, returnType := int32 },
     method := {
-      owner := .atom libScope "Lib.Pair", name := name!"Sum", hasThis := false, genericArity := 0,
+      owner := .atom libScope "Lib.Pair" .valueType, name := name!"Sum", hasThis := false,
+      genericArity := 0,
       returnType := int32, parameters := [] },
     name := "Sum", target := .managed 0x06000002, typeArguments := [], parameterCount := 0,
     returnsValue := true }
@@ -246,7 +249,7 @@ def sumSite : CallSite :=
 def idSite : CallSite :=
   { declared := { convention := 0x10, returnType := .parameter 0, parameters := [.parameter 0] },
     method := {
-      owner := .atom runtimeScope "System.Console", name := name!"Id", hasThis := false,
+      owner := .atom runtimeScope "System.Console" .classType, name := name!"Id", hasThis := false,
       genericArity := 1, returnType := uint32, parameters := [uint32],
       methodArguments := [uint32] },
     name := "Id", target := .external (runtimeScope ++ "::!!0 System.Console::Id(!!0)"),
@@ -254,7 +257,7 @@ def idSite : CallSite :=
 
 /-- The count and total fields of `T.Program`. -/
 def countOperand : RawOperand := .field (.atom "T, Version=1.0.0.0, Culture=neutral, \
-  PublicKeyToken=null" "Program") 0 int32 name!"count" false
+  PublicKeyToken=null" "Program" .classType) 0 int32 name!"count" false
 
 /-- The assembly `T` that `own`'s `Assembly` row names. -/
 def ownAssembly : AssemblyName := Tests.unsignedAssembly name!"T"

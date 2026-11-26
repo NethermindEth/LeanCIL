@@ -297,7 +297,8 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var statics = workload == "statics";
     var staticField = statics
         ? "def staticField : CIL.Extraction.FieldRef :=\n" +
-            "  { owner := .atom \"Fixture\" \"Holder\", index := 0, type := .atom \"Fixture\" \"System.Int32\",\n" +
+            "  { owner := .atom \"Fixture\" \"Holder\" .classType, index := 0,\n" +
+            "    type := .atom \"Fixture\" \"System.Int32\" .valueType,\n" +
             "    name := name!\"Value\" }\n" +
             "def staticValue : CIL.StaticDescriptor :=\n" +
             "  { identity := 0, field := staticField, bytes := [7, 0, 0, 0],\n" +
@@ -324,7 +325,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var callDefinitions = workload is "calls" or "tablecalls" ? $$"""
         /-- The method every call names: one `int64` argument and an `int64` result. -/
         def calleeMethod : CIL.Extraction.MethodRef :=
-          { owner := .atom "Tests" "Stepping", name := name!"Identity", hasThis := false, genericArity := 0,
+          { owner := .atom "Tests" "Stepping" .classType, name := name!"Identity", hasThis := false, genericArity := 0,
             returnType := {{Int64Type}}, parameters := [{{Int64Type}}] }
         """ + "\n" + (workload == "calls" ? $$"""
         /-- The body's link table, every call entering method 1. -/
@@ -339,7 +340,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var maxDefinition = workload == "intrinsiccalls" ? $$"""
         /-- `Math.Max(long, long)`, which the runtime table models as a scalar intrinsic. -/
         def maxMethod : CIL.Extraction.MethodRef :=
-          { owner := .atom CIL.Extraction.runtimeScope "System.Math", name := name!"Max", hasThis := false,
+          { owner := .atom CIL.Extraction.runtimeScope "System.Math" .classType, name := name!"Max", hasThis := false,
             genericArity := 0, returnType := {{Int64Type}}, parameters := [{{Int64Type}}, {{Int64Type}}] }
         """ + "\n" : "";
     var module = "Stepping" + workload + requested;

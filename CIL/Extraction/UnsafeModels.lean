@@ -19,7 +19,8 @@ model and decodes to a hole.
 namespace CIL.Extraction
 
 /-- `System.Runtime.CompilerServices.Unsafe` of the exact `System.Runtime` assembly. -/
-def unsafeOwner : TypeExpr := .atom runtimeScope "System.Runtime.CompilerServices.Unsafe"
+def unsafeOwner : TypeExpr :=
+  .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" .classType
 
 /-- The type argument of a static reference of generic arity one whose owner is exactly
     `unsafeOwner`; an owner with type arguments of its own names no helper. -/

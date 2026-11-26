@@ -46,7 +46,7 @@ private def SpanMember.signature (member : SpanMember) (writable openType : Bool
   let int := TypeExpr.primitive .int32
   let reference := if writable then TypeExpr.byref element else if openType then
       .modified true runtimeScope "System.Runtime.InteropServices.InAttribute" (.byref element)
-    else .atom runtimeScope "!0& modreq(System.Runtime.InteropServices.InAttribute)"
+    else .spelledModified runtimeScope "!0& modreq(System.Runtime.InteropServices.InAttribute)"
   return match member with
     | .item => ⟨0x20, reference, [int]⟩
     | .pinnable => ⟨0x20, reference, []⟩

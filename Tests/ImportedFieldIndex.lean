@@ -480,7 +480,8 @@ private def scopedItem (assembly : AssemblyName) (scope := assembly.display) : O
   let platform : PlatformTable :=
     { includesScope := false, entries := SearchTree.ofSorted [(platformKey claimed.parts, [claimed])] }
   itemError (pairWorldWith [8, 8] (assembly := assembly)) 0
-    (tupleOwner "System.Int32" "System.Int32" scope) (.atom scope "System.Int32") platform
+    (tupleOwner "System.Int32" "System.Int32" scope) (.atom scope "System.Int32"
+        .valueType) platform
 
 /-- An unsigned reference cannot name the platform pair. -/
 theorem refuses_unsigned_pair :

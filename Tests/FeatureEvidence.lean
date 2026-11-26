@@ -9,7 +9,7 @@ private def intType : TypeExpr := .primitive .int32
 private def getter : CallSite := {
   declared := { convention := 0, returnType := .primitive .boolean },
   method := {
-    owner := .atom intrinsicsScope "System.Runtime.Intrinsics.X86.Sse2",
+    owner := .atom intrinsicsScope "System.Runtime.Intrinsics.X86.Sse2" .classType,
     name := name!"get_IsSupported", hasThis := false, genericArity := 0,
     returnType := .primitive .boolean,
     parameters := [] },
@@ -19,7 +19,7 @@ private def getter : CallSite := {
   parameterCount := 0, returnsValue := true }
 private def intrinsic (owner name : String) : CallSite :=
   { getter with
-    method.owner := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner)
+    method.owner := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner) .classType
     method.name := (MetadataName.ofBytes? (name.toUTF8.toList.map UInt8.toNat)).getD ⟨0⟩
     name, target := .external s!"{intrinsicsScope}::System.Boolean System.Runtime.Intrinsics.\
       {owner}::{name}()" }
@@ -234,7 +234,7 @@ example : emittedFeatureEffect (.newobj (.arity 2)) false = some (2, 1) := by de
 /-- Indexed facts retain boolean bounds, exact type identity, address exclusions and absence. -/
 theorem indexed_local_eligibility :
     let types := [intType, .primitive .boolean,
-      .atom "Wrong.Runtime" "System.Int32", .byref intType]
+      .atom "Wrong.Runtime" "System.Int32" .valueType, .byref intType]
     let locals := FeatureLocalIndex.ofRaw (raw [i 18 (.local 0), i 65037 (.local 3)] types)
     locals.eligible 0 (some 1) = false ∧ locals.eligible 0 none = true ∧
     locals.eligible 1 (some 0) = true ∧ locals.eligible 1 (some 1) = true ∧

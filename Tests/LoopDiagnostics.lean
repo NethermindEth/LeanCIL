@@ -1354,7 +1354,8 @@ run_meta do
 
 /-- A static field whose value the caller's memory binds, so no step can compute its load. -/
 def opaqueField : CIL.Extraction.FieldRef :=
-  { owner := .atom "Fixture" "Holder", index := 0, type := .atom "Fixture" "System.Int32",
+  { owner := .atom "Fixture" "Holder" .classType, index := 0,
+      type := .atom "Fixture" "System.Int32" .valueType,
     name := name!"Value" }
 
 /-- The site of `opaqueField`: an opaque value of four bytes. -/

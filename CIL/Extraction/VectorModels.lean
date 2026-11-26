@@ -20,14 +20,14 @@ def ulongVectorOf (vector : String) : TypeExpr :=
 
 /-- `Vector128<ulong> Vector128.CreateScalarUnsafe(ulong)`. -/
 def createScalarUnsafeMethod : MethodRef :=
-  { owner := .atom intrinsicsScope "System.Runtime.Intrinsics.Vector128",
+  { owner := .atom intrinsicsScope "System.Runtime.Intrinsics.Vector128" .classType,
     name := name!"CreateScalarUnsafe", hasThis := false, genericArity := 0,
     returnType := ulongVectorOf "System.Runtime.Intrinsics.Vector128`1",
     parameters := [.primitive .uint64] }
 
 /-- `ulong owner.GetElement<ulong>(vector<ulong>, int)`, as a call site instantiates it. -/
 def getElementMethod (owner vector : String) : MethodRef :=
-  { owner := .atom intrinsicsScope owner, name := name!"GetElement", hasThis := false,
+  { owner := .atom intrinsicsScope owner .classType, name := name!"GetElement", hasThis := false,
     genericArity := 1, returnType := .primitive .uint64,
     parameters := [ulongVectorOf vector, .primitive .int32],
     methodArguments := [.primitive .uint64] }

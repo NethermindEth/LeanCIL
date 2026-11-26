@@ -11,6 +11,7 @@ namespace Tests.UnsafeCallEvidence
 private def scope :=
   "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
 private def unsafeType : TypeExpr := .atom scope "System.Runtime.CompilerServices.Unsafe"
+    .classType
 private def word : TypeExpr := .primitive .uint64
 private def call : CallSite := {
   declared := { convention := 0x10, parameters := [.byref (.parameter 0)] },
@@ -34,7 +35,8 @@ theorem skipInitOperand :
       (decodeRaw .scalar {} [] [true] (raw operand) []).map Method.code
     decode call = .ok [.call call.method {}] ∧
       [{ call with name := "Other" }, { call with target := .external "forged" },
-       { call with method.owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe" },
+       { call with
+         method.owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe" .classType },
        { call with method.hasThis := true }, { call with parameterCount := 2 },
        { call with returnsValue := true }, { call with typeArguments := [.byref word] },
        { call with typeArguments := [] }, { call with method.genericArity := 2 }].all
@@ -64,6 +66,7 @@ namespace Tests.UnsafeCallEvidence
 
 /-- A type of the fixture's own assembly with the runtime `Unsafe` class's name. -/
 private def localUnsafe : TypeExpr := .atom fixtureScope "System.Runtime.CompilerServices.Unsafe"
+    .classType
 
 /-- A managed generic AreSame method in the fixture's assembly. -/
 private def localAreSame : CallSite := {

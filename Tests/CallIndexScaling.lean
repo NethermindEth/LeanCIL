@@ -25,7 +25,8 @@ def emitted (code : List Instruction) : Method :=
 def site : CallSite := {
   declared := { convention := 0 },
   method := {
-    owner := .atom scope "Scaling", name := name!"", hasThis := false, genericArity := 0,
+    owner := .atom scope "Scaling" .classType, name := name!"", hasThis := false,
+    genericArity := 0,
     returnType := .void, parameters := [] },
   target := .managed 1, typeArguments := [], parameterCount := 0, returnsValue := false }
 /-- A managed call of `site`; the emitted link chooses the table index. -/

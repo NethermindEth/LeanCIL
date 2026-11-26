@@ -123,7 +123,7 @@ def body : BodyEvidence := {
             hasThis := true,
             genericArity := 0,
             returnType := .void,
-            parameters := [.atom coreLibraryScope "System.Int32"],
+            parameters := [.atom coreLibraryScope "System.Int32" .valueType],
             methodArguments := []},
           name := "set_HResult",
           target := .managed 100664849,
@@ -134,7 +134,7 @@ def body : BodyEvidence := {
           declared := {
             convention := 32,
             returnType := .void,
-            parameters := [.atom coreLibraryScope "System.Int32"]}})]},
+            parameters := [.atom coreLibraryScope "System.Int32" .valueType]}})]},
   metadata := rows,
   identities := [identity],
   tables,
@@ -260,7 +260,7 @@ def body : BodyEvidence := {
             hasThis := true,
             genericArity := 0,
             returnType := .void,
-            parameters := [.atom coreLibraryScope "System.Int32"],
+            parameters := [.atom coreLibraryScope "System.Int32" .valueType],
             methodArguments := []},
           name := "set_HResult",
           target := .managed 100664849,
@@ -271,7 +271,7 @@ def body : BodyEvidence := {
           declared := {
             convention := 32,
             returnType := .void,
-            parameters := [.atom coreLibraryScope "System.Int32"]}})]},
+            parameters := [.atom coreLibraryScope "System.Int32" .valueType]}})]},
   metadata := rows,
   identities := [identity],
   tables,
@@ -389,7 +389,7 @@ def body : BodyEvidence := {
             hasThis := true,
             genericArity := 0,
             returnType := .void,
-            parameters := [.atom coreLibraryScope "System.Int32"],
+            parameters := [.atom coreLibraryScope "System.Int32" .valueType],
             methodArguments := []},
           name := "set_HResult",
           target := .managed 100664849,
@@ -400,7 +400,7 @@ def body : BodyEvidence := {
           declared := {
             convention := 32,
             returnType := .void,
-            parameters := [.atom coreLibraryScope "System.Int32"]}})]},
+            parameters := [.atom coreLibraryScope "System.Int32" .valueType]}})]},
   metadata := rows,
   identities := [identity],
   tables,
@@ -589,7 +589,8 @@ def body : BodyEvidence := {
   bytes := [118, 2, 32, 82, 67, 67, 224, 125, 180, 2, 0, 4, 2, 40,
     30, 7, 0, 6, 2, 32, 0, 21, 19, 128, 125, 181, 2, 0, 4, 42],
   tokens := {
-    operands := [(67109556, .field (.object coreLibraryScope "System.Exception") 12 (.atom coreLibraryScope "System.Int32") name! "_xcode" false),
+    operands := [(67109556, .field (.object coreLibraryScope "System.Exception") 12
+        (.atom coreLibraryScope "System.Int32" .valueType) name! "_xcode" false),
       (100665118, .call {
           method := {
             owner := .object coreLibraryScope "System.Object",
@@ -608,7 +609,8 @@ def body : BodyEvidence := {
           declared := {
             convention := 32,
             returnType := .void,
-            parameters := []}}), (67109557, .field (.object coreLibraryScope "System.Exception") 13 (.atom coreLibraryScope "System.Int32") name! "_HResult" false)]},
+            parameters := []}}), (67109557, .field (.object coreLibraryScope "System.Exception") 13
+                (.atom coreLibraryScope "System.Int32" .valueType) name! "_HResult" false)]},
   metadata := rows,
   identities := [identity],
   tables,
@@ -761,7 +763,8 @@ theorem tables_valid : tablesMatch rows tables = true := by decide +kernel
 def body : BodyEvidence := {
   bytes := [34, 2, 3, 125, 181, 2, 0, 4, 42],
   tokens := {
-    operands := [(67109557, .field (.object coreLibraryScope "System.Exception") 13 (.atom coreLibraryScope "System.Int32") name! "_HResult" false)]},
+    operands := [(67109557, .field (.object coreLibraryScope "System.Exception") 13
+        (.atom coreLibraryScope "System.Int32" .valueType) name! "_HResult" false)]},
   metadata := rows,
   identities := [identity],
   tables,
@@ -779,7 +782,7 @@ def raw (decoded : DecodedBody) : RawMethod := {
   token := 100664849, owner := (coreLibraryScope ++ "::System.Exception"), hasThis := true, explicitThis := false,
   callingConvention := 0, attributes := 2182,
   implementation := 0, returnType := .void,
-  parameters := [.atom coreLibraryScope "System.Int32"],
+  parameters := [.atom coreLibraryScope "System.Int32" .valueType],
   locals := [], receiverClass := some (.object coreLibraryScope "System.Exception"),
   objectBases := [],
   objectFieldCount := 14, initLocals := decoded.initLocals, maxStack := decoded.maxStack,

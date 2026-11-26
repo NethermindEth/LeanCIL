@@ -42,7 +42,7 @@ private def call0 : CallSite := {
     convention := 0, returnType := vectorType "256",
     parameters := [vectorType "256", vectorType "256"] },
   method := {
-    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"And",
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2" .classType, name := name!"And",
     hasThis := false, genericArity := 0, returnType := vectorType "256",
     parameters := [vectorType "256", vectorType "256"] },
   name := "And",
@@ -64,7 +64,8 @@ private def call1 : CallSite := {
     convention := 0, returnType := vectorType "256",
     parameters := [vectorType "256", vectorType "256"] },
   method := {
-    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"Or", hasThis := false,
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2" .classType, name := name!"Or",
+    hasThis := false,
     genericArity := 0, returnType := vectorType "256",
     parameters := [vectorType "256", vectorType "256"] },
   name := "Or",
@@ -81,7 +82,7 @@ private def call2 : CallSite := {
     convention := 0, returnType := vectorType "256",
     parameters := [vectorType "256", vectorType "256"] },
   method := {
-    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"Xor",
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2" .classType, name := name!"Xor",
     hasThis := false, genericArity := 0, returnType := vectorType "256",
     parameters := [vectorType "256", vectorType "256"] },
   name := "Xor",
@@ -99,7 +100,7 @@ private def call3 : CallSite := {
     convention := 0, returnType := vectorType "256",
     parameters := [vectorType "256", vectorType "256"] },
   method := {
-    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"AndNot",
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2" .classType, name := name!"AndNot",
     hasThis := false, genericArity := 0, returnType := vectorType "256",
     parameters := [vectorType "256", vectorType "256"] },
   name := "AndNot",
@@ -118,7 +119,8 @@ private def call4 : CallSite := {
     convention := 0, returnType := vectorType "256",
     parameters := [vectorType "256", vectorType "128"] },
   method := {
-    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"ShiftLeftLogical",
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2" .classType,
+    name := name!"ShiftLeftLogical",
     hasThis := false, genericArity := 0, returnType := vectorType "256",
     parameters := [vectorType "256", vectorType "128"] },
   name := "ShiftLeftLogical",
@@ -137,7 +139,8 @@ private def call5 : CallSite := {
     convention := 0, returnType := vectorType "256",
     parameters := [vectorType "256", vectorType "128"] },
   method := {
-    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"ShiftRightLogical",
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2" .classType,
+    name := name!"ShiftRightLogical",
     hasThis := false, genericArity := 0, returnType := vectorType "256",
     parameters := [vectorType "256", vectorType "128"] },
   name := "ShiftRightLogical",
@@ -156,7 +159,8 @@ private def call6 : CallSite := {
     convention := 0, returnType := vectorType "512",
     parameters := [vectorType "512", vectorType "512"] },
   method := {
-    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512F", name := name!"CompareLessThan",
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512F" .classType,
+    name := name!"CompareLessThan",
     hasThis := false, genericArity := 0, returnType := vectorType "512",
     parameters := [vectorType "512", vectorType "512"] },
   name := "CompareLessThan",
@@ -175,7 +179,7 @@ private def call7 : CallSite := {
     convention := 0, returnType := vectorType "512",
     parameters := [vectorType "512", vectorType "512"] },
   method := {
-    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512F",
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512F" .classType,
     name := name!"CompareGreaterThan", hasThis := false, genericArity := 0,
     returnType := vectorType "512", parameters := [vectorType "512", vectorType "512"] },
   name := "CompareGreaterThan",
@@ -194,7 +198,8 @@ private def call8 : CallSite := {
     convention := 0, returnType := .primitive .int32,
     parameters := [vectorType "512"] },
   method := {
-    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ", name := name!"MoveMask",
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ" .classType,
+    name := name!"MoveMask",
     hasThis := false, genericArity := 0, returnType := .primitive .int32,
     parameters := [vectorType "512"] },
   name := "MoveMask",
@@ -211,7 +216,7 @@ private def call9 : CallSite := {
     convention := 0, returnType := vectorType "512",
     parameters := [vectorType "256", vectorType "256"] },
   method := {
-    owner := .atom scope "System.Runtime.Intrinsics.Vector512", name := name!"Create",
+    owner := .atom scope "System.Runtime.Intrinsics.Vector512" .classType, name := name!"Create",
     hasThis := false, genericArity := 0, returnType := vectorType "512",
     parameters := [vectorType "256", vectorType "256"] },
   name := "Create",
@@ -266,7 +271,8 @@ private def call10 : CallSite := {
     convention := 0, returnType := vectorType "128",
     parameters := [.primitive .uint64] },
   method := {
-    owner := .atom scope "System.Runtime.Intrinsics.Vector128", name := name!"CreateScalarUnsafe",
+    owner := .atom scope "System.Runtime.Intrinsics.Vector128" .classType,
+    name := name!"CreateScalarUnsafe",
     hasThis := false, genericArity := 0, returnType := vectorType "128",
     parameters := [.primitive .uint64] },
   name := "CreateScalarUnsafe",
@@ -474,7 +480,8 @@ example : keeps {
       convention := 0, returnType := vectorType "256",
       parameters := [vectorType "256", .primitive .byte] },
     method := {
-      owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"ShiftLeftLogical",
+      owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2" .classType,
+      name := name!"ShiftLeftLogical",
       hasThis := false, genericArity := 0, returnType := vectorType "256",
       parameters := [vectorType "256", .primitive .byte] },
     name := "ShiftLeftLogical",
@@ -489,7 +496,8 @@ example : keeps {
       convention := 0, returnType := vectorType "256",
       parameters := [vectorType "256", .primitive .byte] },
     method := {
-      owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"ShiftRightLogical",
+      owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2" .classType,
+      name := name!"ShiftRightLogical",
       hasThis := false, genericArity := 0, returnType := vectorType "256",
       parameters := [vectorType "256", .primitive .byte] },
     name := "ShiftRightLogical",
@@ -504,7 +512,8 @@ example : keeps {
       convention := 0, returnType := .primitive .int32,
       parameters := [vectorType "256"] },
     method := {
-      owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ", name := name!"MoveMask",
+      owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ" .classType,
+      name := name!"MoveMask",
       hasThis := false, genericArity := 0, returnType := .primitive .int32,
       parameters := [vectorType "256"] },
     name := "MoveMask",
@@ -533,7 +542,7 @@ theorem init_vector_admission :
       !(valid (malformed (.constructor "forged" "System.Runtime.Intrinsics.Vector128`1")
         (.primitive .uint64))) &&
       !(valid (malformed (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
-        (.atom "forged" "System.UInt64"))) &&
+        (.atom "forged" "System.UInt64" .valueType))) &&
       !(valid (malformed (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
         (.primitive .int16))) &&
       !(valid (vectorType "64")) &&

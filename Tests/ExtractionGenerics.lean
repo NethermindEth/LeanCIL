@@ -1,4 +1,5 @@
 import CIL.Extraction.Generics
+import CIL.Extraction.MetadataResolution
 import CIL.Extraction.Scalars
 import CIL.Safety.SymbolicExecution
 import Tests.Support
@@ -47,7 +48,7 @@ example : instantiateMethod [] raw [word] ≠ some { closed with returnType := .
 example : instantiateMethod [] raw [word] ≠ some { closed with code := [⟨0, 42, .none⟩] } := by decide
 example : instantiateMethod [] raw [word] ≠ some { closed with
     code := [⟨0, 2, .none⟩, ⟨1, 65045, .type word⟩, ⟨7, 43, .target 1⟩, ⟨9, 42, .none⟩] } := by decide
-example : typeStorage [] (.atom "attacker" "System.UInt64") = none := by decide
+example : typeStorage [] (.atom "attacker" "System.UInt64" .valueType) = none := by decide
 example : typeStorage [{
     identity := "A", explicit := false, packing := 0, declaredSize := 0, fields := []
   }] (.aggregate "B" 0) = none := by decide
@@ -58,7 +59,8 @@ example : substituteType [word] (.apply (.constructor "scope" "Box`1") (.paramet
 def callSite (parameter : TypeExpr) : CallSite := {
   declared := { convention := 0x10, returnType := word, parameters := [.byref (.parameter 0)] },
   method := {
-    owner := .atom testScope "Owner", name := name!"Call", hasThis := false, genericArity := 1,
+    owner := .atom testScope "Owner" .classType, name := name!"Call", hasThis := false,
+    genericArity := 1,
     returnType := word, parameters := [.byref parameter], methodArguments := [word] },
   name := "Call", target := .managed 1, typeArguments := [word], parameterCount := 1,
   returnsValue := true }
@@ -89,7 +91,7 @@ theorem signed_parameter_rejected :
 /-- A matching type name from another assembly remains a different parameter type. -/
 theorem parameter_scope_rejected :
     ¬ ManagedCallsValid [⟨[word], closed, testPin⟩] [] (fun _ => false)
-      (caller (.atom "attacker" "System.UInt64")) [true] callCode := by
+      (caller (.atom "attacker" "System.UInt64" .valueType)) [true] callCode := by
   decide +kernel
 #print axioms parameter_scope_rejected
 
@@ -177,6 +179,55 @@ theorem forged_constructions_rejected :
       (some (.object 0 [counter] 16)) construction.method := by
   decide +kernel
 #print axioms forged_constructions_rejected
+
+/-- Class `Tally` as its TypeDef row resolves it. -/
+def tallyRow : NamedType :=
+  { scope := bytesOf testScope, name := bytesOf "Tally", parts := [[], bytesOf "Tally"],
+    kind := .classType, pinned := true, assembly := some Tests.fixtureAssembly }
+/-- Struct `Pair` as its TypeDef row resolves it. -/
+def pairRow : NamedType :=
+  { tallyRow with name := bytesOf "Pair", parts := [[], bytesOf "Pair"], kind := .valueType }
+/-- A signature frame anchored in the fixture assembly. -/
+def fixtureFrame : CIL.Extraction.Frame :=
+  { corlib := some runtimeScopeBytes, anchor := bytesOf testScope, arity := 0, ownerArity := 0 }
+
+/-- An atom is admitted only at the head kind its definition states. -/
+theorem atom_heads_follow_their_rows :
+    fixtureFrame.admits (.named tallyRow) (.atom testScope "Tally" .classType) = true ∧
+    fixtureFrame.admits (.named tallyRow) (.atom testScope "Tally" .valueType) = false ∧
+    fixtureFrame.admits (.named tallyRow) (.atom testScope "Tally" .interfaceType) = false ∧
+    fixtureFrame.admits (.named pairRow) (.atom testScope "Pair" .valueType) = true ∧
+    fixtureFrame.admits (.named pairRow) (.atom testScope "Pair" .classType) = false := by
+  decide +kernel
+#print axioms atom_heads_follow_their_rows
+
+/-- `Tally`'s constructor with the receiver facts of a struct constructor. -/
+def structShapedTally : RawMethod :=
+  { tallyConstructor with receiverClass := none, objectFieldCount := 0, objectBases := [] }
+/-- The program whose only method is `structShapedTally`. -/
+def structShapedMethods (index : Nat) : Option SpecializedMethod :=
+  [(⟨[], structShapedTally, testPin⟩ : SpecializedMethod)][index]?
+/-- The construction of `Tally` through an atom owner claiming `kind`. -/
+def atomConstruction (kind : HeadKind) : CallSite :=
+  { construction with method.owner := .atom testScope "Tally" kind }
+
+/-- A class's constructor cannot be linked as a struct construction: the value-headed atom of
+    `Tally` is refused against its row, and its class-headed atom links no aggregate. A
+    value-headed atom of `Pair` still links its aggregate and a class-headed one does not. -/
+theorem forged_value_head_rejected :
+    fixtureFrame.admits (.named tallyRow) (atomConstruction .valueType).method.owner = false ∧
+    ¬ validateConstructionWith structShapedMethods ⟨0, 115, .call (atomConstruction .classType)⟩
+      true (some (.aggregate 0 16)) (atomConstruction .classType).method ∧
+    validateConstructionWith constructors ⟨0, 115, .call
+      { pairConstruction with method.owner := .atom testScope "Pair" .valueType }⟩
+      true (some (.aggregate 1 16)) { pairConstruction.method with
+        owner := .atom testScope "Pair" .valueType } ∧
+    ¬ validateConstructionWith constructors ⟨0, 115, .call
+      { pairConstruction with method.owner := .atom testScope "Pair" .classType }⟩
+      true (some (.aggregate 1 16)) { pairConstruction.method with
+        owner := .atom testScope "Pair" .classType } := by
+  decide +kernel
+#print axioms forged_value_head_rejected
 
 /-- A non-virtual instance method of `Tally` taking one word, and a call site of it. -/
 def deposit : RawMethod := { closed with

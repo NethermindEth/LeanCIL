@@ -409,7 +409,7 @@ static void CheckFieldReferences()
     const string scope = "\"T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null\"";
     (FieldRef Reference, byte[] NameBytes)[] cases =
     [
-        (new($".atom {scope} \"Program\"", 0, ".atom \"System.Private.CoreLib\" \"System.Int32\"",
+        (new($".atom {scope} \"Program\" .classType", 0, ".atom \"System.Private.CoreLib\" \"System.Int32\" .valueType",
             MetadataName.OfText("count")), "count"u8.ToArray()),
         (new($".apply (.constructor {scope} \"Box`1\") (.parameter 0)", 70000, ".array (.byref (.parameter 0))",
             MetadataName.FromBytes([0xFF, 0x00])), [0xFF, 0x00]),

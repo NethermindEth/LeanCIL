@@ -196,9 +196,9 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
         var refusal = Refusal ?? $"{Pc} raw.opcode";
         var change = Name switch
         {
-            "typeHandle" or "typeTest" => "method.owner := .atom runtimeScope \"MyType\"",
-            "throwConstructor" => "method.owner := .atom runtimeScope \"System.Object\"",
-            "areSame" => "method.owner := .atom \"Fixture\" \"System.Runtime.CompilerServices.Unsafe\"",
+            "typeHandle" or "typeTest" => "method.owner := .atom runtimeScope \"MyType\" .classType",
+            "throwConstructor" => "method.owner := .atom runtimeScope \"System.Object\" .classType",
+            "areSame" => "method.owner := .atom \"Fixture\" \"System.Runtime.CompilerServices.Unsafe\" .classType",
             _ when Claim == ".model" => "declared.convention := site.declared.convention + 1",
             _ => "target := .external \"Another overload\""
         };

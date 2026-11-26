@@ -138,7 +138,7 @@ private def plainSpelling? (name : ClassName) : Option String := do
 /-- A named type as its referencing scope and full name. -/
 def namedType : TypeExpr → Option (List Char × List Char)
   | .primitive type => leaf (metadataChars runtimeScope) (metadataChars type.display)
-  | .atom scope name => leaf (metadataChars scope) (metadataChars name)
+  | .atom scope name _ => leaf (metadataChars scope) (metadataChars name)
   | .constructor scope name | .objectConstructor scope name => do
     leaf (metadataChars scope) (metadataChars (← plainSpelling? name))
   | .enum identity _ => do
@@ -153,7 +153,7 @@ def namedType : TypeExpr → Option (List Char × List Char)
 theorem namedType_eq_original (type : TypeExpr) : namedType type =
     match type with
     | .primitive type => leaf runtimeScope.toList type.display.toList
-    | .atom scope name => leaf scope.toList name.toList
+    | .atom scope name _ => leaf scope.toList name.toList
     | .constructor scope name | .objectConstructor scope name => do
       leaf scope.toList (← plainSpelling? name).toList
     | .enum identity _ => do
@@ -171,7 +171,7 @@ def plainTypeName : TypeExpr → Option (List Char)
   | .constructor _ name | .objectConstructor _ name => do
     let chars := metadataChars (← plainSpelling? name)
     if plainName chars then some chars else none
-  | .atom _ name =>
+  | .atom _ name _ =>
     let name := metadataChars name
     if plainName name then some name else none
   | type => Prod.snd <$> namedType type
@@ -265,7 +265,7 @@ theorem sameRuntimeType_aggregate_self (identity : String) (layout : Nat) :
 /-- The separate assembly name on a metadata type head. Flat owners carry it inside the name. -/
 def TypeExpr.explicitHeadScope : TypeExpr → Option String
   | .primitive _ => some runtimeScope
-  | .atom scope _ | .object scope _ | .constructor scope _ | .objectConstructor scope _ =>
+  | .atom scope _ _ | .object scope _ | .constructor scope _ | .objectConstructor scope _ =>
     some scope
   | .apply head _ => head.explicitHeadScope
   | _ => none

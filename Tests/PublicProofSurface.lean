@@ -52,7 +52,8 @@ private def wordVector (width : Nat) : TypeExpr :=
 
 open CIL.Extraction in
 private def permuteMethod : MethodRef :=
-  { owner := .atom intrinsicsScope "System.Runtime.Intrinsics.X86.Avx2", name := name!"Permute4x64",
+  { owner := .atom intrinsicsScope "System.Runtime.Intrinsics.X86.Avx2" .classType,
+      name := name!"Permute4x64",
     hasThis := false, genericArity := 0, returnType := wordVector 256,
     parameters := [wordVector 256, .primitive .byte] }
 

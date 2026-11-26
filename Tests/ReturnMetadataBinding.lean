@@ -63,7 +63,8 @@ private def acceptsParameter (parameter : List Nat) (claimed : TypeExpr)
 /-- An opaque atom cannot conceal an unsupported required return modifier. -/
 theorem rejects_opaque_modified_return :
     acceptsReturn [0x1F, 9, 8]
-      (.atom runtimeScope "System.Int32 modreq(System.Runtime.CompilerServices.OtherModifier)") =
+      (.spelledModified runtimeScope
+          "System.Int32 modreq(System.Runtime.CompilerServices.OtherModifier)") =
       false := by decide +kernel
 
 #print axioms rejects_opaque_modified_return
@@ -78,16 +79,19 @@ theorem accepts_declared_returns :
 /-- Optional, nested and non-void init modifiers remain unsupported return signatures. -/
 theorem rejects_other_modified_returns :
     acceptsReturn [0x20, 9, 8]
-      (.atom runtimeScope "System.Int32 modopt(System.Runtime.CompilerServices.OtherModifier)") =
+      (.spelledModified runtimeScope
+          "System.Int32 modopt(System.Runtime.CompilerServices.OtherModifier)") =
       false ∧
     acceptsReturn [0x10, 0x1F, 9, 8]
-      (.byref (.atom runtimeScope
+      (.byref (.spelledModified runtimeScope
         "System.Int32 modreq(System.Runtime.CompilerServices.OtherModifier)")) = false ∧
     acceptsReturn [0x1F, 9, 8]
-      (.atom runtimeScope "System.Int32 modreq(System.Runtime.CompilerServices.IsExternalInit)")
+      (.spelledModified runtimeScope
+          "System.Int32 modreq(System.Runtime.CompilerServices.IsExternalInit)")
       "IsExternalInit" = false ∧
     acceptsReturn [0x20, 9, 1]
-      (.atom runtimeScope "System.Void modopt(System.Runtime.CompilerServices.IsExternalInit)")
+      (.spelledModified runtimeScope
+          "System.Void modopt(System.Runtime.CompilerServices.IsExternalInit)")
       "IsExternalInit" = false := by decide +kernel
 
 #print axioms rejects_other_modified_returns
@@ -96,16 +100,18 @@ theorem rejects_other_modified_returns :
     opaque atom would hide. -/
 theorem rejects_modified_parameters :
     acceptsParameter [0x1F, 9, 5]
-      (.atom runtimeScope "System.Byte modreq(System.Runtime.CompilerServices.OtherModifier)") =
+      (.spelledModified runtimeScope
+          "System.Byte modreq(System.Runtime.CompilerServices.OtherModifier)") =
       false ∧
     acceptsParameter [0x20, 9, 5]
-      (.atom runtimeScope "System.Byte modopt(System.Runtime.CompilerServices.OtherModifier)") =
+      (.spelledModified runtimeScope
+          "System.Byte modopt(System.Runtime.CompilerServices.OtherModifier)") =
       false ∧
     acceptsParameter [0x10, 0x1F, 9, 8]
-      (.byref (.atom runtimeScope
+      (.byref (.spelledModified runtimeScope
         "System.Int32 modreq(System.Runtime.CompilerServices.OtherModifier)")) = false ∧
     acceptsParameter [0x1F, 9, 0x10, 8]
-      (.atom runtimeScope
+      (.spelledModified runtimeScope
         "System.Int32& modreq(System.Runtime.CompilerServices.OtherModifier)") = false := by
   decide +kernel
 

@@ -39,14 +39,14 @@ def importPrimitive : TypeExpr → Bool
     primitive or to a value type whose layout is in `layouts`. -/
 def importParameter (layouts : List RawLayout) : TypeExpr → Bool
   | .byref (.primitive type) => importPrimitive (.primitive type)
-  | .byref (.atom scope name) =>
+  | .byref (.atom scope name .valueType) =>
     layouts.any (fun layout => layout.identity == scope ++ "::" ++ name)
   | type => importPrimitive type
 
 /-- Whether an imported call can be admitted: a named owner type, a nonempty method name,
     primitive arguments, a `void` or primitive return and admissible parameters. -/
 def ImportSignature.supported (signature : ImportSignature) (layouts : List RawLayout) : Bool :=
-  (match signature.owner with | .atom _ _ | .primitive _ => true | _ => false) &&
+  (match signature.owner with | .atom .. | .primitive _ => true | _ => false) &&
   !signature.name.isEmpty && signature.arguments.all importPrimitive &&
   (signature.returnType == .void || importPrimitive signature.returnType) &&
   signature.parameters.all (importParameter layouts)

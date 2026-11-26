@@ -30,7 +30,8 @@ private def raw (code : List RawInstruction) (returnType : TypeExpr := integer)
 private def slot : CallSite := {
   declared := { convention := 0, returnType := boolean },
   method := {
-    owner := .atom "Fixture" "Fixture.IFlag", name := name!"get_IsActive", hasThis := false,
+    owner := .atom "Fixture" "Fixture.IFlag" .interfaceType, name := name!"get_IsActive",
+    hasThis := false,
     genericArity := 0, returnType := boolean, parameters := [] },
   name := "get_IsActive", target := .managed 7, typeArguments := [], parameterCount := 0,
   returnsValue := true }
@@ -66,7 +67,7 @@ private def linkedAt (index : Nat) (pcs : List Nat) (pc : Nat) : Option Link :=
 /-- Bodies that never fold: a static read, an `Int32` constant, a parameterized constant, two
     `ret`s with different words, a `ret`-free body, and a Boolean slot returning 2. -/
 private def staticLoad :=
-  i 126 (.field (.atom "Fixture" "Fixture.Flags") 0 boolean name!"Enabled" true)
+  i 126 (.field (.atom "Fixture" "Fixture.Flags" .valueType) 0 boolean name!"Enabled" true)
 private def staticBody := raw [staticLoad, i 42] boolean
 private def ignored : List MethodEvidence := [
   method staticBody [state [], state [none]],
