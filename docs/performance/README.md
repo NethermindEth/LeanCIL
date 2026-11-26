@@ -229,7 +229,7 @@ same scalar extraction on Windows x64 with Lean 4.35.0, the full generated modul
 | --- | ---: | ---: | ---: |
 | Frontend heartbeats | 581,810,172 | 213,492,476 | 181,647,462 |
 | Kernel recheck heartbeats | 534,376,031 | 186,944,740 | 154,762,131 |
-| Frontend heartbeats for `method0_evidence_validated` | 92,559,531 | 305,996 | 313,273 |
+| Frontend heartbeats for the entry method's evidence theorem | 92,559,531 | 305,996 | 313,273 |
 
 Checking the body and rows took 27.1–29.0s to compile and 24.2–24.9s to replay, against
 75.3–88.6s and 79.7–81.5s for the original. Each version compiled and replayed twice in
