@@ -22,9 +22,9 @@ dotnet run --file scripts/Test.cs -- --suite outlines-objects
 - Suites build and mutate `artifacts/`, so run concurrent suites in separate checkouts.
 - The `cli` and `lookups` suites run their independent checks at once. Their child processes
   run one per processor while their reservations fit in nine tenths of the machine's memory.
-  A process reserves 3 GiB unless its check reserves a measured peak: up to 9 GiB for the
-  largest lookup checks, and 20 GiB for a verify whose joint kernel replay is rejected, which
-  therefore runs alone on a 16 GB runner. Larger reservations start first. A heartbeat count
+  A process reserves 3 GiB unless its check reserves a measured peak: 4 to 6 GiB for a deep CLI
+  verify, up to 9 GiB for the largest lookup checks, and 20 GiB for a verify whose joint kernel
+  replay is rejected, which therefore runs alone on a 16 GB runner. Larger reservations start first. A heartbeat count
   does not depend on the processes beside it, and the checks that time Lean run before the
   others start.
 - In CI one job builds the extractor and example assembly with `--build-tools`, and suite jobs set

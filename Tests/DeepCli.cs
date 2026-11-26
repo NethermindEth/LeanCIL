@@ -21,9 +21,11 @@ preparation.EnsureExtractorBuilt();
 MultiAssemblyFixture fixture = new("DeepCli");
 var checkoutBuild = new object();
 // Reservations of verifies that run beside other checks, from peak private working sets measured on Windows: a
-// rejected joint kernel replay replays each module separately (up to 19.1 GiB), a platform deep audit 4.8 GiB.
+// rejected joint kernel replay replays each module separately (up to 19.1 GiB), a platform deep audit takes 4.9 GiB
+// and any other verify's process tree up to 3.3 GiB.
 const long SeparateReplayMemory = 20L << 30;
 const long PlatformAuditMemory = 6L << 30;
+const long VerifyMemory = 4L << 30;
 var cli = args is [var executable] && !executable.StartsWith("--", StringComparison.Ordinal)
     ? new[] { Path.GetFullPath(executable) } : fixture.Cli;
 if (args is ["--constraints"])
@@ -907,15 +909,17 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
     File.Delete(Path.Combine(output, "verification.json"));
     if (args is ["--arguments"]) return;
 
+    // The first use of the checkout package writes its lakefile, so it happens before the checks share it.
+    preparation.CheckoutPackage();
     // The binding text, platform image and consumer checks share the digest file and the Direct extraction.
-    Concurrently(() =>
+    ReservingMemory(VerifyMemory, () => Concurrently(() =>
         {
             CheckBindingText();
             CheckPlatformObject();
             if (args is not ["--text"]) CheckConsumerRoot();
         },
         CheckPackageEvidence, CheckPlatformPair, CheckDispatchCatalogs, CheckPublisherKey, CheckLayoutContent,
-        CheckGenericConstraints, CheckEnumStorage, CheckStaticTable);
+        CheckGenericConstraints, CheckEnumStorage, CheckStaticTable));
 }
 
 void CheckBindingText()
