@@ -386,7 +386,9 @@ What `MetadataResolution` and `MetadataBinding` check:
   both arguments, including when the pair is nested inside another layout. Runtime scalars and
   strings retain their fixed storage.
   The `RVA` and `ParamList` columns are not read.
-- Generic parameter counts come from `GenericParam` rows. An owner's carried rows must form its
+- Generic parameter counts come from `GenericParam` rows. Lean builds the owner index in linear
+  time for rows in coded owner order and sorts out-of-order rows before indexing them.
+  An owner's carried rows must form its
   whole zero-based run. An owner with none carried must be shown to have none by its neighbours in
   the table, which ECMA-335 requires sorted by coded owner: the first carried row above the
   owner's coded value is row 1 or follows a carried row below it, or the table's last row lies
