@@ -24,18 +24,18 @@ internal enum PlatformKind
 }
 
 /// <summary>
-/// One platform type as Lean reads its reference: the typed assembly the reference scopes it to, the namespace and
-/// name of each enclosing type and of the type, outermost first, and its kind, with the element type code of an enum.
+/// One platform type of an assembly as Lean reads its reference: the namespace and name of each enclosing type and of
+/// the type, outermost first, and its kind, with the element type code of an enum.
 /// </summary>
-internal sealed record PlatformDefinition<TAssembly>(
-    TAssembly Assembly, ImmutableArray<string> Parts, PlatformKind Kind, int Underlying, int Arity)
+internal sealed record PlatformDefinition(ImmutableArray<string> Parts, PlatformKind Kind, int Underlying, int Arity)
 {
-    /// <summary>The Lean <c>CIL.Extraction.PlatformDefinition</c>, with the assembly written by
-    /// <paramref name="assembly"/> and byte lists by <paramref name="bytes"/>.</summary>
-    internal string Lean(Func<TAssembly, string> assembly, Func<IEnumerable<byte>, string> bytes)
+    /// <summary>The Lean <c>CIL.Extraction.PlatformDefinition</c> of this type in the assembly whose
+    /// <c>CIL.AssemblyName</c> term is <paramref name="assembly"/>, with byte lists written by
+    /// <paramref name="bytes"/>.</summary>
+    internal string Lean(string assembly, Func<IEnumerable<byte>, string> bytes)
     {
         var parts = string.Join(", ", Parts.Select(part => bytes(Encoding.UTF8.GetBytes(part))));
-        return $$"""{ assembly := {{assembly(Assembly)}}, parts := [{{parts}}], kind := {{LeanKind}} }""";
+        return $$"""{ assembly := {{assembly}}, parts := [{{parts}}], kind := {{LeanKind}} }""";
     }
 
     string LeanKind => Kind switch
@@ -100,7 +100,7 @@ internal sealed class PlatformDefinitions<TAssembly>(
 {
     // Keyed by the typed assembly and the parts, as Lean compares them, so a type named by several modules is stated
     // once.
-    readonly Dictionary<(TAssembly Assembly, string Parts), PlatformDefinition<TAssembly>> definitions = [];
+    readonly Dictionary<(TAssembly Assembly, string Parts), PlatformDefinition> definitions = [];
 
     /// <summary>The <c>maxRecDepth</c> under which Lean compiles these definitions.</summary>
     internal int Depth => PlatformDefinitions.RecursionDepth(definitions.Count);
@@ -112,8 +112,8 @@ internal sealed class PlatformDefinitions<TAssembly>(
         Func<AssemblyNameReference, bool> platform)
     {
         foreach (var handle in references)
-            if (Definition(module, reader, handle, platform) is { } definition)
-                Add(definition);
+            if (Definition(module, reader, handle, platform) is { } found)
+                Add(found.Assembly, found.Definition);
     }
 
     /// <summary>Adds the definition of <paramref name="type"/> when it is a type of a platform assembly, named as a
@@ -124,21 +124,22 @@ internal sealed class PlatformDefinitions<TAssembly>(
         var parts = PlatformDefinitions.NameParts(type);
         if (type.Resolve() is not { } definition) return;
         var kind = Kind(definition);
-        Add(new(assembly(reference, type.Module), [.. parts], kind,
+        Add(assembly(reference, type.Module), new([.. parts], kind,
             kind == PlatformKind.EnumType ? PlatformDefinitions.Underlying(definition) : 0,
             definition.GenericParameters.Count));
     }
 
-    void Add(PlatformDefinition<TAssembly> definition) =>
-        definitions.TryAdd((definition.Assembly, string.Join('\0', definition.Parts)), definition);
+    void Add(TAssembly scope, PlatformDefinition definition) =>
+        definitions.TryAdd((scope, string.Join('\0', definition.Parts)), definition);
 
     /// <summary>The Lean list of the definitions, ordered by their text, with assemblies written by
     /// <paramref name="writeAssembly"/> and byte lists by <paramref name="bytes"/>.</summary>
     internal string Lean(Func<TAssembly, string> writeAssembly, Func<IEnumerable<byte>, string> bytes) =>
-        $"""[{string.Join(",\n  ", definitions.Values.Select(definition => definition.Lean(writeAssembly, bytes))
+        $"""[{string.Join(",\n  ", definitions
+            .Select(entry => entry.Value.Lean(writeAssembly(entry.Key.Assembly), bytes))
             .Order(StringComparer.Ordinal))}]""";
 
-    PlatformDefinition<TAssembly>? Definition(ModuleDefinition module, MetadataReader reader,
+    (TAssembly Assembly, PlatformDefinition Definition)? Definition(ModuleDefinition module, MetadataReader reader,
         TypeReferenceHandle handle, Func<AssemblyNameReference, bool> platform)
     {
         var parts = new Stack<string>();
@@ -156,8 +157,8 @@ internal sealed class PlatformDefinitions<TAssembly>(
         var named = (TypeReference)module.LookupToken(MetadataTokens.GetToken(handle));
         if (named.Resolve() is not { } type) return null;
         var kind = Kind(type);
-        return new(assembly(reference, module), [.. parts], kind,
-            kind == PlatformKind.EnumType ? PlatformDefinitions.Underlying(type) : 0, type.GenericParameters.Count);
+        return (assembly(reference, module), new([.. parts], kind,
+            kind == PlatformKind.EnumType ? PlatformDefinitions.Underlying(type) : 0, type.GenericParameters.Count));
     }
 
     // The roots, the value pair and the byte-order class by their core-library definitions, any other type by what

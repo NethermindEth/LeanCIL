@@ -8,8 +8,9 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-/// <summary>The head kind of a scoped atom, as Lean's <c>HeadKind</c> states it.</summary>
-internal enum TypeHead { Value, Class, Interface }
+/// <summary>The head kind of a scoped atom, as Lean's <c>HeadKind</c> states it; <c>None</c> for a type that is
+/// not an atom.</summary>
+internal enum TypeHead { None, Value, Class, Interface }
 
 internal static class TypeHeads
 {
@@ -186,13 +187,19 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     /// <summary>The head kind of a named type: its definition's kind when it resolves, otherwise the
     /// value-or-class marker its signature carries.</summary>
-    internal static TypeHead HeadKind(TypeReference type) => type.Resolve() switch
+    internal static TypeHead HeadKind(TypeReference type) => Definition(type) switch
     {
         { IsInterface: true } => TypeHead.Interface,
         { IsValueType: true } => TypeHead.Value,
         { } => TypeHead.Class,
         null => type.IsValueType ? TypeHead.Value : TypeHead.Class,
     };
+
+    // An unpinned assembly has no definition to read; Cecil sets IsValueType from the signature's marker. Lean
+    // refuses the atom whatever its head, since its platform table has no entry for a non-platform assembly.
+    static TypeDefinition? Definition(TypeReference type) =>
+        type.Scope is AssemblyNameReference name && PinnedAssemblies.Active is { } pins && !pins.Resolves(name)
+            ? null : type.Resolve();
 
     // The head says whether the instances are values or references, as the signature's marker does.
     static string Head(GenericInstanceType generic) =>

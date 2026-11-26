@@ -4,9 +4,9 @@ using Mono.Cecil;
 
 namespace Nethermind.LeanCIL;
 
-// An atom carries the head kind its definition states; other kinds carry none.
+// An atom carries the head kind its definition states; other kinds carry TypeHead.None.
 internal sealed record ContractType(string Kind, string Scope, string Name, ContractType? Element = null,
-    TypeHead? Head = null)
+    TypeHead Head = TypeHead.None)
 {
     internal static ContractType Read(TypeReference type)
     {
@@ -27,8 +27,8 @@ internal sealed record ContractType(string Kind, string Scope, string Name, Cont
     internal string Lean => Kind switch
     {
         "void" => ".void",
-        "atom" when Head is { } head =>
-            RuntimePrimitive ?? $".atom {IdentityText.Quote(Scope)} {IdentityText.Quote(Name)} {head.ToLean()}",
+        "atom" when Head != TypeHead.None =>
+            RuntimePrimitive ?? $".atom {IdentityText.Quote(Scope)} {IdentityText.Quote(Name)} {Head.ToLean()}",
         "byref" when Element is not null => ".byref (" + Element.Lean + ")",
         _ => throw new InvalidDataException("Invalid imported type metadata.")
     };
@@ -91,8 +91,8 @@ internal static class ContractMethodMetadata
     {
         if (type is null || type.Kind is not ("atom" or "byref" or "void") ||
             (type.Kind == "atom" && (string.IsNullOrWhiteSpace(type.Scope) || string.IsNullOrWhiteSpace(type.Name) ||
-                type.Element is not null || type.Head is not { } head || !Enum.IsDefined(head))) ||
-            (type.Kind != "atom" && (type.Scope != "" || type.Name != "" || type.Head is not null)) ||
+                type.Element is not null || type.Head == TypeHead.None || !Enum.IsDefined(type.Head))) ||
+            (type.Kind != "atom" && (type.Scope != "" || type.Name != "" || type.Head != TypeHead.None)) ||
             (type.Kind == "void" && type.Element is not null) || (type.Kind == "byref" && type.Element is null))
             throw new InvalidDataException("Invalid imported type metadata.");
         if (type.Element is not null) ValidateType(type.Element);
