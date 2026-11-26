@@ -935,9 +935,11 @@ private def IndirectCase.evidence (access : IndirectCase) : MethodEvidence := wi
 private def IndirectCase.method (access : IndirectCase) : Method :=
   { locals := [], returnsValue := true, declared := { parameters := [word], returnType := word },
     code := access.code }
-/-- Whether the feature and scalar checks accept the claimed emission. -/
-private def IndirectCase.flows (access : IndirectCase) : Bool :=
-  let (method, code, states) := match access.access.operand with
+/-- The body, emitted code and scalar certificate of the access: a typed access reads its address
+    and value from parameters, every other access from copies of its argument. -/
+private def IndirectCase.body (access : IndirectCase) :
+    RawMethod × List Instruction × ScalarCertificate :=
+  match access.access.operand with
     | .type type =>
       let store := access.pops == 2
       let before := if store then [scalarType type, .reference] else [.reference]
@@ -953,10 +955,17 @@ private def IndirectCase.flows (access : IndirectCase) : Bool :=
         [some [], some [.word64]]
       (method, code, states)
     | _ => (access.rawMethod, access.code, access.states)
+/-- Whether the feature and scalar checks accept the claimed emission. -/
+private def IndirectCase.flows (access : IndirectCase) : Bool :=
+  let (method, code, states) := access.body
   decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none) method .scalar
     access.features
       access.reachable code) &&
     decide (ScalarFlowValid method access.features states code)
+/-- Whether the claimed code is the decoding of the body, as the code equation requires. -/
+private def IndirectCase.decodes (access : IndirectCase) : Bool :=
+  let (method, code, _) := access.body
+  decide (code = methodCode .scalar {} [] (access.features.map Option.isSome) method)
 /-- Whether the indirect access rule accepts the emission at the access itself. -/
 private def IndirectCase.window (access : IndirectCase) : Bool :=
   indirectSiteWindow (access.rawMethod.code[·]?) (access.pops + access.prefixes.length)
@@ -1073,20 +1082,21 @@ private def objectForged : List IndirectCase := [
   load 40 (.ldind .i8) .word64 (operand := .call loadSite),
   store 40 (.stind .i8) (operand := .call storeSite)]
 
-/-- Every emission extraction gives passes the indirect access rule, both flow checks and, where
-    the body has no token, every check of the method's evidence. -/
+/-- Every emission extraction gives passes the indirect access rule, both flow checks, the code
+    equation and, where the body has no token, every check of the method's evidence. -/
 private theorem indirect_emissions_accepted :
-    (indirectEmitted.all fun access => access.window && access.flows && access.translates) ∧
-    (objectEmitted.all fun access => access.window && access.flows) := by
+    (indirectEmitted.all fun access =>
+      access.window && access.flows && access.decodes && access.translates) ∧
+    (objectEmitted.all fun access => access.window && access.flows && access.decodes) := by
   decide +kernel
 
 #print axioms indirect_emissions_accepted
 
-/-- Every forged emission fails the indirect access rule, so both flow checks and the method's
-    evidence check reject it. -/
+/-- Every forged emission fails the indirect access rule and the code equation, so the method's
+    evidence check rejects it. -/
 private theorem indirect_forgeries_rejected :
-    (indirectForged.all fun access => !access.window && !access.flows && !access.translates) ∧
-    (objectForged.all fun access => !access.window && !access.flows) := by
+    (indirectForged.all fun access => !access.window && !access.decodes && !access.translates) ∧
+    (objectForged.all fun access => !access.window && !access.decodes) := by
   decide +kernel
 
 #print axioms indirect_forgeries_rejected
@@ -1664,7 +1674,7 @@ theorem addition_rejects_extra_static_site :
 #print axioms addition_rejects_extra_static_site
 
 /-- Valid evidence gives the full scalar encoding check at every reachable pc, from its scalar
-    check and its code equation conjunct. -/
+    check and the code equation its closed decoding implies. -/
 theorem checked_method_encodings {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
     {pins : List AssemblyPin} {platform : PlatformTable} {all : List MethodEvidence} {imports : List ImportSlot}
     {item : MethodEvidence} {method : Method}
@@ -1678,7 +1688,8 @@ theorem checked_method_encodings {rawLayouts : List RawLayout} {layouts : Array 
     (emittedAt : method.code[pc]? = some emitted) :
     scalarEmissionMatches role (rawBefore (item.closed.code[·]?) pc) instruction stack emitted =
       true := by
-  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, ⟨flow, binding⟩, _⟩ := valid
+  have binding := valid.code_eq
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, flow, _⟩ := valid
   exact flow.instruction_checked (binding.trans (methodCode_eq ..)) rawAt roleAt featureAt stackAt
     emittedAt
 

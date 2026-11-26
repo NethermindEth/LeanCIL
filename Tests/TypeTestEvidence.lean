@@ -103,9 +103,9 @@ example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) foldRaw .scala
     (foldCode.set 4 (.ldc_i4 0)) := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) foldRaw .scalar
     (foldStates.set 5 (state [some 0])) foldMask foldCode := by decide
-example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) foldRaw .scalar foldStates
-    foldMask
-    (foldCode.set 2 (.ldc_i4 0)) := by decide
+-- The code equation fixes the type operands, refusing a forged constant among them.
+example : foldCode = methodCode .scalar {} [] foldMask foldRaw ∧
+    foldCode.set 2 (.ldc_i4 0) ≠ methodCode .scalar {} [] foldMask foldRaw := by decide +kernel
 -- Distinct types decide the opposite edge.
 private def distinctRaw := raw (test marker other ++ [i 44 (.target 8), i 23, i 42, i 22, i 42])
 example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none)
@@ -180,15 +180,16 @@ theorem reference_type_branches :
   decide +kernel
 #print axioms reference_type_branches
 
-/-- Neither a changed operation nor a forged edge may bypass the exact fold and entry checks. -/
+/-- The code equation refuses a changed branch operation, and the fold and entry checks refuse a
+    forged edge. -/
 theorem reference_type_branch_rejections :
     let states := branchStates true
     let mask := states.map Option.isSome
     let code := branchCode true 46
     let forwarded := raw ((branchRaw true 46).code.set 2
       (i 208 (.type (.atom "Forwarder" "System.UInt64" .valueType))))
-    (¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (branchRaw true 46) .scalar states
-      mask (code.set 4 (.beq 5))) ∧
+    code = methodCode .scalar {} [] mask (branchRaw true 46) ∧
+    code.set 4 (.beq 5) ≠ methodCode .scalar {} [] mask (branchRaw true 46) ∧
     (¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (branchRaw true 47) .scalar states
       mask code) ∧
     (¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (branchRaw true 46) .scalar
@@ -203,7 +204,8 @@ theorem reference_type_branch_rejections :
   decide +kernel
 #print axioms reference_type_branch_rejections
 
-/-- Operandless `ceq` returns the closed type identity as a word, with the raw two-value stack. -/
+/-- Operandless `ceq` returns the closed type identity as a word, with the raw two-value stack;
+    the code equation refuses the opposite word there. -/
 theorem reference_type_results :
     ([true, false].all fun same =>
       let body := raw ((test word (if same then word else intType)).take 4 ++ [i 65025, i 42])
@@ -220,11 +222,9 @@ theorem reference_type_results :
       !decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none)
           { body with code := body.code.set 4 (i 65025 (.target 5)) }
         .scalar states (List.replicate 6 true) code) &&
-      !decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none) body .scalar states
-        (List.replicate 6 true)
-        (code.set 4 (.ldc_i4 (if same then 0 else 1)))) &&
-      !decide (ScalarFlowValid body states kinds
-        (code.set 4 (.ldc_i4 (if same then 0 else 1))))) = true := by
+      decide (code = methodCode .scalar {} [] (List.replicate 6 true) body) &&
+      decide (code.set 4 (.ldc_i4 (if same then 0 else 1)) ≠
+        methodCode .scalar {} [] (List.replicate 6 true) body)) = true := by
   decide +kernel
 #print axioms reference_type_results
 

@@ -192,12 +192,13 @@ example (message : String) : FeatureFlowValid #[] (fun _ => none) (fun _ => none
     (List.replicate 7 true) guardCode := by
   apply of_decide_eq_true
   with_unfolding_all rfl
--- The raised type is the constructed one, and the fold cannot be emitted as a hole.
+-- The code equation fixes the raised type to the constructed one, and the fold cannot be
+-- emitted as a hole.
 set_option maxHeartbeats 1500000 in
-example (message : String) : ∀ other ∈ ExceptionType.all, other ≠ .argument → ¬ FeatureFlowValid #[] (fun _ => none)
-    (fun _ => none)
-    (guardRaw message) .scalar guardStates (List.replicate 7 true)
-    (guardCode.set 4 (.throw other)) := by
+example (message : String) : guardCode =
+    methodCode .scalar {} [] (List.replicate 7 true) (guardRaw message) ∧
+    ∀ other ∈ ExceptionType.all, other ≠ .argument → guardCode.set 4 (.throw other) ≠
+      methodCode .scalar {} [] (List.replicate 7 true) (guardRaw message) := by
   apply of_decide_eq_true
   with_unfolding_all rfl
 example (message : String) : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none)

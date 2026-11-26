@@ -162,7 +162,7 @@ theorem managedCallerValid : ManagedCallerValid := by
   unfold MethodEvidenceValid
   rw [targets, constants, imports]
   refine ⟨?_, ?_, ?_, ?_, of_decide_eq_true (congrFun callerCalls slots), ?_, ?_, ?_, ?_, ?_,
-    ?_, ⟨?_, ?_⟩, ?_, callerBody, ?_, ?_, ?_, ?_⟩
+    ?_, ?_, ?_, callerBody, ?_, ?_, ?_, ?_⟩
   all_goals first | cil_kernel_rfl | decide +kernel
 
 #print axioms managedCallerValid

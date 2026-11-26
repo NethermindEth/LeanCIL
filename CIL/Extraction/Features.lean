@@ -20,7 +20,9 @@ extractor's per-pc certificate must be closed under them. Only pcs the certifica
 may be live; every other emitted instruction must be a hole (`.unadmitted`).
 
 The same pass binds each raw instruction to its emitted counterpart, exactly for control
-flow, locals and feature tests, and by stack effect for everything else.
+flow, locals and feature tests, and by stack effect for everything else. A fold site whose role
+fixes the decoded instruction (`fixedRoleSite`) skips that comparison, which
+`FeatureFlowValid.instruction_checked` recovers from the decoded code equation.
 
 A parameterless static Boolean call pushes the word `constantReturn` reads from the callee's own
 certificate, which the whole-program obligation validates alongside the caller's. Known words
@@ -514,6 +516,16 @@ theorem fixedRole_matches (layouts : Array RawLayout) (method : RawMethod)
 
 #print axioms fixedRole_matches
 
+/-- A live fold site whose role fixes its instruction and whose operand the method's bindings
+    do not decode, holding no hole: the decoder emits the role's instruction there. -/
+def fixedRoleSite (instruction : RawInstruction) (role : Option FoldRole)
+    (emitted : Instruction) : Bool :=
+  (match role with
+    | some .head | some .interior | some .typeHead | some .typeOperand | some (.result _)
+    | some (.typeBranch _) | some (.raise _) => true
+    | _ => false) &&
+    !(boundSite instruction && !foldOwnsSite role) && !(emitted matches .unadmitted _)
+
 /-- An accepted fold argument has the value and index of its encoded push or return. -/
 theorem argument_of_featureOpMatchesAt {layouts : Array RawLayout} {method : RawMethod}
     {raw : RawInstruction} {emitted : Instruction} {previous : Option RawInstruction}
@@ -642,20 +654,20 @@ def clauseSiteFits (raw : RawMethod) (pc : Nat) (role : Option FoldRole)
 
 /-- One pc of the certificate: an unreachable pc must emit a hole and start no handler; a
     reachable one must be well shaped, fit the exception clauses (`clauseSiteFits`), match its
-    emitted instruction, including the indirect access rule over the raw instructions `rawAt`
-    gives, and flow into a weaker state at every recomputed successor. -/
+    emitted instruction unless its fold role fixes the instruction the decoder emits
+    (`fixedRoleSite`), and flow into a weaker state at every recomputed successor. -/
 private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
     (constants : Nat → Option W32) (linkAt : Nat → Option Link) (raw : RawMethod)
     (facts : LocalFacts Locals)
     (profile : FeatureProfile)
     (certificate : Nat → Option (Option (FeatureFacts Locals)))
-    (roles : Nat → Option (Option FoldRole)) (rawAt : Nat → Option RawInstruction) :
+    (roles : Nat → Option (Option FoldRole)) :
     FeatureSite → Option (FeatureFacts Locals) → Instruction → Bool
   | site, none, .unadmitted _ => !handlerStartsAt raw site.pc
   | ⟨pc, previous, instruction, role⟩, some state, emitted =>
     wellShaped raw facts state && clauseSiteFits raw pc role state.stack &&
-      (featureOpMatchesAt layouts raw role instruction emitted previous &&
-        indirectSiteWindow rawAt pc instruction emitted false previous) &&
+      (fixedRoleSite instruction role emitted ||
+        featureOpMatchesAt layouts raw role instruction emitted previous) &&
       match featureTransferAtWith layouts raw facts profile
           (calleeConstant constants (linkAt pc) emitted)
           role instruction state,
@@ -686,7 +698,7 @@ def FeatureFlowValid (layouts : Array RawLayout) (constants : Nat → Option W32
   certificate[0]? = some (some { stack := [], locals := [] }) ∧
   (let facts := LocalFacts.known raw.locals.length (FeatureLocalIndex.ofRaw raw).eligible
    all3Flow (fun lookup => checkFeatureSiteWith layouts constants linkAt raw facts profile lookup
-      (FlowIndex.ofList (foldRoles raw.code)).get? (FlowIndex.ofList raw.code).get?)
+      (FlowIndex.ofList (foldRoles raw.code)).get?)
     (.ofList certificate) 0
     (featureSites 0 none raw.code (foldRoles raw.code)) certificate code) = true
 
@@ -710,8 +722,7 @@ def FeatureListValid (layouts : Array RawLayout) (constants : Nat → Option W32
   all3 (checkFeatureSiteWith layouts constants linkAt raw
       (LocalFacts.list raw.locals.length (featureLocalEligible raw)) profile
       (fun target => certificate[target]?)
-      (fun target => (foldRoles raw.code)[target]?)
-      (fun target => raw.code[target]?))
+      (fun target => (foldRoles raw.code)[target]?))
     (featureSites 0 none raw.code (foldRoles raw.code)) certificate code = true
 
 /-- Streaming validation has exactly the same entry, mask, shape and successor checks
@@ -726,8 +737,7 @@ private theorem FeatureFlowValid_iff_indexed (layouts : Array RawLayout)
       certificate[0]? = some (some { stack := [], locals := [] }) ∧
       all3 (checkFeatureSiteWith layouts constants linkAt raw (knownLocals raw) profile
           (fun target => certificate[target]?)
-          (fun target => (foldRoles raw.code)[target]?)
-          (fun target => raw.code[target]?))
+          (fun target => (foldRoles raw.code)[target]?))
         (featureSites 0 none raw.code (foldRoles raw.code)) certificate code = true := by
   unfold FeatureFlowValid
   have eligible : (FeatureLocalIndex.ofRaw raw).eligible = featureLocalEligible raw := by
@@ -739,19 +749,20 @@ private theorem FeatureFlowValid_iff_indexed (layouts : Array RawLayout)
       (fun target => (foldRoles raw.code)[target]?) := by
     funext target
     exact FlowIndex.get?_ofList _ _
-  have rawAt : (FlowIndex.ofList raw.code).get? = (fun target => raw.code[target]?) := by
-    funext target
-    exact FlowIndex.get?_ofList _ _
-  rw [roles, rawAt]
+  rw [roles]
   rfl
 
 #print axioms FeatureFlowValid_iff_indexed
 
-/-- At a live instruction the feature certificate checks the role and the actual predecessor. -/
+/-- At a live instruction of code decoded from the raw body, the emitted instruction matches its
+    role after the actual predecessor. -/
 theorem FeatureFlowValid.instruction_checked {layouts : Array RawLayout} {raw : RawMethod}
     {constants : Nat → Option W32} {linkAt : Nat → Option Link} {profile : FeatureProfile}
     {certificate : FeatureCertificate} {reachable : List Bool} {code : List Instruction}
     (valid : FeatureFlowValid layouts constants linkAt raw profile certificate reachable code)
+    {live : Nat → Bool} {decodeSite : SiteDecoder}
+    (codeDecodes : code = Instruction.ofRawCode none raw.code
+      (Instruction.withSiteDecoder (foldRoles raw.code).toArray live decodeSite))
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole}
     {state : FeatureState} {emitted : Instruction}
     (rawAt : raw.code[pc]? = some instruction)
@@ -762,8 +773,23 @@ theorem FeatureFlowValid.instruction_checked {layouts : Array RawLayout} {raw : 
   have pairAt := featureSites_at rawAt roleAt
   have sites := ((FeatureFlowValid_iff_indexed _ _ _ _ _ _ _ _).mp valid).2.2.2.2
   have checked := all3_at sites pairAt stateAt codeAt
-  simp only [checkFeatureSiteWith, Bool.and_eq_true] at checked
-  exact checked.1.2.1
+  simp only [checkFeatureSiteWith, Bool.and_eq_true, Bool.or_eq_true] at checked
+  rcases checked.1.2 with fixed | matched
+  · simp only [fixedRoleSite, Bool.and_eq_true, Bool.not_eq_true'] at fixed
+    obtain ⟨⟨isFixed, direct⟩, present⟩ := fixed
+    have notHole : ∀ opcode, emitted ≠ .unadmitted opcode := by
+      intro opcode hole
+      subst hole
+      simp at present
+    rw [codeDecodes] at codeAt
+    cases role with
+    | none => simp at isFixed
+    | some role =>
+      cases role <;> first
+        | (simp at isFixed; done)
+        | exact (fixedRole_matches layouts raw _ _ instruction emitted trivial).mpr
+            (Instruction.withSiteDecoder_role rawAt roleAt codeAt direct (by simp) notHole)
+  · exact matched
 
 #print axioms FeatureFlowValid.instruction_checked
 
@@ -902,14 +928,14 @@ private theorem checkFeatureSiteWith_known_eq_list (layouts : Array RawLayout)
     (constants : Nat → Option W32) (linkAt : Nat → Option Link) (raw : RawMethod)
     (profile : FeatureProfile)
     (certificate : FeatureCertificate) (roles : Nat → Option (Option FoldRole))
-    (rawAt : Nat → Option RawInstruction) (allKnown : AllKnown raw certificate)
+    (allKnown : AllKnown raw certificate)
     (site : FeatureSite) (state : Option FeatureState)
     (emitted : Instruction) (member : state ∈ certificate) :
     checkFeatureSiteWith layouts constants linkAt raw (knownLocals raw) profile
-        (fun target => certificate[target]?) roles rawAt site state emitted =
+        (fun target => certificate[target]?) roles site state emitted =
       checkFeatureSiteWith layouts constants linkAt raw
         (LocalFacts.list raw.locals.length (featureLocalEligible raw)) profile
-        (fun target => (expandCertificate raw certificate)[target]?) roles rawAt site
+        (fun target => (expandCertificate raw certificate)[target]?) roles site
         (state.map (FeatureState.expand raw.locals.length)) emitted := by
   cases state with
   | none => cases emitted <;> rfl
@@ -971,8 +997,7 @@ private theorem FeatureFlowValid_iff_expand (layouts : Array RawLayout)
     (featureSites 0 none raw.code (foldRoles raw.code)) certificate code
     fun site state emitted member =>
       checkFeatureSiteWith_known_eq_list layouts constants linkAt raw profile certificate
-        (fun target => (foldRoles raw.code)[target]?)
-        (fun target => raw.code[target]?) allKnown site state emitted member
+        (fun target => (foldRoles raw.code)[target]?) allKnown site state emitted member
   constructor
   · rintro ⟨length, codeLength, mask, entry, sites⟩
     have allKnown : AllKnown raw certificate := by

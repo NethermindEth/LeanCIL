@@ -7,8 +7,9 @@ import CIL.Extraction.ValueDecoding
 alignment `blockAlignment` reads from an `unaligned.` before them. `indirectAccessMatches`
 checks the emitted instruction against the opcode, operand type and preceding instruction. It
 reserves the block instructions for their two raw opcodes. Typed transfer calls retain their
-method reference and use the bound runtime model. `FeatureFlowValid` and `ScalarFlowValid` apply `indirectSiteWindow` at every
-reachable pc, reading the neighbouring raw instructions through an index of the body built once.
+method reference and use the bound runtime model. `ScalarFlowValid` applies
+`indirectSiteWindow` at every reachable pc, reading the neighbouring raw instructions through an
+index of the body built once.
 -/
 
 namespace CIL.Extraction

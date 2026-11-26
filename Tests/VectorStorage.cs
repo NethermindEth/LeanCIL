@@ -270,11 +270,16 @@ File.WriteAllText(controlPath, $"""
     {CheckedEvidenceControl(baseline, NarrowEvidence(baseline, shapes), [shapes], 0)}
     """);
 Run(["lake", "env", "lean", controlPath], cwd: verification.CheckoutPackage());
-// At these ordinary value sites the scalar check leaves the emitted operand to the code equation.
+// At these ordinary value sites the scalar check leaves the emitted operand to the method's decoding, whose code
+// equation the kernel decides here.
+const string decodedCode = "method0_decoded_code";
 const string codeEquation = "method0.code = Extraction.methodCode";
 var scalarControl = Path.Combine(root, "Roundtrip128uint/ScalarControl.lean");
-File.WriteAllText(scalarControl, DecodedScalars(baseline));
+File.WriteAllText(scalarControl, NarrowEvidence(baseline, scalars));
 Run(["lake", "env", "lean", scalarControl], cwd: verification.CheckoutPackage());
+var codeControl = Path.Combine(root, "Roundtrip128uint/CodeControl.lean");
+File.WriteAllText(codeControl, DecodedCode(baseline));
+Run(["lake", "env", "lean", codeControl], cwd: verification.CheckoutPackage());
 var rejected = new RejectedEvidence(root);
 const string widerFamily = ".constructor Extraction.intrinsicsScope \"System.Runtime.Intrinsics.Vector256`1\"";
 const string wordElement = ".primitive .uint32";
@@ -283,14 +288,14 @@ foreach (var (name, changed, obligation, marker) in new[]
     ("float-element", baseline.Replace(".primitive .uint32", ".primitive .double"), shapes, "ObjectOperandsValid"),
     ("element-token", baseline.Replace(".primitive .uint32", ".primitive .int16"), shapes, "ObjectOperandsValid"),
     ("vector-token", ForgeTransfer("ldobj", $""".ldobj (.apply ({widerFamily}) ({wordElement}))"""),
-        scalars, codeEquation),
+        decodedCode, codeEquation),
     ("store-width", ForgeTransfer("stobj", ".stobj (.primitive .uint64)"),
-        scalars, codeEquation),
+        decodedCode, codeEquation),
     ("load-width", ForgeTransfer("ldobj", ".ldobj (.primitive .int32)"),
-        scalars, codeEquation),
+        decodedCode, codeEquation),
     ("init-width", ForgeTransfer("initobj", ".initobj (.primitive .byte)"),
-        scalars, codeEquation),
-    ("init-missing", ForgeTransfer("initobj", ".nop"), scalars, codeEquation)
+        decodedCode, codeEquation),
+    ("init-missing", ForgeTransfer("initobj", ".nop"), decodedCode, codeEquation)
 })
 {
     if (changed == baseline) throw new InvalidOperationException($"Ineffective vector mutation: {name}");
@@ -312,23 +317,23 @@ foreach (var (name, changed, obligation, marker) in new[]
         continue;
     }
     var path = Path.Combine(root, $"{name}.lean");
-    File.WriteAllText(path, DecodedScalars(changed));
+    File.WriteAllText(path, DecodedCode(changed));
     rejected.Add(path, $"PASS independently rejected vector evidence: {name}", marker, "is false");
 }
 
-// The scalar obligation with the scalar check and the code equation decided apart, so a rejection names the
-// conjunct that refuses it.
-string DecodedScalars(string source)
+// The decoded code equation decided by the kernel instead of read from the decoder's own proof, so a forged
+// emitted operand is refused by the comparison with the decoding.
+string DecodedCode(string source)
 {
-    var narrowed = NarrowEvidence(source, scalars);
-    var statement = $"{scalars} : And (Extraction.ScalarFlowValid method0Closed method0FeatureStates " +
-        $"method0ScalarStates method0.code) ({codeEquation} ";
-    const string decided = ") := by decide +kernel";
+    var narrowed = NarrowEvidence(source, decodedCode);
+    var statement = $"theorem {decodedCode} : {codeEquation} ";
+    const string proof = " := @Method.ofClosed?_code ";
     var start = narrowed.IndexOf(statement, StringComparison.Ordinal);
-    var end = start < 0 ? -1 : narrowed.IndexOf(decided, start, StringComparison.Ordinal);
-    if (end < 0 || narrowed.IndexOf('\n', start, end - start) >= 0)
-        throw new InvalidOperationException("Missing decoded scalar obligation");
-    return narrowed[..end] + ") := ⟨by decide +kernel, by decide +kernel⟩" + narrowed[(end + decided.Length)..];
+    var at = start < 0 ? -1 : narrowed.IndexOf(proof, start, StringComparison.Ordinal);
+    var end = at < 0 ? -1 : narrowed.IndexOf('\n', at);
+    if (end < 0 || narrowed.IndexOf('\n', start, at - start) >= 0)
+        throw new InvalidOperationException("Missing decoded code obligation");
+    return narrowed[..at] + " := by decide +kernel" + narrowed[end..];
 }
 
 string ForgeTransfer(string opcode, string replacement) => ForgeDecodedMethod(baseline, 0,

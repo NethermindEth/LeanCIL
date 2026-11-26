@@ -260,7 +260,7 @@ partial class Program
                 if (match.Value.Contains(" : Extraction.MethodLayoutsValid ", StringComparison.Ordinal) ||
                     match.Value.Contains(" : Extraction.ObjectOperandsValid ", StringComparison.Ordinal) ||
                       match.Value.Contains(" : Extraction.RuntimeModelsAgree ", StringComparison.Ordinal) ||
-                    match.Value.Contains(" : And (Extraction.ScalarFlowValid ", StringComparison.Ordinal))
+                    match.Value.Contains(" : Extraction.ScalarFlowValid ", StringComparison.Ordinal))
                     return TheoremHead.Replace(match.Value, "$1 := by decide +kernel");
                 return InstructionCheckProjection.Replace(match.Value, " := by decide +kernel");
             });

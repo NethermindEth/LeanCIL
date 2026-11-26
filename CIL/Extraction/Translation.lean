@@ -430,9 +430,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
     item.parameterInput = .ok method ∧
   OpaqueLocalsValid item.closed method ∧
   ObjectOperandsValid item.closed item.reachable method ∧
-  (ScalarFlowValid item.closed item.featureStates item.scalarStates method.code ∧
-    method.code =
-      methodCode method.profile method.environment method.links item.reachable item.closed) ∧
+  ScalarFlowValid item.closed item.featureStates item.scalarStates method.code ∧
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
     method ∧
   BodyDecodes pins platform item.assembly item.body item.original item.arguments item.signature
@@ -484,14 +482,17 @@ theorem MethodEvidenceValid.profile_valid {rawLayouts layouts pins platform all 
   exact shape.1
 #print axioms MethodEvidenceValid.profile_valid
 
-/-- A validated record binds every emitted instruction to its decoding. -/
+/-- A validated record's code is the decoding of its closed body at its own links, which its
+    closed decoding states. -/
 theorem MethodEvidenceValid.code_eq {rawLayouts : List RawLayout}
     {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
     {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) : method.code =
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :
+    method.code =
       methodCode method.profile method.environment method.links item.reachable item.closed := by
-  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, ⟨_, same⟩, _⟩ := valid
-  exact same
+  have decoded := valid.decoded
+  rw [valid.links_eq] at decoded
+  exact (Method.ofClosed?_fields decoded).1
 
 #print axioms MethodEvidenceValid.code_eq
 

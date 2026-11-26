@@ -30,18 +30,13 @@ internal static class ScalarEvidence
         EmitInstructionChecks(lean, number, method.Body.Instructions.Count, calls, objectProof);
     }
 
-    // The checks share the closed operands; the code equality comes from the method's decoding.
+    // The checks share the closed operands in one decision.
     static void EmitInstructionChecks(StringBuilder lean, int number, int instructions, int calls,
         string? objectProof)
     {
         var method = $"method{number}";
         var flow = $"{method}Closed {method}FeatureStates {method}ScalarStates {method}.code";
         var scalar = $"Extraction.ScalarFlowValid {flow}";
-        var context = $"{method}.profile {method}.environment {method}.links";
-        var code = $"Extraction.methodCode {context} {method}Reachable {method}Closed";
-        var binding = $"{method}.code = {code}";
-        var witness = $"{method}_decoded_code";
-        var scalarEvidence = $"And ({scalar}) ({binding})";
         var unsafeCalls = $"Extraction.UnsafeCallsValid {method}Closed {method}Reachable {method}.code";
         var objects = $"Extraction.ObjectOperandsValid {method}Closed {method}Reachable {method}";
         var remaining = $"And ({unsafeCalls}) ({objects})";
@@ -51,11 +46,11 @@ internal static class ScalarEvidence
         if (heartbeats > LeanEmitter.InstructionCheckHeartbeats(0, 0))
             lean.AppendLine($"set_option maxHeartbeats {heartbeats} in");
         lean.AppendLine($"""
-            theorem {method}_instruction_checks : And ({scalarEvidence}) ({remaining}) := by
+            theorem {method}_instruction_checks : And ({scalar}) ({remaining}) := by
               have checks : And ({scalar}) ({decided}) := {LeanEmitter.Decide}
-              exact And.intro (And.intro checks.1 ({witness})) {checkedTail}
+              exact And.intro checks.1 {checkedTail}
             #print axioms {method}_instruction_checks
-            theorem {method}_scalars_validated : {scalarEvidence} := {method}_instruction_checks.1
+            theorem {method}_scalars_validated : {scalar} := {method}_instruction_checks.1
             theorem {method}_unsafe_validated : {unsafeCalls} := {method}_instruction_checks.2.1
             theorem {method}_object_operands_validated : {objects} := {method}_instruction_checks.2.2
             """);

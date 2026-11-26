@@ -47,9 +47,12 @@ comparisons, conversions and stack operations, proof outlines read the opcode fr
 decoder checks the corresponding method bytes.
 
 The evidence proves that each method's entire instruction list equals the decoding of its closed
-body. At a reachable instruction outside a fold, the scalar validator uses this equality for
-value encodings when the decoder supplies an instruction. Folded sites retain their explicit
-site checks.
+body (`MethodEvidenceValid.code_eq`, from the closed decoding check). The scalar validator relies
+on this equality for value encodings at a reachable instruction that no binding decodes, outside a
+fold or at a type fold role, and the feature validator relies on it at a fold site whose role fixes
+the decoded instruction. `ScalarFlowValid.instruction_checked`, `ScalarFlowValid.indirect_checked`
+and `FeatureFlowValid.instruction_checked` derive the comparisons these sites skip from the
+equality. Bound call sites, tail call folds and their arguments retain their explicit site checks.
 Closed method construction refuses the first reachable hole with its pc and raw opcode.
 Dead sites retain their opcode-tagged holes.
 

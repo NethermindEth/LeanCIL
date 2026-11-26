@@ -380,4 +380,33 @@ theorem plainBody_at {closed : RawMethod} {reachable : List Bool}
 
 #print axioms plainBody_at
 
+/-- At a live pc whose fold role fixes its instruction and whose operand the method's bindings do
+    not decode, code decoded through `withSiteDecoder` holds the instruction the role fixes. -/
+theorem Instruction.withSiteDecoder_role {code : List RawInstruction}
+    {roles : List (Option FoldRole)} {live : Nat → Bool} {decodeSite : SiteDecoder}
+    {pc : Nat} {instruction : RawInstruction} {role : FoldRole} {emitted : Instruction}
+    (rawAt : code[pc]? = some instruction) (roleAt : roles[pc]? = some (some role))
+    (decoded : (Instruction.ofRawCode none code
+      (Instruction.withSiteDecoder roles.toArray live decodeSite))[pc]? = some emitted)
+    (direct : (boundSite instruction && !foldOwnsSite (some role)) = false)
+    (unblocked : role ≠ .blocked) (present : ∀ opcode, emitted ≠ .unadmitted opcode) :
+    Instruction.ofRole? role (rawBefore (code[·]?) pc) instruction = some emitted := by
+  rw [Instruction.ofRawCode_getElem? code pc _, Instruction.ofRawAt, rawAt] at decoded
+  have same := Option.some.inj decoded
+  simp only [Instruction.withSiteDecoder, indexedRead?_eq, List.getElem?_toArray, roleAt,
+    Option.join_some, direct] at same
+  cases active : live pc with
+  | false =>
+    simp only [active, Bool.not_false, ite_true] at same
+    exact absurd same.symm (present _)
+  | true =>
+    simp only [active, Bool.not_true, Bool.false_eq_true, ite_false] at same
+    cases role with
+    | blocked => exact absurd rfl unblocked
+    | _ =>
+      cases found : Instruction.ofRole? _ (rawBefore (code[·]?) pc) instruction with
+      | none => simp only [found, Option.getD_none] at same; exact absurd same.symm (present _)
+      | some value => simp only [found, Option.getD_some] at same; rw [same]
+
+#print axioms Instruction.withSiteDecoder_role
 end CIL.Extraction
