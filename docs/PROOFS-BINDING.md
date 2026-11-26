@@ -829,11 +829,15 @@ evaluated method. Admission checks the instructions at live positions. The form
 operand as its listed constant. The method can then use the facts from `cil_field_shape` or
 `cil_value_shape`. The command rejects a listed constant that names no operand.
 
-`cil_evaluated name : type := term` defines `name` as the value of a closed `Extraction.RawMethod`
-or `List String` term, written as a literal, and the kernel checks `name_eq : term = name` by
-reduction. The command refuses a term that depends on `sorryAx`. The extractor writes a bound
-caller's original and the signatures of a program with appended CoreLib rows this way, so tactics
-read them without evaluating the binding.
+`cil_evaluated name : type := term` defines `name` as the value of a closed `Extraction.RawMethod`,
+`List String` or `Extraction.ManagedPackage` term, written as a literal, and the kernel checks
+`name_eq : term = name` by reduction. For a term of type `Option type` the value must be `some`,
+and `name_eq` states `term = some name`. A package literal writes each value that a definition of
+the current module also denotes, such as the caller's body or the extraction's profile, as that
+constant. The command refuses a term that depends on `sorryAx`. The extractor writes a bound
+caller's original, the signatures of a program with appended CoreLib rows, and a single caller's
+bound package (`boundPackage_eq : managedPackage = some boundPackage`) this way. Tactics and
+later kernel checks then read them without evaluating the binding again.
 
 The extractor defines every method this way. It refuses a method with a live instruction that does
 not decode, or with a live call or construction whose operation differs from the one its decoder

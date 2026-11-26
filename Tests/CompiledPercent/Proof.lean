@@ -9,7 +9,13 @@ open CIL CIL.Extraction CIL.Safety CIL.Safety.LiteralImage CIL.Runtime.Net11WinX
 set_option maxRecDepth 65536
 set_option maxHeartbeats 30000000
 
-private def physicalEntry := Extracted.managedPackage.map ProgramEntry.range
+private def physicalEntry := some (ProgramEntry.range Extracted.boundPackage)
+
+/-- The entry is the one the caller's physical package selects. -/
+private theorem physicalEntry_source :
+    Extracted.managedPackage.map ProgramEntry.range = physicalEntry := by
+  rw [Extracted.boundPackage_eq]; rfl
+#print axioms physicalEntry_source
 
 /-- The audited entry selects the same methods as the caller's physical package. -/
 private theorem entry_eq :

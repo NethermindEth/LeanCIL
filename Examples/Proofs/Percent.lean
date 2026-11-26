@@ -9,7 +9,7 @@ open CIL CIL.Safety CIL.Extraction
 set_option maxRecDepth 65536
 set_option maxHeartbeats 30000000
 
-private def package := Extracted.managedPackage.get (by cil_kernel_rfl)
+private def package := Extracted.boundPackage
 private def entry := ProgramEntry.range package
 private def initial := entry.initialMemory.toOption.getD Safety.Memory.empty
 private def caller := entry.methods[0]?.getD { code := [], locals := [], returnsValue := true }
@@ -100,7 +100,7 @@ theorem independentOfResource :
         invoke (body.methods ++ extra) 66 0 [.scalar (.i32 value)] memory =
           if value ≤ 100 then .ok (memory, [.scalar (.i32 value)])
           else .error ⟨0, 6, .thrown .argumentOutOfRange⟩ := by
-  refine ⟨package, initial, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, ?_⟩
+  refine ⟨package, initial, Extracted.boundPackage_eq, by cil_kernel_rfl, by cil_kernel_rfl, ?_⟩
   intro extra value
   change invoke (entry.methods ++ extra) 66 0 [.scalar (.i32 value)] initial = _
   have root := congrFun found extra
@@ -117,7 +117,7 @@ theorem independentOfResource :
 private theorem certifiedEntry {body : ManagedPackage}
     (source : Extracted.managedPackage = some body) :
     Extracted.translation_valid.entry .net11WinX64 = some (.range body) := by
-  have selected : Extracted.managedPackage = some package := by cil_kernel_rfl
+  have selected : Extracted.managedPackage = some package := Extracted.boundPackage_eq
   cases Option.some.inj (selected.symm.trans source)
   cil_kernel_rfl
 #print axioms certifiedEntry

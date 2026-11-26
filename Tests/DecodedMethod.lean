@@ -995,6 +995,24 @@ theorem writtenNamesLiteral : writtenNames = ["Add()", "Sub()"] := rfl
 
 #print axioms writtenNamesLiteral
 
+/-- Names a lookup found, as an option that `cil_evaluated` unwraps. -/
+def foundNames : Option (List String) := some computedNames
+
+cil_evaluated unwrappedNames : List String := foundNames
+
+/-- An option term defines its `some` value, and the kernel equation keeps the `some`. -/
+theorem unwrappedNamesSource : foundNames = some ["Add()", "Sub()"] := unwrappedNames_eq
+
+#print axioms unwrappedNamesSource
+
+/-- A lookup that finds nothing. -/
+def missingNames : Option (List String) := none
+
+-- An option that evaluates to `none` defines nothing, rather than a default value.
+/-- error: cil_evaluated: missingNames evaluates to none -/
+#guard_msgs in
+cil_evaluated missingCopy : List String := missingNames
+
 /-- warning: declaration uses `sorry` -/
 #guard_msgs in
 /-- A raw method whose value is `sorry`, as a declaration that failed to elaborate leaves it. -/

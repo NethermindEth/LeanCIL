@@ -1,5 +1,6 @@
 import Lean
 import CIL.Extraction.DecodedMethod
+import CIL.Extraction.ManagedPackage
 import CIL.KernelReduction
 import CIL.SymbolicExecution
 
@@ -18,7 +19,8 @@ and type operands as their listed `FieldRef` and `TypeExpr` constants. Stepping 
 their `cil_field_shape` and `cil_value_shape` facts. Decoded operands share their raw layouts'
 identity expressions, and a closed decoder keeps the raw type expressions
 in the declared signature. The kernel checks `name_decoder_eq` and every fact.
-`cil_evaluated name : type := term` writes a computed raw method or string list the same way.
+`cil_evaluated name : type := term` writes a computed raw method, string list or managed package
+the same way.
 -/
 
 namespace CIL.Extraction.DecodedDefinition
@@ -174,6 +176,69 @@ deriving instance ToExpr for Extraction.RawInstruction
 deriving instance ToExpr for Extraction.GenericConstraint
 deriving instance ToExpr for Extraction.StaticFieldSite
 deriving instance ToExpr for Extraction.RawMethod
+deriving instance ToExpr for Extraction.ColumnWidths
+deriving instance ToExpr for Extraction.TableHeader
+deriving instance ToExpr for Extraction.AssemblyMetadata
+deriving instance ToExpr for Extraction.MetadataLink
+deriving instance ToExpr for MetadataName
+deriving instance ToExpr for AssemblyName
+deriving instance ToExpr for Extraction.AssemblyPin
+deriving instance ToExpr for Extraction.PlatformKind
+deriving instance ToExpr for Extraction.VectorLane
+deriving instance ToExpr for FieldLayout
+deriving instance ToExpr for Extraction.ArgumentHead
+deriving instance ToExpr for Extraction.FieldType
+deriving instance ToExpr for LayoutArguments
+deriving instance ToExpr for RawField
+deriving instance ToExpr for GenericLayout
+deriving instance ToExpr for AggregateLayout
+deriving instance ToExpr for RawLayout
+deriving instance ToExpr for ComputedLayout
+deriving instance ToExpr for ImportSignature
+deriving instance ToExpr for Extraction.ImportLayoutCatalog
+deriving instance ToExpr for Extraction.MetadataSlice
+deriving instance ToExpr for Extraction.SearchTree
+deriving instance ToExpr for PlatformDefinition
+deriving instance ToExpr for Extraction.PlatformTable
+deriving instance ToExpr for ImportSlot
+deriving instance ToExpr for FeatureFacts
+deriving instance ToExpr for Extraction.TokenTable
+deriving instance ToExpr for Extraction.MethodMetadata
+deriving instance ToExpr for IndexTables
+deriving instance ToExpr for Extraction.MethodNames
+deriving instance ToExpr for Extraction.BodyImports
+deriving instance ToExpr for LayoutIdentity
+deriving instance ToExpr for InstanceArgument
+deriving instance ToExpr for StorageType
+deriving instance ToExpr for ArgumentOp
+deriving instance ToExpr for ScalarKind
+deriving instance ToExpr for DispatchMethod
+deriving instance ToExpr for Architecture
+deriving instance ToExpr for FeatureProfile
+
+/-- A pin index is determined by its identity list, so its literal rebuilds the index from it. -/
+instance : ToExpr Extraction.PinnedIndex where
+  toExpr index := mkApp (mkConst ``Extraction.PinnedIndex.ofIdentities) (toExpr index.identities)
+  toTypeExpr := mkConst ``Extraction.PinnedIndex
+
+/-- The positional table of an environment is its raw layouts as an array. -/
+instance : ToExpr LayoutEnvironment where
+  toExpr environment :=
+    let layoutType := mkConst ``Extraction.RawLayout
+    let rawLayouts := toExpr environment.rawLayouts
+    let indexed := mkApp2 (mkConst ``List.toArray [.zero]) layoutType rawLayouts
+    mkApp4 (mkConst ``LayoutEnvironment.mk) rawLayouts (toExpr environment.layouts) indexed
+      (mkApp2 (mkConst ``Eq.refl [.succ .zero]) (mkApp (mkConst ``Array [.zero]) layoutType)
+        indexed)
+  toTypeExpr := mkConst ``LayoutEnvironment
+
+deriving instance ToExpr for Extraction.BodyEvidence
+deriving instance ToExpr for Extraction.RawArguments
+deriving instance ToExpr for Extraction.LayoutUse
+deriving instance ToExpr for Extraction.DispatchType
+deriving instance ToExpr for Extraction.MethodEvidence
+deriving instance ToExpr for CIL.Method
+deriving instance ToExpr for Extraction.ManagedPackage
 
 /-- The value of the closed term `decoder`, computed by compiled code. -/
 unsafe def evaluateUnsafe (decoder : Expr) : MetaM (Option Method) :=
@@ -201,18 +266,76 @@ unsafe def operandLiteralUnsafe (operand : Expr) : MetaM Expr := do
     return toExpr (← evalExpr Extraction.TypeExpr type operand)
   throwError "cil_decoded_method: {operand} must be a field reference or type operand"
 
-/-- The literal of the closed term `term` of type `type`, computed by compiled code: a raw
-    method or a list of strings. -/
-private unsafe def evaluatedLiteralUnsafe (type term : Expr) : MetaM Expr := do
+/-- The value of `term`, or of the option `term` that must be `some`, written as a literal. -/
+private unsafe def literalAt (α : Type) [ToExpr α] (type term : Expr) (optional : Bool) :
+    MetaM Expr := do
+  unless optional do return toExpr (← evalExpr α type term)
+  let some value ← evalExpr (Option α) (mkApp (mkConst ``Option [.zero]) type) term
+    | throwError "cil_evaluated: {term} evaluates to none"
+  return toExpr value
+
+/-- The literal of the closed term `term` of type `type` (or `Option type` when `optional`),
+    computed by compiled code: a raw method, a list of strings or a managed package. -/
+private unsafe def evaluatedLiteralUnsafe (type term : Expr) (optional : Bool) : MetaM Expr := do
   if type.isConstOf ``Extraction.RawMethod then
-    return toExpr (← evalExpr Extraction.RawMethod type term)
+    return ← literalAt Extraction.RawMethod type term optional
+  if type.isConstOf ``Extraction.ManagedPackage then
+    return ← literalAt Extraction.ManagedPackage type term optional
   if ← isDefEq type (mkApp (mkConst ``List [.zero]) (mkConst ``String)) then
-    return toExpr (← evalExpr (List String) type term)
+    return ← literalAt (List String) type term optional
   throwError "cil_evaluated: no literal is written for the type {type}"
 
 /-- The literal of the closed term `term` of type `type`, computed by compiled code. -/
 @[implemented_by evaluatedLiteralUnsafe]
-private opaque evaluatedLiteral (type term : Expr) : MetaM Expr
+private opaque evaluatedLiteral (type term : Expr) (optional : Bool) : MetaM Expr
+
+/-- The literal of the constant `name` of type `type` when a package can carry a value of that
+    type, computed by compiled code. -/
+private unsafe def sharedLiteralUnsafe (name : Name) (type : Expr) : MetaM (Option Expr) := do
+  let constant := mkConst name
+  let literal? (α : Type) [ToExpr α] : MetaM (Option Expr) := do
+    if ← isDefEq type (toTypeExpr α) then return some (toExpr (← evalExpr α type constant))
+    return none
+  let candidates := [literal? Extraction.BodyEvidence, literal? Extraction.RawMethod,
+    literal? Extraction.MethodMetadata, literal? Extraction.AssemblyMetadata,
+    literal? Extraction.MethodNames, literal? AssemblyName, literal? Extraction.AssemblyPin,
+    literal? Extraction.TokenTable, literal? (List IndexTables), literal? FeatureCertificate,
+    literal? ScalarCertificate, literal? Extraction.RawArguments,
+    literal? (List Extraction.TypeExpr), literal? (List Extraction.LayoutUse),
+    literal? (List Extraction.DispatchType), literal? (List Bool), literal? (List Nat),
+    literal? (List (Nat × Link)), literal? FeatureProfile, literal? LayoutEnvironment,
+    literal? Extraction.PlatformTable, literal? Extraction.PinnedIndex]
+  for candidate in candidates do
+    if let some literal ← candidate then return some literal
+  return none
+
+/-- The literal of a constant whose type a package can carry. -/
+@[implemented_by sharedLiteralUnsafe]
+private opaque sharedLiteral (name : Name) (type : Expr) : MetaM (Option Expr)
+
+/-- The definitions of the current module that `term` is computed from, directly or through
+    other such definitions. -/
+private partial def moduleSources (term : Expr) : MetaM (Array Name) := do
+  let env ← getEnv
+  let rec visit (pending : List Name) (seen : NameSet) (found : Array Name) : Array Name :=
+    match pending with
+    | [] => found
+    | name :: rest =>
+      if seen.contains name || (env.getModuleIdxFor? name).isSome then visit rest seen found
+      else match env.find? name with
+        | some (.defnInfo info) =>
+          visit (info.value.getUsedConstants.toList ++ rest) (seen.insert name) (found.push name)
+        | _ => visit rest (seen.insert name) found
+  return visit term.getUsedConstants.toList {} #[]
+
+/-- `literal` with each value that one of `sources` also denotes written as that constant, so a
+    package names the extraction's own inputs. Values of depth two or less stay written out. -/
+private def shareSources (sources : Array Name) (literal : Expr) : MetaM Expr := do
+  let mut named : Std.HashMap Expr Name := {}
+  for name in sources.qsort Name.lt do
+    let some written ← sharedLiteral name (← getConstInfo name).type | continue
+    if written.approxDepth > 2 && !named.contains written then named := named.insert written name
+  return literal.replace fun term => (named.get? term).map mkConst
 
 /-- The closed constructor term for an extraction's named field or type operand. -/
 @[implemented_by operandLiteralUnsafe]
@@ -400,32 +523,60 @@ elab_rules : command
       addSimpTheorem simpSet fact (post := true) (inv := false) .global (eval_prio default)
 
 /-- `cil_evaluated name : type := term` defines `name` as the value the closed term evaluates to,
-    a raw method or a list of strings, written as a literal so tactics that walk it read it
-    without evaluating `term`, and proves `name_eq : term = name` in the kernel. A term that
-    depends on `sorryAx` is refused. -/
-syntax (name := evaluatedDefinition) "cil_evaluated " ident " : " term " := " term : command
+    a raw method, a list of strings or a managed package, written as a literal so tactics and
+    the kernel read it without evaluating `term`, and proves `name_eq : term = name` in the
+    kernel. A term of type `Option type` must evaluate to `some`, and `name_eq` states
+    `term = some name`. A package literal names each value of a definition of the current module
+    that `term` is computed from as that constant. A preceding doc comment documents `name`. A term
+    that depends on `sorryAx` is refused. -/
+syntax (name := evaluatedDefinition)
+  (docComment)? "cil_evaluated " ident " : " term " := " term : command
 
 elab_rules : command
-  | `(cil_evaluated $nameSyntax:ident : $typeSyntax := $termSyntax) => liftTermElabM do
+  | `($[$doc?:docComment]? cil_evaluated $nameSyntax:ident : $typeSyntax := $termSyntax) =>
+    liftTermElabM do
     let type ← Term.elabType typeSyntax
-    let term ← Term.elabTerm termSyntax (some type)
+    let term ← Term.elabTerm termSyntax none
     Term.synthesizeSyntheticMVarsNoPostponing
     let type ← instantiateMVars type
     let term ← instantiateMVars term
     if term.hasMVar || term.hasFVar then
       throwError "cil_evaluated: the term must be closed{indentExpr term}"
+    let optional ← isDefEq (← inferType term) (mkApp (mkConst ``Option [.zero]) type)
+    let term ← if optional then pure term else Term.ensureHasType type term
     -- Compiled code would run a failed declaration's `sorry`, which can crash the process.
     for constant in term.getUsedConstants do
       if (← collectAxioms constant).contains ``sorryAx then
         throwError "cil_evaluated: {constant} depends on `sorryAx`, so its value is not evaluated"
     let name := (← getCurrNamespace) ++ nameSyntax.getId
-    let value ← evaluatedLiteral type term
-    addAndCompile <| .defnDecl {
+    let package := type.isConstOf ``Extraction.ManagedPackage
+    let mut value ← evaluatedLiteral type term optional
+    if package then value ← shareSources (← moduleSources term) value
+    let declaration := Declaration.defnDecl {
       name, levelParams := [], type, value,
       hints := .regular (getMaxHeight (← getEnv) value + 1), safety := .safe }
+    -- Compiled code for a package literal would add megabytes to the module; `term` runs instead.
+    if package then addDecl declaration else addAndCompile declaration
     addDeclarationRangesFromSyntax name (← getRef) nameSyntax
-    addDocStringCore name s!"The value of `{termSyntax}`."
-    proveByReduction (name.appendAfter "_eq") s!"`{name}` is the value of `{termSyntax}`."
-      (← mkEq term (mkConst name))
+    match doc? with
+    | some doc => addDocStringCore name (← getDocStringText doc)
+    | none => addDocStringCore name s!"The value of `{termSyntax}`."
+    let written := if optional then mkApp2 (mkConst ``Option.some [.zero]) type (mkConst name)
+      else mkConst name
+    let equation := name.appendAfter "_eq"
+    proveByReduction equation s!"`{name}` is the value of `{termSyntax}`." (← mkEq term written)
+    if package then
+      let implementation := name ++ `compiled
+      let computed ← if optional then do
+        let present ← mkEqTrans (← mkCongrArg (mkApp (mkConst ``Option.isSome [.zero]) type)
+          (mkConst equation)) (← mkEqRefl (mkConst ``Bool.true))
+        pure (mkApp3 (mkConst ``Option.get [.zero]) type term present)
+      else pure term
+      addAndCompile <| .defnDecl {
+        name := implementation, levelParams := [], type, value := computed,
+        hints := .regular (getMaxHeight (← getEnv) computed + 1), safety := .safe }
+      addDocStringCore implementation
+        s!"Compiled code for `{name}`, which evaluates `{termSyntax}`."
+      setImplementedBy name implementation
 
 end CIL.Extraction.DecodedDefinition

@@ -333,7 +333,7 @@ internal static class ManagedConstructorPackage
             set_option maxRecDepth 65536
             set_option maxHeartbeats 30000000
             /-- Binding must succeed to publish this extraction. -/
-            def boundPackage := managedPackage.get (by cil_kernel_rfl)
+            cil_evaluated boundPackage : Extraction.ManagedPackage := managedPackage
             def assemblies := Runtime.Net11WinX64.packagePins sourceAssemblies
             def methodEvidence := boundPackage.rows.map Prod.fst
             def managedDeclarations := boundPackage.declarations
