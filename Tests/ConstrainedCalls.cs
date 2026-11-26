@@ -495,14 +495,14 @@ foreach (var (owner, name) in new[]
 // longer matches; moving the entry outside its pin's scope leaves it unreadable for dispatch.
 static string InEntry(string source, string identity, string from, string to)
 {
-    var entry = source.IndexOf($"\"{identity}\", valueType :=", StringComparison.Ordinal);
+    var entry = source.IndexOf($"\"{identity}\" .interfaceType, valueType :=", StringComparison.Ordinal);
     var at = entry < 0 ? -1 : source.IndexOf(from, entry, StringComparison.Ordinal);
     if (at < 0) throw new Exception("Missing dispatch catalog mutation target: " + identity + " " + from);
     return source[..at] + to + source[(at + from.Length)..];
 }
 var most = mostSpecificSources["Most"];
-var mostOverride = Regex.Match(most[most.IndexOf("\"Examples.IScaleMost\", valueType :=", StringComparison.Ordinal)..],
-    @"overrides := \[\(\d+, [^\]]+\]");
+var mostEntry = most.IndexOf("\"Examples.IScaleMost\" .interfaceType, valueType :=", StringComparison.Ordinal);
+var mostOverride = Regex.Match(most[mostEntry..], @"overrides := \[\(\d+, [^\]]+\]");
 var examplesPin = Regex.Match(most, @"assembly := assembly\d+");
 if (!mostOverride.Success || !examplesPin.Success) throw new Exception("Missing most specific mutation targets");
 foreach (var (mutation, forgedSource) in new[]
