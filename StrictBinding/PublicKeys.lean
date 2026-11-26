@@ -54,10 +54,6 @@ private def checkCarriedKeys (images : List PreparedImage) (slice : MetadataSlic
 def checkPublicKeys (images : List PinnedImage) (pins : List AssemblyPin)
     (evidence : List MethodEvidence) : Except AuditError Bool := do
   let prepared ← prepare images
-  -- Keyed by display bytes, so a reference that spells an image but names another is refused.
-  let mut assemblies : Std.TreeMap (List Nat) CIL.AssemblyName := {}
-  for image in prepared do
-    assemblies := assemblies.insert image.assembly.spelling image.assembly
   for item in evidence do
     for slice in item.body.metadata.slices do
       let .ok identity := slice.assembly.name | throw .unnamedAssembly
@@ -71,12 +67,12 @@ def checkPublicKeys (images : List PinnedImage) (pins : List AssemblyPin)
       seen := true
       let token ← checkedTokenOf Table.assemblyRef (i + 1) .rowOverflow
       let (reference, _) ← namedAssemblyAt source.view source.layout token 0
-      match assemblies.get? reference.spelling with
+      -- An image that displays alike but names another assembly is refused, not skipped.
+      match prepared.find? (·.assembly.spellsAlike reference) with
       | none => complete := false
       | some actual =>
-        unless actual.publicKeyToken == reference.publicKeyToken do
-          throw (.referenceKeyMismatch source.identity token)
-        unless actual == reference do throw (.referenceScopeMismatch source.identity token)
+        unless actual.assembly == reference do
+          throw (.referenceScopeMismatch source.identity token)
   return seen && complete
 
 /-- All references have images whose full keys reproduce their tokens, including unsigned targets. -/

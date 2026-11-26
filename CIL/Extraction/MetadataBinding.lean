@@ -176,8 +176,7 @@ def MetadataEnv.fieldSite (env : MetadataEnv) (token : Nat) : Except MetadataErr
 def MetadataEnv.chainRoot (env : MetadataEnv) (token base : Nat) (assembly : AssemblyName)
     (parts : List (List Nat)) (core : Bool) : Except MetadataError (List (Nat × Nat)) := do
   if env.pinned.contains assembly.name then throw (.missingSlice base)
-  let kind ← env.platform.require base assembly.spelling parts
-    (PlatformKind.fitsHint (some false))
+  let kind ← env.platform.require base assembly parts (PlatformKind.fitsHint (some false))
   if !(core && parts == [systemNamespace, objectName]) then throw (.unsupportedBase token)
   if kind == .objectRoot then .ok [] else .error (.platformKindMismatch base)
 
@@ -186,13 +185,13 @@ def MetadataEnv.chainRoot (env : MetadataEnv) (token base : Nat) (assembly : Ass
 theorem MetadataEnv.chainRoot_ok {env : MetadataEnv} {token base : Nat} {assembly : AssemblyName}
     {parts : List (List Nat)} {core : Bool} {chain : List (Nat × Nat)}
     (ended : env.chainRoot token base assembly parts core = .ok chain) :
-    { scope := assembly.spelling, parts, kind := .objectRoot } ∈ env.platform.definitions ∧
+    { assembly, parts, kind := .objectRoot } ∈ env.platform.definitions ∧
       parts = [systemNamespace, objectName] ∧ core = true := by
   unfold MetadataEnv.chainRoot at ended
   by_cases pinned : env.pinned.contains assembly.name = true
   · simp [pinned, throw, throwThe, MonadExceptOf.throw, bind, Except.bind] at ended
   cases required :
-      env.platform.require base assembly.spelling parts (PlatformKind.fitsHint (some false)) with
+      env.platform.require base assembly parts (PlatformKind.fitsHint (some false)) with
   | error error => simp [pinned, required, bind, Except.bind] at ended
   | ok kind =>
     have member := (PlatformTable.require_ok required).1
@@ -289,15 +288,15 @@ def MetadataEnv.platformConstant (env : MetadataEnv) (token : Nat) (site : Field
     | none => .error (.unboundStaticField token)
     | some head =>
       (fun _ => (0, held, none)) <$>
-        env.platform.require token head.scope head.parts (· == .byteOrder)
+        env.platform.requireNamed token head (· == .byteOrder)
 
 /-- The constant field's owner has a platform definition that states the byte order. -/
 theorem MetadataEnv.platformConstant_ok {env : MetadataEnv} {token : Nat} {site : FieldSite}
     {held : ResolvedType} {isStatic platform : Bool} {result : Nat × ResolvedType × Option Bool}
     (found : env.platformConstant token site held isStatic platform = .ok result) :
-    result = (0, held, none) ∧ ∃ head, site.owner.head = some head ∧
-      { scope := head.scope, parts := head.parts, kind := .byteOrder } ∈
-        env.platform.definitions := by
+    result = (0, held, none) ∧ ∃ head assembly, site.owner.head = some head ∧
+      head.assembly = some assembly ∧
+      { assembly, parts := head.parts, kind := .byteOrder } ∈ env.platform.definitions := by
   unfold MetadataEnv.platformConstant at found
   split at found
   · cases found
@@ -306,14 +305,14 @@ theorem MetadataEnv.platformConstant_ok {env : MetadataEnv} {token : Nat} {site 
     · split at found
       · cases found
       · rename_i head owned
-        cases required : env.platform.require token head.scope head.parts (· == .byteOrder) with
+        cases required : env.platform.requireNamed token head (· == .byteOrder) with
         | error error => simp [required, Functor.map, Except.map] at found
         | ok kind =>
           simp only [required, Functor.map, Except.map, Except.ok.injEq] at found
-          have ⟨member, fits⟩ := PlatformTable.require_ok required
+          have ⟨assembly, named, member, fits⟩ := PlatformTable.requireNamed_ok required
           simp only [beq_iff_eq] at fits
           cases fits
-          exact ⟨found.symm, head, owned, member⟩
+          exact ⟨found.symm, head, assembly, owned, named, member⟩
 
 #print axioms MetadataEnv.platformConstant_ok
 
@@ -330,7 +329,7 @@ def MetadataEnv.platformField (env : MetadataEnv) (token : Nat) (site : FieldSit
     | [first, second] =>
       if head.assembly.any (·.isCoreLibrary) &&
           head.parts == [systemNamespace, valueTuplePairName] then
-        match env.platform.require token head.scope head.parts (· == .valuePair) with
+        match env.platform.requireNamed token head (· == .valuePair) with
         | .error error => .error error
         | .ok _ =>
           if site.name == firstItemName && site.declared == .var 0 then .ok (0, first, some false)
@@ -347,8 +346,9 @@ def MetadataEnv.platformField (env : MetadataEnv) (token : Nat) (site : FieldSit
 theorem MetadataEnv.platformField_pair {env : MetadataEnv} {token : Nat} {site : FieldSite}
     {held type : ResolvedType} {isStatic platform : Bool} {index : Nat}
     (found : env.platformField token site held isStatic platform = .ok (index, type, some false)) :
-    ∃ head arguments, site.owner = .genericInst head arguments ∧
-      { scope := head.scope, parts := head.parts, kind := .valuePair } ∈
+    ∃ head arguments assembly, site.owner = .genericInst head arguments ∧
+      head.assembly = some assembly ∧
+      { assembly, parts := head.parts, kind := .valuePair } ∈
         env.platform.definitions ∧ site.declared = .var index ∧
       arguments.toList[index]? = some type ∧
       ((index = 0 ∧ site.name = firstItemName) ∨ (index = 1 ∧ site.name = secondItemName)) := by
@@ -360,10 +360,10 @@ theorem MetadataEnv.platformField_pair {env : MetadataEnv} {token : Nat} {site :
       · split at found
         · cases found
         · rename_i required
-          have ⟨member, fits⟩ := PlatformTable.require_ok required
+          have ⟨assembly, named, member, fits⟩ := PlatformTable.requireNamed_ok required
           simp only [beq_iff_eq] at fits
           cases fits
-          refine ⟨head, arguments, owner, member, ?_⟩
+          refine ⟨head, arguments, assembly, owner, named, member, ?_⟩
           split at found
           · rename_i selected
             simp only [Bool.and_eq_true, beq_iff_eq] at selected
@@ -496,10 +496,9 @@ private def MetadataEnv.callOwner (env : MetadataEnv) (token : Nat) (linked : Bo
   if !linked then return <- { env with publishedLayouts := #[] }.resolveToken 0 token
   if metadataTableOf token != Table.typeRef then throw (.unresolvedMember token)
   let (assembly, name, parts) <- typeRefQualified env 0 resolveFuel token
-  let scope := assembly.spelling
   if env.identities.contains assembly || env.pinned.contains assembly.name ||
-      (env.platform.kindOf scope parts).isSome then throw (.unresolvedMember token)
-  return .named { scope, name, parts, kind := .importedOwner, pinned := false,
+      (env.platform.kindOf assembly parts).isSome then throw (.unresolvedMember token)
+  return .named { scope := assembly.spelling, name, parts, kind := .importedOwner, pinned := false,
                   assembly := some assembly }
 
 /-- Read a definition or member reference, resolving an opaque owner only for a linked call. -/

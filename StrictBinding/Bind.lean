@@ -60,14 +60,23 @@ def prepare (images : List PinnedImage) : Except AuditError (List PreparedImage)
   | some identity => throw (.duplicateImage identity)
   | none => pure prepared
 
-/-- A referenced scope with a supplied image must match that image's physical Assembly columns. -/
+/-- Two assemblies whose display text is one text: equal names, versions and tokens, and equal
+    cultures or the empty culture against the literal culture `neutral`, which display alike. -/
+def _root_.CIL.AssemblyName.spellsAlike (left right : CIL.AssemblyName) : Bool :=
+  let neutral := fun (culture : CIL.MetadataName) =>
+    culture == CIL.MetadataName.mk 1 || culture == name!"neutral"
+  left.name == right.name && left.version == right.version &&
+    left.publicKeyToken == right.publicKeyToken &&
+    (left.culture == right.culture || neutral left.culture && neutral right.culture)
+
+/-- The assembly an AssemblyRef row names. A supplied image that displays alike must be that very
+    assembly, so a reference cannot stand for an image it only resembles. -/
 def checkedReferenceScope (images : List PreparedImage) (source : PreparedImage) (token : Nat) :
-    Except AuditError (List Nat) := do
+    Except AuditError CIL.AssemblyName := do
   let (columns, _) ← namedAssemblyAt source.view source.layout token 0
-  let scope := columns.spelling
-  if let some target := images.find? (fun image => CIL.Extraction.bytesOf image.identity == scope) then
+  if let some target := images.find? (·.assembly.spellsAlike columns) then
     unless target.assembly == columns do throw (.referenceScopeMismatch source.identity token)
-  return scope
+  return columns
 
 /-- Whether the Assembly or AssemblyRef row names a neutral core library with its publisher's
     token. Both tables have the same identity columns after the Assembly's hash-algorithm

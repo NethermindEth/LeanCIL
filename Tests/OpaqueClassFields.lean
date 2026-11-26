@@ -92,7 +92,7 @@ private def slice : MetadataSlice × Tokens := build world (bytesOf "T")
 
 /-- A type of `System.Runtime`'s `System.Collections.Generic` namespace of this kind. -/
 private def collectionType (name : String) (kind : PlatformKind) : PlatformDefinition :=
-  { scope := runtimeScopeBytes, parts := [bytesOf "System.Collections.Generic", bytesOf name],
+  { assembly := runtimeAssembly, parts := [bytesOf "System.Collections.Generic", bytesOf name],
     kind }
 
 /-- The platform definitions of the types the fields and the classes' base name. -/

@@ -248,7 +248,17 @@ var platformScopes = trusted.Split(Path.PathSeparator)
     .ToHashSet(StringComparer.Ordinal);
 var coreLibrary = module.TypeSystem.Object.Resolve()?.Module ??
     throw new InvalidDataException("System.Object does not resolve for the platform definitions.");
-var platform = new PlatformDefinitions(coreLibrary);
+// The columns Lean reads from a reference row; the runtime's names and cultures are plain text.
+static (string Name, Version Version, string Culture, string Token) Columns(
+    AssemblyNameReference reference, ModuleDefinition _) =>
+    (reference.Name, reference.Version, reference.Culture,
+        reference.PublicKeyToken is { Length: > 0 } key ? $"some 0x{Convert.ToHexStringLower(key)}" : "none");
+static string AssemblyTerm((string Name, Version Version, string Culture, string Token) columns) =>
+    $$"""{ name := name!"{{columns.Name}}", version := ⟨{{columns.Version.Major}}, {{columns.Version.Minor}}, """ +
+    $$"""{{columns.Version.Build}}, {{columns.Version.Revision}}⟩, culture := name!"{{columns.Culture}}", """ +
+    $$"""publicKeyToken := {{columns.Token}} }""";
+var platform = new PlatformDefinitions<(string Name, Version Version, string Culture, string Token)>(
+    coreLibrary, Columns);
 platform.Add(module, reader, reader.TypeReferences,
     scope => !imports.Contains(scope.FullName) && platformScopes.Contains(scope.FullName));
 var linkList = string.Join(", ", links.Select(link => $"⟨{link.Kind}, {(uint)link.Source}, 0, {link.Target}⟩"));
@@ -293,7 +303,7 @@ var prefix = $$"""
         links := [{{linkList}}] }
 
     /-- Scoped definitions supplied by the runtime libraries referenced by this assembly. -/
-    def platform : PlatformTable := platform_table% {{platform.Lean(ByteLiterals.Of)}}
+    def platform : PlatformTable := platform_table% {{platform.Lean(AssemblyTerm, ByteLiterals.Of)}}
 
     {{declaration}}
 

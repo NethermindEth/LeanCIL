@@ -163,9 +163,10 @@ classifying a base. Each table contains the six definitions these checks use and
 1,024 filler definitions. Separate rows look up an absent type and a simple name that occurs
 in several namespaces. A further row looks up identical name parts in distinct assembly scopes.
 It checks two entries with different kinds and a third, absent scope. The three lookups together
-cost about 82,000, 90,000 and 101,000 heartbeats at the three sizes.
+cost about 61,000, 65,000 and 68,000 heartbeats at the three sizes.
 
-When names repeat across scopes, the literal index includes scope bytes in the key. The suite
+When names repeat across scopes, the literal index includes the assembly's name bytes in the key,
+and a lookup compares the whole typed `AssemblyName` of each candidate. The suite
 compares each lookup at consecutive table sizes and allows up to 1.15 times the previous cost.
 The same growth limit applies to elaboration heartbeats per definition. Run these rows with
 `dotnet run --file Tests/LookupScaling.cs -- --platform-table-only`.

@@ -236,7 +236,7 @@ def method0Signature : String :=
 
 /-- The platform definition `Add`'s owner relies on: its base `System.Object`. -/
 def method0Platform : PlatformTable := platform_table%
-  [{ scope := runtimeScopeBytes, parts := [bytesOf "System", bytesOf "Object"],
+  [{ assembly := runtimeAssembly, parts := [bytesOf "System", bytesOf "Object"],
      kind := .objectRoot }]
 
 def method0Body : Extraction.BodyEvidence :=

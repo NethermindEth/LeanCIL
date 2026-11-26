@@ -125,7 +125,8 @@ private def slice (carried : Bool) (result : List Nat) : MetadataSlice × Tokens
     `IsLittleEndian` is the platform's byte order. -/
 private def sitePlatform : PlatformTable := platform_table%
   [runtimeType "Object" .objectRoot, runtimeType "BitConverter" .byteOrder,
-   { scope := bytesOf extScope, parts := [bytesOf "Ext", bytesOf "Point"], kind := .classType }]
+   { assembly := Tests.unsignedAssembly name!"Ext", parts := [bytesOf "Ext", bytesOf "Point"],
+     kind := .classType }]
 
 /-- The static operand of `field`. -/
 private def operandOf (field : FieldRef) : RawOperand :=

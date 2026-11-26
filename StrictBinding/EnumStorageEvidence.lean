@@ -61,19 +61,20 @@ theorem EnumStorageChecked.carried {images : List PinnedImage} {platform : Platf
     (environment : item.body.environment = .ok env) (budget : fuel ≤ resolveFuel)
     (lookup : typeDefNamed env position fuel token = .ok named) (kind : named.kind = .enumType code) :
     ∃ prepared image, prepare images = .ok prepared ∧ image ∈ prepared ∧
-      bytesOf image.identity = named.scope ∧
+      named.assembly = some image.assembly ∧
       enumDefinition? image 0 named.parts = .ok (some (tokenRow token)) ∧
       physicalEnumCode image (tokenRow token) = .ok code := by
   obtain ⟨prepared, claims, built, selected, covered, _⟩ := checked.complete
-  have member := carriedEnums_of_typeDefNamed budget lookup kind
+  obtain ⟨assembly, assembled, member⟩ := carriedEnums_of_typeDefNamed budget lookup kind
   have physical := covered _ ((methodEnumClaims_body method environment selected).2 _ member)
   unfold carriedEnumBound at physical
   simp only [bind, Except.bind] at physical
-  cases hi : prepared.find? (fun image => bytesOf image.identity == named.scope) with
+  cases hi : prepared.find? (·.assembly == assembly) with
   | none => simp [hi, pure, Except.pure] at physical
   | some image =>
     have scope := List.find?_some hi
-    refine ⟨prepared, image, built, List.mem_of_find?_eq_some hi, by simpa using scope, ?_⟩
+    refine ⟨prepared, image, built, List.mem_of_find?_eq_some hi,
+      by simpa [assembled] using (beq_iff_eq.mp scope).symm, ?_⟩
     cases row : enumDefinition? image 0 named.parts with
     | error err => simp [hi, row] at physical
     | ok result =>
@@ -101,7 +102,7 @@ theorem EnumStorageChecked.external {images : List PinnedImage} {platform : Plat
     (resolved : env.externalNamed token scope name parts hint = .ok named)
     (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity storage) = true) :
     ∃ prepared, prepare images = .ok prepared ∧ ∃ code image row,
-      PinnedDefinitionAt prepared named.parts named.scope image row ∧
+      PinnedDefinitionAt prepared named.parts scope image row ∧
       physicalEnumCode image row = .ok code ∧ integerElement code = true ∧
       storage.primitive.elementType = code := by
   obtain ⟨prepared, _, built, selected, _, covered⟩ := checked.complete

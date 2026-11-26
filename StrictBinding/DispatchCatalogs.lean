@@ -209,7 +209,7 @@ def singleModule (image : PreparedImage) : Reading Unit := do
 /-- Read the namespace, outer name and nested names from the TypeRef chain, ending at
     the physical AssemblyRef. A cyclic or module-scoped reference is uncovered. -/
 def referencedClass (images : List PreparedImage) (image : PreparedImage) :
-    Nat → Nat → List (List Nat) → Reading (List Nat × List (List Nat))
+    Nat → Nat → List (List Nat) → Reading (CIL.AssemblyName × List (List Nat))
   | 0, _, _ => failure
   | fuel + 1, token, nested => do
     let cell := image.layout.cell image.view token
@@ -234,7 +234,7 @@ def testDefinition (prepared : List PreparedImage) (home : PreparedImage) (token
   if tableOf token == Table.typeDef then return (home, token % 2^24)
   guard (tableOf token == Table.typeRef)
   let (identity, parts) ← referencedClass prepared home (home.layout.rowCount Table.typeRef) token []
-  let some target := prepared.find? (fun image => bytesOf image.identity == identity) | failure
+  let some target := prepared.find? (·.assembly == identity) | failure
   singleModule target
   match ← physical (definitionRoute prepared target parts) with
   | .defined row => return (target, row)

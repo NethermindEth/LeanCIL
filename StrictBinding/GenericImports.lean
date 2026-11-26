@@ -68,7 +68,7 @@ private def targetAt (prepared : List PreparedImage) (caller : PreparedImage) (e
   let site ← (env.importMethodSite token frame slot.identity).toOption
   let .named named := site.owner | none
   guard (named.parts == [← stringAt (← (ty 2).toOption), ← stringAt (← (ty 1).toOption)] &&
-    named.scope == scope && site.name == name && site.methodArguments == some args &&
+    named.assembly == some scope && site.name == name && site.methodArguments == some args &&
     signature.convention == site.convention && signature.genericArity == site.genericArity &&
     resolveScalar site.genericArity signature.result == some site.result &&
     signature.parameters.mapM (resolveScalar site.genericArity) == some site.parameters)

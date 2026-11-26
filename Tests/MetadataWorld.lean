@@ -205,7 +205,7 @@ def worldPlatform : PlatformTable := platform_table%
    runtimeType "Lazy`1" (.genericClass 1), runtimeType "String" .classType,
    runtimeType "ValueTuple`2" .valuePair, runtimeType "Math" .classType,
    runtimeType "G`1" (.genericClass 1),
-   ⟨runtimeScopeBytes, [bytesOf "System.Runtime.CompilerServices", bytesOf "Unsafe"], .classType⟩]
+   ⟨runtimeAssembly, [bytesOf "System.Runtime.CompilerServices", bytesOf "Unsafe"], .classType⟩]
 
 /-- The 32-bit and 64-bit unsigned types as the extractor writes them. -/
 def int32 : TypeExpr := .primitive .int32

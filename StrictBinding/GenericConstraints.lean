@@ -67,7 +67,7 @@ def ordinaryTypeName (space name : String) : Bool :=
 
 /-- A top-level TypeDef or AssemblyRef-scoped TypeRef with its physical assembly identity. -/
 private def constraintTypeParts (images : List PreparedImage) (image : PreparedImage) (token : Nat) :
-    Except AuditError (String × ClassName) := do
+    Except AuditError (CIL.AssemblyName × ClassName) := do
   let cell := image.layout.cell image.view token
   let space ← image.layout.stringAt image.view (← cell typeNamespaceColumn)
   let name ← image.layout.stringAt image.view (← cell typeNameColumn)
@@ -80,14 +80,12 @@ private def constraintTypeParts (images : List PreparedImage) (image : PreparedI
         throw .uncoveredConstraint
       unless (← enumDefinition? image 0 [space, name]) == some (token % 2^24) do
         throw (.constraintMismatch token)
-      pure image.identity
+      pure image.assembly
     | 1 => do
       let coded ← cell 0
       unless coded % 4 == 2 do throw .uncoveredConstraint
-      let scope ← checkedReferenceScope images image
+      checkedReferenceScope images image
         (← checkedTokenOf Table.assemblyRef (coded / 4) .rowOverflow)
-      let some text := spelled? scope | throw (.tables .invalidUtf8)
-      pure text
     | _ => throw .uncoveredConstraint
   let some declaration := ClassName.ofParts? [space, name] | throw (.constraintMismatch token)
   return (scope, declaration)
@@ -95,7 +93,8 @@ private def constraintTypeParts (images : List PreparedImage) (image : PreparedI
 /-- The scoped identity of a closed constraint type. -/
 private def constraintTypeName (images : List PreparedImage) (image : PreparedImage) (token : Nat) :
     Except AuditError String := do
-  let (scope, name) ← constraintTypeParts images image token
+  let (assembly, name) ← constraintTypeParts images image token
+  let some scope := spelled? assembly.spelling | throw (.tables .invalidUtf8)
   let some text := name.signatureName? | throw (.constraintMismatch token)
   return scope ++ "::" ++ text
 
@@ -110,7 +109,7 @@ private def constraintHead (images : List PreparedImage) (image : PreparedImage)
       let cell := image.layout.cell image.view head
       let space ← image.layout.stringAt image.view (← cell typeNamespaceColumn)
       let simple ← image.layout.stringAt image.view (← cell typeNameColumn)
-      let some found ← findPinnedDefinition images [space, simple] (bytesOf scope)
+      let some found ← findPinnedDefinition images [space, simple] scope
         (images.length + 1) | throw .uncoveredConstraint
       pure found
   let (kind, count) ← physicalTypeShape defining row

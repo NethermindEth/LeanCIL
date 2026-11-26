@@ -377,9 +377,9 @@ private def externalScope (name : String) : String :=
   name ++ ", Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 
 private def externalValues : PlatformTable := platform_table%
-  [⟨bytesOf (externalScope "Outer"), [bytesOf "N", bytesOf "Wrap`1"], .genericValue 1⟩,
-   ⟨bytesOf (externalScope "A"), [bytesOf "N", bytesOf "Value"], .valueType⟩,
-   ⟨bytesOf (externalScope "B"), [bytesOf "N", bytesOf "Value"], .valueType⟩]
+  [⟨Tests.unsignedAssembly name!"Outer", [bytesOf "N", bytesOf "Wrap`1"], .genericValue 1⟩,
+   ⟨Tests.unsignedAssembly name!"A", [bytesOf "N", bytesOf "Value"], .valueType⟩,
+   ⟨Tests.unsignedAssembly name!"B", [bytesOf "N", bytesOf "Value"], .valueType⟩]
 
 private def externalAggregateRows (reference : String) : Step Nat := do
   let outer ← string "Outer"

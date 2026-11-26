@@ -10,7 +10,7 @@ open CIL.Extraction
     exports have an ExportedType as their implementation and belong to their enclosing export. -/
 private def forwardedScope? (images : List PreparedImage) (image : PreparedImage)
     (space name : List Nat) :
-    Except AuditError (Option (Nat × List Nat)) := do
+    Except AuditError (Option (Nat × CIL.AssemblyName)) := do
   let exportedType := 0x27
   let cell := image.layout.cellOfRow image.view exportedType
   let mut target := none
@@ -46,9 +46,11 @@ private def nestedExports (image : PreparedImage) (parent : Nat) :
     nestedExports image child rest
   | _ => throw (.typeDefMismatch parent .typeName)
 
+/-- Where a type's outermost name leads in one image: its own row, or the assembly it is
+    forwarded to. -/
 inductive DefinitionRoute where
   | defined (row : Nat)
-  | forwarded (scope : List Nat)
+  | forwarded (scope : CIL.AssemblyName)
 
 /-- Resolve the outermost name in the current image. A local definition owns its nested types,
     and a forwarder carries the whole enclosing name chain to the referenced assembly. -/
@@ -69,37 +71,37 @@ def definitionRoute (images : List PreparedImage) (image : PreparedImage) (parts
 
 /-- The physical definition, or an uncovered assembly when a scope on the path is missing. -/
 def findPinnedDefinition (images : List PreparedImage) (parts : List (List Nat))
-    (scope : List Nat) : Nat → Except AuditError (Option (PreparedImage × Nat))
+    (scope : CIL.AssemblyName) : Nat → Except AuditError (Option (PreparedImage × Nat))
   | 0 => throw (.typeDefMismatch 0 .typeName)
   | fuel + 1 => do
-    let some image := images.find? (fun image => bytesOf image.identity == scope) | return none
+    let some image := images.find? (·.assembly == scope) | return none
     match ← definitionRoute images image parts with
     | .defined row => return some (image, row)
     | .forwarded target => findPinnedDefinition images parts target fuel
 
 /-- Each step uses the assembly named by the reference or preceding physical forwarder. -/
 inductive PinnedDefinitionAt (images : List PreparedImage) (parts : List (List Nat)) :
-    List Nat → PreparedImage → Nat → Prop where
+    CIL.AssemblyName → PreparedImage → Nat → Prop where
   | here {scope image row}
-      (selected : images.find? (fun candidate => bytesOf candidate.identity == scope) = some image)
+      (selected : images.find? (·.assembly == scope) = some image)
       (defined : definitionRoute images image parts = .ok (.defined row)) :
       PinnedDefinitionAt images parts scope image row
   | forward {scope image next target row}
-      (selected : images.find? (fun candidate => bytesOf candidate.identity == scope) = some image)
+      (selected : images.find? (·.assembly == scope) = some image)
       (forwarded : definitionRoute images image parts = .ok (.forwarded next))
       (found : PinnedDefinitionAt images parts next target row) :
       PinnedDefinitionAt images parts scope target row
 
 /-- A successful lookup retains the chain of physical references to the defining TypeDef. -/
 theorem pinnedDefinitionAt_of_find {images : List PreparedImage} {parts : List (List Nat)}
-    {scope : List Nat} {fuel : Nat} {image : PreparedImage} {row : Nat}
+    {scope : CIL.AssemblyName} {fuel : Nat} {image : PreparedImage} {row : Nat}
     (found : findPinnedDefinition images parts scope fuel = .ok (some (image, row))) :
     PinnedDefinitionAt images parts scope image row := by
   induction fuel generalizing scope with
   | zero => cases found
   | succ fuel ih =>
     simp only [findPinnedDefinition, bind, Except.bind] at found
-    cases selected : images.find? (fun candidate => bytesOf candidate.identity == scope) with
+    cases selected : images.find? (·.assembly == scope) with
     | none => simp [selected, pure, Except.pure] at found
     | some candidate =>
       simp only [selected] at found

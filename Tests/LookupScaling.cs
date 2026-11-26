@@ -2046,10 +2046,13 @@ void PlatformTableCosts()
     static string Parts(string space, string name) => $"[{Bytes(space)}, {Bytes(name)}]";
     // Table names in the literal form an extraction writes, so the literal costs what an extraction's does.
     static string Literal(string text) => ByteLiterals.Of(Encoding.UTF8.GetBytes(text));
-    // The text of `runtimeScopeBytes`, which the checks pass as the scope of the types they read.
-    const string runtimeScope = "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a";
-    static string Definition(string space, string name, string kind, string scope = runtimeScope) =>
-        $$"""{ scope := {{Literal(scope)}}, parts := [{{Literal(space)}}, {{Literal(name)}}], kind := {{kind}} }""";
+    // The typed assembly in the literal form an extraction writes: `runtimeAssembly` by default.
+    static string Assembly(string name, string version = "0, 0, 0, 0", string token = "none") =>
+        $$"""{ name := name!"{{name}}", version := ⟨{{version}}⟩, culture := name!"", publicKeyToken := {{token}} }""";
+    string runtime = Assembly("System.Runtime", "11, 0, 0, 0", "some 0xb03f5f7f11d50a3a");
+    string Definition(string space, string name, string kind, string? assembly = null) =>
+        $$"""{ assembly := {{assembly ?? runtime}}, parts := [{{Literal(space)}}, {{Literal(name)}}], """ +
+        $$"""kind := {{kind}} }""";
     // The depth an extraction sets for its list, so a list it would refuse to compile fails here.
     static string Depth(int count) => $"set_option maxRecDepth {PlatformDefinitions.RecursionDepth(count)} in";
     string[] relied =
@@ -2074,7 +2077,8 @@ void PlatformTableCosts()
         /-- Identical names alternate between class and value storage in distinct scopes. -/
         def scopes{{size}} : PlatformTable := platform_table% [
           {{string.Join(",\n  ", Enumerable.Range(0, size).Select(index =>
-              Definition("Shared", "Enumerator", index % 2 == 0 ? ".classType" : ".valueType", $"Scope{index:D5}")))}}]
+              Definition("Shared", "Enumerator", index % 2 == 0 ? ".classType" : ".valueType",
+                  Assembly($"Scope{index:D5}"))))}}]
         /-- The environment of no slices under the table. -/
         def env{{size}} : MetadataEnv := MetadataEnv.ofSlices [] (platform := table{{size}})
         #kernel_cost "platform reference {{size}}"
@@ -2103,19 +2107,19 @@ void PlatformTableCosts()
               name := bytesOf "IsLittleEndian", declared := .primitive 2, definition := none }
             (.primitive 2) true true).isOk = true)
         #kernel_cost "platform base {{size}}"
-          ((table{{size}}.require 0 runtimeScopeBytes {{Parts("System", "ValueType")}}
+          ((table{{size}}.require 0 runtimeAssembly {{Parts("System", "ValueType")}}
             (baseFits true {{Parts("System", "ValueType")}})).isOk = true)
         #kernel_cost "platform shared {{size}}"
-          (shared{{size}}.kindOf runtimeScopeBytes {{Parts($"Shared{size / 2:D5}", "Enumerator")}} =
+          (shared{{size}}.kindOf runtimeAssembly {{Parts($"Shared{size / 2:D5}", "Enumerator")}} =
             some .classType)
         #kernel_cost "platform scoped {{size}}"
-          (scopes{{size}}.kindOf {{Bytes($"Scope{size - 2:D5}")}} {{Parts("Shared", "Enumerator")}} =
+          (scopes{{size}}.kindOf {{Assembly($"Scope{size - 2:D5}")}} {{Parts("Shared", "Enumerator")}} =
               some .classType /\
-            scopes{{size}}.kindOf {{Bytes($"Scope{size - 1:D5}")}} {{Parts("Shared", "Enumerator")}} =
+            scopes{{size}}.kindOf {{Assembly($"Scope{size - 1:D5}")}} {{Parts("Shared", "Enumerator")}} =
               some .valueType /\
-            scopes{{size}}.kindOf {{Bytes($"Scope{size:D5}")}} {{Parts("Shared", "Enumerator")}} = none)
+            scopes{{size}}.kindOf {{Assembly($"Scope{size:D5}")}} {{Parts("Shared", "Enumerator")}} = none)
         #kernel_cost "platform missing {{size}}"
-          (table{{size}}.kindOf runtimeScopeBytes {{Parts("System", "Absent")}} = none)
+          (table{{size}}.kindOf runtimeAssembly {{Parts("System", "Absent")}} = none)
         """;
     var path = Path.Combine(tableDirectory, "PlatformTables.lean");
     File.WriteAllText(path, $$"""

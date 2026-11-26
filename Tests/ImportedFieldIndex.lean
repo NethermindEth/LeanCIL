@@ -85,7 +85,7 @@ private def slice (classOwner : Bool) (opcode : Nat) (parameterless := false) :
 
 /-- `Ext.Point` as a platform definition of this kind. -/
 private def pointDefinition (kind : PlatformKind) : PlatformDefinition :=
-  { scope := bytesOf extScope, parts := [bytesOf "Ext", bytesOf "Point"], kind }
+  { assembly := Tests.unsignedAssembly name!"Ext", parts := [bytesOf "Ext", bytesOf "Point"], kind }
 
 /-- The field owner has value storage. -/
 private def structPlatform : PlatformTable := platform_table%
@@ -476,7 +476,7 @@ theorem refuses_class_marked_pair :
 /-- The first item with the same assembly scope in its reference and its operand. -/
 private def scopedItem (assembly : AssemblyName) (scope := assembly.display) : Option MetadataError :=
   let claimed : PlatformDefinition :=
-    ⟨bytesOf scope, [bytesOf "System", bytesOf "ValueTuple`2"], .valuePair⟩
+    ⟨assembly, [bytesOf "System", bytesOf "ValueTuple`2"], .valuePair⟩
   let platform : PlatformTable :=
     { includesScope := false, entries := SearchTree.ofSorted [(platformKey claimed.parts, [claimed])] }
   itemError (pairWorldWith [8, 8] (assembly := assembly)) 0

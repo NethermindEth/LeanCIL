@@ -7,12 +7,12 @@ namespace Tests.StrictBinding.EnumEvidence
 open CIL CIL.Extraction _root_.StrictBinding
 
 private def small (code : Nat) : PlatformDefinition :=
-  { scope := bytesOf StrictFixture.identity
+  { assembly := StrictFixture.assembly
     parts := [asciiOf "StrictFixture", asciiOf "Small"]
     kind := .enumType code }
 
 private def absent : PlatformDefinition :=
-  { small 5 with scope := bytesOf "Absent, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" }
+  { small 5 with assembly := { StrictFixture.assembly with name := name!"Absent" } }
 
 private def check (claims : List PlatformDefinition) : Except AuditError Bool := do
   let image ← prepareOne ⟨StrictFixture.identity, StrictFixture.image⟩
@@ -38,7 +38,7 @@ theorem rejects_wrong_scope_parts :
 private def table : PlatformTable := platform_table% [small 5]
 
 theorem compiled_table_storage :
-    table.kindOf (small 5).scope (small 5).parts = some (.enumType 5) ∧
+    table.kindOf (small 5).assembly (small 5).parts = some (.enumType 5) ∧
     (check table.definitions).toOption = some true := by decide +kernel
 #print axioms compiled_table_storage
 

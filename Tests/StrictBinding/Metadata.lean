@@ -43,7 +43,8 @@ private def cultureImage (definitionCulture referenceCulture : Bool) :
   return ⟨StrictFixture.identity, ImageBytes.ofBytes bytes⟩
 
 /-- Resolve the physical AssemblyRef of the modified PE against its sole pinned image. -/
-private def cultureReference (definition reference : Bool) : Except AuditError (List Nat) := do
+private def cultureReference (definition reference : Bool) :
+    Except AuditError CIL.AssemblyName := do
   let image ← prepareOne (← cultureImage definition reference)
   checkedReferenceScope [image] image (tokenOf 0x23 1)
 
@@ -57,10 +58,10 @@ private def cultureKeys (definition reference : Bool) : Except AuditError Bool :
 /-- Both equal physical cultures bind. A substitution in either direction fails at AssemblyRef 1
     in the scope checker and in the audit of direct references. -/
 theorem physical_culture_binding :
-    let scope := CIL.Extraction.bytesOf StrictFixture.identity
+    let neutral := { StrictFixture.assembly with culture := name!"neutral" }
     let mismatch := AuditError.referenceScopeMismatch StrictFixture.identity (tokenOf 0x23 1)
-    (cultureReference false false).toOption = some scope ∧
-    (cultureReference true true).toOption = some scope ∧
+    (cultureReference false false).toOption = some StrictFixture.assembly ∧
+    (cultureReference true true).toOption = some neutral ∧
     failsWith (cultureReference false true) mismatch = true ∧
     failsWith (cultureReference true false) mismatch = true ∧
     (cultureKeys false false).toOption = some true ∧ (cultureKeys true true).toOption = some true ∧

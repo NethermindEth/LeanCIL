@@ -96,7 +96,7 @@ def physicalPlatformKind (image : PreparedImage) (row : Nat) (parts : List (List
     a supplied image fails verification. -/
 def coveredPlatformKind (images : List PreparedImage) (entry : PlatformDefinition) :
     Except AuditError Bool := do
-  let some (image, row) ← findPinnedDefinition images entry.parts entry.scope (images.length + 1)
+  let some (image, row) ← findPinnedDefinition images entry.parts entry.assembly (images.length + 1)
     | return false
   unless (← physicalPlatformKind image row entry.parts) == entry.kind do
     throw (.typeDefMismatch row .kind)
@@ -128,10 +128,10 @@ instance (images : List PinnedImage) (platform : PlatformTable) (methods : List 
 /-- The definition used for a fully covered entry has the declared kind in its pinned image. -/
 theorem coveredPlatformKind_physical {images : List PreparedImage} {entry : PlatformDefinition}
     (covered : coveredPlatformKind images entry = .ok true) :
-    ∃ image row, PinnedDefinitionAt images entry.parts entry.scope image row ∧
+    ∃ image row, PinnedDefinitionAt images entry.parts entry.assembly image row ∧
       physicalPlatformKind image row entry.parts = .ok entry.kind := by
   simp only [coveredPlatformKind, bind, Except.bind] at covered
-  cases selected : findPinnedDefinition images entry.parts entry.scope (images.length + 1) with
+  cases selected : findPinnedDefinition images entry.parts entry.assembly (images.length + 1) with
   | error fault => simp [selected] at covered
   | ok result =>
     cases result with
@@ -155,7 +155,7 @@ theorem PlatformKindsChecked.physical {images : List PinnedImage} {platform : Pl
     (environment : item.body.environment = .ok env) {entry : PlatformDefinition}
     (member : entry ∈ env.platform.definitions) :
     ∃ prepared image row, prepare images = .ok prepared ∧
-      PinnedDefinitionAt prepared entry.parts entry.scope image row ∧
+      PinnedDefinitionAt prepared entry.parts entry.assembly image row ∧
       physicalPlatformKind image row entry.parts = .ok entry.kind := by
   have done : checkPlatformKinds images platform methods = .ok true := by
     cases result : checkPlatformKinds images platform methods with

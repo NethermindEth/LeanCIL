@@ -18,7 +18,8 @@ def carriedEnum? (env : MetadataEnv) (position token : Nat) : Option CarriedEnum
   guard (metadataTableOf token == Table.typeDef)
   let named ← (typeDefNamed env position resolveFuel token).toOption
   let .enumType code := named.kind | none
-  return ⟨tokenRow token, ⟨named.scope, named.parts, .enumType code named.platformArity⟩⟩
+  let assembly ← named.assembly
+  return ⟨tokenRow token, ⟨assembly, named.parts, .enumType code named.platformArity⟩⟩
 
 /-- Enumerate every carried row from the checked indexes, once per slice. -/
 def carriedEnums (env : MetadataEnv) : List CarriedEnum :=
@@ -41,9 +42,13 @@ theorem carriedEnums_of_typeDefNamed {env : MetadataEnv} {position fuel token co
     {named : NamedType} (budget : fuel ≤ resolveFuel)
     (lookup : typeDefNamed env position fuel token = .ok named)
     (kind : named.kind = .enumType code) :
-    ⟨tokenRow token, ⟨named.scope, named.parts, .enumType code named.platformArity⟩⟩ ∈ carriedEnums env := by
+    ∃ assembly, named.assembly = some assembly ∧
+      ⟨tokenRow token, ⟨assembly, named.parts, .enumType code named.platformArity⟩⟩ ∈
+        carriedEnums env := by
   have resolved := typeDefNamed_of_le budget lookup
   have original := resolved
+  obtain ⟨_, _, assembled⟩ := typeDefNamed_assembly resolved
+  refine ⟨_, assembled, ?_⟩
   unfold typeDefNamed at resolved
   obtain ⟨index, located, later⟩ := CIL.Safety.except_bind_ok resolved
   obtain ⟨row, decoded, _⟩ := CIL.Safety.except_bind_ok later
@@ -55,14 +60,13 @@ theorem carriedEnums_of_typeDefNamed {env : MetadataEnv} {position fuel token co
     simp only [fromSlice, Except.ok.injEq] at located
     subst found
     apply carriedEnum_mem fromSlice fromRow
-    simp [carriedEnum?, original, typed, guard, pure, Option.bind, Except.toOption, kind]
+    simp [carriedEnum?, original, typed, guard, pure, Option.bind, Except.toOption, kind, assembled]
 #print axioms carriedEnums_of_typeDefNamed
 
 /-- Check both the physical TypeDef token and its field code. A missing assembly leaves the
     claim uncovered. An incorrect declaration in a supplied assembly fails. -/
 def carriedEnumBound (images : List PreparedImage) (claim : CarriedEnum) : Except AuditError Bool := do
-  let some image := images.find? (fun image => bytesOf image.identity == claim.entry.scope)
-    | return false
+  let some image := images.find? (·.assembly == claim.entry.assembly) | return false
   let .enumType code _ := claim.entry.kind | throw (.typeDefMismatch claim.row .kind)
   unless (← enumDefinition? image 0 claim.entry.parts) == some claim.row do
     throw (.typeDefMismatch claim.row .typeName)

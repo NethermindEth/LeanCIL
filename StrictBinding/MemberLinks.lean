@@ -105,7 +105,7 @@ def owningType (image : PreparedImage) (table column member : Nat) :
     no supplied image defines it, by the scope and name chain its TypeRef spells. -/
 inductive TypeKey where
   | defined (assembly : CIL.AssemblyName) (row : Nat)
-  | named (scope : List Nat) (parts : List (List Nat))
+  | named (scope : CIL.AssemblyName) (parts : List (List Nat))
   deriving DecidableEq, Repr
 
 /-- The key of a TypeDef or TypeRef token of `image`. Other forms are uncovered. -/

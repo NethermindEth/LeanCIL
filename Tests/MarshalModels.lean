@@ -182,7 +182,7 @@ private def castBinding (writable : Bool) : Bool := Id.run do
     [Tests.MetadataBuilder.runtimeType "Object" .objectRoot,
      Tests.MetadataBuilder.runtimeType "Span`1" (.genericValue 1),
      Tests.MetadataBuilder.runtimeType "ReadOnlySpan`1" (.genericValue 1),
-     ⟨runtimeScopeBytes, [bytesOf "System.Runtime.InteropServices", bytesOf "MemoryMarshal"],
+     ⟨runtimeAssembly, [bytesOf "System.Runtime.InteropServices", bytesOf "MemoryMarshal"],
        .classType⟩]
   let env := MetadataEnv.ofSlices [index] (platform := platform)
   let .ok frame := env.frame 0 0 | return false

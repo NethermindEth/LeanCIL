@@ -11,7 +11,7 @@ open CIL CIL.Extraction
 def coveredEnumEntry (images : List PreparedImage) (entry : PlatformDefinition) :
     Except AuditError Bool := do
   let .enumType code _ := entry.kind | return true
-  let some (image, row) ← findPinnedDefinition images entry.parts entry.scope (images.length + 1)
+  let some (image, row) ← findPinnedDefinition images entry.parts entry.assembly (images.length + 1)
     | return false
   unless (← physicalEnumCode image row) == code do throw (.typeDefMismatch row .fields)
   return true
@@ -51,13 +51,13 @@ theorem externalEnum_physicalStorage {images : List PreparedImage} {env : Metada
     (resolved : env.externalNamed token scope name parts hint = .ok named)
     (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity storage) = true)
     (checked : coveredEnumEntries images env.platform.definitions = .ok true) :
-    ∃ code image row, PinnedDefinitionAt images named.parts named.scope image row ∧
+    ∃ code image row, PinnedDefinitionAt images named.parts scope image row ∧
       physicalEnumCode image row = .ok code ∧ integerElement code = true ∧
       storage.primitive.elementType = code := by
   obtain ⟨_, code, member, integer, representation⟩ := typeAdmits_external_enum resolved admitted
   have covered := coveredEnumEntries_each checked member
   simp only [coveredEnumEntry, bind, Except.bind] at covered
-  cases selected : findPinnedDefinition images named.parts named.scope (images.length + 1) with
+  cases selected : findPinnedDefinition images named.parts scope (images.length + 1) with
   | error fault => simp [selected] at covered
   | ok result =>
     cases result with

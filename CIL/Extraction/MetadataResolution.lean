@@ -363,7 +363,7 @@ def MetadataEnv.externalBaseKind (env : MetadataEnv) (index : MetadataIndex) (to
   if env.pinned.contains assembly.name then .error (.missingSlice base)
   else if !core || (parts != [systemNamespace, enumName] &&
       parts != [systemNamespace, valueTypeName]) then .ok .classType
-  else match env.platform.require base assembly.spelling parts (baseFits core parts) with
+  else match env.platform.require base assembly parts (baseFits core parts) with
     | .error error => .error error
     | .ok .enumRoot => .enumType <$> enumUnderlying index token
     | .ok .valueTypeRoot => .ok .valueType
@@ -377,9 +377,9 @@ theorem MetadataEnv.externalBaseKind_value {env : MetadataEnv} {index : Metadata
     (found : env.externalBaseKind index token base assembly parts core = .ok kind)
     (value : kind = .valueType ∨ ∃ underlying, kind = .enumType underlying) :
     core = true ∧
-      ({ scope := assembly.spelling, parts, kind := .enumRoot } ∈ env.platform.definitions ∧
+      ({ assembly, parts, kind := .enumRoot } ∈ env.platform.definitions ∧
           parts = [systemNamespace, enumName] ∨
-        { scope := assembly.spelling, parts, kind := .valueTypeRoot } ∈
+        { assembly, parts, kind := .valueTypeRoot } ∈
           env.platform.definitions ∧
           parts = [systemNamespace, valueTypeName]) := by
   unfold MetadataEnv.externalBaseKind at found
@@ -545,18 +545,40 @@ def PlatformKind.resolvedKind : PlatformKind → TypeKind
   | .enumType code _ => .enumType code
   | kind => .external (some kind.isValue)
 
+/-- The kind the table states for a named type's assembly and name parts, which `fits` must
+    accept; a type that names no assembly has no definition. -/
+def PlatformTable.requireNamed (table : PlatformTable) (token : Nat) (named : NamedType)
+    (fits : PlatformKind → Bool) : Except MetadataError PlatformKind :=
+  match named.assembly with
+  | some assembly => table.require token assembly named.parts fits
+  | none => .error (.missingPlatformDefinition token)
+
+/-- A kind required of a named type is a definition of the table for its assembly and name
+    parts, and `fits` accepts it. -/
+theorem PlatformTable.requireNamed_ok {table : PlatformTable} {token : Nat} {named : NamedType}
+    {fits : PlatformKind → Bool} {kind : PlatformKind}
+    (required : table.requireNamed token named fits = .ok kind) :
+    ∃ assembly, named.assembly = some assembly ∧
+      { assembly, parts := named.parts, kind } ∈ table.definitions ∧ fits kind = true := by
+  unfold PlatformTable.requireNamed at required
+  split at required
+  · rename_i assembly named
+    exact ⟨assembly, named, PlatformTable.require_ok required⟩
+  · cases required
+
+#print axioms PlatformTable.requireNamed_ok
+
 /-- The named type of a reference to a type no carried slice defines: a scope of a pinned name
     is refused, and the type's platform definition must agree with the value-or-class hint and
     gives its kind. -/
 def MetadataEnv.externalNamed (env : MetadataEnv) (token : Nat) (assembly : AssemblyName)
     (name : List Nat) (parts : List (List Nat)) (hint : Option Bool) :
     Except MetadataError NamedType :=
-  let scope := assembly.spelling
   if env.pinned.contains assembly.name then .error (.missingSlice token)
-  else match env.platform.require token scope parts (PlatformKind.fitsHint hint) with
+  else match env.platform.require token assembly parts (PlatformKind.fitsHint hint) with
     | .error error => .error error
     | .ok kind =>
-      .ok { scope, name, parts, kind := kind.resolvedKind, pinned := false,
+      .ok { scope := assembly.spelling, name, parts, kind := kind.resolvedKind, pinned := false,
             platformArity := kind.arity, assembly := some assembly }
 
 /-- An external type has a platform definition of its scope and name parts that agrees with the
@@ -565,7 +587,7 @@ theorem MetadataEnv.externalNamed_ok {env : MetadataEnv} {token : Nat} {scope : 
     {name : List Nat}
     {parts : List (List Nat)} {hint : Option Bool} {named : NamedType}
     (resolved : env.externalNamed token scope name parts hint = .ok named) :
-    ∃ kind, { scope := named.scope, parts := named.parts, kind } ∈ env.platform.definitions ∧
+    ∃ kind, { assembly := scope, parts := named.parts, kind } ∈ env.platform.definitions ∧
       kind.fitsHint hint = true /\ named.kind = kind.resolvedKind /\
       named.platformArity = kind.arity /\ named.pinned = false := by
   simp only [MetadataEnv.externalNamed] at resolved
@@ -850,6 +872,24 @@ theorem typeDefNamed_of_le {env : MetadataEnv} {position fuel budget token : Nat
         rw [definitionParts_add index position fuel extra token row [] parts hp]
         simpa only [hp] using resolved
 #print axioms typeDefNamed_of_le
+
+/-- A resolved definition names the assembly of the slice that holds its row. -/
+theorem typeDefNamed_assembly {env : MetadataEnv} {position fuel token : Nat} {named : NamedType}
+    (resolved : typeDefNamed env position fuel token = .ok named) :
+    ∃ index, env.slice position token = .ok index ∧ named.assembly = some index.identity := by
+  unfold typeDefNamed at resolved
+  cases hi : env.slice position token with
+  | error err => simp [hi, Bind.bind, Except.bind] at resolved
+  | ok index =>
+    refine ⟨index, rfl, ?_⟩
+    simp only [hi, Bind.bind, Except.bind] at resolved
+    split at resolved <;> try contradiction
+    split at resolved <;> try contradiction
+    split at resolved <;> try contradiction
+    split at resolved <;> try contradiction
+    cases resolved
+    rfl
+#print axioms typeDefNamed_assembly
 
 /-- What a `TypeRef` names before any platform lookup: for a scope that names a carried slice,
     the `TypeDef` the slice's definition link reaches, whose name must be the one the reference
@@ -1556,7 +1596,7 @@ theorem typeAdmits_external_enum {env : MetadataEnv} {token : Nat} {scope : Asse
     (admitted : typeAdmits frame (fuel + 1) (.named named) (.enum identity storage) = true) :
     partsName named.parts = some named.name ∧
       Exists fun code => Membership.mem env.platform.definitions
-        { scope := named.scope, parts := named.parts, kind := .enumType code named.platformArity }
+        { assembly := scope, parts := named.parts, kind := .enumType code named.platformArity }
         /\ integerElement code = true /\
         storage.primitive.elementType = code := by
   cases env.externalNamed_ok resolved with

@@ -861,12 +861,13 @@ lean.AppendLine(body.Definition);
         return chain.Append(".nil").Append(')', generic.GenericArguments.Count).ToString();
     }
 
-    string ArgumentScope(AssemblyNameReference reference, ModuleDefinition module)
-    {
-        var assembly = AssemblyName.Of(reference, Pinned.IdentityMetadata(module)) ??
+    string ArgumentScope(AssemblyNameReference reference, ModuleDefinition module) =>
+        ReferencedAssembly(reference, module).ToLean();
+
+    // The assembly a reference row of the module names, as Lean reads the row.
+    AssemblyName ReferencedAssembly(AssemblyNameReference reference, ModuleDefinition module) =>
+        AssemblyName.Of(reference, Pinned.IdentityMetadata(module)) ??
             throw new InvalidDataException($"Invalid assembly scope for {reference.Name}");
-        return assembly.ToLean();
-    }
 
     string ArgumentHead(TypeReference type, HashSet<TypeDefinition> definitions)
     {
@@ -946,22 +947,23 @@ lean.AppendLine(body.Definition);
     internal void InsertPlatformDefinitions(StringBuilder lean)
     {
         var platform = Platform();
+        var definitions = platform.Lean(assembly => assembly.ToLean(), ByteLiterals.Of);
         lean.Insert(platformAt, $"""
             set_option maxRecDepth {platform.Depth} in
-            def platformDefinitions : Extraction.PlatformTable := platform_table% {platform.Lean(ByteLiterals.Of)}
+            def platformDefinitions : Extraction.PlatformTable := platform_table% {definitions}
 
             """);
     }
 
     // The platform types the carried TypeRef rows and the stated type arguments name, under the core library the
     // entry module's System.Object resolves to.
-    PlatformDefinitions Platform()
+    PlatformDefinitions<AssemblyName> Platform()
     {
         var slices = metadata ??
             throw new InvalidOperationException("Method evidence requires the pinned assemblies.");
         var coreLibrary = Pinned.Original(Pinned.Modules.First()).TypeSystem.Object.Resolve()?.Module ??
             throw new InvalidDataException("System.Object does not resolve for the platform definitions.");
-        var definitions = new PlatformDefinitions(coreLibrary);
+        var definitions = new PlatformDefinitions<AssemblyName>(coreLibrary, ReferencedAssembly);
         foreach (var group in slices.TypeReferences.GroupBy(reference => reference.Module))
             definitions.Add(group.Key, Pinned.Metadata(group.Key).Reader, group.Select(reference => reference.Handle),
                 Pinned.IsPlatform);

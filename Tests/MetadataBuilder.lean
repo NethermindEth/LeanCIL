@@ -17,7 +17,7 @@ open CIL CIL.Extraction
 
 /-- A type of `System.Runtime`'s `System` namespace as a platform definition of this kind. -/
 def runtimeType (name : String) (kind : PlatformKind) : PlatformDefinition :=
-  { scope := runtimeScopeBytes, parts := [bytesOf "System", bytesOf name], kind }
+  { assembly := runtimeAssembly, parts := [bytesOf "System", bytesOf name], kind }
 
 /-- The platform definition of `System.Object`, the base of a fixture's classes. -/
 def objectPlatform : PlatformTable := platform_table% [runtimeType "Object" .objectRoot]

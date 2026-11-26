@@ -6,14 +6,16 @@ import Std.Data.HashSet
 
 The carried slices hold the rows of the pinned assemblies only; a type they name but do not
 define belongs to a platform assembly. What the metadata checks rely on about such a type is read
-from a `PlatformTable`, the list of platform definitions the extraction states: the type's scope,
-name parts and kind. Each check that relies on a type outside the carried slices looks its entry
-up with `PlatformTable.require` and refuses the type when the entry is missing or states another
-kind. The extractor supplies each kind, including enum storage. The kernel checks the lookup
-and table equality across bodies. Agreement with the platform image bytes remains trusted.
+from a `PlatformTable`, the list of platform definitions the extraction states: the type's
+assembly, name parts and kind. Each check that relies on a type outside the carried slices looks
+its entry up with `PlatformTable.require` and refuses the type when the entry is missing or
+states another kind. The extractor supplies each kind, including enum storage. The kernel checks
+the lookup and table equality across bodies. Agreement with the platform image bytes remains
+trusted.
 
-`platform_table%` emits a balanced tree. When several scopes use identical name parts, the
-search key includes the scope. Every lookup compares the exact scope and name parts.
+`platform_table%` emits a balanced tree. When several assemblies use identical name parts, the
+search key includes the assembly's name. Every lookup compares the typed `AssemblyName` and the
+exact name parts.
 -/
 
 namespace CIL.Extraction
@@ -58,11 +60,10 @@ def PlatformKind.arity : PlatformKind -> Nat
 def PlatformKind.fitsHint (hint : Option Bool) (kind : PlatformKind) : Bool :=
   hint.all (· == kind.isValue)
 
-/-- One platform type: the identity of the assembly a reference scopes it to, the namespace
-    column and simple name of each enclosing type and of the type itself, as bytes, and its
-    kind. -/
+/-- One platform type: the assembly a reference scopes it to, the namespace column and simple
+    name of each enclosing type and of the type itself, as bytes, and its kind. -/
 structure PlatformDefinition where
-  scope : List Nat
+  assembly : AssemblyName
   parts : List (List Nat)
   kind : PlatformKind
   deriving DecidableEq, Repr
@@ -75,7 +76,13 @@ def platformKey (parts : List (List Nat)) : Nat :=
   parts.foldl (init := 1) fun code part =>
     part.foldl (fun code byte => code * 512 + byte) code * 512 + partEnd
 
-/-- A balanced index of scoped definitions. Shared names require scope bytes in the key. -/
+/-- The search key of a definition in a table whose name parts repeat: the key of the parts after
+    the code of the assembly's name. Assemblies that share a name share a key, and the lookup
+    tells them apart by typed equality. -/
+def platformScopedKey (assembly : AssemblyName) (parts : List (List Nat)) : Nat :=
+  platformKey ([assembly.name.code] :: parts)
+
+/-- A balanced index of scoped definitions. Shared names put the assembly's name in the key. -/
 structure PlatformTable where
   includesScope : Bool
   entries : SearchTree (List PlatformDefinition)
@@ -88,8 +95,10 @@ private def scopedCandidates (tree : SearchTree (List PlatformDefinition)) (key 
   match tree with
   | .leaf => previous
   | .node left limit group right =>
-    if Nat.blt key limit then scopedCandidates left key previous
-    else scopedCandidates right key group
+    -- A match on the comparison costs the kernel a third of an `if` per level.
+    match Nat.blt key limit with
+    | true => scopedCandidates left key previous
+    | false => scopedCandidates right key group
 
 /-- Each candidate comes from the inherited group or a group in the subtree. -/
 private theorem scopedCandidates_mem (tree : SearchTree (List PlatformDefinition)) (key : Nat)
@@ -110,29 +119,29 @@ private theorem scopedCandidates_mem (tree : SearchTree (List PlatformDefinition
 #print axioms scopedCandidates_mem
 
 /-- Candidate definitions for the reference. Shared names use a single comparison per node. -/
-private def PlatformTable.group? (table : PlatformTable) (scope : List Nat)
+private def PlatformTable.group? (table : PlatformTable) (assembly : AssemblyName)
     (parts : List (List Nat)) : Option (List PlatformDefinition) :=
   if table.includesScope then
-    some (scopedCandidates table.entries (platformKey (scope :: parts)) [])
+    some (scopedCandidates table.entries (platformScopedKey assembly parts) [])
   else table.entries.find? (platformKey parts)
 
 /-- Every definition of the table, group by group. -/
 def PlatformTable.definitions (table : PlatformTable) : List PlatformDefinition :=
   table.entries.toList.flatMap (·.2)
 
-/-- The kind the table states for the type of this scope and these name parts. -/
-def PlatformTable.kindOf (table : PlatformTable) (scope : List Nat)
+/-- The kind the table states for the type of this assembly and these name parts. -/
+def PlatformTable.kindOf (table : PlatformTable) (assembly : AssemblyName)
     (parts : List (List Nat)) : Option PlatformKind := do
-  let group ← table.group? scope parts
-  let entry ← group.find? fun entry => entry.scope == scope && entry.parts == parts
+  let group ← table.group? assembly parts
+  let entry ← group.find? fun entry => entry.assembly == assembly && entry.parts == parts
   pure entry.kind
 
-/-- A kind the table states is a definition of the table for exactly that scope and those
+/-- A kind the table states is a definition of the table for exactly that assembly and those
     parts, whatever order the tree holds its groups in. -/
-theorem PlatformTable.mem_of_kindOf {table : PlatformTable} {scope : List Nat}
+theorem PlatformTable.mem_of_kindOf {table : PlatformTable} {assembly : AssemblyName}
     {parts : List (List Nat)} {kind : PlatformKind}
-    (found : table.kindOf scope parts = some kind) :
-    { scope, parts, kind } ∈ table.definitions := by
+    (found : table.kindOf assembly parts = some kind) :
+    { assembly, parts, kind } ∈ table.definitions := by
   simp only [PlatformTable.kindOf, bind, Option.bind] at found
   split at found
   · cases found
@@ -145,7 +154,7 @@ theorem PlatformTable.mem_of_kindOf {table : PlatformTable} {scope : List Nat}
       have member := List.mem_of_find?_eq_some selected
       have same := List.find?_some selected
       simp only [Bool.and_eq_true, beq_iff_eq] at same
-      obtain ⟨sameScope, sameParts⟩ := same
+      obtain ⟨sameAssembly, sameParts⟩ := same
       have included : entry ∈ table.definitions := by
         simp only [PlatformTable.definitions, List.mem_flatMap]
         unfold PlatformTable.group? at filed
@@ -154,28 +163,28 @@ theorem PlatformTable.mem_of_kindOf {table : PlatformTable} {scope : List Nat}
           exact (scopedCandidates_mem _ _ [] entry member).resolve_left (by simp)
         · exact ⟨(_, group), SearchTree.find?_mem_toList _ _ _ filed, member⟩
       cases entry
-      cases sameScope
+      cases sameAssembly
       cases sameParts
       exact included
 
 #print axioms PlatformTable.mem_of_kindOf
 
-/-- The kind of the type of this scope and these parts, which `fits` must accept: a missing
+/-- The kind of the type of this assembly and these parts, which `fits` must accept: a missing
     entry is `missingPlatformDefinition` and another kind `platformKindMismatch`, both for
     `token`. -/
-def PlatformTable.require (table : PlatformTable) (token : Nat) (scope : List Nat)
+def PlatformTable.require (table : PlatformTable) (token : Nat) (assembly : AssemblyName)
     (parts : List (List Nat)) (fits : PlatformKind → Bool) :
     Except MetadataError PlatformKind :=
-  match table.kindOf scope parts with
+  match table.kindOf assembly parts with
   | none => .error (.missingPlatformDefinition token)
   | some kind => if fits kind then .ok kind else .error (.platformKindMismatch token)
 
-/-- A required kind is the kind of a definition of the table for that scope and those parts,
+/-- A required kind is the kind of a definition of the table for that assembly and those parts,
     and `fits` accepts it. -/
-theorem PlatformTable.require_ok {table : PlatformTable} {token : Nat} {scope : List Nat}
+theorem PlatformTable.require_ok {table : PlatformTable} {token : Nat} {assembly : AssemblyName}
     {parts : List (List Nat)} {fits : PlatformKind → Bool} {kind : PlatformKind}
-    (required : table.require token scope parts fits = .ok kind) :
-    { scope, parts, kind } ∈ table.definitions ∧ fits kind = true := by
+    (required : table.require token assembly parts fits = .ok kind) :
+    { assembly, parts, kind } ∈ table.definitions ∧ fits kind = true := by
   unfold PlatformTable.require at required
   split at required
   · cases required
@@ -233,21 +242,22 @@ private partial def literalParts? (term : Expr) : MetaM (Option (List (List Nat)
   | _ => return none
 
 open Lean Meta in
-/-- The scope and name parts of a definition term: read from its literals when an extraction
+/-- The assembly and name parts of a definition term: read from its literals when an extraction
     wrote them, otherwise evaluated, which compiles the term. -/
-private def definitionType (cell : Expr) : MetaM (List Nat × List (List Nat)) := do
-  if let some (scope, parts, _) := cell.app3? ``PlatformDefinition.mk then
-    if let (some scope, some parts) := (← literalBytes? scope, ← literalParts? parts) then
-      return (scope, parts)
+private def definitionType (cell : Expr) : MetaM (AssemblyName × List (List Nat)) := do
+  if let some (assembly, parts, _) := cell.app3? ``PlatformDefinition.mk then
+    if let (some assembly, some parts) :=
+        (← assemblyNameLiteral? assembly, ← literalParts? parts) then
+      return (assembly, parts)
   let definition ← unsafe evalExpr PlatformDefinition (Lean.mkConst ``PlatformDefinition) cell
-  return (definition.scope, definition.parts)
+  return (definition.assembly, definition.parts)
 
 open Lean Meta Elab Term in
 /-- `platform_table% [definitions]` is the list written out as a literal search tree whose leaves
-    hold the definition terms. Each term is elaborated on its own and its scope and name parts are
-    read from its literals, so a long list costs no evaluation and no recursion per definition. Two
-    definitions of one scope and name parts are an error, since a lookup would read only the
-    first. -/
+    hold the definition terms. Each term is elaborated on its own and its assembly and name parts
+    are read from its literals, so a long list costs no evaluation and no recursion per definition.
+    Two definitions of one assembly and name parts are an error, since a lookup would read only
+    the first. -/
 elab "platform_table% " "[" definitions:term,* "]" : term => do
   let entryType := Lean.mkConst ``PlatformDefinition
   let mut elaborated := #[]
@@ -255,7 +265,7 @@ elab "platform_table% " "[" definitions:term,* "]" : term => do
     elaborated := elaborated.push (← elabTermEnsuringType definition entryType)
   synthesizeSyntheticMVarsNoPostponing
   let cells ← elaborated.mapM instantiateMVars
-  let mut named : Std.HashSet (List Nat × List (List Nat)) := {}
+  let mut named : Std.HashSet (AssemblyName × List (List Nat)) := {}
   let mut names : Std.HashSet (List (List Nat)) := {}
   let types ← cells.mapM fun cell => definitionType cell
   for type in types do
@@ -263,8 +273,8 @@ elab "platform_table% " "[" definitions:term,* "]" : term => do
     named := named.insert type
     names := names.insert type.2
   let includesScope := names.size != types.size
-  let keys := types.map fun (scope, parts) =>
-    platformKey (if includesScope then scope :: parts else parts)
+  let keys := types.map fun (assembly, parts) =>
+    if includesScope then platformScopedKey assembly parts else platformKey parts
   return mkApp2 (mkConst ``PlatformTable.mk) (toExpr includesScope)
     (← SearchTree.groupedLiteral entryType cells keys)
 

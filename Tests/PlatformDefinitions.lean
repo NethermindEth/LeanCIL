@@ -284,14 +284,12 @@ theorem aggregate_argument_keeps_scope (head argument : NamedType) (corlib : Opt
 
 /-! ## An external enum -/
 
-/-- The scope bytes from the enum assembly row. -/
+/-- The assembly the enum's reference row names. -/
 private def numberAssembly : AssemblyName := Tests.unsignedAssembly name!"E"
-
-private def enumScope := numberAssembly.spelling
 
 /-- The platform enum `Number` of `E` over `int`. -/
 private def numberPlatform : PlatformTable := platform_table%
-  [{ scope := enumScope, parts := [[], bytesOf "Number"], kind := .enumType 8 }]
+  [{ assembly := numberAssembly, parts := [[], bytesOf "Number"], kind := .enumType 8 }]
 
 /-- Whether the type `spelled` of `E` with the name parts of `Number`, resolved outside the
     carried slices, is admitted under `platform` as an enum with `storage`. -/
@@ -431,7 +429,7 @@ private def enumWorld (home : EnumHome) (rootName := "Enum") : Step Nat := do
 /-- `Ext`'s `System.Enum` as the platform definition of this kind, beside `System.Object`. -/
 private def extEnumPlatform (kind : PlatformKind) : PlatformTable :=
   restating (platform_table% [runtimeType "Object" .objectRoot,
-    { scope := bytesOf "Ext, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+    { assembly := Tests.unsignedAssembly name!"Ext",
       parts := [bytesOf "System", bytesOf "Enum"], kind := .classType }]) "Enum" kind
 
 /-- Checking `Run` with its receiver claimed an object of a class with the one field `value__`
@@ -512,5 +510,29 @@ theorem foreign_value_type_is_a_class_base :
         some .classType := by
   decide +kernel
 #print axioms foreign_value_type_is_a_class_base
+
+/-! ## Assemblies that share a name -/
+
+/-- Version 1 of the unsigned assembly `Lib`. -/
+private def libOne : AssemblyName := Tests.unsignedAssembly name!"Lib"
+
+/-- One type name stated by two versions of `Lib` and by another assembly, with three kinds. -/
+private def sharedNames : PlatformTable := platform_table%
+  [{ assembly := libOne, parts := [bytesOf "N", bytesOf "T"], kind := .classType },
+   { assembly := Tests.unsignedAssembly name!"Lib" 2, parts := [bytesOf "N", bytesOf "T"],
+     kind := .valueType },
+   { assembly := Tests.unsignedAssembly name!"Other", parts := [bytesOf "N", bytesOf "T"],
+     kind := .interfaceType }]
+
+/-- Assemblies of one name share a search key, and the lookup still tells each version, the
+    other assembly and a signed `Lib` apart. -/
+theorem shared_assembly_names_keep_their_kinds :
+    let parts := [bytesOf "N", bytesOf "T"]
+    sharedNames.includesScope = true ∧ sharedNames.kindOf libOne parts = some .classType ∧
+      sharedNames.kindOf (Tests.unsignedAssembly name!"Lib" 2) parts = some .valueType ∧
+      sharedNames.kindOf (Tests.unsignedAssembly name!"Other") parts = some .interfaceType ∧
+      sharedNames.kindOf { libOne with publicKeyToken := some 1 } parts = none := by
+  decide +kernel
+#print axioms shared_assembly_names_keep_their_kinds
 
 end Tests.PlatformDefinitions

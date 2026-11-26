@@ -45,7 +45,7 @@ theorem type_parameter_ownership :
 #print axioms type_parameter_ownership
 
 private def overlay (kind : PlatformKind) : PlatformDefinition :=
-  { scope := bytesOf StrictFixture.identity
+  { assembly := StrictFixture.assembly
     parts := [asciiOf "StrictFixture", asciiOf "Overlay"]
     kind }
 
@@ -56,7 +56,8 @@ private def checkKinds (claims : List PlatformDefinition) : Except AuditError Bo
 /-- The pinned Overlay definition is a nongeneric value type. A missing assembly leaves
     coverage partial and cannot conceal another entry with the wrong physical kind. -/
 theorem physical_kind_and_partial_coverage :
-    let absent := { overlay .valueType with scope := bytesOf "Missing" }
+    let missing := { StrictFixture.assembly with name := name!"Missing" }
+    let absent := { overlay .valueType with assembly := missing }
     (checkKinds [overlay .valueType]).toOption = some true ∧
     (checkKinds [absent, overlay .valueType]).toOption = some false ∧
     failsWith (checkKinds [absent, overlay .classType]) (.typeDefMismatch 3 .kind) = true ∧

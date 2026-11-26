@@ -83,7 +83,7 @@ def physicalEnumCode (image : PreparedImage) (row : Nat) : Except AuditError Nat
 
 /-- Check an enum in the supplied defining image against the entry the method decoder can use. -/
 def directEnumBound (image : PreparedImage) (entry : PlatformDefinition) : Except AuditError Unit := do
-  unless bytesOf image.identity == entry.scope do throw (.typeDefMismatch 0 .typeName)
+  unless image.assembly == entry.assembly do throw (.typeDefMismatch 0 .typeName)
   let .enumType code _ := entry.kind | throw (.typeDefMismatch 0 .kind)
   let some row ← enumDefinition? image 0 entry.parts | throw (.typeDefMismatch 0 .typeName)
   unless (← physicalEnumCode image row) == code do throw (.typeDefMismatch row .fields)
@@ -91,7 +91,7 @@ def directEnumBound (image : PreparedImage) (entry : PlatformDefinition) : Excep
 /-- A checked entry identifies the physical row and its declared storage code in this image. -/
 theorem directEnumBound_row {image : PreparedImage} {entry : PlatformDefinition} {code arity : Nat}
     (kind : entry.kind = .enumType code arity) (checked : directEnumBound image entry = .ok ()) :
-    bytesOf image.identity = entry.scope ∧ ∃ row, enumDefinition? image 0 entry.parts = .ok (some row) ∧
+    image.assembly = entry.assembly ∧ ∃ row, enumDefinition? image 0 entry.parts = .ok (some row) ∧
       physicalEnumCode image row = .ok code := by
   unfold directEnumBound at checked
   simp only [kind, bind, Except.bind] at checked

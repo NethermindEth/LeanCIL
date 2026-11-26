@@ -106,7 +106,7 @@ theorem forwarded_culture_columns :
     slice carries `Lib`. -/
 private def libraryPlatform : PlatformTable := platform_table%
   [runtimeType "Object" .objectRoot,
-   { scope := bytesOf libScope, parts := [bytesOf "Lib", bytesOf "Box"], kind := .classType }]
+   { assembly := libAssembly, parts := [bytesOf "Lib", bytesOf "Box"], kind := .classType }]
 
 /-- Resolve the library type with the supplied assembly order and pins. -/
 private def resolveLibrary (others : List MetadataSlice) (pins : List AssemblyName := []) := do
