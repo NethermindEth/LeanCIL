@@ -73,8 +73,6 @@ inductive MetadataError where
   | platformKindMismatch (token : Nat)
   deriving DecidableEq, Repr
 
-
-
 /-- The heap number `MetadataError.missingHeap` reports for `#Strings`. -/
 def stringsHeap : Nat := 0
 
@@ -94,7 +92,6 @@ def field : Nat := 0x04
 def methodDef : Nat := 0x06
 def memberRef : Nat := 0x0A
 def standAloneSig : Nat := 0x11
-def moduleRef : Nat := 0x1A
 def typeSpec : Nat := 0x1B
 def assembly : Nat := 0x20
 def assemblyRef : Nat := 0x23

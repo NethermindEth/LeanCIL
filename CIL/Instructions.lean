@@ -435,12 +435,6 @@ theorem Instruction.eq_newobj_of_constructor? {op : Instruction}
 
 #print axioms Instruction.eq_newobj_of_constructor?
 
-/-- Instructions whose metadata binding belongs to the method's link table. -/
-def Instruction.statesLink (op : Instruction) : Bool := by
-  cases op
-  case call | callvirt | newobj | ldftn | calli => exact true
-  all_goals exact false
-
 /-- Instructions whose execution can consult the link at their pc. -/
 def Instruction.readsLink (op : Instruction) : Bool := by
   cases op

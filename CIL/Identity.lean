@@ -28,9 +28,6 @@ namespace CIL
 /-- The number of values one UTF-8 byte can take. -/
 def byteBase : Nat := 256
 
-/-- The number of values one UTF-16 code unit can take. -/
-def codeUnitBase : Nat := 65536
-
 /-- Read `digits` in `base` into `code`, most significant first; reject digits not below `base`.
     Each step scales a growing code. -/
 def radixCode? (base : Nat) : List Nat → Nat → Option Nat
@@ -249,7 +246,6 @@ theorem fixedDigits_spec (bits count code : Nat) (bounded : code < (2^bits)^coun
       have joined := Nat.div_add_mod code ((2^bits)^low)
       rw [Nat.mul_comm] at joined
       omega
-
 
 #print axioms fixedDigits_spec
 

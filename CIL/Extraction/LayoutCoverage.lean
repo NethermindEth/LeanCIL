@@ -79,8 +79,4 @@ instance (layouts : List RawLayout) (closed : RawMethod) (parameters : RawArgume
     Decidable (LayoutUsesComplete layouts closed parameters reachable uses) :=
   inferInstanceAs (Decidable (_ = _))
 
-theorem layout_uses_complete {layouts closed parameters reachable uses}
-    (valid : LayoutUsesComplete layouts closed parameters reachable uses) :
-    expectedLayoutUses layouts closed parameters reachable = some uses := valid
-
 end CIL.Extraction

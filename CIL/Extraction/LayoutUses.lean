@@ -66,9 +66,4 @@ instance (raw : List RawLayout) (layouts : Array ComputedLayout) (method : Metho
     (uses : List LayoutUse) : Decidable (MethodLayoutsValid raw layouts method uses) :=
   inferInstanceAs (Decidable (_ ∧ _))
 
-theorem method_layout_use_checked {raw : List RawLayout} {layouts : Array ComputedLayout}
-    {method : Method} {uses : List LayoutUse} (valid : MethodLayoutsValid raw layouts method uses)
-    (use : LayoutUse) (present : use ∈ uses) : validateLayoutUse raw layouts method use = true :=
-  valid.2 use present
-
 end CIL.Extraction

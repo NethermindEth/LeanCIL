@@ -47,11 +47,6 @@ theorem Instruction.relabel_eq_self (r : Nat → Nat) (op : Instruction)
   induction op <;> simp_all [Instruction.relabel, Instruction.targets]
   exact (List.map_congr_left fixed).trans (List.map_id _)
 
-theorem Instruction.relabel_of_targets_nil (r : Nat → Nat) (op : Instruction)
-    (none : op.targets = []) :
-    op.relabel r = op :=
-  op.relabel_eq_self r (by simp [none])
-
 /-- False only for instructions that never resume at the next pc, including after a call. -/
 def Instruction.continues : Instruction → Bool
   | .calli _ true => false

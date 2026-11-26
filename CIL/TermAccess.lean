@@ -33,11 +33,6 @@ def lastArgument? : Expr → Option Expr
   | .app _ argument => some argument
   | _ => none
 
-/-- What `term` applies to its last argument; `none` when `term` is not an application. -/
-def appliedFunction? : Expr → Option Expr
-  | .app function _ => some function
-  | _ => none
-
 /-- The arguments of `term` when it applies the constant `function` to exactly `arity`
     arguments, so an array pattern of that length always matches them. -/
 def argumentsOf? (term : Expr) (function : Name) (arity : Nat) : Option (Array Expr) :=
@@ -60,13 +55,6 @@ def argumentAt (reader : String) (term : Expr) (index : Nat) : m Expr :=
 def lastArgument (reader : String) (term : Expr) : m Expr :=
   match lastArgument? term with
   | some argument => pure argument
-  | none => throwError "{reader}: expected an application, but found{indentExpr term}"
-
-/-- What `term` applies to its last argument, or an error from `reader` showing the term that
-    is not an application. -/
-def appliedFunction (reader : String) (term : Expr) : m Expr :=
-  match appliedFunction? term with
-  | some function => pure function
   | none => throwError "{reader}: expected an application, but found{indentExpr term}"
 
 /-- The entry of `entries` at `index`, or an error from `reader` giving the number of entries
