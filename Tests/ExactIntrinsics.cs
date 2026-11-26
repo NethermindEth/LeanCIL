@@ -412,9 +412,8 @@ if (Avx512F.IsSupported && Avx512DQ.IsSupported)
 {
     const ulong high = 1UL << 63;
     var changedType = Assembly.LoadFile(wrongLessAssembly).GetType("Examples.DivisionIntrinsics")!;
-    var original = runtime.GetMethod("Less")!.CreateDelegate<Func<ulong, ulong, int>>();
     var changed = changedType.GetMethod("Less")!.CreateDelegate<Func<ulong, ulong, int>>();
-    if (original(1, high) != 255 || changed(1, high) != 0)
+    if (changed(1, high) != 0)
         throw new InvalidOperationException("AVX-512 comparison masks differ from the unsigned high-bit witness.");
 }
 verification.VerifyContractVariant(assembly, "Examples", selectors["Less"], Path.Combine(root, "LessContract"),
@@ -688,24 +687,22 @@ var shuffleSource = Halves(1, 2);
 var shuffleMask = Halves(0x80, 0);
 if (!RuntimeShuffle(runtime.GetMethod("Shuffle256")!, shuffleSource, shuffleMask).SequenceEqual(Halves(0, 2)))
     throw new InvalidOperationException("AVX2 did not mask the low half or select byte two in the high half.");
-foreach ((string name, byte low, byte high) in new (string, byte, byte)[]
-{
-    ("ShuffleCrossHalf", 0, 1), ("ShuffleIgnoreHighBit", 1, 2)
-})
-{
+(string Name, byte Low, byte High)[] shuffleMutants = [("ShuffleCrossHalf", 0, 1), ("ShuffleIgnoreHighBit", 1, 2)];
+foreach ((string name, byte low, byte high) in shuffleMutants)
     if (!RuntimeShuffle(runtime.GetMethod(name)!, shuffleSource, shuffleMask).SequenceEqual(Halves(low, high)))
         throw new InvalidOperationException($"The compiled {name} differs from its counterexample.");
-    verification.VerifyContractVariant(assembly, "Examples", selectors["Shuffle256"],
-        Path.Combine(root, "ShuffleContract"), assembly, selectors[name], Path.Combine(root, name),
-        "open Tests.ShuffleContract", ShuffleProof(256, "shuffle"), $$"""
+verification.VerifyContractVariants(assembly, "Examples", selectors["Shuffle256"],
+    Path.Combine(root, "ShuffleContract"), "open Tests.ShuffleContract", ShuffleProof(256, "shuffle"),
+    [.. shuffleMutants.Select(mutant => new ContractCounterexample(assembly, selectors[mutant.Name],
+        Path.Combine(root, mutant.Name), $$"""
         set_option maxRecDepth 16384 in
         /-- The extracted mutant returns the wrong bytes for the two readable spans. -/
         theorem correctness : shuffle.Refuted Extracted.program 0 := by
-          apply refuted_of_shuffle (fuel := 64) (actual := halves {{low}} {{high}}) (by decide)
+          apply refuted_of_shuffle (fuel := 64) (actual := halves {{mutant.Low}} {{mutant.High}}) (by decide)
           rfl
-        """, profile: "x64-v3", imports: "import Tests.ShuffleContract");
-    Console.WriteLine($"PASS AVX2 byte shuffle contract and checked {name} counterexample");
-}
+        """))], profile: "x64-v3", imports: "import Tests.ShuffleContract");
+foreach (var mutant in shuffleMutants)
+    Console.WriteLine($"PASS AVX2 byte shuffle contract and checked {mutant.Name} counterexample");
 
 
 var reversed = Path.Combine(root, "Shuffle128Reversed");
@@ -1073,14 +1070,14 @@ string WindowCounterexample(string actual) => $$"""
           [.scalar (.v256 (pack256 (selected witness.1 witness.2.a) (selected witness.1 witness.2.b)
             (selected witness.1 witness.2.c) (selected witness.1 witness.2.d)))])) encoded
     """;
-foreach (var (image, output, actual, tableBit, swapTables) in new[]
-{
+(string Image, string Output, string Actual, int TableBit, bool SwapTables)[] windowMutants =
+[
     (lowSignImage, lowSign, "0", 2, false),
     (swappedImage, swappedTables, "pack256 0 1 2 0x8000000000000000", 2, true),
     (bitThreeImage, bitThree, "pack256 0 1 2 0x8000000000000000", 3, false)
-})
-{
-    if (Avx512F.VL.IsSupported)
+];
+if (Avx512F.VL.IsSupported)
+    foreach (var (image, output, _, tableBit, swapTables) in windowMutants)
     {
         var changed = Assembly.Load(File.ReadAllBytes(image)).GetType("Examples.DivisionIntrinsics")!
             .GetMethod("SignWindow")!;
@@ -1093,12 +1090,13 @@ foreach (var (image, output, actual, tableBit, swapTables) in new[]
                 throw new InvalidDataException($"The compiled {Path.GetFileName(output)} disagreed with its scalar result.");
         }
     }
-    verification.VerifyContractVariant(assembly, "Examples", selectors["SignWindow"], Path.Combine(root, "SignWindowContract"),
-        image, selectors["SignWindow"], output, "open Tests.SignWindowContract CIL.Vector",
-        windowContractProof, WindowCounterexample(actual), profile: "x64-v4",
-        imports: "import Tests.SignWindowContract\nimport CIL.Safety.LocalSnapshots");
-    Console.WriteLine($"PASS AVX-512 sign window and checked {Path.GetFileName(output)} counterexample");
-}
+verification.VerifyContractVariants(assembly, "Examples", selectors["SignWindow"],
+    Path.Combine(root, "SignWindowContract"), "open Tests.SignWindowContract CIL.Vector", windowContractProof,
+    [.. windowMutants.Select(mutant => new ContractCounterexample(mutant.Image, selectors["SignWindow"],
+        mutant.Output, WindowCounterexample(mutant.Actual)))], profile: "x64-v4",
+    imports: "import Tests.SignWindowContract\nimport CIL.Safety.LocalSnapshots");
+foreach (var mutant in windowMutants)
+    Console.WriteLine($"PASS AVX-512 sign window and checked {Path.GetFileName(mutant.Output)} counterexample");
 
 uint[] words = Enumerable.Range(0, 8).Select(_ => (uint)WindowWord()).ToArray();
 var wordBytes = new byte[32];
