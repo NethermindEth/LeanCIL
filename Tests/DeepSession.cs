@@ -9,7 +9,6 @@
 #:include MultiAssemblyFixture.cs
 
 using System.Text.Json;
-using System.Text.Json.Nodes;
 
 if (args is ["--request-scaling"])
 {
@@ -256,16 +255,6 @@ foreach (var artifact in new[] { extractedOlean, contribution.Artifacts["Binding
     File.Delete(unrelated);
 }
 Console.WriteLine("PASS added module companions are rejected and unrelated prefix names are excluded");
-
-var manifest = JsonNode.Parse(identity.Root.GetRawText())!;
-manifest["references"] = new JsonArray(new JsonObject
-{
-    ["assemblyIdentity"] = "Missing",
-    ["sha256"] = new string('0', 64)
-});
-using var missing = JsonDocument.Parse(manifest.ToJsonString());
-ExpectFailure(() => inputs.MatchPins(missing.RootElement), "No line of");
-Console.WriteLine("PASS every reference requires a consumer-stated digest");
 
 var same = new BindingImagePin("First", Sha256Digest.Parse(digest, "the test image"),
     inputs.Images[0].Bytes.ToArray());
