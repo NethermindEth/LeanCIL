@@ -1411,7 +1411,7 @@ internal static partial class ProofOutline
                         $"frameFacts{level}.confined.grows";
                 }
                 // No object with a located field is an array, so an element store is apart from every field.
-                if (stored[level - 1] is Allocation) return $"{previous}.after_confined framed{level} Nowhere";
+                if (stored[level - 1] is Allocation) return $"{previous}.after_confined framed{level} {Nowhere}";
                 if (stored[level - 1] is ElementAccess element)
                     return $"{previous}.after_confined framed{level} (ReferenceArray.apart_single (show " +
                         $"{reached.Name}.allocation ≠ {element.Array}.allocation from " +
@@ -1445,7 +1445,7 @@ internal static partial class ProofOutline
                 Access store => $"{previous}.after_confined framed{level} (ReferenceArray.apart_single (show " +
                     $"{array}.allocation ≠ {store.Object.Name}.allocation from ({ArrayLive(array, level - 1)}" +
                     $".field_ne {FieldFact(store.Object, store.Field, level - 1)}.located rfl).symm))",
-                Allocation => $"{previous}.after_confined framed{level} Nowhere",
+                Allocation => $"{previous}.after_confined framed{level} {Nowhere}",
                 _ => throw new InvalidOperationException($"no carry of `{slot}` across write {level}")
             });
 
