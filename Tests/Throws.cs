@@ -163,12 +163,15 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         // The decoder fixes the raised type, so a forged one fails the kernel's comparison with the decoding; a
         // `throw` outside a fold also fails the feature certificate, independently of the instruction lemma.
         var forgedLabel = label == "invalidOperation" ? "divideByZero" : "invalidOperation";
-        var forged = ForgeDecodedInstruction(source, method, pc, $"fun _ => .throw (some .{forgedLabel})");
+        var raisedType = $"fun _ => .throw (some .{forgedLabel})";
+        var forged = ForgeDecodedInstruction(source, method, pc, raisedType);
+        // The complete extraction, since the null case narrows `source` to its feature obligation.
+        var complete = File.ReadAllText(extracted);
         var decodedControl = Path.Combine(root, name + "-decoded-code.lean");
-        File.WriteAllText(decodedControl, DecodedCode(source, method));
+        File.WriteAllText(decodedControl, DecodedCode(complete, method));
         controls.Add(decodedControl, $"PASS {name}: decoded code control", $"method{method}_decoded_code");
         var decoded = Path.Combine(root, name + "-forged-decoded.lean");
-        File.WriteAllText(decoded, DecodedCode(forged, method));
+        File.WriteAllText(decoded, DecodedCode(ForgeDecodedInstruction(complete, method, pc, raisedType), method));
         rejected.Add(decoded, $"PASS {name}: forged raised type rejected by the decoded code",
             DecodedCodeEquation(method), "is false");
         if (name == "Null")
