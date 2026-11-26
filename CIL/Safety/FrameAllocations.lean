@@ -3,8 +3,8 @@ import CIL.Safety.FrameOwnership
 /-!
 # Frame-owned allocations
 
-The allocations a frame records as owned are live and belong to that activation, for each
-frame builder in `CIL/Safety/Frames.lean` and for `enterFrame` as a whole. Projections of
+The allocations a frame records as owned are live and belong to that activation, for
+`makeLocals` in `CIL/Safety/Frames.lean` and for `enterFrame` as a whole. Projections of
 `FrameSetup` from `CIL/Safety/FrameSetupLemmas.lean`.
 -/
 

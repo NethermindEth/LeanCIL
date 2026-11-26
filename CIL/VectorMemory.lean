@@ -7,8 +7,8 @@ import CIL.WideMultiply
 /-!
 # Vector memory and unsafe references
 
-128- and 256-bit loads, `Unsafe` reference arithmetic, and the operations bound to modeled
-memory calls. In caller storage a vector is
+128-, 256- and 512-bit loads and stores, `Unsafe` reference arithmetic, and the operations
+bound to modeled memory calls. In caller storage a vector is
 stored little-endian, byte by byte, like scalars in `CIL.Memory`, so vector and scalar
 accesses to the same bytes agree. A scalar local holds a whole vector value instead.
 

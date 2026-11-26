@@ -4,8 +4,8 @@ import CIL.SIMD.Intrinsics
 /-!
 # 128-bit intrinsic evaluation lemmas
 
-`evalIntrinsic` on concrete 128-bit operations, as `rfl` simp lemmas, plus the BMI1 flag
-extraction facts. Stepping proofs rewrite with these instead of unfolding `evalIntrinsic`.
+`evalIntrinsic` on concrete 128-bit operations and the BMI1 flag extraction, as `rfl` simp
+lemmas. Stepping proofs rewrite with these instead of unfolding `evalIntrinsic`.
 -/
 
 open CIL

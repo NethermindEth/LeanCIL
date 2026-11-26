@@ -5,7 +5,7 @@ import CIL.Safety.FrameSetupLemmas
 # Frame setup preserves the static world
 
 Building a frame only allocates fresh homes and writes into them, so every valid static
-field binding stays valid. Derived once from `FrameSetup` and projected to each builder.
+field binding stays valid. Derived once from `FrameSetup` and projected to `enterFrame`.
 -/
 
 namespace CIL.Safety
