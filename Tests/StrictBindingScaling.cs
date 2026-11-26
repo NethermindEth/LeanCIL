@@ -535,9 +535,6 @@ partial class Program
             def claims : List StrictBinding.SortedClaim := [{ identity := {{StrictBindingFacts.Name(files[index])
                 }}, table := {{(int)TableIndex.NestedClass}}, key := StrictBinding.nestedClassKey }]
             {{report}}
-            theorem prepared : StrictBinding.ok (StrictBinding.prepare Types{{size}}.pinned) = true := by
-              decide +kernel
-            {{report}}
             theorem checked : StrictBinding.TablesSorted Types{{size}}.pinned claims := by decide +kernel
             {{report}}
             #print axioms checked
@@ -548,8 +545,14 @@ partial class Program
         var path = Path.Combine(root, "TypeDefs.lean");
         File.WriteAllText(path, $"import StrictBinding.TypeDefs\nimport Tests.StrictBinding.Mutation\n\n{cases}" +
             $"{sorting}{UnsortedNestedClassRejection(files[0])}");
-        var measured = CheckHeartbeats(path, package, 2 * sizes.Length, "type definition and sorted table claims");
-        long[] checks = measured[..sizes.Length];
+        // Each Types case reports before preparing, after preparing and after its check; each Sorted case
+        // reports around its check alone and subtracts the preparation its Types case measured.
+        var counts = HeartbeatCounts(path, package, 5 * sizes.Length, "type definition and sorted table claims");
+        long Prepared(int index) => counts[3 * index + 1] - counts[3 * index];
+        long[] checks = [.. sizes.Select((_, index) => counts[3 * index + 2] - counts[3 * index + 1] - Prepared(index))];
+        var sortedReports = 3 * sizes.Length;
+        long[] sorted = [.. sizes.Select((_, index) =>
+            counts[sortedReports + 2 * index + 1] - counts[sortedReports + 2 * index] - Prepared(index))];
         var growth = (double)checks[^1] / checks[0];
         var costs = string.Join(", ", sizes.Zip(checks, (size, cost) => $"{cost} heartbeats at {size} classes"));
         if (checks[0] <= 0 || growth > MaximumTableGrowth)
@@ -557,7 +560,7 @@ partial class Program
                 $"much at {sizes[^1]} classes as at {sizes[0]}");
         Console.WriteLine($"PASS the type definition check reads a fixed part of the tables ({costs}; " +
             $"{growth:F2} times at {sizes[^1] / sizes[0]} times the classes)");
-        var sortedCost = RequireGrowth([.. nestedRows.Select(rows => rows.Length)], measured[sizes.Length..],
+        var sortedCost = RequireGrowth([.. nestedRows.Select(rows => rows.Length)], sorted,
             MaximumPerRowGrowth, "NestedClass sortedness check", "row");
         Console.WriteLine($"PASS the sortedness check is linear in the NestedClass rows ({sortedCost})");
     }
