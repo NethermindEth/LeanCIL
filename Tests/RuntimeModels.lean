@@ -915,7 +915,7 @@ theorem blockInit_result :
 
 end ClosedMembers
 
--- Each helper call steps as the scalar intrinsic it was lowered to, faults included.
+-- Each helper call steps as the scalar intrinsic its model names, faults included.
 /-- A body whose only instruction is a call of `method`, with no link. -/
 private def calling (method : CIL.Extraction.MethodRef) : CIL.Method :=
   { body with code := [.call method {}] }

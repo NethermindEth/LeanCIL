@@ -11,8 +11,8 @@ import Tests.Support
 The runtime table models `BitOperations`, the bit helpers each integer type declares and
 `BinaryPrimitives.ReverseEndianness` by their scalar intrinsics. The model states each helper's
 result: `System.Int32` for a count of `BitOperations`, and the integer type, a 64-bit word only at
-64 bits, for a count the type declares. A helper site keeps its call, which steps as the
-intrinsic it was lowered to, and the lowered intrinsic or another helper's is refused there.
+64 bits, for a count the type declares. A helper site keeps its call, which steps as its model's
+scalar intrinsic, and a call of another helper is refused there.
 -/
 
 namespace Tests.BitModels
