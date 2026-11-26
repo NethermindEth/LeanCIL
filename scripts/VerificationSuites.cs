@@ -175,8 +175,8 @@ internal static class VerificationSuites
             "body at a cost linear in the length of the pointer's owner; raw value opcode decoding and the " +
             "method decoded from a raw body at a per-instruction kernel cost that does not grow with the body, " +
             "and the method cil_decoded_method defines from that body at a per-instruction cost that does not " +
-            "grow with the body; and the certificate index, feature getter, layout accumulation and " +
-            "projection, and extraction home index libraries"),
+            "grow with the body; and the certificate index, feature getter, layout projection and extraction " +
+            "home index libraries"),
         new("gates", "Tests/ProofGates.cs",
             "manifest project builds, extraction, named profiles, per-variant and templated proofs, " +
             "witness refutations, kernel statement comparison, binding catalogs, planned groups, " +

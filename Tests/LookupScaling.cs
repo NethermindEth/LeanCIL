@@ -167,9 +167,9 @@ if (!instructionEquationsOnly)
 
     LayoutIdentityCosts();
     Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
-    BuildLeanTestLibraries("Certificate index, feature getter, layout and home index libraries",
+    BuildLeanTestLibraries("Certificate index, feature getter, layout projection and home index libraries",
         "Tests.FlowIndex", "Tests.CertificateFlow", "Tests.FeatureGetter", "Tests.ExtractionHomeIndexes",
-        "Tests.LayoutAccumulation", "Tests.LayoutProjectionIndexes");
+        "Tests.LayoutProjectionIndexes");
 }
 
 // `cil_instruction_equations` proves each equation from the code suffix that starts its block. Proved
