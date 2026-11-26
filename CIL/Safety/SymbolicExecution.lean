@@ -1859,15 +1859,6 @@ def cilNormalisedFacts (facts : Array Term) : TacticM (Array Term) :=
       (← prepareOperationFacts (#[← `(CIL.truth)] ++ facts))
 
 open Lean Elab Tactic in
-/-- Normalise `facts` with `cilNormalisedFacts`, then build a stepping loop's tactic from the
-    raw and normalised facts. -/
-def cilWithNormalisedFacts (facts : Array Term)
-    (body : Array Term → Array Term → TacticM Syntax) : TacticM Unit :=
-  withMainContext do
-    let prepared ← cilNormalisedFacts facts
-    withMainContext <| evalTactic (← body facts prepared)
-
-open Lean Elab Tactic in
 elab_rules : tactic
   | `(tactic| cil_checked_step [$facts:term,*]) => do
     let config ← `(Lean.Parser.Tactic.optConfig|)

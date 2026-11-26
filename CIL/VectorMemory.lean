@@ -7,8 +7,8 @@ import CIL.WideMultiply
 /-!
 # Vector memory and unsafe references
 
-128-, 256- and 512-bit loads and stores, `Unsafe` reference arithmetic, and the operations
-bound to modeled memory calls. In caller storage a vector is
+128- and 256-bit loads, `Unsafe` reference arithmetic, and the operations bound to modeled
+memory calls. In caller storage a vector is
 stored little-endian, byte by byte, like scalars in `CIL.Memory`, so vector and scalar
 accesses to the same bytes agree. A scalar local holds a whole vector value instead.
 
@@ -40,35 +40,6 @@ def read256 (memory : Memory) : Address → Option Value
     let .v256 bits ← memory (.local frame index) | none
     return .v256 bits
   | .static bytes base => do return .v256 (BitVec.ofNat 256 (← readStaticBytes bytes base 32))
-
-/-- Writes a 128-bit vector. Read-only data cannot be written. -/
-def write128 (memory : Memory) (address : Address) (bits : BitVec 128) : Option Memory :=
-  match address with
-  | .byte base => some (writeBytes memory base bits.toNat 16)
-  | .local frame index => some (write memory (.local frame index) (.v128 bits))
-  | .static _ _ => none
-
-/-- Writes a 256-bit vector. Read-only data cannot be written. -/
-def write256 (memory : Memory) (address : Address) (bits : BitVec 256) : Option Memory :=
-  match address with
-  | .byte base => some (writeBytes memory base bits.toNat 32)
-  | .local frame index => some (write memory (.local frame index) (.v256 bits))
-  | .static _ _ => none
-
-/-- Reads a 512-bit vector. -/
-def read512 (memory : Memory) : Address → Option Value
-  | .byte base => do return .v512 (BitVec.ofNat 512 (← readBytes memory base 64))
-  | .local frame index => do
-    let .v512 bits ← memory (.local frame index) | none
-    return .v512 bits
-  | .static bytes base => do return .v512 (BitVec.ofNat 512 (← readStaticBytes bytes base 64))
-
-/-- Writes a 512-bit vector; read-only data cannot be written. -/
-def write512 (memory : Memory) (address : Address) (bits : BitVec 512) : Option Memory :=
-  match address with
-  | .byte base => some (writeBytes memory base bits.toNat 64)
-  | .local frame index => some (write memory (.local frame index) (.v512 bits))
-  | .static .. => none
 
 /-- Byte-address arithmetic is unbounded, as in the existing scalar memory
     model. Negative offsets must remain nonnegative. Local slots are typed

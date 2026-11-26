@@ -1,4 +1,4 @@
-import CIL.Safety.RunReturnTrace
+import CIL.Safety.RunningPrefixes
 
 /-!
 # Invocation certificates

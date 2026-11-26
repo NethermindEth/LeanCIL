@@ -97,13 +97,6 @@ def StepRelabel (op : CIL.Instruction) : Prop :=
     step expected op pc args frame stack m = .ok action →
     step actual (op.relabel r) q args frame stack m = .ok (action.relabel r)
 
-/-- Static-memory instructions at two pcs that resolve the same descriptor behave alike. -/
-theorem staticInstruction_congr {expected actual : CIL.Method} {pc q : Nat}
-    (_same : actual.staticAt q = expected.staticAt pc) (operation : CIL.MemoryOp)
-    (stack : List Value) (m : Memory) :
-    staticInstruction actual q operation stack m =
-      staticInstruction expected pc operation stack m := rfl
-
 /-- `ldsfld` at two pcs that resolve the same descriptor loads the same value. -/
 theorem staticLoad_congr {expected actual : CIL.Method} {pc q : Nat}
     (same : actual.staticAt q = expected.staticAt pc) (memory : Memory) :
@@ -262,12 +255,6 @@ macro "explicit_intro" : tactic => `(tactic| (
   unfold step referenceCompareCall referenceSubtractCall at h ⊢
   dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers))
-
-theorem mapError_ok {x : Except ε α} {f : ε → ε'} {a : α} (h : x.mapError f = .ok a) :
-    x = .ok a := by
-  cases x with
-  | error _ => cases h
-  | ok _ => cases h; rfl
 
 set_option hygiene false in
 /-- Splits operand shapes only while needed: unary and invalid-first-operand cases close
@@ -952,12 +939,6 @@ theorem except_bind_error {x : Except ε α} {f : α → Except ε β} {e : ε}
 
 @[simp] theorem error_bind_eq (e : ε) (f : α → Except ε β) :
     (Except.error e >>= f) = .error e := rfl
-
-/-- An arithmetic fault is never a thrown exception. -/
-theorem mapError_arithmetic_ne_thrown {x : Except CIL.ArithmeticFault α}
-    {exception : ExceptionType} :
-    x.mapError ExecutionFault.arithmetic ≠ .error (.thrown exception) := by
-  cases x <;> simp [Except.mapError]
 
 /-- The shared tail of `step` throws only from `instruction`, which both steps share. -/
 theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}

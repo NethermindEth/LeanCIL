@@ -252,16 +252,4 @@ theorem checkedKind?_relabel (r : Nat → Nat) (op : Instruction) :
 
 #print axioms checkedKind?_relabel
 
-/-- Every instruction whose mixed operands `widenMixed` widens satisfies `BaseRelabel`. -/
-theorem base_relabel_of_nativePure (op : Instruction) (pure : nativePureBinary op = true) :
-    BaseRelabel op := by
-  cases op <;> simp only [nativePureBinary, Bool.false_eq_true] at pure
-  all_goals first
-    | exact base_relabel_add | exact base_relabel_sub | exact base_relabel_mul
-    | exact base_relabel_and | exact base_relabel_or | exact base_relabel_xor
-    | exact base_relabel_clt | exact base_relabel_clt_un | exact base_relabel_cgt
-    | exact base_relabel_cgt_un | exact base_relabel_ceq | exact base_relabel_bgt _
-    | exact base_relabel_ble _ | exact base_relabel_bge _ | exact base_relabel_blt _
-    | exact base_relabel_beq _
-
 end CIL.Embedding

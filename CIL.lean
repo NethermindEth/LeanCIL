@@ -141,7 +141,6 @@ import CIL.Safety.RelocationExecution
 import CIL.Safety.ReturnArity
 import CIL.Safety.ReturnMemory
 import CIL.Safety.ReturnReferences
-import CIL.Safety.RunReturnTrace
 import CIL.Safety.RunningPrefixes
 import CIL.Safety.ScalarBranch
 import CIL.Safety.SpanContents
