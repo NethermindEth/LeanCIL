@@ -7,7 +7,7 @@ import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.KernelEquation
 import CIL.ProfileEquivalence
 import Tests.Support
-import Tests.LoweredCallRefusal
+import Tests.CallDecoding
 
 /-!
 # Runtime model tests

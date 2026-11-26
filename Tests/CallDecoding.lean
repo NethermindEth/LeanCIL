@@ -2,9 +2,11 @@ import CIL.Extraction.DecodedDefinition
 import CIL.Extraction.DecodedMethod
 import Tests.Support.RawDecoding
 
-/-! Decoder refusal tests for incomplete method-token operands. -/
+/-! Call decoding: a call, virtual call or construction decodes only with the link, binding or
+model its operand needs, and an operand whose declaration, layout or prefix does not match its
+model decodes to a hole. -/
 
-namespace Tests.LoweredCallRefusal
+namespace Tests.CallDecoding
 open CIL CIL.Extraction
 
 /-- A managed member with no runtime model, embedded in a static caller. -/
@@ -280,4 +282,4 @@ theorem constrainedLinkCode :
 
 #print axioms constrainedLinkCode
 
-end Tests.LoweredCallRefusal
+end Tests.CallDecoding

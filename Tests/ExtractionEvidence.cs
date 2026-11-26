@@ -13,7 +13,7 @@ if (args is not ([] or ["--prepare-only"]))
 using var fixtures = new Program();
 fixtures.PrepareLeanFixtures(
     "Tests.MetadataBuilder", "Tests.BodyEncoding", "Tests.ExtractionLayout", "Tests.ExtractionParameters",
-    "Tests.FeatureEvidence", "Tests.LoweredCallRefusal",
+    "Tests.FeatureEvidence", "Tests.CallDecoding",
     "Tests.ScalarEvidence", "Tests.CoreStringLength", "Tests.CoreExceptionHResult", "Tests.CoreMonitor",
     "Tests.CoreHeaderPointer", "Tests.PercentRuntime",
     "Tests.LayoutCoverage", "Tests.TypeTestEvidence", "Tests.ThrowEvidence", "Tests.SpanEvidence",

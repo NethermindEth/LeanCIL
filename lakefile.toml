@@ -118,7 +118,7 @@ name = "Tests.FieldShape"
 name = "Tests.RuntimeModels"
 
 [[lean_lib]]
-name = "Tests.LoweredCallRefusal"
+name = "Tests.CallDecoding"
 
 [[lean_lib]]
 name = "Tests.BitModels"
