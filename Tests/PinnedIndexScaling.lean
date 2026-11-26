@@ -121,10 +121,12 @@ run_cmd do
     if previousConstruction != 0 && construction > previousConstruction * 6 then
       throwError "pin construction grew faster than indexed construction"
     previousConstruction := construction
+    -- Each size extends the same sequence of independent kernel checks.
+    let mut checkedMethods := 0
+    let mut cost := 0
     let mut previousMethods := 0
     for methodCount in [128, 512, 2048] do
-      let mut cost := 0
-      for position in [:methodCount] do
+      for position in [checkedMethods:methodCount] do
         let (statement, proof) ← liftTermElabM do
           let statement ← mkEq
             (mkApp2 (mkConst ``methodCheck) (mkConst indexName) (mkNatLit position))
@@ -136,6 +138,7 @@ run_cmd do
         | .error error => throwKernelException error
         | .ok _ => pure ()
         cost := cost + ((← IO.getNumHeartbeats) - start)
+      checkedMethods := methodCount
       logInfo m!"pin methods: {pinCount} pins, {methodCount} methods, {cost} heartbeats"
       if previousMethods != 0 && cost > previousMethods * 6 then
         throwError "independent method pin checks grew faster than method count"
