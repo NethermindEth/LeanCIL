@@ -34,14 +34,6 @@ internal static class ExceptionClauses
             handler.HandlerType == ExceptionHandlerType.Catch ? handler.CatchType : null))];
     }
 
-    /// <summary>Whether a clause of <paramref name="method"/> protects <paramref name="instruction"/>.</summary>
-    internal static bool Protects(MethodDefinition method, Instruction instruction)
-    {
-        if (!method.Body.HasExceptionHandlers) return false;
-        var pc = new InstructionIndex(method).Position(instruction);
-        return Of(method).Any(clause => clause.TryStart <= pc && pc < clause.TryEnd);
-    }
-
     /// <summary>
     /// Refuse filter and fault clauses and any body that breaks a rule of <c>checkRegions</c>: misnested clauses, a
     /// return inside a region, a branch that crosses a region boundary, a misplaced <c>endfinally</c> or a

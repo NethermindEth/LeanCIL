@@ -179,8 +179,6 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         readonly HashSet<uint> arities = [];
         int corlib;
 
-        internal ModuleDefinition Module => module;
-
         MetadataReader Reader => image.Reader;
 
         static uint TokenOf(EntityHandle handle) => (uint)MetadataTokens.GetToken(handle);

@@ -121,16 +121,4 @@ internal readonly record struct InitialValue(InitialKind Kind, int Size)
     internal static readonly InitialValue Int32 = new(InitialKind.Int32, 0);
     internal static readonly InitialValue Int64 = new(InitialKind.Int64, 0);
     internal static readonly InitialValue Unmodeled = new(InitialKind.Unmodeled, 0);
-
-    internal string ToLean() => Kind switch
-    {
-        InitialKind.NullRef => ".nullRef",
-        InitialKind.Int32 => ".i32 0",
-        InitialKind.Int64 => ".i64 0",
-        InitialKind.Vector128 => ".v128 0",
-        InitialKind.Vector256 => ".v256 0",
-        InitialKind.Vector512 => ".v512 0",
-        InitialKind.Aggregate => $".aggregate (List.replicate {Size} 0)",
-        _ => ".unmodeled"
-    };
 }

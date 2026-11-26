@@ -1,10 +1,7 @@
 namespace Nethermind.LeanCIL;
 
 /// <summary>An argument kept in a local slot, with the kind of that slot.</summary>
-internal sealed record ParameterHome(int Argument, LocalKind Kind)
-{
-    internal string ToLean() => $"({Argument}, {Kind.ToLean()})";
-}
+internal sealed record ParameterHome(int Argument, LocalKind Kind);
 
 /// <summary>What a static site reads: its value, an opaque binding, or the data block it addresses.</summary>
 internal abstract record StaticSiteDetail;
@@ -30,8 +27,6 @@ internal sealed record StaticDataBlock(int Alignment) : StaticSiteDetail;
 internal sealed record StaticSite(int Pc, StaticIdentityRecord Identity, FieldRef Field, ValueList<byte> Bytes,
     StaticSiteDetail Detail)
 {
-    internal string ToLean() => ToLean(LeanText.MethodNumber);
-
     /// <summary>The initializer method this site reads through, or none.</summary>
     internal IEnumerable<int> Methods => Detail is InitializedStaticValue { Initializer: { } method } ? [method] : [];
 
@@ -90,23 +85,12 @@ internal sealed record FrameMetadata(bool ReturnsValue, ValueList<InitialValue> 
     /// <summary>The environment value: the file's shared constant, or a template's parameter.</summary>
     internal const string EnvironmentLean = "environment";
 
-    /// <summary>The method reads or addresses at least one static field.</summary>
-    internal bool HasStaticSites => StaticSites.Count != 0;
-
     /// <summary>The method declares no locals.</summary>
     internal bool HasNoLocals => Locals.Count == 0;
 
     /// <summary>Argument homes follow the declared locals in this frame's slot order.</summary>
     internal Dictionary<int, int> IndexParameterHomes() =>
         ParameterStorage.IndexHomes(ParameterHomes.Select(home => home.Argument), Locals.Count);
-
-    internal string ReturnsValueLean => LeanText.Bool(ReturnsValue);
-
-    internal string LocalsLean => string.Join(", ", Locals.Select(value => value.ToLean()));
-
-    internal string LocalKindsLean => string.Join(", ", LocalKinds.Select(kind => kind.ToLean()));
-
-    internal string ParameterHomesLean => string.Join(", ", ParameterHomes.Select(home => home.ToLean()));
 
     /// <summary>The index of every method the static sites read initial values through.</summary>
     internal IEnumerable<int> Methods => StaticSites.SelectMany(site => site.Methods);
@@ -116,14 +100,6 @@ internal sealed record FrameMetadata(bool ReturnsValue, ValueList<InitialValue> 
     {
         StaticSites = [.. StaticSites.Select(site => site.Renumber(map))]
     };
-
-    /// <summary>The frame fields, with each initializer written as <paramref name="calleeName"/> of it.</summary>
-    internal string ToLean(Func<int, string> calleeName, string opaqueLocals) =>
-        $"""
-        returnsValue := {ReturnsValueLean}, locals := [{LocalsLean}], localKinds := [{LocalKindsLean}],
-        opaqueVectorLocals := {opaqueLocals}, parameterHomes := [{ParameterHomesLean}],
-        staticSites := [{StaticSitesLeanWith(calleeName)}], declared := {Declared}, environment := {EnvironmentLean}
-        """.ReplaceLineEndings(" ");
 
     internal string StaticSitesLeanWith(Func<int, string> calleeName) =>
         string.Join(", ", StaticSites.Select(site => site.ToLean(calleeName)));

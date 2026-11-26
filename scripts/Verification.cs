@@ -4037,8 +4037,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             foreach (var (name, closure) in closures) checkedClosures.Add(name, closure);
     }
 
-    static JsonElement[] ImportedBindings(string output) => ExtractionIdentity.Read(output).Imports;
-
     static JsonElement[] ImportGraph(string output) => ExtractionIdentity.Read(output).Graph;
 
     // acceptedVia and sourceBundleDigest name a node whose export forced full verification re-checked.

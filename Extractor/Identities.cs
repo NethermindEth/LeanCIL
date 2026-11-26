@@ -199,9 +199,6 @@ internal sealed record UserString
     /// <summary>The literal of an <c>ldstr</c> operand, whose UTF-16 code units Cecil reads unchanged.</summary>
     internal static UserString OfLiteral(string literal) => new(literal.ToCharArray());
 
-    /// <summary>The UTF-16 code units of the literal.</summary>
-    internal ReadOnlySpan<char> Units => units;
-
     /// <summary>The number <c>CIL.UserString.code</c> holds: the units after a leading 1, in base 65536.</summary>
     internal BigInteger Code => IdentityText.Code(units);
 

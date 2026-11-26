@@ -594,13 +594,6 @@ partial class Program
             throw new InvalidDataException("Consumer and verifier Lean toolchains differ.");
     }
 
-    static SortedDictionary<string, string> ConsumerInputs(string root, string proof, string? settings, string output)
-    {
-        var inputs = Inputs(proof, settings);
-        foreach (var (key, value) in ConsumerSnapshot(root, output)) inputs[key] = value;
-        return inputs;
-    }
-
     static SortedDictionary<string, string> RequestInputs(SortedDictionary<string, string> common, string proof, string? settings)
     {
         var inputs = new SortedDictionary<string, string>(common, StringComparer.Ordinal);
