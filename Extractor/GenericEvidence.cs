@@ -545,7 +545,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
         var originalEvidence = Method(original, original, method, reachable, staticInput);
         // Token operands are spelled in the original's generic context, as its code is.
-        var body = Body(original, method, reachable, number);
+        var body = Body(original, method, reachable, number, $"method{number}{source}Body");
         closedTypes.Clear();
         var closedEvidence = Method(method, original, method, reachable, staticInput, closedTypes);
         ExternalIdentities.Emit(lean, decoderInputs);
@@ -563,9 +563,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 def method{number}BodyImports : Extraction.BodyImports :=
                   importIndex.forLinks {methodCount} method{number}Links
                 """);
-        lean.AppendLine(binding is null ? body.Definition
-            : body.Definition.Replace($"def method{number}Body ", $"def method{number}SourceBody ",
-                StringComparison.Ordinal));
+        lean.AppendLine(body.Definition);
         if (binding is not null)
             lean.AppendLine($"""
                 /-- This caller with its constructions bound to the image's CoreLib definitions. -/
@@ -721,7 +719,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// </summary>
     (string Bytes, string Slices, string Definition, string Identified, string TablesValid) Body(
         MethodDefinition original, MethodDefinition admitted,
-        IReadOnlySet<Instruction> reachable, int number)
+        IReadOnlySet<Instruction> reachable, int number, string bodyName)
     {
         var body = Pinned.Body(original);
         var bytes = body.Bytes;
@@ -800,7 +798,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var staticTokens = statics.Count == 0 ? "" : $", statics := {List(statics)}";
         var platform = $"""platformDefinitions{instantiation}{staticTokens}{bodyImports}""";
         var definition = string.Join(" ",
-            $$"""def method{{number}}Body : Extraction.BodyEvidence := { bytes := method{{number}}Bytes,""",
+            $$"""def {{bodyName}} : Extraction.BodyEvidence := { bytes := method{{number}}Bytes,""",
             $$"""tokens := { operands := {{table}} }, metadata := method{{number}}Metadata,""",
             $"""identities := {identities}, tables := method{number}Tables, names := method{number}Names,""",
             "pinned := pinnedIndex, layoutDeclarations := Extraction.layoutDeclarations rawLayouts,",
