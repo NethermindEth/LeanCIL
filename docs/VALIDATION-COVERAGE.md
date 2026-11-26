@@ -892,6 +892,12 @@ whose original is forged to read the other lane, so that it claims a body other 
 bytes.
 `Tests/DecodedSummary.lean` refutes a summary bound to another token than the call names, and a
 summary of a body with a `Vector128.CreateScalarUnsafe` call whose models omit that call.
+`Tests/DecodedSegment.lean` reuses a `DecodedSegmentSummary` of an add and its return after the
+argument loads before it change, joins it with a summary of the load before it, and refutes the
+same summary for another instruction at the add's position or another return convention.
+`Tests/LoopSummary.lean` proves a countdown loop's summary from an invariant and a decreasing
+measure, including that it changes no caller memory, and refutes an exit summary for a loop that
+branches to itself.
 `Tests/ProgramClosures.cs` proves the contract of a method whose two callees have the same body
 once in its extraction, carries it to the method's closure and binds it there as a
 `DecodedSummary`. It carries that summary back to the extraction, to a program that holds the
