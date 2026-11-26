@@ -15,7 +15,7 @@ cannot substitute for it.
 | Layouts | Require one row per type identity, recompute field placement and size, and check use sites and bounds | Faithful raw metadata, including the byref-like declaration marker, and runtime layout correspondence |
 | Specialization | Substitute closed method/owner arguments through signatures, locals, operands and calls, including the owner segment of an external call identity (`scope::result owner::member`, open owners spelled `!!n`/`!n`); preserve control flow | Faithful raw definitions and admitted constraints |
 | Feature flow | Entry, transfers, joins, required successors, reachable mask and feature-dependent operations | No complete concrete CLI simulation for every opcode |
-| Method body decoding | Decode the bytes the extractor emitted for a body (tiny or fat header, every standard opcode, branch targets as instruction indices) through the token table and compare `maxStack`, `initLocals`, the locals and every instruction with the original definition | That the bytes are the method's body in the image (reconfirmed by the opt-in [deep verification](CLI.md#deep-verification)) and the PE container stay trusted; bodies with exception sections are rejected |
+| Method body decoding | Decode the bytes the extractor emitted for a body (tiny or fat header, every standard opcode, branch targets as instruction indices) through the token table and compare `maxStack`, `initLocals`, the locals and every instruction with the original definition | That the bytes are the method's body in the image (reconfirmed by the opt-in [deep verification](CLI.md#deep-verification)) and the PE container stay trusted; filter and fault clauses are rejected by kind |
 | Metadata binding | Decode the table rows, heap entries and signature blobs each method carries and check every token-table entry, every local type and the method's own definition against them, including generic import descriptors and their open signatures and closed arguments | That the carried bytes are the image's, that each platform definition states its type as the platform assembly defines it, public key tokens, imported implementation definitions, raw layout content, imported layouts, dispatch catalogs, static data and generic parameter constraints |
 | Scalar flow | Complete stack kinds, raw maximum stack, joins/backedges, call arguments/results, homes and returns | Unknown types remain opaque |
 | Scalar translations | Exact literal values, arithmetic, comparisons, conversion flags and branch targets | Other operations require specialized checks or retain stack-effect fallback |
@@ -416,6 +416,11 @@ platform type is a value type, a class or an enum, an enum's underlying type, th
 `ValueTuple`, and that `System.Object` declares no instance fields), public key tokens of referenced assemblies,
 imported implementation definitions, raw layout content, the layouts import slots select, dispatch catalog
 completeness, static data bytes and generic parameter constraints.
+The extractor reads raw layout content, dispatch catalogs, static data bytes and generic parameter
+constraints from the metadata of the pinned image, and the default check does not reconfirm them.
+[Deep verification](CLI.md#deep-verification) reconfirms them as the `layout-content`,
+`dispatch-catalogs`, `static-data` and `generic-constraints` facts, or reports each one it does
+not cover as not covered.
 For a generic contract import, Lean reconstructs the open definition key from the caller's
 metadata, encodes its bytes in uppercase hexadecimal and checks the closed arguments and
 signature. Lean does not recompute the implementation and interface digests, the hashed part of a generic
