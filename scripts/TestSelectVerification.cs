@@ -58,15 +58,13 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     var groups = VerificationSelection.Groups(All());
     Equal(groups.SelectMany(group => group.Suites).Order(StringComparer.Ordinal), All());
     // Every job repeats setup and restores, so a full run must not go back to one job per suite.
-    double Seconds(VerificationSelection.Group group) => group.Suites.Sum(suite => durations[suite]);
+    double Seconds(VerificationSelection.Group group) => group.Suites.Sum(suite => durations[suite]) +
+        (group.Libraries ? VerificationSelection.LibraryMeasurementSeconds : 0);
     var target = VerificationSelection.GroupSeconds(durations);
     var longest = durations.MaxBy(suite => suite.Value);
     Require(groups.Length <= All().Length / 3, "Suites were not packed: " + groups.Length + " jobs");
-    // The target is one runner's share of a round, with the fewest rounds that fit under the longest suite.
-    var rounds = durations.Values.Sum() / (VerificationSelection.Runners * target);
-    Require(target <= longest.Value && Math.Abs(rounds - Math.Round(rounds)) < 1e-9 &&
-        (rounds < 1.5 || durations.Values.Sum() / (VerificationSelection.Runners * (rounds - 1)) > longest.Value),
-        "The target is not the fewest whole rounds under the longest suite");
+    Require(target == Math.Min(longest.Value, durations.Values.Sum() / VerificationSelection.Runners),
+        "Packed jobs must fit under the longest suite and one runner's share");
     // A refreshed table moves the target; the longest suites may then swap places without unbalancing a run.
     var refreshed = new Dictionary<string, double>(durations) { ["evidence"] = longest.Value - 100 };
     Require(VerificationSelection.GroupSeconds(refreshed) <= longest.Value &&
@@ -88,7 +86,7 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
         groups.All(group => group.Suite.StartsWith(group.Suites[0], StringComparison.Ordinal) &&
             WorkflowPatterns.JobName.IsMatch(group.Suite)), "A job name is ambiguous or not its first suite");
     // Eight runners, with the setup every job repeats: packing must cost neither wall time nor jobs.
-    const double setupSeconds = 52;
+    const double setupSeconds = VerificationSelection.SetupSeconds;
     double Wall(IEnumerable<double> jobs)
     {
         var runners = new PriorityQueue<double, double>();
@@ -100,7 +98,9 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
         }
         return runners.UnorderedItems.Max(item => item.Element);
     }
-    var single = VerificationSelection.Schedule(All()).Select(suite => durations[suite]).ToArray();
+    var shortest = durations.MinBy(suite => suite.Value).Key;
+    var single = durations.Select(pair => pair.Value +
+        (pair.Key == shortest ? VerificationSelection.LibraryMeasurementSeconds : 0)).OrderDescending().ToArray();
     Require(Wall(groups.Select(Seconds)) <= Wall(single), "Packing lengthened the simulated run");
     Require((single.Length - groups.Length) * setupSeconds >= 30 * 60, "Packing saves under thirty job-minutes");
     // A job measures proof cost exactly when it runs a proof suite, alone or grouped with others.
@@ -109,11 +109,14 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
             "Proof cost is measured in the wrong job: " + group.Suite);
     Require(groups.Any(group => group.Proof && group.Suites.Length > 1), "No proof suite shares a job");
     // The libraries take minutes to measure; a job near its timeout would fail a suite that passed.
-    Require(groups.Single(group => group.Libraries) == groups[^1] &&
-        Seconds(groups[^1]) + 8 * 60 <= groups[^1].Timeout * 60,
-        "The libraries are not measured in the shortest job, or leave it no time");
+    var carrier = groups.Single(group => group.Libraries);
+    Require(groups.Take(VerificationSelection.Runners).Contains(carrier) &&
+        Seconds(carrier) <= carrier.Timeout * 60 / 2,
+        "The library measurement must start in the first wave and fit within the job budget");
     Require(VerificationSelection.Groups(["unsafe"]).Single().Libraries,
         "A run of one job measures no libraries");
+    Require(VerificationSelection.Groups(["cli", "gates"], planLibraries: false).Length == 1,
+        "A selection without library measurements should keep suites that fit together in one job");
     Equal(VerificationSelection.Groups(["contracts", "unknown"]).SelectMany(group => group.Suites),
         ["unknown", "contracts"]);
     Require(VerificationSelection.Groups([]).Length == 0, "Empty selection gained suites");

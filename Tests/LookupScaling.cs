@@ -3129,7 +3129,18 @@ string MethodNumber(string extracted, string method, string name)
     Run(Extract("extract", image, "Bodies", entry.Contains('(') ? entry : $"Bodies::{entry}(ulong)", output));
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     var body = $"method{MethodNumber(extracted, method, name)}_body_validated";
-    var narrowed = NarrowEvidence(extracted, body);
+    // The body proof reads the original method. When the closed raw literal has the same value,
+    // its definition can reference the first literal while setting up the benchmark.
+    var literals = new Dictionary<string, string>(StringComparer.Ordinal);
+    var narrowed = LookupPatterns.RawMethodLiteral.Replace(NarrowEvidence(extracted, body), match =>
+    {
+        var literal = match.Groups["literal"].Value;
+        var name = match.Groups["name"].Value;
+        if (literals.TryGetValue(literal, out var previous))
+            return $"def {name} : Extraction.RawMethod := {previous}";
+        literals.Add(literal, name);
+        return match.Value;
+    });
     var obligations = new List<(Match Proof, string Kind)> { (Obligation(narrowed, body, decided: false), "body") };
     if (tablesMethod is not null)
         obligations.Add((Obligation(narrowed, $"method{MethodNumber(extracted, tablesMethod, name)}_tables_valid",
@@ -3982,6 +3993,11 @@ static partial class LookupPatterns
 
     [GeneratedRegex("""def method(\d+)Signature : String := "[^"]*?Bodies::(?<method>[^"(]*)\(""")]
     internal static partial Regex BodySignature { get; }
+
+    /// <summary>A complete original or closed raw-method literal in a generated body fixture.</summary>
+    [GeneratedRegex(@"(?m)^def (?<name>method[0-9]+(?:Original|Closed)) : Extraction\.RawMethod := " +
+        @"(?<literal>\{[^\r\n]*\})(?=\r?$)")]
+    internal static partial Regex RawMethodLiteral { get; }
 
     const string ProofTerm = """(?:⟨[^\r\n]*⟩|(?<decision>by decide \+kernel))""";
 

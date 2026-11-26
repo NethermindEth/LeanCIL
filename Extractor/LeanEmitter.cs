@@ -282,7 +282,7 @@ internal static class LeanEmitter
                 : InitialValue.Unmodeled)];
 
             fieldAccesses.AddRange(m.Body.Instructions.Select((site, pc) => reachable.Contains(site)
-                ? ClassViews.Of(site, n, pc, profile.Architecture) : null).OfType<ClassViews.Access>());
+                ? ClassViews.Of(site, n, pc, layoutContext) : null).OfType<ClassViews.Access>());
             LocalKind[] kinds =
                 [.. m.Body.Variables.Select(variable => KindOf(variable.VariableType, variable.Index))];
             StaticSite[] sites = [.. m.Body.Instructions.Select((i, pc) => (i, pc))
@@ -544,7 +544,7 @@ internal static class LeanEmitter
             lean.AppendLine("theorem programIndex_get? (index : Nat) : programIndex.get? index = program[index]? := by");
             lean.AppendLine("  rw [programIndex_eq]; exact Extraction.FlowIndex.get?_ofList program index");
             ProgramLookupFacts.Append(lean, "program", "method", lookups);
-            var classViews = ClassViews.Views(fieldAccesses);
+            var classViews = ClassViews.Views(fieldAccesses, layoutContext);
             var views = ClassViews.Emit(fieldAccesses, classViews);
             if (views.Length > 0)
             {

@@ -70,6 +70,8 @@ partial class Program
         }
         var bodies = new string[requests.Count];
         var hashes = new string[requests.Count];
+        var caseOf = new int[requests.Count];
+        var cases = new Dictionary<(string Manifest, string ProofPath, string Body), int>();
         ExtractGeneratedBatch("extract", identity, requests, profile);
         for (var i = 0; i < requests.Count; i++)
         {
@@ -78,20 +80,26 @@ partial class Program
                 throw new InvalidDataException("Generated batch verification does not support contract imports.");
             hashes[i] = Sha(Path.Combine(request.Output, "identity.json"));
             var body = new StringBuilder();
-            body.AppendLine($"namespace BatchCase{i}");
             body.AppendLine(Body(File.ReadAllText(Path.Combine(request.Output, "Extracted.lean"))));
             var proofSource = File.ReadAllText(request.Proof);
             if (ImportsSymbols(proofSource)) body.AppendLine(File.ReadAllText(SymbolsFor(request.Output)));
             body.AppendLine(Body(proofSource));
-            body.AppendLine($"end BatchCase{i}");
+            // Several theorems in the same proof can use one elaboration and replay of that exact input.
             bodies[i] = body.ToString();
+            var key = (hashes[i], request.Proof, bodies[i]);
+            if (!cases.TryGetValue(key, out var existing))
+            {
+                existing = i;
+                cases.Add(key, existing);
+            }
+            caseOf[i] = existing;
         }
         // One Lean process elaborates its file on one core, so disjoint shards elaborate in parallel
         // and are replayed and audited together. Largest fixtures go first to the least loaded shard.
-        var shardCount = Math.Min(requests.Count, Math.Min(Environment.ProcessorCount, MaxBatchShards));
+        var shardCount = Math.Min(cases.Count, Math.Min(Environment.ProcessorCount, MaxBatchShards));
         var shardOf = new int[requests.Count];
         var loads = new long[shardCount];
-        foreach (var i in Enumerable.Range(0, requests.Count).OrderByDescending(i => bodies[i].Length))
+        foreach (var i in cases.Values.OrderByDescending(i => bodies[i].Length))
         {
             shardOf[i] = Array.IndexOf(loads, loads.Min());
             loads[shardOf[i]] += bodies[i].Length;
@@ -123,8 +131,9 @@ partial class Program
             {
                 sources[shard] = Path.Combine(fresh, $"Shard{shard}", "Batch.lean");
                 Directory.CreateDirectory(Path.GetDirectoryName(sources[shard])!);
-                File.WriteAllText(sources[shard], header + string.Concat(Enumerable.Range(0, requests.Count)
-                    .Where(i => shardOf[i] == shard).Select(i => bodies[i])));
+                File.WriteAllText(sources[shard], header + string.Concat(cases.Values
+                    .Where(i => shardOf[i] == shard)
+                    .Select(i => $"namespace BatchCase{i}\n{bodies[i]}end BatchCase{i}\n")));
             }
             // Building the batch runs its proofs' code; this session's compiled modules must survive it unchanged.
             var bound = OleanHashes(fresh, session);
@@ -144,8 +153,9 @@ partial class Program
             var built = OleanHashes(fresh, session);
             RequireOnlyAdded(bound, built, [.. shardModules.Select(module => module.Replace('.', '/'))]);
             AuditRequest[] proofAudits = [.. Enumerable.Range(0, requests.Count).SelectMany(i => new[] {
-                ProofTheorem($"BatchCase{i}.{requests[i].Theorem}"),
-                ExtractionCertificate($"BatchCase{i}.Extracted.translation_valid", $"BatchCase{i}.") })];
+                ProofTheorem($"BatchCase{caseOf[i]}.{requests[i].Theorem}"),
+                ExtractionCertificate($"BatchCase{caseOf[i]}.Extracted.translation_valid",
+                    $"BatchCase{caseOf[i]}.") })];
             AuditedOleans? audited = null;
             if (Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
             {
@@ -171,7 +181,7 @@ partial class Program
             for (var i = 0; i < requests.Count; i++)
             {
                 var request = requests[i];
-                var theorem = $"BatchCase{i}.{request.Theorem}";
+                var theorem = $"BatchCase{caseOf[i]}.{request.Theorem}";
                 var axioms = AuditedAxioms(audited.theorems[2 * i]);
                 AuditedAxioms(audited.theorems[2 * i + 1]);
                 // The manifest a refutation is bound to is the bytes whose digest matched, read once.
@@ -184,21 +194,22 @@ partial class Program
                     ? assumptions.Deserialize<string[]>() : [];
                 reports[i] = new Report(CertificateSchema, Sha(request.Assembly!), hashes[i], request.Theorem, axioms,
                     AuditText(audited.theorems[2 * i]), before[i], BindingSection.Default, libraryKey, libraryBuild,
-                    AuditText(audited.theorems[2 * i + 1]), initializedTypes, Sha(sources[shardOf[i]]), theorem,
+                    AuditText(audited.theorems[2 * i + 1]), initializedTypes, Sha(sources[shardOf[caseOf[i]]]), theorem,
                     staticValues: StaticValueAssumptions(extraction),
                     opaqueStaticValues: OpaqueStaticValues(extraction),
                     imports: PublishedImports(extraction),
                     contractDependencies: DeploymentDependencies(extraction),
                     initializationAssumptions: InitializationAssumptions(extraction),
                     refutation: ExtractedRefutation(audited.theorems[2 * i], extraction,
-                        $"BatchCase{i}.{ExtractedProgram}"));
+                        $"BatchCase{caseOf[i]}.{ExtractedProgram}"));
             }
             // A package may require the same library by path and have built into it since the last snapshot.
             RequireUnchangedLibrary();
             // Nothing is published until every fixture, certificate and replay passes.
             for (var i = 0; i < requests.Count; i++)
             {
-                File.Copy(sources[shardOf[i]], Path.Combine(requests[i].Output, "Batch.lean"), overwrite: true);
+                var source = sources[shardOf[caseOf[i]]];
+                File.Copy(source, Path.Combine(requests[i].Output, "Batch.lean"), overwrite: true);
                 File.WriteAllText(Path.Combine(requests[i].Output, "verified.json"), JsonSerializer.Serialize(reports[i], Json) + "\n");
             }
         }

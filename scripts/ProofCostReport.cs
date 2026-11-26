@@ -496,11 +496,15 @@ internal static partial class ProofCostReport
         async Task<string?> Compile(string group, string module, string source, string root,
             string[]? treeImports = null)
         {
-            foreach (var import in treeImports ?? Imports(File.ReadAllText(source)))
-                if ((root == shared ||
-                    !File.Exists(Path.Combine(root, import.Replace('.', Path.DirectorySeparatorChar) + ".olean"))) &&
-                    TreeSource(import) is not null && await TreeModule(import) is { } reason)
-                    return $"its import {import} was not measured: {reason}";
+            // Queue independent imports together. Only compilation takes one of the worker slots.
+            var dependencies = treeImports ?? Imports(File.ReadAllText(source)).Where(import =>
+                TreeSource(import) is not null && (root == shared ||
+                    !File.Exists(Path.Combine(root, import.Replace('.', Path.DirectorySeparatorChar) + ".olean"))))
+                .ToArray();
+            var failures = await Task.WhenAll(dependencies.Select(TreeModule));
+            for (var i = 0; i < failures.Length; i++)
+                if (failures[i] is { } reason)
+                    return $"its import {dependencies[i]} was not measured: {reason}";
             var olean = Path.Combine(root, module.Replace('.', Path.DirectorySeparatorChar) + ".olean");
             var report = Path.ChangeExtension(olean, ".cost.json");
             Directory.CreateDirectory(Path.GetDirectoryName(olean)!);
@@ -757,8 +761,6 @@ internal static partial class ProofCostReport
 
     internal const string LibrariesSource = "libraries";
 
-    static readonly string[] LibraryInputs = ["lakefile.toml", "lean-toolchain", "lake-manifest.json"];
-
     // What a change needs measured: the test libraries when Lean inputs changed, and each selected proof suite.
     internal static string[] Sources(string selectionMatrix, IEnumerable<string> changedPaths)
     {
@@ -766,8 +768,7 @@ internal static partial class ProofCostReport
         var selected = matrix.RootElement.GetProperty("include").EnumerateArray()
             .SelectMany(group => group.GetProperty("suites").EnumerateArray()).Select(suite => suite.GetString())
             .ToHashSet(StringComparer.Ordinal);
-        var lean = changedPaths.Any(path => path.EndsWith(".lean", StringComparison.Ordinal) ||
-            LibraryInputs.Contains(path));
+        var lean = VerificationSuites.MeasureLibraries(changedPaths);
         return [.. lean ? [LibrariesSource] : Array.Empty<string>(),
             .. VerificationSuites.ProofSuites.Where(selected.Contains)];
     }

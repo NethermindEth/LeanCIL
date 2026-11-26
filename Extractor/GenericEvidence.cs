@@ -343,7 +343,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             if (!isStatic) fieldType = layouts.Metadata.Fields(field.DeclaringType)[index].Type;
             // A class field's index counts its bases' fields first, as its model slot does.
             if (!isStatic && ObjectTypes.Is(field.DeclaringType))
-                index = ObjectTypes.FieldIndex(field.DeclaringType, resolved);
+                index = layouts.Metadata.ClassFieldIndex(field.DeclaringType, resolved);
         }
         else if (!isStatic && ValueTuples.Is(field.DeclaringType))
         {
@@ -513,7 +513,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var owner = Quote(LayoutEvidence.Identity(method.DeclaringType));
         var classOwner = ObjectReceiver(method);
         var receiverClass = classOwner ? $"some ({ObjectType(method.DeclaringType)})" : "none";
-        var objectFields = classOwner ? ObjectTypes.Fields(method.DeclaringType).Length : 0;
+        var objectFields = classOwner ? layouts.Metadata.ClassFieldCount(method.DeclaringType) : 0;
         var objectBases = classOwner ? ObjectTypes.BaseList(method.DeclaringType) : "[]";
         var (parameters, returnType) = SignatureTypes(method);
         var locals = Locals(method);
@@ -607,16 +607,17 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 def method{number}BodyImports : Extraction.BodyImports :=
                   importIndex.forLinks {methodCount} method{number}Links
                 """);
-lean.AppendLine(body.Definition);
+        lean.AppendLine(body.Definition);
         carried?.AppendLine(body.Definition);
         if (binding is not null)
         {
             var bound = $"""
                 /-- This caller with its constructions bound to the image's CoreLib definitions. -/
-                def method{number}Binding : Runtime.Net11WinX64.BoundCaller :=
-                  (constructorImage.bindCaller? {binding.Base} method{number}SourceBody method{number}SourceOriginal
-                    [{string.Join(", ", binding.Pcs)}]).get (by cil_kernel_rfl)
-                cil_evaluated method{number}Original : Extraction.RawMethod := method{number}Binding.original
+                cil_evaluated method{number}Binding : Runtime.Net11WinX64.BoundCaller :=
+                  constructorImage.bindCaller? {binding.Base} method{number}SourceBody method{number}SourceOriginal
+                    [{string.Join(", ", binding.Pcs)}]
+                def method{number}Original : Extraction.RawMethod := method{number}Binding.original
+                theorem method{number}Original_eq : method{number}Binding.original = method{number}Original := rfl
                 def method{number}Body : Extraction.BodyEvidence := method{number}Binding.body
                 """;
             lean.AppendLine(bound);

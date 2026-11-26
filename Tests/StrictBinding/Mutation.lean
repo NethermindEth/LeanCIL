@@ -1,4 +1,5 @@
 import StrictBinding.Image
+import CIL.Extraction.FixedDigits
 
 /-!
 # Strict binding tests: mutations
@@ -26,25 +27,27 @@ def flipByte (image : ImageBytes) (offset mask : Nat) : ImageBytes :=
 def flipBytes (image : ImageBytes) (changes : List (Nat × Nat)) : ImageBytes :=
   changes.foldl (fun changed (offset, mask) => flipByte changed offset mask) image
 
-/-- The bytes of an image, read one at a time; empty when the image is malformed. -/
+/-- The bytes of a well-formed image in file order, without the last chunk's padding. -/
 def imageBytes (image : ImageBytes) : List Nat :=
-  match ImageView.ofImage image >>= (·.bytes 0 image.length) with
-  | .ok bytes => bytes
-  | .error _ => []
+  if image.wellFormed then
+    (image.chunks.foldr (CIL.Extraction.fixedDigitsWithin 8 64 64) []).take image.length
+  else []
 
 /-- The little-endian value of `width` bytes at `offset`. -/
 def readLittle (bytes : List Nat) (offset width : Nat) : Nat :=
   (List.range width).foldl
     (fun value index => value + bytes.getD (offset + index) 0 * 256 ^ index) 0
 
+/-- The bytes with `replacement` written from `offset` up to the end of the input. -/
+def writeBytes : List Nat → Nat → List Nat → List Nat
+  | bytes, _, [] => bytes
+  | [], _, _ => []
+  | _ :: rest, 0, byte :: more => byte :: writeBytes rest 0 more
+  | byte :: rest, offset + 1, replacement => byte :: writeBytes rest offset replacement
+
 /-- The bytes with `width` bytes at `offset` replaced by the little-endian `value`. -/
 def writeLittle (bytes : List Nat) (offset width value : Nat) : List Nat :=
-  (List.range width).foldl
-    (fun bytes index => bytes.set (offset + index) (value / 256 ^ index % 256)) bytes
-
-/-- The bytes with `replacement` written from `offset` on. -/
-def writeBytes (bytes : List Nat) (offset : Nat) (replacement : List Nat) : List Nat :=
-  replacement.zipIdx.foldl (fun bytes (byte, index) => bytes.set (offset + index) byte) bytes
+  writeBytes bytes offset ((List.range width).map fun index => value / 256 ^ index % 256)
 
 /-- The bytes with the byte at `index` xor-ed with `mask`. -/
 def flipAt (bytes : List Nat) (index mask : Nat) : List Nat :=

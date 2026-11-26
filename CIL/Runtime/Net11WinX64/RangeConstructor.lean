@@ -1,5 +1,6 @@
 import CIL.Extraction.ManagedPackage
 import CIL.Runtime.Net11WinX64.ActualValueCtor
+import CIL.Runtime.Net11WinX64.BoundCaller
 import CIL.Runtime.Net11WinX64.InnerMethods
 import CIL.Runtime.Net11WinX64.MessageCtor
 
@@ -464,13 +465,6 @@ def ConstructorImage.of? (overloads : List (ExceptionType × List TypeExpr)) :
     dependencies := first.dependencies,
     methods := firstByKey (·.2.token) (selected.flatMap (·.methods)),
     getters := firstByKey (·.token) (selected.flatMap (·.getter.toList)) }
-
-/-- A caller rebound to an image: its body carrying the dependency rows and member links, its
-method decoded from that body, and the construction link of each bound site. -/
-structure BoundCaller where
-  body : BodyEvidence
-  original : RawMethod
-  links : List (Nat × Link)
 
 /-- Bind the live exception constructions at `pcs` in a caller whose program places the image's
 methods from slot `base`. Each site selects an overload of the image, and every entry to its

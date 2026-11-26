@@ -36,10 +36,11 @@ double Elapsed(IEnumerable<string> order, int workers)
 if (args.Contains("--jobs"))
 {
     // Measured across one run: checkout, toolchain, library and tool restores, and uploads of a job.
-    const double setupSeconds = 52;
+    const double setupSeconds = VerificationSelection.SetupSeconds;
     const int runners = VerificationSelection.Runners;
     var jobs = VerificationSelection.Groups(alphabetical).Select(group =>
-        (group.Suite, group.Suites, Seconds: group.Suites.Sum(suite => durations[suite]) + setupSeconds)).ToArray();
+        (group.Suite, group.Suites, Seconds: group.Suites.Sum(suite => durations[suite]) + setupSeconds +
+            (group.Libraries ? VerificationSelection.LibraryMeasurementSeconds : 0))).ToArray();
     string Minutes(double seconds) => (seconds / 60).ToString("F1", CultureInfo.InvariantCulture);
     Console.WriteLine("| Job | Suites | Estimated minutes |\n| --- | --- | ---: |");
     foreach (var job in jobs)
@@ -55,7 +56,7 @@ if (args.Contains("--jobs"))
     Console.WriteLine($"\n{jobs.Length} jobs for {durations.Count} suites: " +
         $"{Minutes(jobs.Sum(job => job.Seconds))} job-minutes, of which {Minutes(jobs.Length * setupSeconds)} " +
         $"setup; {Minutes(wall)} minutes on {runners} runners. One job per suite would spend " +
-        $"{Minutes(durations.Count * setupSeconds)} on setup. Proof cost measurement is not included.");
+        $"{Minutes(durations.Count * setupSeconds)} on setup. Includes library and per-suite proof measurements.");
     return;
 }
 var estimates = new Dictionary<string, double> { ["alphabetical4"] = Elapsed(alphabetical, 4) };
@@ -63,9 +64,8 @@ foreach (var workers in new[] { 4, 8, 12 }) estimates["longestFirst" + workers] 
 Console.WriteLine(JsonSerializer.Serialize(new
 {
     measurementRun = measured.RootElement.GetProperty("workflowRun").GetString(),
-    assumptions = "Fixed measured job durations; immediate dispatch when a worker is free. " +
-        "Excludes the new preparation job, artifact transfer, runner queueing and library-reuse savings. " +
-        "This is a scheduling estimate, not a measured optimized workflow run.",
+    assumptions = "One job per suite with immediate dispatch. Includes verified-output measurements. " +
+        "Excludes shared library measurement, job setup and preparation.",
     suiteCount = durations.Count,
     totalMeasuredJobSeconds = durations.Values.Sum(),
     estimatedSeconds = estimates,

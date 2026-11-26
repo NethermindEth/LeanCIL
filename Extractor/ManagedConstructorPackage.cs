@@ -99,8 +99,8 @@ internal static class ManagedConstructorPackage
         decoderInputs?.AppendLine(table);
         lean.AppendLine($$"""
             /-- The image's CoreLib definitions after the local methods, and its getter declarations. -/
-            def runtimeRows : List (Extraction.MethodEvidence × Method) × List Extraction.MethodEvidence :=
-              (constructorImage.rows? localMethods method{{caller}}Body profile environment).get (by cil_kernel_rfl)
+            cil_evaluated runtimeRows : List (Extraction.MethodEvidence × Method) × List Extraction.MethodEvidence :=
+              constructorImage.rows? localMethods method{{caller}}Body profile environment
             def managedDeclarations : List Extraction.MethodEvidence := runtimeRows.2
             """);
     }
@@ -192,10 +192,11 @@ internal static class ManagedConstructorPackage
         if (!method.HasBody || method.HasGenericParameters || method.DeclaringType.HasGenericParameters ||
             profile.Architecture == "arm64" || profile.NativeWidth != 64 || !profile.LittleEndian) return Empty;
         HashSet<Instruction> sites = [];
+        HashSet<Instruction>? branchTargets = null;
         foreach (var site in method.Body.Instructions)
             if (site is { OpCode.Code: Code.Newobj, Operand: MethodReference constructor } &&
                 OverloadOf(constructor) is { } overload && (only is null || overload == only) &&
-                LoadsOnEveryEntry(method.Body, site, Loads(overload)))
+                LoadsOnEveryEntry(branchTargets ??= BranchTargets(method.Body), site, Loads(overload)))
                 sites.Add(site);
         return sites.Count != 0 && RuntimeTypesCovered(method, sites) ? sites : Empty;
     }
@@ -291,18 +292,21 @@ internal static class ManagedConstructorPackage
         GenericParameter => [],
         _ => [type]
     };
-    /// <summary>
-    /// The instructions before <paramref name="site"/> are <paramref name="loads"/> in order, and no branch
-    /// enters after the first load, so every path to the allocation runs them all.
-    /// </summary>
-    static bool LoadsOnEveryEntry(MethodBody body, Instruction site, Code[] loads)
-    {
-        var entered = body.Instructions.SelectMany(instruction => instruction.Operand switch
+    /// <summary>The branch and switch targets shared by every candidate in one method.</summary>
+    static HashSet<Instruction> BranchTargets(MethodBody body) =>
+        body.Instructions.SelectMany(instruction => instruction.Operand switch
         {
             Instruction target => [target],
             Instruction[] targets => targets,
             _ => Array.Empty<Instruction>()
         }).ToHashSet();
+
+    /// <summary>
+    /// The instructions before <paramref name="site"/> are <paramref name="loads"/> in order, and no branch
+    /// enters after the first load, so every path to the allocation runs them all.
+    /// </summary>
+    static bool LoadsOnEveryEntry(IReadOnlySet<Instruction> entered, Instruction site, Code[] loads)
+    {
         var current = site;
         for (var index = loads.Length - 1; index >= 0; index--)
         {

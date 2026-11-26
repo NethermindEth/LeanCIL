@@ -36,19 +36,19 @@ internal static partial class ClassViews
     internal sealed record View(string FullName, string Path, string Type, Field[] Fields);
 
     /// <summary>The named class field accessed by a reachable load or store.</summary>
-    internal static Access? Of(Instruction instruction, int method, int pc, string architecture)
+    internal static Access? Of(Instruction instruction, int method, int pc, MetadataValidation.LayoutContext layouts)
     {
         if (instruction is not { OpCode.Code: Code.Ldfld or Code.Stfld, Operand: FieldReference field } ||
             !ObjectTypes.Candidate(field.DeclaringType)) return null;
         var resolved = field.Resolve() ?? throw new InvalidDataException("Unresolved field");
         var operation = ObjectTypes.FieldOperation(field, resolved, instruction.OpCode.Code == Code.Stfld,
-            address: false, architecture);
+            address: false, layouts);
         return new(resolved, field.DeclaringType, method, pc, operation);
     }
 
     /// <summary>The views of the classes whose fields the accesses touch, each field named once per class.
     /// </summary>
-    internal static View[] Views(IEnumerable<Access> accesses)
+    internal static View[] Views(IEnumerable<Access> accesses, MetadataValidation.LayoutContext layouts)
     {
         var classes = accesses.GroupBy(access => access.Owner.FullName, StringComparer.Ordinal)
             .OrderBy(group => group.Key, StringComparer.Ordinal).ToArray();
@@ -62,7 +62,7 @@ internal static partial class ClassViews
                 : string.Join('.', type.FullName.Split('.', '/').Select(Identifier));
             var used = new HashSet<string>(["type"], StringComparer.Ordinal);
             var fields = owner.GroupBy(access => access.Field)
-                .OrderBy(group => ObjectTypes.FieldIndex(type, group.Key))
+                .OrderBy(group => layouts.ClassFieldIndex(type, group.Key))
                 .Select(group =>
                 {
                     var wanted = FieldName(group.Key);

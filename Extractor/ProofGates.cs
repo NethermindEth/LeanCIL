@@ -349,7 +349,8 @@ partial class Program
         {
             row.ProgramBase, row.ComparesStatement ? production[(row.Gate, row.Profile)] : null
         }).OfType<GateRow>().ToHashSet();
-        var prepared = gates.Rows.Where(row => (selected.Contains(row) || needed.Contains(row)) &&
+        needed.UnionWith(selected);
+        var prepared = gates.Rows.Where(row => needed.Contains(row) &&
             row.Extraction is null && row.ExtractionStatus is null && row.BuildStatus is null).ToList();
         // A row that fails before verification must keep no certificate or failure report from an earlier run.
         foreach (var row in prepared.Where(row => Directory.Exists(row.Output)))
@@ -366,12 +367,13 @@ partial class Program
         if (plan.manifest != gates.Digest)
             throw new InvalidDataException($"The plan was made for manifest {plan.manifest}, but the manifest and " +
                 $"its catalogs are now {gates.Digest}.");
-        var rows = gates.Rows.ToDictionary(row => row.Name, StringComparer.Ordinal);
+        var rows = gates.Rows.Select((row, index) => (row, index)).ToDictionary(entry => entry.row.Name,
+            StringComparer.Ordinal);
         var planned = plan.groups.SingleOrDefault(candidate => candidate.id == group) ??
             throw new ArgumentException("The plan has no group " + group + ".");
-        return [.. planned.rows.Select(id => rows.TryGetValue(id, out var row) ? row
+        return [.. planned.rows.Select(id => rows.TryGetValue(id, out var entry) ? entry
             : throw new InvalidDataException("The plan names row " + id + ", which the manifest does not have."))
-            .OrderBy(row => gates.Rows.IndexOf(row))];
+            .OrderBy(entry => entry.index).Select(entry => entry.row)];
     }
 
     static GatePlan ReadGatePlan(string path)
@@ -416,21 +418,25 @@ partial class Program
             .Select(unit => (unit.First().Method, Cost: Recorded(unit)))
             .Where(unit => unit.Cost is not null).ToArray();
         var overall = Median(recordedUnits.Select(unit => unit.Cost!.Value));
+        var methodCosts = recordedUnits.GroupBy(unit => unit.Method, unit => unit.Cost!.Value, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => Median(group), StringComparer.Ordinal);
         var units = selected.GroupBy(row => (row.Gate, row.Profile)).Select(unit =>
         {
             var method = unit.First().Method;
-            var cost = Recorded(unit) ?? Median(recordedUnits.Where(other => other.Method == method)
-                .Select(other => other.Cost!.Value)) ?? overall ?? 1;
+            var cost = Recorded(unit) ?? methodCosts.GetValueOrDefault(method) ?? overall ?? 1;
             return (Id: unit.Key.Gate + "/" + unit.Key.Profile, Rows: unit.ToList(), Cost: cost);
         }).OrderByDescending(unit => unit.Cost).ThenBy(unit => unit.Id, StringComparer.Ordinal).ToArray();
         var count = Math.Min(options.PlanCount!.Value, units.Length);
         var loads = new double[count];
         var members = Enumerable.Range(0, count).Select(_ => new List<GateRow>()).ToArray();
+        var jobs = new PriorityQueue<int, (double Load, int Index)>();
+        for (var index = 0; index < count; index++) jobs.Enqueue(index, (0, index));
         foreach (var unit in units)
         {
-            var lightest = Array.IndexOf(loads, loads.Min());
+            var lightest = jobs.Dequeue();
             loads[lightest] += unit.Cost;
             members[lightest].AddRange(unit.Rows);
+            jobs.Enqueue(lightest, (loads[lightest], lightest));
         }
         var order = selected.Select((row, index) => (row, index)).ToDictionary(pair => pair.row, pair => pair.index);
         var plan = new GatePlan(gates.Digest, GitRevision(gates.Directory),
@@ -557,7 +563,7 @@ partial class Program
         // Production verifies first and reports its statement; variants compared with it verify in a second batch.
         // Compile-only runs audit no statement, so they compare none.
         var compared = options.CheckOnly ? [] : selected.Where(row => row.ComparesStatement && !row.Failed).ToList();
-        var origins = compared.Select(row => production[(row.Gate, row.Profile)]).Where(row => !selected.Contains(row));
+        var origins = compared.Select(row => production[(row.Gate, row.Profile)]).Except(selected);
         var requests = new List<BatchRequest>();
         var requestIndex = new Dictionary<GateRow, (int? Refutation, int Proof)>();
         // A refutation precedes the proof it accompanies, so the proof's request owns the output.
@@ -573,7 +579,7 @@ partial class Program
             // A rejected variant's own proof must fail at proof checking; its refutation is the request above.
             requests.Add(new(row.Output, row.Proof, row.Theorem, row.Expect == "rejected" ? "unproved" : row.Expect));
         }
-        foreach (var row in selected.Except(compared).Concat(origins.Distinct())
+        foreach (var row in selected.Except(compared).Concat(origins)
             .Where(row => !row.Failed && row.Expect != "unchanged"))
             Request(row);
         var firstCount = requests.Count;
@@ -834,21 +840,7 @@ partial class Program
                         variant.theorem ?? gate.theorem, variant.initializedTypes ?? gate.initializedTypes,
                         variant.program, variant.programOf, refutation, refutationTemplate, variant.statement));
             }
-            foreach (var (name, variant) in variants.Where(pair => pair.Value.programOf is not null))
-            {
-                // Following programOf from any variant must end at production.
-                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { name };
-                for (var next = variant.programOf; next is not null and not "production";
-                    next = variants[next].programOf)
-                    if (!variants.ContainsKey(next) || !seen.Add(next))
-                        throw new InvalidDataException("Variant " + gate.name + "/" + name + " compares its program " +
-                            "with an unknown variant or through a cycle: " + next);
-            }
-            foreach (var row in gateRows.Where(row => row.ExpectedProgram is not null))
-                row.ProgramBase = gateRows.SingleOrDefault(other => other.Profile == row.Profile &&
-                    other.Variant.Equals(row.ProgramOf ?? "production", StringComparison.OrdinalIgnoreCase)) ??
-                    throw new InvalidDataException("Variant " + row.Name + " compares its program with " +
-                        row.ProgramOf + ", which does not run under profile " + row.Profile + ".");
+            BindProgramComparisons(gate.name, variants, gateRows);
             rows.AddRange(gateRows);
 
             GateRow Row(string variant, string expect, string? assembly, GateBuildPlan? plan, string profile,
@@ -891,6 +883,35 @@ partial class Program
         }
         return rows;
     }
+
+    /// <summary>Checks the variant chains and binds each comparison to its row in the same profile.</summary>
+    static void BindProgramComparisons(string gate, Dictionary<string, GateVariant> variants, List<GateRow> rows)
+    {
+        if (!rows.Any(row => row.ExpectedProgram is not null)) return;
+        var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, variant) in variants)
+        {
+            if (variant.programOf is null || resolved.Contains(name)) continue;
+            var path = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { name };
+            var next = variant.programOf;
+            while (next is not null and not "production" && !resolved.Contains(next))
+            {
+                if (!variants.TryGetValue(next, out var target) || !path.Add(next))
+                    throw new InvalidDataException("Variant " + gate + "/" + name + " compares its program " +
+                        "with an unknown variant or through a cycle: " + next);
+                next = target.programOf;
+            }
+            resolved.UnionWith(path);
+        }
+
+        var byProfile = rows.GroupBy(row => row.Profile, StringComparer.Ordinal).ToDictionary(group => group.Key,
+            group => group.ToDictionary(row => row.Variant, StringComparer.OrdinalIgnoreCase), StringComparer.Ordinal);
+        foreach (var row in rows.Where(row => row.ExpectedProgram is not null))
+            row.ProgramBase = byProfile[row.Profile].GetValueOrDefault(row.ProgramOf ?? "production") ??
+                throw new InvalidDataException("Variant " + row.Name + " compares its program with " +
+                    row.ProgramOf + ", which does not run under profile " + row.Profile + ".");
+    }
+
     /// <summary>Whether `name` selects a built-in execution profile, including a retired one.</summary>
     static bool BuiltInProfile(string name)
     {

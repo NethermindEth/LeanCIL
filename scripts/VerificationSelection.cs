@@ -42,47 +42,64 @@ internal static class VerificationSelection
     // The suite jobs that run at once, which the workflow's `max-parallel` sets.
     internal const int Runners = 8;
 
+    // Reserve the full workflow step budget until a hosted run measures the library to completion.
+    internal const int LibraryMeasurementSeconds = 20 * 60;
+    internal const int SetupSeconds = 52;
+
     // More members than this make a job's summary long and its name useless for finding a failure.
     internal const int GroupMembers = 8;
 
-    // A job is filled to the share of all measured time that one runner takes in one round, with the
-    // fewest rounds that keep a job no longer than the longest suite. That suite then stays the
-    // longest job, and every runner finishes its last job at about the same time.
-    internal static double GroupSeconds(IReadOnlyDictionary<string, double> durations)
-    {
-        var rounds = 1;
-        while (durations.Values.Sum() / (Runners * rounds) > durations.Values.Max()) rounds++;
-        return durations.Values.Sum() / (Runners * rounds);
-    }
+    // A packed job fits within both one runner's share of a full run and the longest measured suite.
+    internal static double GroupSeconds(IReadOnlyDictionary<string, double> durations) =>
+        Math.Min(durations.Values.Max(), durations.Values.Sum() / Runners);
 
     // A job's suites when few enough to read, else its longest suite and how many more it runs.
     static string Name(List<string> group) => group.Count <= 3 ? string.Join("+", group)
         : $"{group[0]}+{group.Count - 1}more";
 
-    // Each job costs setup and restores before its first suite, so suites are packed into as few jobs
-    // as the target allows, longest first into the fullest job that still has room. A suite without
-    // a measured time runs alone.
-    internal static Group[] Groups(IEnumerable<string> suites, string? root = null)
+    // Give the next suite to the runner with the least work, including each job's setup.
+    // Short selections share a job. Unknown suites start first and run alone.
+    internal static Group[] Groups(IEnumerable<string> suites, string? root = null, bool planLibraries = true)
     {
         var durations = ReadDurations(root);
         var target = GroupSeconds(durations);
-        double Seconds(List<string> group) =>
-            group.Sum(name => durations.GetValueOrDefault(name, double.PositiveInfinity));
-        var groups = new List<List<string>>();
-        foreach (var suite in Schedule(suites.Distinct(StringComparer.Ordinal), root))
+        var selected = suites.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        if (selected.Length == 0) return [];
+        double Seconds(string suite) => durations.GetValueOrDefault(suite, double.PositiveInfinity);
+        var carrier = selected.MinBy(Seconds)!;
+        double Work(string suite) =>
+            Seconds(suite) + (planLibraries && suite == carrier ? LibraryMeasurementSeconds : 0);
+        var measured = selected.Where(durations.ContainsKey).OrderByDescending(Work).ToArray();
+        var workers = (int)Math.Clamp(Math.Ceiling(measured.Sum(Work) / target), 1, Runners);
+        var loads = new double[workers];
+        var assigned = Enumerable.Range(0, workers).Select(_ => new List<List<string>>()).ToArray();
+        var groups = selected.Where(suite => !durations.ContainsKey(suite))
+            .Select(suite => new List<string> { suite }).ToList();
+        foreach (var suite in measured)
         {
-            var seconds = durations.GetValueOrDefault(suite, double.PositiveInfinity);
-            var group = groups.Where(group => group.Count < GroupMembers && Seconds(group) + seconds <= target)
-                .OrderByDescending(Seconds).FirstOrDefault();
-            if (group is null) groups.Add([suite]);
-            else group.Add(suite);
+            bool Fits(List<string> group) => group.Count < GroupMembers &&
+                group.Sum(Work) + Work(suite) <= target;
+            var worker = Enumerable.Range(0, workers).MinBy(i =>
+                loads[i] + (assigned[i].Any(Fits) ? 0 : SetupSeconds));
+            var group = assigned[worker].LastOrDefault(Fits);
+            if (group is null)
+            {
+                group = [];
+                assigned[worker].Add(group);
+                groups.Add(group);
+                loads[worker] += SetupSeconds;
+            }
+            group.Add(suite);
+            loads[worker] += Work(suite);
         }
-        var ordered = groups.OrderByDescending(Seconds).ToArray();
-        // The shortest job carries the libraries: it starts last and has the most room before the
-        // other jobs of its round finish.
-        var carrier = ordered.LastOrDefault();
-        return ordered.Select(group => new Group(Name(group), group.ToArray(), Timeout(group, Seconds(group)),
-                group.Any(VerificationSuites.ProofSuites.Contains), group == carrier)).ToArray();
+        return groups.OrderByDescending(group => group.Sum(Work))
+            .Select(group => group.OrderByDescending(Seconds).ToList()).Select(group =>
+            {
+                var libraries = group.Contains(carrier);
+                var budget = group.Sum(Seconds) + (libraries ? LibraryMeasurementSeconds : 0);
+                return new Group(Name(group), group.ToArray(), Timeout(group, budget),
+                    group.Any(VerificationSuites.ProofSuites.Contains), libraries);
+            }).ToArray();
     }
 
     const int TimeoutStepMinutes = 10;

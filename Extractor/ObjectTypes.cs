@@ -74,8 +74,9 @@ internal static class ObjectTypes
     {
         if (IsStringDefinition(type)) return [];
         var bases = new List<TypeReference>();
+        // Validate checks the entire lineage, including the assembly identity of its root.
         for (var parent = Validate(type).BaseType; parent is not null && parent.FullName != "System.Object";
-            parent = Validate(parent).BaseType)
+            parent = parent.Resolve().BaseType)
             bases.Add(parent);
         return [.. bases];
     }
@@ -87,17 +88,6 @@ internal static class ObjectTypes
     internal static FieldDefinition[] Fields(TypeReference type) =>
         [.. Bases(type).Reverse().Append(type).SelectMany(owner =>
             MetadataValidation.Fields(owner).Select(field => field.Definition))];
-
-    /// <summary>
-    /// The model slot index of an instance field of an admitted class, counting its bases' fields first.
-    /// </summary>
-    internal static int FieldIndex(TypeReference owner, FieldDefinition resolved)
-    {
-        var index = Array.IndexOf(Fields(owner), resolved);
-        return index >= 0 ? index
-            : throw new InvalidDataException(
-                "Unresolved class instance field: " + owner.FullName + "::" + resolved.Name);
-    }
 
     /// <summary>
     /// The string class referenced through System.Runtime or defined in its pinned CoreLib image.
@@ -143,10 +133,10 @@ internal static class ObjectTypes
     /// value-array field of a class instance, at the model offset of its slot. A class-typed field, admitted or
     /// opaque, or a field holding an array of a class holds an object reference in its slot, never in bytes; a
     /// value-array field holds the origin of a whole array of its element type there, a struct element taking its
-    /// width from the layout for <paramref name="architecture"/>.
+    /// width from the target architecture in <paramref name="layouts"/>.
     /// </summary>
     internal static ClassViews.FieldOperation FieldOperation(FieldReference field, FieldDefinition resolved,
-        bool store, bool address, string architecture)
+        bool store, bool address, MetadataValidation.LayoutContext layouts)
     {
         var owner = field.DeclaringType;
         Validate(owner);
@@ -155,13 +145,13 @@ internal static class ObjectTypes
                 "\n  Class field offsets are chosen by the model, so no address may observe them.");
         var type = resolved.FieldType;
         var holdsReference = !type.IsValueType && type is not PointerType and not FunctionPointerType;
-        var valueArray = Arrays.Of(type, architecture);
+        var valueArray = Arrays.Of(type, layouts.Architecture);
         if (holdsReference && !Is(type) && !Opaque(type) && !ReferenceArrays.Is(type) && valueArray is null)
             throw new InvalidDataException("Unsupported reference-typed field: " + field.FullName +
                 "\n  Only fields holding class instances, arrays of classes or single-dimensional arrays of " +
                 "reference-free value types are modelled; " + type.FullName +
                 " is another array, a generic parameter or a modified type.");
-        var offset = FieldSlot * FieldIndex(owner, resolved);
+        var offset = FieldSlot * layouts.ClassFieldIndex(owner, resolved);
         if (valueArray is not null)
             return new(store, GenericEvidence.ObjectType(owner), offset, ClassViews.FieldKind.Array,
                 null, false, valueArray);

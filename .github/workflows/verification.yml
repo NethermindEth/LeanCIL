@@ -409,13 +409,13 @@ jobs:
           dotnet artifacts/verification-fixtures/ProofCost/ProofCost.dll measure-suites --tree .
           --library artifacts/certified-library --artifacts artifacts
           --runs artifacts/verification-suites.json --jobs "$(nproc)" --output-rows "$RUNNER_TEMP/proof-cost"
-      # The test libraries need only the certified library; selection marks the shortest job for them.
+      # The matrix includes the library measurement in the estimated work of its carrier.
       - name: Measure the proof cost of the test libraries
         if: >-
           ${{ !cancelled() && matrix.libraries &&
           contains(fromJSON(needs.select.outputs.cost-sources || '[]'), 'libraries') }}
         continue-on-error: true
-        timeout-minutes: 8
+        timeout-minutes: 20
         shell: bash
         run: >-
           dotnet artifacts/verification-fixtures/ProofCost/ProofCost.dll measure --tree .

@@ -69,13 +69,9 @@ theorem wrong_literal_character :
     spelled? arithmeticBytes = some "Examples.Arithmetid" := by cil_kernel_rfl
 
 open Lean Elab Tactic Meta in
-/-- Run `cil_kernel_rfl` on the equation `type` under the options this module is compiled with
-    and require its own refusal. `#guard_msgs` checks declarations synchronously, so a tactic that
-    left the kernel check to an asynchronous task would pass there and assign an unchecked proof
-    here. -/
-elab "refused_under_module_options " type:term : tactic => do
-  unless Elab.async.get (← getOptions) do
-    throwError "the module must be elaborated with the default asynchronous kernel checks"
+/-- Require the tactic's own refusal with asynchronous declaration checking enabled, including
+    when the surrounding theorem is being measured by the single-threaded proof profiler. -/
+elab "refused_with_async_checks " type:term : tactic => withOptions (Elab.async.set · true) do
   let equation ← Term.elabTerm type (some (mkSort .zero))
   let goal ← mkFreshExprMVar equation
   let saved ← getGoals
@@ -95,8 +91,8 @@ elab "refused_under_module_options " type:term : tactic => do
 /-- A wrong character on the literal side and a wrong byte on the heap side are refused by the
     tactic itself under the default options, outside `#guard_msgs`. -/
 example : True := by
-  refused_under_module_options spelled? arithmeticBytes = some "Examples.Arithmetid"
-  refused_under_module_options spelled? (arithmeticBytes.set 1 121) = some "Examples.Arithmetic"
+  refused_with_async_checks spelled? arithmeticBytes = some "Examples.Arithmetid"
+  refused_with_async_checks spelled? (arithmeticBytes.set 1 121) = some "Examples.Arithmetic"
   trivial
 
 /-- An overlong encoding of NUL, a surrogate, a truncated character and a stray continuation
