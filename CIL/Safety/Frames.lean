@@ -4,7 +4,7 @@ import CIL.Safety.InstructionMemory
 # Activation frames
 
 How the checked interpreter (`CIL/Safety/Execution.lean`) lays out a method activation.
-Each numeric local, vector argument and written parameter gets its own frame-owned
+Each numeric local and written parameter gets its own frame-owned
 allocation of bytes, so unsafe code can address it; managed references live in root slots
 that hold a reference, not bytes. `enterFrame` builds a frame on call and `leaveFrame`
 expires its allocations on return. The `Frame*` lemma files describe these functions.
@@ -53,15 +53,25 @@ inductive LocalSlot where
   | object (value : Option ManagedReference)
   deriving DecidableEq, Repr
 
-/-- A method activation: its identity, local slots, the allocations it owns (expired by
-    `leaveFrame`), and the private homes of vector arguments, keyed by argument index. -/
+/-- How an activation continues when a finally handler it entered reaches `endfinally`. -/
+inductive Resumption where
+  /-- Continue the `leave` to `target` that entered the handler. -/
+  | leave (target : Nat)
+  /-- Raise again the exception that entered the handler, located where it was first raised. -/
+  | raise (location : LocatedFault) (object : Option Reference)
+  deriving DecidableEq, Repr
+
+/-- A method activation: its identity, local slots and the allocations it owns (expired by
+    `leaveFrame`). -/
 structure Frame where
   activation : Nat
   locals : List LocalSlot
   owned : List AllocationId
-  arguments : List (Nat × LocalSlot) := []
   /-- Rounded bytes reserved by this activation's dynamic stack allocations. -/
   stackBytes : Nat := 0
+  /-- The finally handlers the activation is running, innermost first: each clause's index in
+      the body's exception clauses and how its `endfinally` resumes. -/
+  resumptions : List (Nat × Resumption) := []
   deriving Repr
 
 /-- Natural alignment for 32/64-bit scalar homes on the supported 64-bit targets
@@ -133,7 +143,7 @@ def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     if table.signature != signature then .error .invalidState else
       return (.methodTable signature (some table), m)
   | .methodTable signature _, .object .null =>
-    return (.methodTable signature (some ⟨signature, none, none⟩), m)
+    return (.methodTable signature (some { signature, targets := none, entryCount := 0 }), m)
   | .object _, .object reference =>
     let _ ← formObject m reference
     return (.object (some reference), m)
@@ -218,15 +228,16 @@ def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
     | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ | .object =>
       .error .invalidState
 
-/-- The address of a local's byte home. Root and opaque vector slots have no bytes and
-    cannot be addressed. -/
-def localAddress (m : Memory) (slot : LocalSlot) : ExecutionResult Value :=
+/-- What taking the address of local `index`, held in `slot`, pushes: the address of its byte
+    home, or for a span local its home, which reads nothing until a call passes it. Root,
+    array, opaque vector, callable and object slots have no address the model forms. -/
+def localAddress (m : Memory) (index : Nat) (slot : LocalSlot) : ExecutionResult Value :=
   match slot with
   | .bytes _ reference => formValue m (.address reference)
+  | .span .. => .ok (.spanHome index)
   | .root _ | .readOnlyRoot _ => .error (.unsupported "Address of managed-reference local")
   | .array .. => .error (.unsupported "Address of array root local")
   | .opaque128 _ => .error (.unsupported "Address of opaque vector local")
-  | .span .. => .error (.unsupported "Address of span local outside a validated receiver")
   | .methodPointer .. | .methodTable .. =>
     .error (.unsupported "Address of callable provenance root")
   | .object _ => .error (.unsupported "Address of object reference local")
@@ -259,7 +270,8 @@ def makeLocal (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value) (m
     | .unmodeled => .ok (.methodPointer signature none, [], m)
     | _ => .error .invalidState
   | .methodTable signature => match initial with
-    | .nullRef => .ok (.methodTable signature (some ⟨signature, none, none⟩), [], m)
+    | .nullRef =>
+      .ok (.methodTable signature (some { signature, targets := none, entryCount := 0 }), [], m)
     | .unmodeled => .ok (.methodTable signature none, [], m)
     | _ => .error .invalidState
   | .array element => match initial with
@@ -340,27 +352,6 @@ def makeSelectedLocals (activation : Nat) (indices : List Nat) (kinds : List CIL
       makeLocals activation kinds initializers m := rfl
 #print axioms makeSelectedLocals_nil
 
-/-- Aggregate argument instructions operate on a private snapshot home, never
-    directly on the caller's by-value source. Their extracted indices identify
-    the 256-bit vector representation supported by those CIL operations. -/
-def makeArgumentHomes (activation : Nat) (indices : List Nat) (args : List Value)
-    (m : Memory) : ExecutionResult (List (Nat × LocalSlot) × List AllocationId × Memory) := do
-  match indices with
-  | [] => return ([], [], m)
-  | index :: rest =>
-    if (args[index]?.map Value.hasUnspecified).getD false then
-      .error (.unsupported "Argument home observes unspecified vector bits") else
-    let some (.scalar (.v256 bits)) := args[index]? | .error .invalidState
-    let (reference, memory) ← allocateHome m activation (localWidth .vector256)
-    let (slot, memory) ← storeLocal memory (.bytes .vector256 reference) (.scalar (.v256 bits))
-    let (homes, owned, memory) ← makeArgumentHomes activation rest args memory
-    return ((index, slot) :: homes, reference.allocation :: owned, memory)
-
-/-- The private home of vector argument `index`. -/
-def argumentHome (frame : Frame) (index : Nat) : ExecutionResult LocalSlot := do
-  let some (_, slot) := frame.arguments.find? (fun home => home.1 == index) | .error .invalidState
-  return slot
-
 /-- Materialize only parameters that are assigned or addressed. By-value homes
     are private to the activation; byref parameters retain their reference value. -/
 def makeParameterHomes (activation : Nat) (parameters : List (Nat × CIL.LocalKind))
@@ -375,18 +366,16 @@ def makeParameterHomes (activation : Nat) (parameters : List (Nat × CIL.LocalKi
     let (homes, other, memory) ← makeParameterHomes activation rest args memory
     return ((index, slot) :: homes, owned ++ other, memory)
 
-/-- Sets up a callee activation under a fresh identity: its locals, vector argument homes
-    and parameter homes. Parameter homes are appended to the locals. -/
+/-- Sets up a callee activation under a fresh identity: its locals and parameter homes.
+    Parameter homes are appended to the locals. -/
 def enterFrame (body : CIL.Method) (args : List Value) (m : Memory) :
     ExecutionResult (Frame × Memory) := do
   let activation := m.nextIdentity
   let (locals, owned, memory) ←
     makeSelectedLocals activation body.opaqueVectorLocals body.localKinds body.locals m
-  let (arguments, argumentIds, memory) ← makeArgumentHomes activation body.vectorArgs args memory
   let (parameters, parameterIds, memory) ←
     makeParameterHomes activation body.parameterHomes args memory
-  return (⟨activation, locals ++ parameters.map Prod.snd, (owned ++ argumentIds) ++ parameterIds,
-    arguments, 0⟩, memory)
+  return (⟨activation, locals ++ parameters.map Prod.snd, owned ++ parameterIds, 0, []⟩, memory)
 
 /-- Ends an activation by expiring every allocation it owns. -/
 def leaveFrame (frame : Frame) (m : Memory) : Memory :=
@@ -398,12 +387,10 @@ theorem enterFrame_of_no_opaque (body : CIL.Method) (args : List Value) (m : Mem
     enterFrame body args m = (do
       let activation := m.nextIdentity
       let (locals, owned, memory) ← makeLocals activation body.localKinds body.locals m
-      let (arguments, argumentIds, memory) ←
-        makeArgumentHomes activation body.vectorArgs args memory
       let (parameters, parameterIds, memory) ←
         makeParameterHomes activation body.parameterHomes args memory
-      return (⟨activation, locals ++ parameters.map Prod.snd,
-        (owned ++ argumentIds) ++ parameterIds, arguments, 0⟩, memory)) := by
+      return (⟨activation, locals ++ parameters.map Prod.snd, owned ++ parameterIds, 0, []⟩,
+        memory)) := by
   simp only [enterFrame, noOpaque, makeSelectedLocals_nil]
 #print axioms enterFrame_of_no_opaque
 

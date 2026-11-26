@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
@@ -73,28 +78,37 @@ var requests = cases.Select(item =>
     File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" + memory +
         "\ntheorem correctness :\n" + string.Join(" ∧\n", item.Claims) + " := by\n  exact " +
         (item.Claims.Length == 1 ? "rfl" : "⟨" + string.Join(", ", item.Claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
+    if (item.Name is "IsNull" or "IsLive")
+    {
+        var (pc, operation, forgery) = item.Name == "IsNull"
+            ? (0, ".nullRef", ".ldc_i8 0")
+            : (1, ".isNullRef", ".ldnull");
+        File.AppendAllText(proof, $$"""
+
+            namespace ExampleProof
+            open CIL CIL.Extraction
+            /-- The compiled null helper keeps its operand and rejects the forged stack operation. -/
+            theorem nullHelperCall :
+                let raw := Extracted.method0Closed.code[{{pc}}]'(by decide +kernel)
+                let kept := Extracted.method0.code[{{pc}}]'(by decide +kernel)
+                let check := fun emitted => runtimeCatalog.siteAgrees Extracted.environment
+                  Extracted.profile raw emitted none true
+                And ((match kept with
+                 | .call method _ => runtimeModel Extracted.environment .call method
+                 | _ => none) = some (.memory {{operation}}))
+                  (check kept && !check ({{forgery}}) && (match kept with
+                   | .call method _ => !check (.call method { tail := true })
+                   | _ => false)) := by
+              decide +kernel
+            #print axioms nullHelperCall
+            end ExampleProof
+
+            """);
+    }
     return new GeneratedVerification(methods.Single(m => m.Name == item.Name).FullName, proof, output);
 }).ToArray();
 verification.VerifyGeneratedBatch(assembly, "Examples", requests);
 foreach (var item in cases) Console.WriteLine($"PASS {item.Name}: {item.Claims.Length} runtime comparisons");
-
-// An operation with the helper's stack effect cannot stand in for it: only the call binding rejects these.
-foreach (var (name, helper, forgery) in new[]
-{
-    ("IsNull", ".memory .nullRef", ".const64 0"),
-    ("IsLive", ".memory .isNullRef", ".memory .asRef")
-})
-{
-    var extracted = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
-    if (!extracted.Contains(helper)) throw new InvalidOperationException($"{name} does not emit {helper}");
-    var mutated = Path.Combine(root, name + "-forged.lean");
-    File.WriteAllText(mutated, extracted.Replace(helper, forgery));
-    var result = Execute(["lake", "env", "lean", mutated], cwd: verification.CheckoutPackage());
-    if (result.Code == 0 || !result.Output.Contains("Extraction.UnsafeCallsValid rawLayouts method0Closed") ||
-        !result.Output.Contains("is false") || result.Output.Contains("FeatureFlowValid"))
-        throw new InvalidOperationException($"Forged {helper} was accepted for {name}\n{result.Output}");
-    Console.WriteLine($"PASS {name}: forged {helper} rejected by the call binding");
-}
 
 foreach (var (name, selector) in new[] { ("Read", "NullReferences::Read()"), ("IsLive", "NullReferences::IsLive(ulong&)") })
 foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "arity", "parameter", "return", "instance", "scope", "version" })

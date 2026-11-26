@@ -36,7 +36,7 @@ def loops (method : Expr) : MetaM (Array (Nat × Nat)) := do
   repeat
     match (← whnf cell).getAppFnArgs with
     | (``List.cons, #[_, op, tail]) =>
-      for target in ← nats (mkApp (mkConst ``CIL.Op.targets) op) do
+      for target in ← nats (mkApp (mkConst ``CIL.Instruction.targets) op) do
         if target ≤ pc then latches := latches.insert target pc
       cell := tail
       pc := pc + 1
@@ -69,7 +69,8 @@ elab_rules : command
       ⟨rfl, by decide⟩))
 
 /-- `bind_call site := callee from parent` names the only call from `parent` to the bound
-method `callee`, and `[k]` the `k`-th in pc order; `site.call` states its instruction. -/
+method `callee`, and `[k]` the `k`-th in pc order; `site.call` states its instruction and
+`site.link` its link. -/
 syntax (name := bindCall)
   (docComment)? "bind_call " ident " := " term:max " from " term:max (" [" num "]")? : command
 
@@ -83,8 +84,7 @@ elab_rules : command
       callSite parent method (table[method]?.getD s!"method {method}") (occurrence.map (·.getNat))
     elabCommand (← `(@[cil_code] def $label : Nat := $(quote site.pc)))
     CIL.MethodIdentity.documentBinding doc label
-    let instruction ← liftMacroM (site.instruction callee)
-    elabAtPc site.pc (← `(@[cil_code] theorem $(mkIdent (label.getId ++ `call)) :
-      ($parent).code[$label]? = some $instruction := rfl))
+    CIL.MethodIdentity.emitCallFact (mkIdent (label.getId ++ `call)) parent site
+    CIL.MethodIdentity.emitLink (mkIdent (label.getId ++ `link)) parent site.pc callee
 
 end CIL.StructuralLabels

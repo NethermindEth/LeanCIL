@@ -1,3 +1,4 @@
+using static Nethermind.LeanCIL.LeanText;
 using Mono.Cecil;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -24,6 +25,9 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
 {
     internal static FeatureProfile Scalar { get; } = new("scalar", "scalar", 64, true);
 
+    // .NET 11 x64 refuses to start without SSE through SSE4.2 and reports them all under X86Base.
+    private static readonly Feature[] X86Baseline = [Feature.Sse2, Feature.Ssse3, Feature.Sse41, Feature.Sse42];
+
     internal bool Get(Feature feature) => feature switch
     {
         Feature.AdvSimd => AdvSimd, Feature.Sse2 => Sse2, Feature.Ssse3 => Ssse3,
@@ -39,6 +43,10 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
 
     internal void Validate()
     {
+        var missingBaseline = X86Base64 ? X86Baseline.Where(feature => !Get(feature)).ToArray() : [];
+        if (missingBaseline.Length != 0)
+            throw new InvalidDataException($"Invalid execution profile: {Name}: below the .NET 11 x64 baseline " +
+                $"(x86-64-v2); missing {string.Join(", ", missingBaseline)}");
         if (string.IsNullOrWhiteSpace(Name) || NativeWidth != 64 || !LittleEndian || Architecture is not ("scalar" or "arm64" or "x64") ||
             ((AdvSimd || ArmBase64) && Architecture != "arm64") ||
             (X86Base64 && Architecture != "x64") ||
@@ -57,7 +65,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         if ((Sse2 || Ssse3 || Sse42 || Avx || Avx2 || Avx512F || Avx512FVL || Bmi1 || Sse41 || Avx512DQ || Avx512DQVL ||
                 Bmi2 || Avx512Vbmi || Aes) && !X86Base64)
             throw new InvalidDataException($"Invalid execution profile: {Name}: x86 ISA flags require x86Base64");
-        if (Sse2 != X86Base64 || Ssse3 != Sse41 || Sse41 != Sse42 ||
+        if (Sse2 != X86Base64 ||
             Avx2 != Bmi1 || Avx2 != Bmi2 ||
             Avx512F != Avx512FVL || Avx512F != Avx512DQ || Avx512F != Avx512DQVL ||
             AdvSimd != ArmBase64 || Vector128Accelerated != (Sse2 || AdvSimd) ||
@@ -89,7 +97,6 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         {
             "scalar" => Scalar,
             "arm64-advsimd" => new(name, "arm64", 64, true, AdvSimd: true, ArmBase64: true, Vector128Accelerated: true),
-            "x64-sse2" => new(name, "x64", 64, true, Sse2: true, X86Base64: true, Vector128Accelerated: true),
             "x64-sse42" => new(name, "x64", 64, true, Sse2: true, Ssse3: true, Sse41: true, Sse42: true, X86Base64: true, Vector128Accelerated: true),
             // .NET 10 enables x86-64-v3 (AVX2 with BMI1/BMI2) and v4 (AVX-512 F/DQ/VL) only as whole groups.
             // x86-64-v4 excludes VBMI, so x64-v4 covers only deployments where Avx512Vbmi is unsupported.
@@ -124,8 +131,6 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
     internal static string LeanFeature(Feature feature) =>
         "." + char.ToLowerInvariant(feature.ToString()[0]) + feature.ToString()[1..];
 
-    private static string Bool(bool value) => value ? "true" : "false";
-
     internal static int? PlatformConstant(MethodReference reference)
     {
         var pointerSize = reference.Name == "get_Size" &&
@@ -134,7 +139,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             reference.DeclaringType.FullName == "System.Environment";
         if (!pointerSize && !processWidth) return null;
         var result = pointerSize ? "System.Int32" : "System.Boolean";
-        if (!RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
+        if (!RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             reference.HasThis || reference.ExplicitThis || reference.CallingConvention != MethodCallingConvention.Default ||
             reference.HasGenericParameters || reference is GenericInstanceMethod || reference.Parameters.Count != 0 ||
             reference.FullName != $"{result} {reference.DeclaringType.FullName}::{reference.Name}()")
@@ -143,9 +148,14 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         return pointerSize ? 8 : 1;
     }
 
+    private static readonly TypeLevel BitConverterOwner =
+        new(MetadataName.OfText("System"), MetadataName.OfText("BitConverter"));
+    private static readonly MetadataName EndianName = MetadataName.OfText("IsLittleEndian");
+
     /// <summary>Whether a field load is named <c>BitConverter.IsLittleEndian</c>, before identity checks.</summary>
     internal static bool PlatformFieldQuery(FieldReference reference) =>
-        reference.Name == "IsLittleEndian" && reference.DeclaringType.FullName == "System.BitConverter";
+        reference.Name == "IsLittleEndian" && reference.DeclaringType is
+            { Namespace: "System", Name: "BitConverter", DeclaringType: null };
 
     /// <summary>
     /// The value of the exact System.Runtime <c>BitConverter.IsLittleEndian</c> field;
@@ -154,13 +164,16 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
     internal static int? PlatformField(FieldReference reference)
     {
         if (!PlatformFieldQuery(reference)) return null;
-        const string identity = "System.Boolean System.BitConverter::IsLittleEndian";
         var exactReference = reference.DeclaringType is not TypeSpecification &&
-            RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") &&
-            RuntimeModels.ExactScope(reference.FieldType.Scope, "System.Runtime") && reference.FullName == identity;
+            IdentityRows.TopLevelMatches(reference.DeclaringType, BitConverterOwner,
+                PlatformAssemblies.SystemRuntime) &&
+            MetadataName.OfText(reference.Name) == EndianName &&
+            reference.FieldType.MetadataType == MetadataType.Boolean &&
+            RuntimeModels.ExactScope(reference.FieldType, PlatformAssemblies.SystemRuntime);
         // Resolve only exact references: a forged assembly scope must not reach the resolver.
         var field = exactReference ? reference.Resolve() : null;
-        if (field is null || field.FullName != identity ||
+        if (field is null || MetadataName.OfText(field.Name) != EndianName ||
+            field.FieldType.MetadataType != MetadataType.Boolean ||
             !field.IsStatic || !field.IsInitOnly || !field.IsPublic || field.HasConstant ||
             (field.Attributes & FieldAttributes.HasFieldRVA) != 0)
             throw new InvalidDataException($"Unsupported static field load: {reference.FullName} " +
@@ -174,7 +187,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         if (reference.Name is not ("get_IsSupported" or "get_IsHardwareAccelerated") ||
             !reference.DeclaringType.FullName.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal)) return null;
         // Never reinterpret an unrecognised getter as a disabled capability.
-        if (!RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime.Intrinsics") ||
+        if (!RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntimeIntrinsics) ||
             reference.HasThis || reference.ExplicitThis || reference.CallingConvention != MethodCallingConvention.Default ||
             reference.HasGenericParameters || reference.Parameters.Count != 0 ||
             reference.ReturnType.FullName != "System.Boolean" ||

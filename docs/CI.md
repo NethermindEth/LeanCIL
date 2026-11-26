@@ -9,7 +9,7 @@ the workflow, the selection scripts or a documentation marker.
 
 ## Jobs
 
-All jobs run on `ubuntu-24.04`. A newer run on the same ref cancels the one in progress. Uploaded
+All jobs run on `ubuntu-26.04`. A newer run on the same ref cancels the one in progress. Uploaded
 artifacts are kept for 14 days.
 
 | Job | Name | Limit | Does |
@@ -66,8 +66,9 @@ concurrent jobs.
   measured time runs alone.
 - `dotnet run --file scripts/EstimateVerificationSchedule.cs -- --jobs` prints the jobs of a full
   run with their estimated minutes.
-- A job's time limit is the largest of its members': 90 minutes for `imports`, 120 for each
-  `exports` partition and 30 for any other suite.
+- A job's time limit is the largest of its members' (90 minutes for `imports`, 120 for each
+  `exports` partition and 30 for any other suite) and at least twice the job's measured time,
+  rounded up to ten minutes.
 - A job is named for its suites, or for its longest suite and the number of others when it runs
   more than three, so job names change when the durations do. Only `Build and verify` is a stable
   check name.
@@ -86,9 +87,9 @@ narrows a local run to the named cases of that group. `loops`, `structoutlines`,
 
 ## Certified library
 
-The `prepare` job provides one kernel-replayed `CIL` library per workflow attempt and passes its
-artifact ID, the run that uploaded it, its archive digest and its manifest digest to the suite jobs
-as job outputs. A rerun of failed suite jobs keeps the producer's artifact ID.
+The `prepare` job provides one kernel-replayed library of `CIL` and `StrictBinding` per workflow
+attempt and passes its artifact ID, the run that uploaded it, its archive digest and its manifest
+digest to the suite jobs as job outputs. A rerun of failed suite jobs keeps the producer's artifact ID.
 
 ### Donors
 
@@ -146,10 +147,11 @@ modules came from those sources.
 
 ### Identity
 
-A library's identity covers the toolchain, `CIL.lean`, `CIL/`, `lake-manifest.json` and the library
-view of `lakefile.toml`, which is the file the library is built from: the checkout lakefile without
-blank lines, comments and plain `[[lean_lib]]` tables naming a library outside CIL. Package
-settings, dependencies, the `CIL` library, the `leancil-audit` executable and any library with
+A library's identity covers the toolchain, `CIL.lean`, `CIL/`, `StrictBinding.lean`, `StrictBinding/`,
+`lake-manifest.json` and the library view of `lakefile.toml`, which is the file the library is built
+from: the checkout lakefile without blank lines, comments and plain `[[lean_lib]]` tables naming a
+library other than `CIL` and `StrictBinding`. Package settings, dependencies, those two libraries,
+the `leancil-audit` executable and any library with
 further keys stay in the library view. Adding or removing a test library therefore keeps both the
 identity and incremental donors; checkout inputs, such as session cache keys, hash the complete
 lakefile. `Tests/LibraryConfiguration.cs` checks both directions.
@@ -239,7 +241,8 @@ A source is measured on each tree by the run that verifies it:
   reported as unmeasured. Each extracted method's instruction equations are one row, named for
   its `cil_instruction_equations` command. A directory is measured only while it holds the report
   of an accepted proof, so a suite that also checks rejected proofs against an extraction verifies
-  the accepted one last.
+  the accepted one last. A report that is not a certificate a default `verify` accepts, by its
+  schema and binding section, leaves its directory unmeasured.
 
 ### Row measurement
 
@@ -350,7 +353,9 @@ Selection runs `dotnet run --file scripts/CheckDocReferences.cs`, which needs no
   functions: `step`, `run`, `invoke`, `pureArity`, `scalars`, `instructionStep`,
   `staticInstruction`, `checkedIntrinsic`, `checkedValue`, `numericValue`, `checkedAt`,
   `formValue`, `storeValue`, `instruction`, `memoryInstruction`, `otherMemoryInstruction`,
-  `observerCount`, `unspecifiedOperands` or `hasUnspecified`, or the monad plumbing
+  `observerCount`, `unspecifiedOperands`, `hasUnspecified`, the runtime model runner `runModel`
+  and its helpers `observedCall`, `intrinsicCall`, `featureCall`, `referenceCompareCall`,
+  `referenceSubtractCall`, `typedTransferCall` and `skipInitCall`, or the monad plumbing
   `Except.mapError`, `Bind.bind`, `Except.bind`, `Pure.pure` or `Except.pure`, by any suffix of its
   full name. Such a proof runs the method by unfolding the interpreter; step with
   `cil_checked_steps` and pass a fact about the operation instead. A name the block binds with
@@ -362,6 +367,15 @@ Selection runs `dotnet run --file scripts/CheckDocReferences.cs`, which needs no
   [public proof surface](PROOFS.md#public-proof-surface).
 - A document declares at most one audience, `users` or `maintainers`, and closes every code
   fence. A Lean block's info string starts with exactly `lean`; another spelling of it fails.
+- No file that git tracks with the extension `.lean`, `.cs`, `.md`, `.toml`, `.json`, `.yml`,
+  `.txt`, `.tsv` or `.csv` holds a byte below 0x20 other than tab, line feed and carriage return;
+  the failure names the file, line and byte. A shell that expands a backtick escape writes such a
+  byte into a docstring, and git then treats the file as binary.
+- No such file holds a character above ASCII that shows nothing, shows as a space or reorders the
+  text around it: a format character such as a zero-width space, a byte order mark or a
+  bidirectional override, a line or paragraph separator, a space other than U+0020, or a control
+  character. The failure names the file, line and code point. A diff does not show such a
+  character, so source spells it as an escape such as `\u200B`.
 
 ### Lean blocks
 

@@ -105,13 +105,11 @@ theorem smaller_footprint_not_refines : ¬ addInternal.Refines addUnframed := fu
   exact nomatch member
 
 /-- No proof of the empty footprint exists for the actual extraction. -/
-theorem smaller_footprint_rejected : ¬ addUnframed.Holds Extracted.program 0 := fun holds => by
-  obtain ⟨_, ⟨final, values⟩, invoked, framed, -⟩ := holds sampleInput sample sample_pre
-  obtain ⟨_, ⟨otherFinal, otherValues⟩, otherInvoked, -, _, rfl, -, readback⟩ :=
+theorem smaller_footprint_rejected : addUnframed.Refuted Extracted.program 0 := by
+  obtain ⟨_, ⟨final, values⟩, invoked, -, _, rfl, -, readback⟩ :=
     add_internal sampleInput sample sample_pre
-  have same := congrArg Prod.fst (invoke_ok_unique invoked otherInvoked)
-  dsimp only at same
-  subst same
+  refine .of_return (input := sampleInput) (initial := sample) sample_pre invoked ?_
+  rintro ⟨framed, -⟩
   have kept := framed.read_eq sampleInput.sum (by decide) 8 1 fun _ _ => Outside.nil _ _
   have zero : read sample sampleInput.sum 8 1 = .ok (numberBytes 0 8) := rfl
   rw [readback, zero] at kept

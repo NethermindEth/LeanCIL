@@ -2,8 +2,14 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../Extractor/StaticIdentity.cs
 #:include ImportReviewRegressions.cs
+#:include PinnedMetadata.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -27,10 +33,14 @@ string package = Path.Combine(root, "Package");
 string caller = Path.Combine(root, "Caller");
 foreach (string path in new[] { libRoot, appRoot, package, caller }) Directory.CreateDirectory(path);
 File.WriteAllText(Path.Combine(libRoot, "Lib.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>StaticFixture.Lib</AssemblyName><AssemblyVersion>1.0.0.0</AssemblyVersion><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AssemblyName>StaticFixture.Lib</AssemblyName><AssemblyVersion>1.0.0.0</AssemblyVersion><Optimize>true</Optimize>
+</PropertyGroup></Project>
 """);
 File.WriteAllText(Path.Combine(appRoot, "App.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>StaticFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AssemblyName>StaticFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup>
+<ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
 """);
 File.WriteAllText(Path.Combine(libRoot, "Library.cs"), """
 namespace StaticFixture;
@@ -122,14 +132,19 @@ void CreatePackage(string path, string name, params string[] modules)
 }
 CreatePackage(package, "staticproducer", "PublishedTable", "LibraryProof");
 CreatePackage(caller, "staticconsumer", "CallerProof");
+// The published descriptor names the field as the library extraction's static site does.
+string extractedLibrary = File.ReadAllText(Path.Combine(libArtifact, "Extracted.lean"));
+int fieldStart = extractedLibrary.IndexOf("field := {", StringComparison.Ordinal) + "field := ".Length;
+if (fieldStart < "field := ".Length)
+    throw new InvalidOperationException("The library extraction names no static field.");
+string libField = extractedLibrary[fieldStart..(extractedLibrary.IndexOf('}', fieldStart) + 1)];
 string contract = Path.Combine(package, "PublishedTable.lean");
 File.WriteAllText(contract, $$"""
 import CIL.Safety.MethodContract
 namespace PublishedTable
 open CIL.Safety
 def table : CIL.StaticDescriptor :=
-  { identity := {{libKey}}, assemblyIdentity := {{JsonSerializer.Serialize(libStatic["assemblyIdentity"]!.GetValue<string>())}},
-    fieldName := {{JsonSerializer.Serialize(libStatic["fieldName"]!.GetValue<string>())}},
+  { identity := {{libKey}}, field := {{libField}},
     bytes := [17#8, 0#8, 0#8, 0#8, 0#8, 0#8, 0#8, 0#8] }
 def read : MethodContract Unit CIL.W64 where
   args _ := []
@@ -163,30 +178,31 @@ theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
     change read result reference 8 1 = .ok descriptor.bytes at actual
     simpa only [contents] using actual
   have load := load_word64_of_read loaded
-  have addressed : staticInstruction Extracted.method0 0 (.staticAddress descriptor.bytes) [] memory =
-      .ok (result, [.reference (.address reference)]) := by
+  have addressed : staticAddress Extracted.method0 0 memory =
+      .ok (result, .reference (.address reference)) := by
     change (do
       let (updated, address) ← staticReference descriptor memory
-      pure (updated, [CIL.Safety.Value.reference (.address address)]) :
-      ExecutionResult (CIL.Safety.Memory × List CIL.Safety.Value)) = _
+      pure (updated, CIL.Safety.Value.reference (.address address)) :
+      ExecutionResult (CIL.Safety.Memory × CIL.Safety.Value)) = _
     rw [resolved]
     rfl
   let frame : Frame := { activation := memory.nextIdentity, locals := [], owned := [] }
-  have first : step Extracted.method0 (.memory (.staticAddress descriptor.bytes)) 0 [] frame [] memory =
+  have first : ∀ field, step Extracted.method0 (.ldsflda field) 0 [] frame [] memory =
       .ok (.next 1 [.reference (.address reference)] frame result) := by
-    rw [step_memory_eq, addressed]
-    rfl
-  have second : step Extracted.method0 .load64 1 [] frame [.reference (.address reference)] result =
+    intro field
+    rw [step_ldsflda_eq, addressed]
+  have second : step Extracted.method0 (.ldind .i8) 1 [] frame [.reference (.address reference)] result =
       .ok (.next 2 [.scalar (.i64 17)] frame result) := by
-    rw [step_load64_eq]
-    simp only [instructionStep, instruction, load, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    rw [step_ldind_eq]
+    simp only [instructionStep, instruction, CIL.NumericKind.width, CIL.NumericKind.signed, load,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
     rfl
   have returned : step Extracted.method0 .ret 2 [] frame [.scalar (.i64 17)] result =
       .ok (.returned [.scalar (.i64 17)] result) := rfl
   have preserved := staticReference_preserves_static_world _ _ _ _ _ formed world (by simp) resolved
   rw [same] at preserved
   apply WP.enter (body := Extracted.method0) (by rfl) (by rfl) (by rfl)
-  apply WP.step (by rfl) (by rfl) first
+  apply WP.step (by rfl) (by rfl) (first _)
   apply WP.step (by rfl) (by rfl) second
   apply WP.returned (by rfl) (by rfl) returned (by rfl)
   exact ⟨Confined.ofMemoryBelow (staticReference_preserves_memory_below _ _ _ _ resolved)
@@ -233,7 +249,7 @@ open CIL.Safety
 theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (fun linked => PublishedTable.read.Holds linked 0) := by
   intro linked links imported input memory permitted
-  have found : linked[0]? = some Extracted.method0 := links.found Extracted.lookup0
+  have found : linked[0]? = some Extracted.method0 := links.found Extracted.program_method0
   have holds : PublishedTable.read.Holds linked 1 := imported
   apply WP.enter found (by rfl) (by rfl)
   apply WP.call found (by rfl) (by cil_checked_step []) (holds input memory permitted)
@@ -251,7 +267,7 @@ var bundle = Path.GetFullPath(published["fullVerificationLocator"]!.GetValue<str
 var originalLib = File.ReadAllBytes(lib);
 string[] FullCommand(string artifact, string callerSource, bool package) => [.. cli, "verify", artifact,
     "--proof", callerSource, .. package ? new[] { "--proof-root", caller } : [], "--force-full-verify"];
-void FullVerify(string artifact, string callerSource, bool package, int slots)
+string[] FullVerify(string artifact, string callerSource, bool package, int slots)
 {
     var trace = Path.Combine(root, "trace-" + Guid.NewGuid().ToString("N"));
     string? previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
@@ -287,6 +303,7 @@ void FullVerify(string artifact, string callerSource, bool package, int slots)
         !verified.GetProperty("compositionAudit").GetString()!.Contains("linkChecked", StringComparison.Ordinal))
         throw new InvalidOperationException(
             "Full verification did not publish the checked static composition: " + verified);
+    return stages;
 }
 // Each rejection names the one check expected to fire first.
 void RejectFull(string artifact, string marker)
@@ -337,8 +354,24 @@ if (fullComposition)
         FullTransitiveStatic();
         return;
     }
-    FullVerify(appArtifact, callerProof, package: true, slots: 1);
-    Console.WriteLine("PASS the separate caller returns the RVA-table value under full verification");
+    // A private library cache meets the first forced run empty, which builds the caller's library, and the
+    // last one holding it; that run opens the hash-checked entry and must trace the open like any other.
+    static bool Flag(string name) =>
+        string.Equals(Environment.GetEnvironmentVariable(name), "true", StringComparison.OrdinalIgnoreCase);
+    var cacheReachable = string.IsNullOrEmpty(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")) &&
+        !Flag("CI") && !Flag("GITHUB_ACTIONS");
+    var libraryCache = Path.Combine(root, "library-cache");
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", libraryCache);
+    bool CacheHoldsEntry() => Directory.Exists(libraryCache) && Directory.EnumerateDirectories(libraryCache)
+        .Any(entry => File.Exists(Path.Combine(entry, "cache-receipt.hmac")));
+    if (!cacheReachable)
+        Console.WriteLine("NOTE a supplied certified library or CI keeps the local library cache unread, so the " +
+            "cold and warm cache runs below both open the supplied library");
+    const string openStage = "Opening certified Lean verification library";
+    if (FullVerify(appArtifact, callerProof, package: true, slots: 1).Contains(openStage) && cacheReachable)
+        throw new InvalidOperationException("Precondition: the first forced run met a warm library cache.");
+    Console.WriteLine("PASS the separate caller returns the RVA-table value under full verification with a cold " +
+        "library cache");
 
     // A cooperating publisher's bundle whose extraction record drops the table fails before any build.
     try
@@ -412,9 +445,12 @@ if (fullComposition)
         stages.Any(stage => stage.StartsWith("Checking Proof:", StringComparison.Ordinal));
     if (!ChecksProof(OrdinaryStages("trace-cold")) || ChecksProof(OrdinaryStages("trace-warm")))
         throw new InvalidOperationException("Precondition: the repeated ordinary verification restored no receipt.");
-    FullVerify(mixedArtifact, mixedProof, package: false, slots: 2);
+    if (cacheReachable && !CacheHoldsEntry())
+        throw new InvalidOperationException("Precondition: the ordinary verification cached no certified library.");
+    if (!FullVerify(mixedArtifact, mixedProof, package: false, slots: 2).Contains(openStage) && cacheReachable)
+        throw new InvalidOperationException("The forced run with a warm library cache did not open its entry.");
     Console.WriteLine("PASS distinct same-index app and library tables and one shared table across two " +
-        "imported slots, with a warm receipt present");
+        "imported slots, with a warm receipt and a warm library cache present");
     FullTransitiveStatic();
     return;
 }
@@ -445,7 +481,9 @@ void FullTransitiveStatic()
     var topRoot = Path.Combine(root, "Top");
     Directory.CreateDirectory(topRoot);
     File.WriteAllText(Path.Combine(topRoot, "Top.csproj"), """
-        <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>StaticFixture.Top</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include="../App/App.csproj" /></ItemGroup></Project>
+        <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+        <AssemblyName>StaticFixture.Top</AssemblyName><Optimize>true</Optimize></PropertyGroup>
+        <ItemGroup><ProjectReference Include="../App/App.csproj" /></ItemGroup></Project>
         """);
     File.WriteAllText(Path.Combine(topRoot, "Top.cs"),
         "namespace StaticFixture; public static class Top { public static ulong Entry() => Application.Entry(); }");

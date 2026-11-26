@@ -17,14 +17,135 @@ srcDir = ".lake/leancil"
 roots = ["Extracted", "ExtractedSymbols"]
 defaultFacets = []
 
+# Opt-in binding audit; no CIL module imports it.
+[[lean_lib]]
+name = "StrictBinding"
+
 [[lean_lib]]
 name = "Tests.Support"
+
+[[lean_lib]]
+name = "Tests.ReplayDiagnostics"
 
 [[lean_lib]]
 name = "Tests.Semantics"
 
 [[lean_lib]]
+name = "Tests.MixedNativeOpcodes"
+
+[[lean_lib]]
+name = "Tests.BodyEncoding"
+
+[[lean_lib]]
+name = "Tests.BodyDecoding"
+
+[[lean_lib]]
+name = "Tests.CoreStringLength"
+
+[[lean_lib]]
+name = "Tests.CoreExceptionHResult"
+
+[[lean_lib]]
+name = "Tests.CoreMonitor"
+
+[[lean_lib]]
+name = "Tests.CoreHeaderPointer"
+
+[[lean_lib]]
+name = "Tests.BodyLiteral"
+
+[[lean_lib]]
+name = "Tests.KernelEquation"
+
+[[lean_lib]]
+name = "Tests.MetadataBuilder"
+
+[[lean_lib]]
+name = "Tests.MetadataDecoding"
+
+[[lean_lib]]
+name = "Tests.MetadataWorld"
+
+[[lean_lib]]
+name = "Tests.MetadataBinding"
+
+[[lean_lib]]
+name = "Tests.ImportedFieldIndex"
+
+[[lean_lib]]
+name = "Tests.OpaqueClassFields"
+
+[[lean_lib]]
+name = "Tests.StaticFieldSites"
+
+[[lean_lib]]
+name = "Tests.GenericOwnerScaling"
+
+[[lean_lib]]
 name = "Tests.LiteralDisplay"
+
+[[lean_lib]]
+name = "Tests.Identity"
+
+[[lean_lib]]
+name = "Tests.ResolutionFacts"
+
+[[lean_lib]]
+name = "Tests.SpanHomes"
+
+[[lean_lib]]
+name = "Tests.ValueDecoding"
+
+[[lean_lib]]
+name = "Tests.DecodedMethod"
+
+[[lean_lib]]
+name = "Tests.DecodedSummary"
+
+[[lean_lib]]
+name = "Tests.DecodedSegment"
+
+[[lean_lib]]
+name = "Tests.LoopSummary"
+
+[[lean_lib]]
+name = "Tests.FieldRef"
+
+[[lean_lib]]
+name = "Tests.FieldShape"
+
+[[lean_lib]]
+name = "Tests.RuntimeModels"
+
+[[lean_lib]]
+name = "Tests.CallDecoding"
+
+[[lean_lib]]
+name = "Tests.BitModels"
+
+[[lean_lib]]
+name = "Tests.UnsafeModels"
+
+[[lean_lib]]
+name = "Tests.UnsafeTransferModels"
+
+[[lean_lib]]
+name = "Tests.UnsafeReinterpretations"
+
+[[lean_lib]]
+name = "Tests.UnsafeOffsets"
+
+[[lean_lib]]
+name = "Tests.UnsafeBlocks"
+
+[[lean_lib]]
+name = "Tests.ReturnOpcode"
+
+[[lean_lib]]
+name = "Tests.ReturnMetadataBinding"
+
+[[lean_lib]]
+name = "Tests.PlatformDefinitions"
 
 [[lean_lib]]
 name = "Tests.Automation"
@@ -177,7 +298,16 @@ name = "Tests.TypeTestEvidence"
 name = "Tests.ThrowEvidence"
 
 [[lean_lib]]
+name = "Tests.PercentRuntime"
+
+[[lean_lib]]
 name = "Tests.SpanEvidence"
+
+[[lean_lib]]
+name = "Tests.SpanModels"
+
+[[lean_lib]]
+name = "Tests.MarshalModels"
 
 [[lean_lib]]
 name = "Tests.ConstrainedEvidence"
@@ -217,6 +347,18 @@ name = "Tests.ContractClosure"
 
 [[lean_lib]]
 name = "Tests.ExactIntrinsics"
+
+[[lean_lib]]
+name = "Tests.ShuffleContract"
+
+[[lean_lib]]
+name = "Tests.HalfSwapContract"
+
+[[lean_lib]]
+name = "Tests.AesRoundContract"
+
+[[lean_lib]]
+name = "Tests.SignWindowContract"
 
 [[lean_lib]]
 name = "Tests.ScalarEvidence"
@@ -287,6 +429,9 @@ name = "Tests.FeatureGetter"
 name = "Tests.Segment"
 
 [[lean_lib]]
+name = "Tests.SegmentContract"
+
+[[lean_lib]]
 name = "Tests.AllocationRenaming"
 
 [[lean_lib]]
@@ -320,7 +465,22 @@ name = "Tests.WeakestPrecondition"
 name = "Tests.LocalCalls"
 
 [[lean_lib]]
+name = "Tests.WordFields"
+
+[[lean_lib]]
 name = "Tests.CallingFields"
 
 [[lean_lib]]
 name = "Tests.PublicProofSurface"
+
+[[lean_lib]]
+name = "Tests.StrictBinding"
+
+[[lean_lib]]
+name = "Tests.Crypto"
+
+[[lean_lib]]
+name = "Tests.MetadataAssemblies"
+
+[[lean_lib]]
+name = "Tests.PinnedIndexScaling"

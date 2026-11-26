@@ -53,7 +53,8 @@ internal static class ObjectTypes
             throw new InvalidDataException(Unsupported + type.FullName +
                 "\n  A finalizer runs outside the extracted call graph.");
         var parent = definition.BaseType ?? throw new InvalidDataException(Unsupported + type.FullName);
-        if (parent.FullName == "System.Object" && RuntimeModels.ExactScope(parent.Scope, "System.Runtime"))
+        if (parent.FullName == "System.Object" &&
+            RuntimeModels.ExactScope(parent, PlatformAssemblies.SystemRuntime))
             return definition;
         if (!Candidate(parent))
             throw new InvalidDataException(Unsupported + type.FullName +
@@ -71,6 +72,7 @@ internal static class ObjectTypes
     /// <summary>The admitted base classes of an admitted class, nearest first, excluding System.Object.</summary>
     internal static TypeReference[] Bases(TypeReference type)
     {
+        if (IsStringDefinition(type)) return [];
         var bases = new List<TypeReference>();
         for (var parent = Validate(type).BaseType; parent is not null && parent.FullName != "System.Object";
             parent = Validate(parent).BaseType)
@@ -98,18 +100,28 @@ internal static class ObjectTypes
     }
 
     /// <summary>
-    /// The exact <c>System.String</c> of <c>System.Runtime</c>: a value of it is an object reference the model can
-    /// pass, store, compare and test for null, never read through, since no admitted operation reads characters.
+    /// The string class referenced through System.Runtime or defined in its pinned CoreLib image.
     /// </summary>
     internal static bool IsString(TypeReference type) =>
         type is not TypeSpecification && type.FullName == "System.String" &&
-        RuntimeModels.ExactScope(type.Scope, "System.Runtime");
+        (RuntimeModels.ExactScope(type, PlatformAssemblies.SystemRuntime) || IsStringDefinition(type));
+
+    // The metadata receiver for CoreLib string methods has no base slots before its own fields.
+    internal static bool IsStringDefinition(TypeReference type) =>
+        type is TypeDefinition { FullName: "System.String", BaseType: TypeDefinition parent } &&
+        parent.Module == type.Module && IsObjectDefinition(parent);
+
+    // The ECMA object element type resolves to this root TypeDef inside CoreLib itself.
+    static bool IsObjectDefinition(TypeReference type) =>
+        type is TypeDefinition { FullName: "System.Object", BaseType: null } &&
+        PinnedAssemblies.Active is { } pins &&
+        AssemblyName.OfScope(type, pins.IdentityMetadata(type.Module)) == PlatformAssemblies.CoreLibrary;
 
     /// <summary>
     /// A type whose values are object references on the stack and in argument and local roots: an admitted class,
-    /// or <c>string</c>, which is opaque.
+    /// the CoreLib root object, or <c>string</c>.
     /// </summary>
-    internal static bool Reference(TypeReference type) => Is(type) || IsString(type);
+    internal static bool Reference(TypeReference type) => Is(type) || IsString(type) || IsObjectDefinition(type);
 
     /// <summary>
     /// A candidate class or <c>string</c>: its values live in roots without byte storage, so neither an argument,
@@ -133,8 +145,8 @@ internal static class ObjectTypes
     /// value-array field holds the origin of a whole array of its element type there, a struct element taking its
     /// width from the layout for <paramref name="architecture"/>.
     /// </summary>
-    internal static string FieldOperation(FieldReference field, FieldDefinition resolved, bool store, bool address,
-        string architecture)
+    internal static ClassViews.FieldOperation FieldOperation(FieldReference field, FieldDefinition resolved,
+        bool store, bool address, string architecture)
     {
         var owner = field.DeclaringType;
         Validate(owner);
@@ -151,12 +163,11 @@ internal static class ObjectTypes
                 " is another array, a generic parameter or a modified type.");
         var offset = FieldSlot * FieldIndex(owner, resolved);
         if (valueArray is not null)
-            return store
-                ? $".memory (.setArrayField ({GenericEvidence.ObjectType(owner)}) {offset} {valueArray.Expression})"
-                : $".memory (.arrayField ({GenericEvidence.ObjectType(owner)}) {offset} {valueArray.Expression})";
+            return new(store, GenericEvidence.ObjectType(owner), offset, ClassViews.FieldKind.Array,
+                null, false, valueArray);
         if (holdsReference)
-            return store ? $".memory (.setObjectReferenceField ({GenericEvidence.ObjectType(owner)}) {offset})"
-                : $".memory (.objectReferenceField ({GenericEvidence.ObjectType(owner)}) {offset})";
+            return new(store, GenericEvidence.ObjectType(owner), offset,
+                ClassViews.FieldKind.Reference, null, false, null);
         int width;
         try { width = MetadataValidation.PrimitiveWidth(type); }
         catch (InvalidDataException)
@@ -165,29 +176,25 @@ internal static class ObjectTypes
                 "\n  Only integer, Boolean, Char and enum fields of class instances are modelled.");
         }
         var signed = EnumTypes.Storage(type).FullName is "System.SByte" or "System.Int16";
-        return store ? $".memory (.setObjectField ({GenericEvidence.ObjectType(owner)}) {offset} {width})"
-            : $".memory (.objectField ({GenericEvidence.ObjectType(owner)}) {offset} {width} " +
-                $"{signed.ToString().ToLowerInvariant()})";
+        return new(store, GenericEvidence.ObjectType(owner), offset, ClassViews.FieldKind.Word, width,
+            !store && signed, null);
     }
 
     /// <summary>The emitted list of an admitted class's base classes, nearest first.</summary>
     internal static string BaseList(TypeReference type) =>
-        "[" + string.Join(", ", Bases(type).Select(parent => $"({GenericEvidence.ObjectType(parent)})")) + "]";
+        LeanText.ClassList(Bases(type).Select(GenericEvidence.ObjectType));
 
     /// <summary>
-    /// The checked operation for <c>newobj</c> of an admitted class: a fresh instance of its runtime type, with
-    /// one 8-byte slot per instance field including its bases', passed to <paramref name="constructor"/> at
-    /// method index <paramref name="index"/>. An abstract class has no instances of its own.
+    /// A concrete class allocation includes its base classes and one slot per inherited or declared instance field.
     /// </summary>
-    internal static string Construction(MethodDefinition constructor, int index)
+    internal static (string[] Bases, int Size) AllocationOf(MethodDefinition constructor)
     {
         var owner = Validate(constructor.DeclaringType);
         if (owner.IsAbstract)
             throw new InvalidDataException("Unsupported construction of an abstract class: " + owner.FullName +
                 "\n  newobj of an abstract class fails at run time; only its derived classes have instances.");
         var size = FieldSlot * Fields(owner).Length;
-        return $".newObject {index} {constructor.Parameters.Count} ({GenericEvidence.ObjectType(owner)}) " +
-            $"{BaseList(owner)} {size}";
+        return ([.. Bases(owner).Select(GenericEvidence.ObjectType)], size);
     }
 
     /// <summary>
@@ -203,7 +210,7 @@ internal static class ObjectTypes
     /// class. An instance records only its own and its admitted base classes, so a test against an interface or
     /// System.Object is rejected, naming why.
     /// </summary>
-    internal static string Test(Instruction instruction)
+    internal static void ValidateTestOperand(Instruction instruction)
     {
         var target = (TypeReference)instruction.Operand;
         var site = $"Unsupported type test: {instruction.OpCode.Name} {target.FullName}\n  ";
@@ -222,10 +229,8 @@ internal static class ObjectTypes
             throw new InvalidDataException(
                 site + error.Message.Replace("\n", "\n  ", StringComparison.Ordinal), error);
         }
-        var throwing = instruction.OpCode.Code == Code.Castclass ? "true" : "false";
-        return $".objectTest ({GenericEvidence.ObjectType(target)}) {throwing}";
     }
 
     // Matches `CIL.objectFieldSlot`, which Lean uses to recheck every emitted offset.
-    const int FieldSlot = 8;
+    internal const int FieldSlot = 8;
 }

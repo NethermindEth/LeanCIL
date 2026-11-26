@@ -7,9 +7,9 @@ import CIL.Safety.ReferenceArrayElements
 # An array of class references the method creates
 
 `NodeArrays.Pair(first, second)` allocates a `Node[2]`, stores both nodes and reads element 1
-back. The array is a class instance charged to the caller's heap budget: with budget for its
-two 8-byte slots the result is `second` and no memory the caller held changes; without, the
-`newarr` fails with the model's `allocationFailure`, not a CLR exception.
+back. Its two reference slots occupy 16 bytes. Ordinary execution returns `second` and
+preserves the caller's allocations. An explicit budget below 16 bytes produces the model fault
+`allocationFailure` at `newarr`.
 -/
 
 open CIL.Safety
@@ -29,7 +29,7 @@ bind_method pair pairBody :=
 /-- With 16 bytes of heap budget, `Pair(first, second)` returns `second` for any two live nodes,
     the same node or not, and every allocation, byte and reference the caller held is kept. -/
 theorem correctness (memory : Memory) (formed : memory.WellFormed)
-    (budget : objectFieldSlot * 2 ≤ memory.heapBudget) (first second : Reference)
+    (budget : objectFieldSlot * 2 ≤ memory.heapBudget.getD (objectFieldSlot * 2)) (first second : Reference)
     (firstLive : LiveObject memory first) (secondLive : LiveObject memory second)
     (firstAllocation secondAllocation : Allocation)
     (firstFound : liveAllocation memory first.allocation = .ok firstAllocation)
@@ -89,11 +89,11 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed)
 
 /-- With less than 16 bytes of heap budget, `Pair` fails at its `newarr`, pc 1, with the
     model's resource fault, before any store. -/
-theorem insufficient_budget (memory : Memory) (short : memory.heapBudget < objectFieldSlot * 2)
+theorem insufficient_budget (memory : Memory) (short : memory.heapBudget.getD (objectFieldSlot * 2) < objectFieldSlot * 2)
     (first second : ManagedReference) (firstFormed : formObject memory first = .ok (.object first))
     (secondFormed : formObject memory second = .ok (.object second)) :
     ∃ fuel, invoke Extracted.program fuel pair [.object first, .object second] memory =
-      .error ⟨pair, 1, .allocationFailure (objectFieldSlot * 2) memory.heapBudget⟩ := by
+      .error ⟨pair, 1, .allocationFailure (objectFieldSlot * 2) (memory.heapBudget.getD (objectFieldSlot * 2))⟩ := by
   have failed := newReferenceArray_insufficient memory nodeType (value := .i32 2) (length := 2)
     (Or.inl rfl) (by decide) (by decide) short
   cil_checked_steps [failed, firstFormed, secondFormed, nodeType]

@@ -99,9 +99,9 @@ structure Memory where
   /-- Admitted dynamic-stack bytes per activation; deployment must justify this quota.
       Zero is the default, so existing memory grants no dynamic stack storage. -/
   stackLimit : Nat := 0
-  /-- Bytes still available for object allocations; deployment must justify it, and each
-      allocation consumes its size. Zero is the default, so existing memory grants none. -/
-  heapBudget : Nat := 0
+  /-- An explicit byte budget bounds cumulative object and reference-array allocation.
+      With no budget, execution assumes global heap availability. Local extent checks still apply. -/
+  heapBudget : Option Nat := none
   /-- The object reference each reference-typed field of a class instance holds, by allocation
       and field byte offset. No field's bytes encode a reference; zeroed storage holds null. -/
   slots : AllocationId → Nat → ManagedReference := fun _ _ => .null
@@ -181,11 +181,6 @@ def validPosition (a : Allocation) (offset : Nat) : Bool :=
 def form (m : Memory) (r : Reference) : Checked Reference := do
   let a ← liveAllocation m r.allocation
   if validPosition a r.offset then return r else .error .invalidReference
-
-/-- `null` or an address that forms. -/
-def validManagedReference (m : Memory) : ManagedReference → Bool
-  | .null => true
-  | .address r => match form m r with | .ok _ => true | .error _ => false
 
 /-- Offset multiplication and addition wrap at native width. A wrapped result
     retains its allocation identity and must pass formation validity anew. -/

@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Text.Json;
 using System.Xml.Linq;
@@ -56,6 +61,14 @@ Document("M:Examples.Throws.Percent(System.UInt32)", "System.ArgumentOutOfRangeE
 if (!Potential(Lint()).SequenceEqual(["System.ArgumentOutOfRangeException"]))
     throw new InvalidOperationException("Explicit folded exception name was lost.");
 
+Extract("Examples.Throws::Null(uint)");
+Document("M:Examples.Throws.Null(System.UInt32)", "System.NullReferenceException");
+var nullThrow = Lint();
+if (!Potential(nullThrow).SequenceEqual(["System.NullReferenceException"]) ||
+    !nullThrow.GetProperty("sites").EnumerateArray()
+        .Any(site => site.GetProperty("origin").GetString() == "throw of null"))
+    throw new InvalidOperationException("The reachable ldnull and throw must identify a null-reference fault.");
+
 string compilerDocumentation = Path.ChangeExtension(assembly, ".xml");
 foreach ((string Selector, string[] Expected) item in new (string, string[])[]
 {
@@ -72,6 +85,13 @@ foreach ((string Selector, string[] Expected) item in new (string, string[])[]
     JsonElement report = Lint();
     if (!Potential(report).SequenceEqual(item.Expected))
         throw new InvalidOperationException("Wrong modeled exception set: " + item.Selector);
+    if (item.Selector == "Examples.ExceptionDocumentation::Absolute(int)")
+    {
+        var site = report.GetProperty("sites").EnumerateArray().Single();
+        const string origin = "interpreter operation: IL_0001: call System.Int32 System.Math::Abs(System.Int32)";
+        if (site.GetProperty("origin").GetString() != origin)
+            throw new InvalidOperationException("The overflow site must name the call to the selected overload.");
+    }
     bool expectedDrift = item.Selector.Contains("Clamp", StringComparison.Ordinal) || item.Selector.Contains("Profile", StringComparison.Ordinal);
     if (report.GetProperty("findings").GetArrayLength() != (expectedDrift ? 1 : 0))
         throw new InvalidOperationException("Compiler XML matching or separate invalid-bounds/profile exclusion failed: " + item.Selector);

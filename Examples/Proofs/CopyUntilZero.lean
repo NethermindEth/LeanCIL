@@ -34,7 +34,7 @@ theorem stamp_holds : stampContract.Holds Extracted.program stamp := by
   rintro ⟨slot, value⟩ memory writable
   obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one value
   refine MethodContract.Holds.intro after () ?_ confined filled
-  cil_checked_steps [step_storeScalar_of_write wrote, formed]
+  cil_checked_steps [step_stind_narrow_of_write .i4 wrote, formed]
 
 /-- The words copied: those before the first zero, or all of them. -/
 def copied (values : List W32) : List W32 := values.takeWhile (· ≠ 0#32)
@@ -70,7 +70,7 @@ private abbrev State (memory : Memory) (output : Reference) (room : Nat)
 -- The loop guard observes the remaining span length.
 bind_cutpoint header (memory : Memory) (output : Reference) (room : Nat)
     (home0 home1 : Reference) (state : State memory output room home0 home1) :=
-  copyBody at loop.latch matching (· matches .brnonzero _)
+  copyBody at loop.latch matching (· matches .brtrue _)
   with entry.frame memory state.values.1.view home0 home1,
     [.scalar (.i32 (BitVec.ofNat 32 state.values.1.view.length))], state.memory
 

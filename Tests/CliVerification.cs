@@ -1,8 +1,13 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
+#:include ../scripts/ConsumerVerification.cs
+#:include ../scripts/LeanDiagnostics.cs
 
-using System.Diagnostics;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -15,6 +20,27 @@ var output = At("artifacts/CliVerification");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var proof = At("Examples/Proofs/Add.lean");
 var settingsPath = Path.Combine(output, "verification.json");
+
+// A run that does not exit as expected is reported with the tool's own output, not as the report file or
+// JSON it never wrote.
+var refused = (Code: 1, Output: "Invalid: boom\n  Stage: proof checking\n", Stdout: "", Stderr: "Invalid: boom\n");
+if (FailureOf(() => Exited(refused, 0)) is not { } refusedMessage || !refusedMessage.Contains("exit code 0") ||
+    !refusedMessage.Contains("got 1") || !refusedMessage.Contains("Invalid: boom\n  Stage: proof checking"))
+    throw new InvalidOperationException("A run that failed was not reported with the tool's output.");
+
+// Every assertion below runs against a prepared certified library, as CI supplies one, so the notices a
+// first run prints while it builds the library never reach the stderr checks.
+if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")))
+{
+    var preparedLibrary = At("artifacts/CliCertifiedLibrary");
+    if (Directory.Exists(preparedLibrary)) DeleteTree(preparedLibrary);
+    using var producer = new Program();
+    producer.PrepareCertifiedFingerprints();
+    Environment.SetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY_SHA256", producer.PrepareLibrary(preparedLibrary));
+    Environment.SetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY", preparedLibrary);
+}
+
+Run(["dotnet", "run", "--file", At("Tests/DeepCli.cs"), "--", .. args], progress: "Deep verification CLI");
 
 void Verified(params string[] options)
 {
@@ -32,12 +58,36 @@ void Verified(params string[] options)
     if (!stdout.Contains("\u2203 result,") || stdout.Contains("Exists fun") || stdout.Contains("HMod.hMod") ||
         !stdout.Contains($"  Subject: {entry} (method 0) via CIL.Safety.invoke\n") ||
         !stdout.Contains($"  Extraction entry: {entry}\n") || stdout.Contains("  Entry:") ||
-        !stdout.Contains("Add.lean:15:0: info: 'ExampleProof.correctness' depends on axioms"))
+        !stdout.Contains("Add.lean:16:0: info: 'ExampleProof.correctness' depends on axioms"))
         throw new InvalidOperationException(
             "CLI verification did not print the readable statement, subject and messages: " + result.Output);
 
+    // A default run checks no binding fact: its stages name no deep-check module, and its certificate lists
+    // every fact as trusted, once each, in this order.
+    if (result.Output.Contains("BindingAudit", StringComparison.Ordinal) ||
+        result.Output.Contains("StrictBinding", StringComparison.Ordinal))
+        throw new InvalidOperationException("A default verification ran a deep check: " + result.Output);
     var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
-    if (report.GetProperty("schema").GetInt32() != 4 ||
+    string[] bindingFacts =
+    [
+        "body-bytes", "metadata-rows", "member-links", "platform-type-kinds", "enum-underlying-types",
+        "value-tuple-field-order", "object-fields", "layout-content", "dispatch-catalogs", "static-data",
+        "generic-constraints", "public-key-tokens", "import-identities", "imported-layouts"
+    ];
+    var binding = report.GetProperty("binding");
+    var facts = binding.GetProperty("facts").EnumerateArray().ToArray();
+    if (binding.GetProperty("mode").GetString() != "default" ||
+        binding.GetProperty("digests").ValueKind != JsonValueKind.Null ||
+        binding.GetProperty("sources").ValueKind != JsonValueKind.Null ||
+        binding.GetProperty("images").GetArrayLength() != 0 ||
+        !facts.Select(fact => fact.GetProperty("id").GetString()).SequenceEqual(bindingFacts) ||
+        facts.Any(fact => fact.GetProperty("status").GetString() != "trusted" ||
+            fact.GetProperty("theorem").ValueKind != JsonValueKind.Null ||
+            fact.GetProperty("reason").ValueKind != JsonValueKind.Null))
+        throw new InvalidOperationException("The certificate does not list the 14 binding facts as trusted: " +
+            binding.GetRawText());
+
+    if (report.GetProperty("schema").GetInt32() != CertificateSchema ||
         !report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid"))
         throw new InvalidOperationException("Missing mandatory extraction certificate audit in report.");
 
@@ -80,6 +130,34 @@ if (Path.IsPathRooted(JsonSerializer.Deserialize<JsonElement>(settings).GetPrope
     throw new InvalidOperationException("Expected a relative proof path in verification settings.");
 Console.WriteLine("PASS CLI proof selection, persistent settings and theorem statement");
 
+// Without settings or --proof, verify looks for Proof.lean beside the extraction and never reads the proof
+// from an earlier certificate.
+File.Delete(settingsPath);
+try
+{
+    var unselected = Exited(Execute([.. cli, "verify", output]), 1);
+    if (!unselected.Output.Contains("Proof file not found") ||
+        !unselected.Output.Contains("Proof.lean", StringComparison.Ordinal) ||
+        File.Exists(Path.Combine(output, "verified.json")))
+        throw new InvalidOperationException("verify took its proof from an earlier certificate: " + unselected.Output);
+}
+finally { File.WriteAllText(settingsPath, settings); }
+Console.WriteLine("PASS CLI verify reads no proof selection from an earlier certificate");
+
+// The prepared library serves a verification whose cache holds nothing: no notice on stderr, and no
+// library built into the cache.
+var emptyCache = At("artifacts/CliEmptyCache");
+if (Directory.Exists(emptyCache)) DeleteTree(emptyCache);
+var cold = Exited(Execute([.. cli, "verify", output], environment: new Dictionary<string, string>
+    { ["LEANCIL_CACHE_DIR"] = emptyCache }), 0);
+if (WithoutStageProgress(cold.Stderr).Length != 0 || !cold.Stdout.StartsWith("Verified: ExampleProof.correctness") ||
+    // A library entry is a directory named by its key; only the verification results live beside it.
+    Directory.Exists(emptyCache) &&
+    Directory.EnumerateDirectories(emptyCache).Any(entry => Path.GetFileName(entry) != "success-v1"))
+    throw new InvalidOperationException("A verification with an empty cache built or announced a library: " +
+        cold.Output);
+Console.WriteLine("PASS CLI verification with an empty library cache prints no first-run notice");
+
 // Elaborator acceptance and an empty axiom list do not establish kernel validity.
 // Test both a forged selected theorem and a normally checked theorem using a forged helper.
 var auditOutput = At("artifacts/CliKernelAudit");
@@ -112,6 +190,25 @@ foreach (var transitive in new[] { false, true })
 }
 Console.WriteLine("PASS CLI kernel replay rejects unchecked theorems and transitive helpers");
 
+// A false body check names the method and the part that differs: the same tactic the extraction's certificate
+// uses, stated for a body whose method claims a maximum stack depth its bytes do not give.
+var falseBody = Path.Combine(auditOutput, "FalseBody.lean");
+File.WriteAllText(falseBody, """
+    import Extracted
+    theorem ExampleProof.falseBody : CIL.Extraction.bodyMatches Extracted.method0Body
+        { Extracted.method0Original with maxStack := 99 } [] = true := by
+      cil_body_decodes
+    """.ReplaceLineEndings("\n") + "\n");
+var falseCertificate = Execute([.. cli, "verify", auditOutput, "--proof", falseBody, "--theorem",
+    "ExampleProof.falseBody"]);
+var falseText = falseCertificate.Stderr.ReplaceLineEndings("\n");
+if (falseCertificate.Code != 1 || falseCertificate.Stdout.Length != 0 || !falseText.Contains("Lean errors (") ||
+    !falseText.Contains("Method System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64): " +
+        "the decoded method does not match its body bytes or metadata: the maximum stack depth differ"))
+    throw new InvalidOperationException("verify did not name the method and the false body check: " +
+        falseCertificate.Output);
+Console.WriteLine("PASS CLI verify names the method and the part of a false body check");
+
 // The unchanged addition contract must fail after changing + to - and rebuilding.
 var methodsPath = Path.Combine(fixture, "Methods.cs");
 var methods = File.ReadAllText(methodsPath);
@@ -137,11 +234,11 @@ var rejectedGoals = Execute([.. cli, "verify", output, "--goals"]);
 var rejectedGoalsText = rejectedGoals.Stderr.ReplaceLineEndings("\n");
 if (!rejected.Stderr.ReplaceLineEndings("\n").Contains(GoalsHint) || rejectedGoals.Code != 1 ||
     rejectedGoals.Stdout.Length != 0 || !rejectedGoalsText.Contains("  Stage: proof checking\n") ||
-    rejectedGoalsText.Contains(GoalsHint) || !rejectedGoalsText.Contains("  Goals (1):\n") ||
+    rejectedGoalsText.Contains(GoalsHint) || !rejectedGoalsText.Contains("  Goals (2):\n") ||
     !Regex.IsMatch(rejectedGoalsText, @"^    Examples/Proofs/Add\.lean:\d+:\d+: failing tactic$",
         RegexOptions.Multiline) ||
     !rejectedGoalsText.Contains("      ⊢ Except.map Prod.snd") || rejectedGoalsText.Contains(": info: ") ||
-    !rejectedGoalsText.Contains("  Lean messages (1): artifacts/CliVerification/proof-messages.txt\n") ||
+    !rejectedGoalsText.Contains("  Lean messages (2): artifacts/CliVerification/proof-messages.txt\n") ||
     !File.ReadAllText(Path.Combine(output, "proof-messages.txt")).Contains("depends on axioms"))
     throw new InvalidOperationException("verify --goals did not print the goal of the failing tactic: " +
         rejected.Stderr + rejectedGoals.Output);
@@ -192,13 +289,13 @@ var traced = Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "
 var tracedText = traced.Stdout.ReplaceLineEndings("\n");
 var tracedMessages = tracedText[..Math.Max(0, tracedText.IndexOf("  Trace (", StringComparison.Ordinal))];
 if (traced.Code != 0 || !tracedText.Contains("  Trace (") || tracedText.Contains("Untraced") ||
-    !tracedText.Contains("Countdown.lean:30:4: [CIL.step] pc 0: CIL.Op.arg 0\n") ||
+    !tracedText.Contains("Countdown.lean:31:4: [CIL.step] pc 0: CIL.Instruction.ldarg 0\n") ||
     !tracedText.Contains("[CIL.step] cil_loop_finish took ") || tracedMessages.Contains("[CIL.step]") ||
     // Each tactic reports its step count once, at its own position.
-    tracedText.Split("Countdown.lean:30:4: [CIL.step] cil_loop_recurse took ").Length != 2)
+    tracedText.Split("Countdown.lean:31:4: [CIL.step] cil_loop_recurse took ").Length != 2)
     throw new InvalidOperationException("verify --trace did not report the steps apart: " + traced.Output);
-var tracedReport = JsonNode.Parse(Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "--trace",
-    "--format", "json"]).Stdout) as JsonObject;
+var tracedReport = JsonNode.Parse(Exited(Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "--trace",
+    "--format", "json"]), 0).Stdout) as JsonObject;
 var steps = tracedReport?["trace"]?.AsArray().Select(step => step!["text"]!.GetValue<string>()).ToArray() ?? [];
 if (steps.Length == 0 || !steps.All(step => step.StartsWith("[CIL.step] ", StringComparison.Ordinal)) ||
     tracedReport!["unknown"]!.AsObject().ContainsKey("trace") ||
@@ -223,10 +320,14 @@ RequireReport(Execute([.. cli, "verify", objectOutput, "--proof", unformed, "--t
     "ExampleProof.first_null_throws", "--format", "json"]), 1, "UnformedAccount.json", (objectOutput, "<output>"),
     (unformed, "<proof>"));
 // The trace shows the receiver-checked call and the exception it throws on a null receiver.
-var objectTrace = Execute([.. cli, "verify", objectOutput, "--proof", depositBothProof, "--theorem",
-    "ExampleProof.first_null_throws", "--trace"]).Stdout.ReplaceLineEndings("\n");
-if (!objectTrace.Contains("[CIL.step] pc 2: CIL.Op.callInstance 1 2\n") ||
-    !objectTrace.Contains("changes faults: ExecutionFault.thrown \"System.NullReferenceException\"\n"))
+var objectTrace = Exited(Execute([.. cli, "verify", objectOutput, "--proof", depositBothProof, "--theorem",
+    "ExampleProof.first_null_throws", "--trace"]), 0).Stdout.ReplaceLineEndings("\n");
+var depositExtraction = File.ReadAllText(Path.Combine(objectOutput, "Extracted.lean"));
+var nullReceiverCall = objectTrace.Split("[CIL.step] ").Skip(1).Any(entry =>
+    entry.StartsWith("pc 2: CIL.Instruction.callvirt", StringComparison.Ordinal) &&
+    entry.Contains("name := name!\"Deposit\", hasThis := true", StringComparison.Ordinal) &&
+    entry.Contains("changes faults: ExecutionFault.thrown CIL.ExceptionType.nullReference\n", StringComparison.Ordinal));
+if (!nullReceiverCall || !depositExtraction.Contains("def method0Link2 : Link := .direct 1", StringComparison.Ordinal))
     throw new InvalidOperationException("verify --trace did not show the null receiver's call: " + objectTrace);
 Console.WriteLine("PASS CLI reports a proof stuck on a class instance and traces its receiver-checked call");
 
@@ -244,7 +345,7 @@ foreach (var module in new[] { "Tests.Support", "Examples.Support" })
 {
     var fixtureProof = Path.Combine(auditOutput, "Fixture.lean");
     File.WriteAllText(fixtureProof, $"import Extracted\nimport {module}\n");
-    var fixtureImport = Execute([.. cli, "verify", auditOutput, "--proof", fixtureProof]);
+    var fixtureImport = Exited(Execute([.. cli, "verify", auditOutput, "--proof", fixtureProof]), 1);
     var failure = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(auditOutput, "failed.json")));
     if (fixtureImport.Code != 1 || !fixtureImport.Stderr.Contains("Stage: proof selection") ||
         !fixtureImport.Stderr.Contains($"imports {module}, a LeanCIL repository module") ||
@@ -289,13 +390,13 @@ File.WriteAllText(subjectProof, """
     """);
 const string addTwo =
     "System.UInt32 Examples.Loops::AddTwo(System.UInt32) (method 1) via CIL.Safety.MethodContract.Holds";
-var helper = Execute([.. cli, "verify", subjectOutput, "--proof", subjectProof, "--theorem", "ExampleProof.helper"])
-    .Stdout.ReplaceLineEndings("\n");
+var helper = Exited(Execute([.. cli, "verify", subjectOutput, "--proof", subjectProof, "--theorem",
+    "ExampleProof.helper"]), 0).Stdout.ReplaceLineEndings("\n");
 if (!helper.Contains($"  Subject: {addTwo}\n") || !helper.Contains($"  Premise: {addTwo}\n") ||
     helper.Contains("Subject: System.UInt32 Examples.Loops::TallyTwice") ||
     !helper.Contains("  Extraction entry: System.UInt32 Examples.Loops::TallyTwice(System.UInt32)\n"))
     throw new InvalidOperationException("Helper theorem was not labelled by its subject: " + helper);
-var unfixed = Execute([.. cli, "verify", subjectOutput, "--theorem", "ExampleProof.unfixed"])
+var unfixed = Exited(Execute([.. cli, "verify", subjectOutput, "--theorem", "ExampleProof.unfixed"]), 0)
     .Stdout.ReplaceLineEndings("\n");
 if (!unfixed.Contains("  Subject: a method index the statement does not fix via CIL.Safety.MethodContract.Holds\n") ||
     unfixed.Contains("Examples.Loops::AddTwo") || unfixed.Contains("Subject: System.UInt32"))
@@ -343,7 +444,7 @@ foreach (var (postcondition, evidence, printed) in new[]
     // The second run reuses the checked proof, which carries the specification with its statement.
     foreach (var reuse in new[] { false, true })
     {
-        var specified = Execute([.. cli, "verify", specificationOutput, "--proof", specifiedProof]);
+        var specified = Exited(Execute([.. cli, "verify", specificationOutput, "--proof", specifiedProof]), 0);
         var recorded = JsonNode.Parse(File.ReadAllText(Path.Combine(specificationOutput, "verified.json")))!
             ["specification"]?.AsArray().Select(definition =>
                 (definition!["name"]!.GetValue<string>(), definition["text"]!.GetValue<string>())).ToArray() ?? [];
@@ -355,8 +456,8 @@ foreach (var (postcondition, evidence, printed) in new[]
                 $"The report does not show the specification the theorem uses (reused: {reuse}): " +
                 specified.Output + string.Join('\n', recorded));
     }
-    var specifiedJson = JsonNode.Parse(Execute([.. cli, "verify", specificationOutput, "--proof", specifiedProof,
-        "--format", "json"]).Stdout)?["specification"]?.AsArray();
+    var specifiedJson = JsonNode.Parse(Exited(Execute([.. cli, "verify", specificationOutput, "--proof",
+        specifiedProof, "--format", "json"]), 0).Stdout)?["specification"]?.AsArray();
     if (specifiedJson is not { Count: 2 } || specifiedJson[0]!["text"]!.GetValue<string>() != postconditionText)
         throw new InvalidOperationException("verify --format json does not report the specification: " +
             specifiedJson?.ToJsonString());
@@ -390,8 +491,8 @@ var consumerEntry = JsonSerializer.Deserialize<JsonElement>(
 foreach (var (options, cached) in new[]
     { (new[] { "--fresh" }, (bool?)false), (Array.Empty<string>(), null), (Array.Empty<string>(), true) })
 {
-    var consumer = Execute([.. cli, "verify", consumerOutput, "--proof", consumerProof,
-        "--proof-root", consumerPackage, .. options]);
+    var consumer = Exited(Execute([.. cli, "verify", consumerOutput, "--proof", consumerProof,
+        "--proof-root", consumerPackage, .. options]), 0);
     var consumerText = consumer.Stdout.ReplaceLineEndings("\n");
     var libraryBuild = JsonSerializer.Deserialize<JsonElement>(
         File.ReadAllText(Path.Combine(consumerOutput, "verified.json"))).GetProperty("libraryBuild").GetString();
@@ -399,8 +500,8 @@ foreach (var (options, cached) in new[]
         !consumerText.Contains("∃ result,") || consumerText.Contains("Exists fun") ||
         consumerText.Contains("Subject: not identified") ||
         !consumerText.Contains($"  Subject: {consumerEntry} (method 0) via CIL.Safety.invoke\n") ||
-        !consumerText.Contains("  Lean messages (1):\n") ||
-        !consumerText.Contains("Add.lean:15:0: info: 'ExampleProof.correctness' depends on axioms"))
+        !consumerText.Contains("  Lean messages (2):\n") ||
+        !consumerText.Contains("Add.lean:16:0: info: 'ExampleProof.correctness' depends on axioms"))
         throw new InvalidOperationException(
             "Consumer verification did not print the readable statement, subject and messages: " + consumer.Output);
 }
@@ -424,6 +525,10 @@ if (unfinished.Code != 1 || !unfinishedText.Contains("Stage: proof checking") ||
         unfinished.Output);
 RequireSourceLocations(unfinishedText,
     "artifacts/CliConsumer/Package/Proofs/Unfinished.lean:5:2 (building Proofs.Unfinished)");
+// The failed package check reaches a reader that expected it to pass as the tool's output, not as a missing report.
+if (FailureOf(() => Exited(unfinished, 0)) is not { } unfinishedFailureText ||
+    !unfinishedFailureText.Contains("got 1") || !unfinishedFailureText.Contains("Stage: proof checking"))
+    throw new InvalidOperationException("A failed --proof-root check was not reported with the tool's output.");
 // A package's proof shows its goals as a standalone one does.
 var unfinishedGoals = Execute([.. cli, "verify", consumerOutput, "--proof", unfinishedProof,
     "--proof-root", consumerPackage, "--goals"]).Stderr.ReplaceLineEndings("\n");
@@ -437,7 +542,8 @@ var holeProof = Path.Combine(consumerPackage, "Proofs", "Hole.lean");
 File.WriteAllText(holeProof, "import Extracted\ntheorem ExampleProof.correctness : 1 + 1 = 2 := by\n  sorry\n");
 var hole = Execute([.. cli, "verify", consumerOutput, "--proof", holeProof, "--proof-root", consumerPackage,
     "--goals"]);
-var holeText = hole.Stderr.ReplaceLineEndings("\n");
+// A build that runs past the progress interval reports its stage first, as it does under machine load.
+var holeText = WithoutStageProgress(hole.Stderr.ReplaceLineEndings("\n"));
 if (hole.Code != 1 ||
     !holeText.StartsWith("Invalid: 1 goal remains in artifacts/CliConsumer/Package/Proofs/Hole.lean.\n") ||
     !holeText.Contains("  Stage: open goals\n") || !holeText.Contains("  Goals (1):\n" +
@@ -457,35 +563,39 @@ if (unfinishedJson.Code != 1 || WithoutStageProgress(unfinishedJson.Stderr).Leng
         unfinishedJson.Output);
 
 // `verify-batch --format json` prints one document with each request's `verify --format json` report, and
-// `--trace` adds each request's steps; the rejected request is last, so the output keeps its settings.
+// `--trace` adds each request's steps; the failing request is last, so the output keeps its settings.
 var batchManifest = Path.Combine(consumerRoot, "requests.json");
 File.WriteAllText(batchManifest, JsonSerializer.Serialize(new
 {
     schema = 1, proofRoot = consumerPackage, requests = new object[]
     {
         new { output = consumerOutput, proof = consumerProof, theorem = "ExampleProof.correctness" },
-        new { output = consumerOutput, proof = unfinishedProof, theorem = "ExampleProof.correctness",
-            expect = "rejected" }
+        new { output = consumerOutput, proof = unfinishedProof, theorem = "ExampleProof.correctness" }
     }
 }));
 var batch = Execute([.. cli, "verify-batch", batchManifest, "--format", "json", "--trace"]);
 var batchReport = JsonNode.Parse(batch.Stdout) as JsonObject;
 var batchRequests = batchReport?["requests"]?.AsArray();
-if (batch.Code != 0 || WithoutStageProgress(batch.Stderr).Length != 0 || batchReport?["schema"]?.GetValue<int>() != 1 ||
-    batchReport["passed"]?.GetValue<int>() != 2 || batchRequests is not { Count: 2 } ||
+if (batch.Code != 1 || WithoutStageProgress(batch.Stderr).Length != 0 ||
+    batchReport?["schema"]?.GetValue<int>() != 1 ||
+    batchReport["passed"]?.GetValue<int>() != 1 || batchRequests is not { Count: 2 } ||
     batchRequests[0]!["status"]!.GetValue<string>() != "verified" ||
     batchRequests[0]!["report"]!["result"]!.GetValue<string>() != "verified" ||
     batchRequests[0]!["report"]!["trace"] is not JsonArray { Count: > 0 } verifiedSteps ||
     !verifiedSteps.All(step => step!["text"]!.GetValue<string>().StartsWith("[CIL.step] ", StringComparison.Ordinal)) ||
-    batchRequests[1]!["status"]!.GetValue<string>() != "rejected" ||
+    batchRequests[1]!["status"]!.GetValue<string>() != "failed" ||
     batchRequests[1]!["report"]!["result"]!.GetValue<string>() != "failed" ||
     batchRequests[1]!["report"]!["failures"]?[0]?["source"]?["file"]?.GetValue<string>() !=
-        Path.GetFullPath(unfinishedProof))
+        Path.GetFullPath(unfinishedProof) ||
+    // The verified request's report carries its certificate's binding section; the failing one issued none.
+    batchRequests[0]!["report"]!["binding"]?["facts"] is not JsonArray { Count: 14 } batchFacts ||
+    batchFacts.Any(fact => fact!["status"]!.GetValue<string>() != "trusted") ||
+    batchRequests[1]!["report"]!["binding"] is not null)
     throw new InvalidOperationException("verify-batch --format json --trace did not print one report per request: " +
         batch.Output);
 var batchText = Execute([.. cli, "verify-batch", batchManifest, "--trace"]);
-if (batchText.Code != 0 || !batchText.Stdout.Contains("PASS verified") || !batchText.Stdout.Contains("  Trace (") ||
-    !batchText.Stdout.Contains("Batch: 2 passed, 0 failed of 2 requests."))
+if (batchText.Code != 1 || !batchText.Stdout.Contains("PASS verified") || !batchText.Stdout.Contains("  Trace (") ||
+    !batchText.Stdout.Contains("Batch: 1 passed, 1 failed of 2 requests."))
     throw new InvalidOperationException("verify-batch --trace did not print each request's trace: " + batchText.Output);
 Console.WriteLine("PASS CLI verify-batch reports each request as JSON and traces each request's steps");
 Console.WriteLine("PASS CLI shows Lean messages, with control characters escaped, when a --proof-root proof fails");
@@ -502,23 +612,43 @@ if (written.Code != 0 || !written.Stdout.StartsWith("Wrote ") ||
     !written.Stdout.Contains("Holes: 3 obligations, 0 paths not outlined"))
     throw new InvalidOperationException("new-proof did not write the Add outline: " + written.Output);
 var outlineText = File.ReadAllText(addOutline);
-var refusedOutline = Execute([.. cli, "verify", outlined, "--proof", addOutline]);
+var refusalTrace = Path.Combine(outlines, "RefusalTrace");
+var goalsTrace = Path.Combine(outlines, "GoalsTrace");
+Dictionary<string, string> TraceEnvironment(string directory) => new()
+{
+    ["LEANCIL_TRACE_DIRECTORY"] = directory,
+    ["LEANCIL_DISABLE_SUCCESS_CACHE"] = "true"
+};
+JsonElement[] AfterProofCheck(string directory)
+{
+    var records = Directory.EnumerateFiles(directory, "*.jsonl").SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+        .OrderBy(record => record.GetProperty("startedAtUtc").GetDateTimeOffset()).ToArray();
+    var proofChecks = records.Select((record, index) => (record, index)).Where(item =>
+        item.record.GetProperty("stage").GetString()!.StartsWith("Checking Proof: ", StringComparison.Ordinal))
+        .ToArray();
+    if (proofChecks.Length != 1 || proofChecks[0].record.GetProperty("exitCode").GetInt32() != 0)
+        throw new InvalidOperationException("Expected one successful proof check in " + directory);
+    return records[(proofChecks[0].index + 1)..];
+}
+bool ReplaysOrAudits(JsonElement record) =>
+    record.GetProperty("stage").GetString()!.Contains("replay", StringComparison.OrdinalIgnoreCase) ||
+    Path.GetFileNameWithoutExtension(record.GetProperty("command")[0].GetString()) is
+        "leanchecker" or "leancil-audit";
+var refusedOutline = Execute([.. cli, "verify", outlined, "--proof", addOutline],
+    environment: TraceEnvironment(refusalTrace));
 if (refusedOutline.Code == 0 || !refusedOutline.Output.Contains("Unapproved proof axioms: sorryAx") ||
     refusedOutline.Output.Contains(": error"))
     throw new InvalidOperationException("The unedited Add outline was not refused for its holes alone: " +
         refusedOutline.Output);
 // `--goals` prints the goal at each hole, once each in source order and without the proof's warnings, and
-// stops before replay and audit, so it answers sooner than the verification that refuses the file.
+// ends the run at the proof check: the kernel replay and audit that refuse the file never start.
 var holes = Regex.Matches(outlineText.ReplaceLineEndings("\n"), @"(?<=:= |=> |^\s+)sorry\b", RegexOptions.Multiline)
     .Select(hole => outlineText.ReplaceLineEndings("\n")[..hole.Index].Split('\n'))
     .Select(before => (Line: before.Length, Column: before[^1].Length)).ToArray();
-var refusal = Stopwatch.StartNew();
-Execute([.. cli, "verify", outlined, "--proof", addOutline]);
-refusal.Stop();
-var answer = Stopwatch.StartNew();
-var outlineGoals = Execute([.. cli, "verify", outlined, "--proof", addOutline, "--goals"]);
-answer.Stop();
-var outlineGoalsText = outlineGoals.Stderr.ReplaceLineEndings("\n");
+var outlineGoals = Execute([.. cli, "verify", outlined, "--proof", addOutline, "--goals"],
+    environment: TraceEnvironment(goalsTrace));
+var outlineGoalsText = WithoutStageProgress(outlineGoals.Stderr.ReplaceLineEndings("\n"));
 var reportedHoles = Regex.Matches(outlineGoalsText, @"^    \S*AddProof\.lean:(\d+):(\d+): sorry$",
         RegexOptions.Multiline)
     .Select(goal => (Line: int.Parse(goal.Groups[1].Value), Column: int.Parse(goal.Groups[2].Value))).ToArray();
@@ -530,11 +660,16 @@ if (outlineGoals.Code != 1 || outlineGoals.Stdout.Length != 0 || holes.Length !=
     outlineGoalsText.Contains("[LeanCIL goal") || File.Exists(Path.Combine(outlined, "verified.json")))
     throw new InvalidOperationException("verify --goals did not print one goal per hole in source order: " +
         outlineGoals.Output);
-if (answer.Elapsed >= refusal.Elapsed)
-    throw new InvalidOperationException($"verify --goals took {answer.Elapsed.TotalSeconds:F1}s, no less than " +
-        $"the {refusal.Elapsed.TotalSeconds:F1}s of the verification that refuses the outline.");
-var outlineGoalsJson = JsonNode.Parse(Execute([.. cli, "verify", outlined, "--proof", addOutline, "--goals",
-    "--format", "json"]).Stdout) as JsonObject;
+var refusalStages = AfterProofCheck(refusalTrace);
+var goalsStages = AfterProofCheck(goalsTrace);
+string Stages(JsonElement[] records) => string.Join("; ", records.Select(record =>
+    $"{record.GetProperty("stage").GetString()} " +
+    $"({Path.GetFileNameWithoutExtension(record.GetProperty("command")[0].GetString())})"));
+if (!refusalStages.Any(ReplaysOrAudits) || goalsStages.Any(ReplaysOrAudits))
+    throw new InvalidOperationException("verify --goals did not end at the proof check. After it, verify --goals " +
+        $"ran [{Stages(goalsStages)}] and the refused verification ran [{Stages(refusalStages)}].");
+var outlineGoalsJson = JsonNode.Parse(Exited(Execute([.. cli, "verify", outlined, "--proof", addOutline, "--goals",
+    "--format", "json"]), 1).Stdout) as JsonObject;
 var jsonGoals = outlineGoalsJson?["goals"]?.AsArray();
 if (outlineGoalsJson?["result"]?.GetValue<string>() != "failed" ||
     outlineGoalsJson["stage"]?.GetValue<string>() != "open goals" ||
@@ -547,8 +682,8 @@ if (outlineGoalsJson?["result"]?.GetValue<string>() != "failed" ||
     !outlineGoalsJson["rerun"]!.AsArray().Any(argument => argument!.GetValue<string>() == "--goals"))
     throw new InvalidOperationException("verify --goals --format json did not report each hole's goal: " +
         outlineGoalsJson?.ToJsonString());
-Console.WriteLine($"PASS CLI --goals prints one goal per hole in source order in {answer.Elapsed.TotalSeconds:F1}s, " +
-    $"under the {refusal.Elapsed.TotalSeconds:F1}s of the refused verification, and the goal of a failing tactic");
+Console.WriteLine("PASS CLI --goals prints one goal per hole in source order, starts no kernel replay or audit " +
+    "after the proof check, and prints the goal of a failing tactic");
 var overwrite = Execute([.. cli, "new-proof", outlined, addOutline]);
 if (overwrite.Code == 0 || !overwrite.Stderr.Contains("already exists; new-proof never overwrites a proof") ||
     File.ReadAllText(addOutline) != outlineText)
@@ -582,13 +717,45 @@ Console.WriteLine("PASS CLI version names the framework revision and toolchain")
 if (args.Length == 0)
 {
     var packages = Path.Combine(output, "packages");
-    if (Directory.Exists(packages)) Directory.Delete(packages, true);
-    Run(["dotnet", "pack", At("Extractor"), "-c", "Release", "-o", packages], progress: "CLI development pack");
+    var packBuild = Path.Combine(output, "pack-build");
+    foreach (var directory in new[] { packages, packBuild })
+        if (Directory.Exists(directory)) Directory.Delete(directory, true);
+    // Later suites of the same job run the extractor this one found, so the pack builds into its own directories.
+    var bin = Path.Combine(packBuild, "bin");
+    var publish = Path.Combine(packBuild, "publish");
+    var relative = Path.Combine("StrictBinding", "PlatformEnums.lean");
+    var source = At(relative);
+    var expected = Sha(source);
+
+    // Build and publish must refresh changed proof sources even when file sizes and timestamps match.
+    string SeedStaleSource(string directory)
+    {
+        var path = Path.Combine(directory, "verification", relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var bytes = File.ReadAllBytes(source);
+        bytes[0] ^= 1;
+        File.WriteAllBytes(path, bytes);
+        File.SetLastWriteTimeUtc(path, File.GetLastWriteTimeUtc(source));
+        return path;
+    }
+
+    var builtSource = SeedStaleSource(bin);
+    var publishedSource = SeedStaleSource(publish);
+    var sharedExtractor = Sha(ExtractorPath);
+    Run(["dotnet", "pack", At("Extractor"), "-c", "Release", "-o", packages,
+        $"-p:OutputPath={bin}/", $"-p:PublishDir={publish}/",
+        $"-p:IntermediateOutputPath={Path.Combine(packBuild, "obj")}/"], progress: "CLI development pack");
+    if (Sha(builtSource) != expected || Sha(publishedSource) != expected)
+        throw new InvalidOperationException("The built or published CLI retained the previous strict binding source.");
+    if (Sha(ExtractorPath) != sharedExtractor)
+        throw new InvalidOperationException("The development pack rebuilt the shared extractor at " + ExtractorPath);
     var package = Directory.GetFiles(packages, "Nethermind.LeanCIL.*.nupkg").Single();
     var packageVersion = Path.GetFileNameWithoutExtension(package)["Nethermind.LeanCIL.".Length..];
     var unpacked = Path.Combine(packages, "unpacked");
     System.IO.Compression.ZipFile.ExtractToDirectory(package, unpacked);
-    var packedVersion = Execute(["dotnet", Path.Combine(unpacked, "tools/net10.0/any/Nethermind.LeanCIL.dll"),
+    if (Sha(Path.Combine(unpacked, "tools/net11.0/any/verification", relative)) != expected)
+        throw new InvalidOperationException("The packed CLI contains a different strict binding source.");
+    var packedVersion = Execute(["dotnet", Path.Combine(unpacked, "tools/net11.0/any/Nethermind.LeanCIL.dll"),
         "--version"]);
     var reported = packedVersion.Stdout.ReplaceLineEndings("\n").Split('\n')[0];
     if (packedVersion.Code != 0 || !packageVersion.Contains("-dev.") || reported != "leancil " + packageVersion)
@@ -601,12 +768,25 @@ if (args.Length == 0)
     Run(["dotnet", "run", "--file", At("Tests/CliImportedKernelAudit.cs")],
         streamOutput: true, progress: "CLI imported helper kernel audit");
 
+// A run that exited otherwise has not written the report the caller reads next, so its own output is what
+// the failure must carry.
+static (int Code, string Output, string Stdout, string Stderr) Exited(
+    (int Code, string Output, string Stdout, string Stderr) run, int code) =>
+    run.Code == code ? run
+        : throw new InvalidOperationException($"Expected exit code {code}, got {run.Code}: " + run.Output);
+
+static string? FailureOf(Action action)
+{
+    try { action(); return null; }
+    catch (InvalidOperationException error) { return error.Message; }
+}
+
 // A golden report pins every field a tool reads; paths and hashes vary by machine and are named instead.
 static void RequireReport((int Code, string Output, string Stdout, string Stderr) run, int code, string golden,
     params (string Path, string Name)[] paths)
 {
     var report = JsonNode.Parse(run.Stdout) as JsonObject;
-    if (run.Code != code || WithoutStageProgress(run.Stderr).Length != 0 || report?["schema"]?.GetValue<int>() != 1)
+    if (run.Code != code || WithoutStageProgress(run.Stderr).Length != 0 || report?["schema"]?.GetValue<int>() != 2)
         throw new InvalidOperationException($"verify --format json did not exit {code} with one report: " + run.Output);
     var actual = Normalized(report, paths)!.ToJsonString(new JsonSerializerOptions
     {

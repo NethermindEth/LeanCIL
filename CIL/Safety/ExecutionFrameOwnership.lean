@@ -13,7 +13,8 @@ namespace CIL.Safety
 
 /-- A step keeps every allocation the resulting frame owns live and tagged with its activation,
     including a home the step just allocated. -/
-theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Instruction)
+    (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (hm : m.WellFormed)
     (owns : FrameAllocations m frame.activation frame.owned)
@@ -47,7 +48,7 @@ theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op
       rcases List.mem_cons.mp member with rfl | member
       · exact new _ (by simp)
       · exact retained id member
-  | arrayAllocation | objectAllocation | memory | store => exact retained
+  | arrayAllocation | objectAllocation | memory | store | resume => exact retained
   | valueHome allocated stored | localHome allocated stored =>
     have fresh := allocateHome_fresh _ _ _ _ _ allocated
     have new := (allocateHome_owned _ _ _ _ _ allocated).preserve (by
@@ -59,6 +60,21 @@ theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op
     rcases List.mem_cons.mp member with rfl | member
     · exact new _ (by simp)
     · exact retained id member
+
+/-- A child's whole run, from frame entry to the memory it ends in or the memories a fault
+    leaves, keeps the parent frame's allocations live. -/
+theorem OutcomeTrace.parentFrame {program : CIL.Program} {fuel method : Nat}
+    {body : CIL.Method} {args : List Value} {child parent : Frame} {memory entered : Memory}
+    {outcome : Except FaultState (Memory × List Value)}
+    (trace : OutcomeTrace program fuel method 0 args child [] entered outcome)
+    (formed : memory.WellFormed) (owns : FrameAllocations memory parent.activation parent.owned)
+    (setup : enterFrame body args memory = .ok (child, entered)) :
+    OutcomeHolds (fun after => FrameAllocations after parent.activation parent.owned) outcome :=
+  (trace.enteredExtends setup).mono fun _ extended => owns.preserve extended fun id member => by
+    obtain ⟨_, present, _, _⟩ := owns id member
+    exact (formed.allocations _ _ present).1
+
+#print axioms OutcomeTrace.parentFrame
 
 /-- A child's whole run, from frame entry to its final memory, leaves the parent frame's
     allocations live. -/

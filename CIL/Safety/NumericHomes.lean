@@ -142,19 +142,11 @@ theorem NumericHomes.ordered {memory : Memory} {lower : Nat} {specs slots}
 #print axioms make_numeric_locals
 #print axioms NumericHomes.home_at
 
-/-- Propose numeric recipes from metadata. Callers must prove both metadata
-    lists equal the resulting recipe, so rejected pairs or truncation cannot pass. -/
-def numericSpecs (body : CIL.Method) : List NumericLocalSpec :=
-  (body.localKinds.zip body.locals).filterMap fun (kind, value) =>
-    match h : localNumber kind value with
-    | .ok number => some ⟨kind, value, number, h⟩
-    | .error _ => none
-
 /-- Actual extracted local metadata must match the validated recipe exactly. -/
 theorem numeric_frame_setup (body : CIL.Method) (specs : List NumericLocalSpec)
     (kinds : body.localKinds = specs.map NumericLocalSpec.kind)
     (initializers : body.locals = specs.map NumericLocalSpec.value)
-    (arguments : body.vectorArgs = []) (parameters : body.parameterHomes = [])
+    (parameters : body.parameterHomes = [])
     (opaqueLocals : body.opaqueVectorLocals = []) (memory : Memory) (args : List Value)
     (wellFormed : memory.WellFormed) :
     ∃ frame result,
@@ -164,10 +156,10 @@ theorem numeric_frame_setup (body : CIL.Method) (specs : List NumericLocalSpec)
   obtain ⟨slots, owned, result, made, homes⟩ :=
     make_numeric_locals memory memory.nextIdentity specs wellFormed
   simp only [numericKinds, numericInitializers] at made
-  let frame : Frame := ⟨memory.nextIdentity, slots, owned, [], 0⟩
+  let frame : Frame := ⟨memory.nextIdentity, slots, owned, 0, []⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
     simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true,
-      kinds, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes,
+      kinds, initializers, made, parameters, makeParameterHomes,
       List.map_nil,
       Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
     rfl

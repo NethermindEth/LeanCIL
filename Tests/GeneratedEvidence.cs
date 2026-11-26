@@ -5,71 +5,368 @@ using System.Text.RegularExpressions;
 
 partial class Program
 {
-    /// <summary>One instruction of an extracted method, as its definition in `Extracted.lean` writes it.</summary>
-    sealed record ExtractedInstruction(int Method, int Pc, string Op);
-
-    // `cil_instruction_equations` states each lookup equation from the definition, which lists one op per line.
-    static List<ExtractedInstruction> ExtractedInstructions(string source)
+    // Heartbeats count the elaborator's and the kernel's work on one thread, so they repeat exactly where compile
+    // time varies with the machine's load. Returns the count `text` costs, imports included, and Lean's output.
+    static (long Heartbeats, string Output) CountHeartbeats(string path, string text)
     {
-        var instructions = new List<ExtractedInstruction>();
-        var lines = source.Split('\n');
-        for (var line = 0; line < lines.Length; line++)
-        {
-            var header = Regex.Match(lines[line], @"\Adef method(\d+) : Method := .* code := \[\r?\z");
-            if (!header.Success) continue;
-            var method = int.Parse(header.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-            // The line that closes the code list ends the definition, whatever follows it.
-            for (var (pc, last) = (0, false); !last && ++line < lines.Length; pc++)
-            {
-                var op = lines[line].Trim();
-                last = op.EndsWith("] }", StringComparison.Ordinal);
-                if (op == "] }") break;
-                instructions.Add(new(method, pc, last ? op[..^3] : op[..^1]));
-            }
-        }
-        return instructions;
+        File.WriteAllText(path, text + "\n#eval show IO Nat from IO.getNumHeartbeats\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        if (output.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException("A measured file depends on sorryAx: " + path);
+        var count = HeartbeatCount.Match(output);
+        if (!count.Success) throw new InvalidOperationException("Missing heartbeat count:\n" + output);
+        return (long.Parse(count.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), output);
     }
+
+    // The line `#eval show IO Nat from IO.getNumHeartbeats` prints.
+    [GeneratedRegex(@"(?m)^([0-9]+)\r?$")]
+    private static partial Regex HeartbeatCount { get; }
+
+    [GeneratedRegex(@"(?m)^cil_resolution_facts [A-Za-z_][A-Za-z0-9_]*\r?\n")]
+    private static partial Regex ResolutionFactsCommand { get; }
+
+    const string DecodedMethodDefinition = """cil_decoded_method method(?<number>\d+)(?: \[[^\]\r\n]*\])?""";
+
+    [GeneratedRegex($"""(?m)^{DecodedMethodDefinition} :=""")]
+    private static partial Regex DefinedMethod { get; }
+
+    // A decoded method's definition line: its options, then its decoder over the method's own definitions.
+    const string DecodedMethodHead = """(?m)^cil_decoded_method method(?<number>\d+)( \[[^\]\r\n]*\])? := """;
+    const string DecoderCall = """Method\.ofClosed\? profile environment method\k<number>Links """;
+    const string DecoderInput =
+        """method\k<number>Reachable method\k<number>Closed method\k<number>RawArguments""";
+
+    [GeneratedRegex($"""{DecodedMethodHead}{DecoderCall}{DecoderInput}(?=\r?$)""")]
+    internal static partial Regex DecodedMethod { get; }
+
+    [GeneratedRegex(@"(?m)^def method(\d+)Original : Extraction\.RawMethod := [^\r\n]*")]
+    private static partial Regex RawDefinition { get; }
+
+    [GeneratedRegex(@"(?m)^def method(\d+)Closed : Extraction\.RawMethod := (?<body>[^\r\n]+)")]
+    internal static partial Regex ClosedDefinition { get; }
+
+    [GeneratedRegex(@"(?m)^def method(?<number>\d+)Closed : [^\r\n]*?returnType := (?<type>[^\r\n]*?), parameters := ")]
+    private static partial Regex ClosedReturnType { get; }
+
+    [GeneratedRegex(@"(?m)^@\[cil_code\] def method(\d+)Link(\d+) : Link := (?<link>[^\r\n]*)")]
+    private static partial Regex MethodLink { get; }
+
+    [GeneratedRegex(@"(?m)^@\[cil_code\] def method(\d+)Link(\d+) : Link := \.direct (\d+)\r?$")]
+    private static partial Regex DirectLink { get; }
+
+    // The head of a one-line theorem, up to its proof.
+    [GeneratedRegex(@"(?m)^(theorem (?<name>[\w?!']+) : [^\r\n]*?) := [^\r\n]*")]
+    private static partial Regex TheoremHead { get; }
+
+    // A theorem and its indented continuation lines; a Lean name may end in ?, ! or '.
+    [GeneratedRegex(@"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n")]
+    private static partial Regex GeneratedTheorem { get; }
+
+    [GeneratedRegex(@" := method\d+_instruction_checks(?:\.[12])+(?=\r?$)", RegexOptions.Multiline)]
+    private static partial Regex InstructionCheckProjection { get; }
+
+    [GeneratedRegex(@"\AexternalIdentity(?:Chunk\d+|\d+Bytes)_valid\z")]
+    private static partial Regex IdentityWitnessName { get; }
+
+    [GeneratedRegex(@"\A(?:method\d+_tables_valid|assembly\d+_identified|pinned_identities_listed)\z")]
+    private static partial Regex RetainedObligationName { get; }
+
+    // A generated report names one theorem or a bracketed group spanning several lines.
+    [GeneratedRegex(@"(?m)^#print axioms (?:\[(?<members>[\w'?!.,\s]+)\]|[\w'?!.]+)[ \t]*\r?(?:\n|\z)")]
+    private static partial Regex AxiomsCommand { get; }
+
+    [GeneratedRegex(@"""(?:\\.|[^""\\])*""")]
+    private static partial Regex StringLiteral { get; }
+
+    [GeneratedRegex(@"(?m)^(?:namespace|end) Extracted\r?$")]
+    private static partial Regex ExtractedNamespaceLine { get; }
+
+    [GeneratedRegex(@"\bExtracted\b")]
+    private static partial Regex ExtractedWord { get; }
+
+    [GeneratedRegex(@"(?m)^namespace Extracted\r?$")]
+    private static partial Regex NamespaceExtracted { get; }
+
+    [GeneratedRegex(@"(?m)^end Extracted\r?$")]
+    private static partial Regex EndExtracted { get; }
+
+    [GeneratedRegex(@"(?m)^import [^\r\n]+\r?\n")]
+    private static partial Regex ImportCommand { get; }
+
+    [GeneratedRegex(@"(?m)^(?:namespace|end) Extracted\r?\n")]
+    private static partial Regex ExtractedNamespaceCommand { get; }
+
+    [GeneratedRegex(@"^import[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*\r?$", RegexOptions.Multiline)]
+    private static partial Regex ImportedModule { get; }
+
+    // An extraction's definition of method `method` from its decoder, with the field and type operands it names.
+    static Match DecodedDefinition(string source, int method) => DecodedMethod.Matches(source)
+        .FirstOrDefault(match => match.Groups["number"].Value == $"{method}") ?? Match.Empty;
+
+    /// <summary>Whether an extraction defines method `method` with `cil_decoded_method`.</summary>
+    static bool IsDecodedMethod(string source, int method) => DecodedDefinition(source, method).Success;
+
+    /// <summary>The numbers of the methods an extraction defines.</summary>
+    static int[] DefinedMethods(string source) => [.. DefinedMethod.Matches(source)
+        .Select(match => int.Parse(match.Groups["number"].Value, System.Globalization.CultureInfo.InvariantCulture))];
+
+    /// <summary>
+    /// Change the emitted instruction at a decoded pc while retaining its raw evidence.
+    /// </summary>
+    static string ForgeDecodedInstruction(string source, int method, int pc, string change) =>
+        ForgeDecodedMethod(source, method, $"code := method.code.modify {pc} ({change})");
+
+    /// <summary>The start of method `method`'s code equation, which a refusal of its decoded code names.</summary>
+    static string DecodedCodeEquation(int method) => $"method{method}.code = Extraction.methodCode";
+
+    // The code equation decided by the kernel instead of read from the decoder's own proof, so a forged emitted
+    // instruction is refused by the comparison with the decoding.
+    static string DecodedCode(string source, int method)
+    {
+        var obligation = $"method{method}_decoded_code";
+        var narrowed = NarrowEvidence(source, obligation);
+        var statement = $"theorem {obligation} : {DecodedCodeEquation(method)} ";
+        const string proof = " := @Method.ofClosed?_code ";
+        var start = narrowed.IndexOf(statement, StringComparison.Ordinal);
+        var at = start < 0 ? -1 : narrowed.IndexOf(proof, start, StringComparison.Ordinal);
+        var end = at < 0 ? -1 : narrowed.IndexOf('\n', at);
+        if (end < 0 || narrowed.IndexOf('\n', start, at - start) >= 0)
+            throw new InvalidOperationException($"Missing decoded code obligation of method{method}");
+        return narrowed[..at] + " := by decide +kernel" + narrowed[end..];
+    }
+
+    // The decoder keeps the genuine closed body. Every obligation reads the changed evidence record.
+    static string ForgeClosedCode(string source, int method, string code)
+    {
+        var closed = $"method{method}Closed";
+        var input = $"method{method}DecoderInput";
+        var definition = ClosedDefinition.Matches(source).Single(match => match.Groups[1].Value == $"{method}");
+        var decoder = DecodedDefinition(source, method);
+        if (!decoder.Success) throw new InvalidOperationException($"Missing decoder for method{method}");
+        var declarations = $$"""
+            def {{input}} : Extraction.RawMethod := {{definition.Groups["body"].Value}}
+            def {{closed}} : Extraction.RawMethod := { {{input}} with code := {{input}}.code.{{code}} }
+            """;
+        return source.Replace(definition.Value, declarations, StringComparison.Ordinal)
+            .Replace(decoder.Value, decoder.Value.Replace(closed, input, StringComparison.Ordinal),
+                StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The line defining the raw method a decoded method is decoded from, the decoder's input. A method the
+    /// extraction does not define fails, so a reader never takes an absent body for an empty one.
+    /// </summary>
+    static string DecodedOriginal(string source, int method)
+    {
+        if (!IsDecodedMethod(source, method))
+            throw new InvalidOperationException($"method{method} is not defined from its decoder");
+        return RawDefinition.Matches(source)
+            .FirstOrDefault(match => match.Groups[1].Value == $"{method}")?.Value ?? "";
+    }
+
+    /// <summary>
+    /// Decodes the forged original so the emitted code differs from the closed evidence used by the checks.
+    /// </summary>
+    static string ForgeDecodedOriginal(string source, int method, string before, string after)
+    {
+        var original = DecodedOriginal(source, method);
+        if (!original.Contains(before, StringComparison.Ordinal))
+            throw new InvalidOperationException($"method{method}Original has no {before}");
+        var definition = DecodedDefinition(source, method);
+        var name = $"method{method}";
+        var context = $"profile environment {name}Links {name}Reachable";
+        var decoder = $"Method.ofRaw? {context} {name}Original {name}TypeArgumentsRaw";
+        var command = definition.Value[..definition.Value.IndexOf("Method.ofClosed?", StringComparison.Ordinal)];
+        var changed = source.Replace(definition.Value, $"""{command}{decoder}""", StringComparison.Ordinal);
+        return changed.Replace(original, original.Replace(before, after, StringComparison.Ordinal),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// `source` with decoded method `method` defined by a forged decoder: the extraction's decoder call with
+    /// `update`, a structure update of the decoded `method`, applied to the method it gives.
+    /// </summary>
+    static string ForgeDecodedMethod(string source, int method, string update)
+    {
+        // The definition writes a decoded method's links as the table constant its decoder is given.
+        if (update.Contains("links :=", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Forge method{method}Links, the decoder's input, to change its links");
+        var call = DecodedDefinition(source, method);
+        if (!call.Success) throw new InvalidOperationException($"method{method} is not defined from its decoder");
+        var forged = $"method{method}Forged";
+        var name = $"method{method}";
+        var decoder = $"{forged} profile environment {name}Links {name}Reachable {name}Closed {name}RawArguments";
+        return $$"""
+            {{source[..call.Index]}}def {{forged}} (profile : FeatureProfile) (environment : LayoutEnvironment)
+                (links : List (Prod Nat Link)) (reachable : List Bool) (closed : Extraction.RawMethod)
+                (storage : Extraction.RawArguments) : Except Extraction.MethodDecodeError Method :=
+                (Method.ofClosed? profile environment links reachable closed storage).map fun method =>
+                  { method with {{update}} }
+            cil_decoded_method {{name}}{{call.Groups[1].Value}} := {{decoder}}{{source[(call.Index + call.Length)..]}}
+            """;
+    }
+
+    /// <summary>
+    /// `source` with decoded method `method` declaring its closed definition's return type with `atom` replaced by
+    /// `replacement`, through a forged decoder.
+    /// </summary>
+    static string ForgeDecodedReturnType(string source, int method, string atom, string replacement)
+    {
+        var closed = ClosedReturnType.Matches(source)
+            .FirstOrDefault(match => match.Groups["number"].Value == $"{method}");
+        var returnType = closed?.Groups["type"].Value ?? "";
+        if (!returnType.Contains(atom, StringComparison.Ordinal))
+            throw new InvalidOperationException($"method{method}Closed returns no {atom}");
+        return ForgeDecodedMethod(source, method, "declared := { method.declared with returnType := " +
+            returnType.Replace(atom, replacement, StringComparison.Ordinal) + " }");
+    }
+
+    /// <summary>
+    /// `source` with the link of the call at `pc` of method `method` changed to `link`: the definition the method's
+    /// link table names.
+    /// </summary>
+    static string ForgeLink(string source, int method, int pc, string link)
+    {
+        var definition = MethodLink.Matches(source).FirstOrDefault(match =>
+                match.Groups[1].Value == $"{method}" && match.Groups[2].Value == $"{pc}")
+            ?? throw new InvalidOperationException($"method{method} has no link at pc {pc}");
+        return source[..definition.Index] + $"@[cil_code] def method{method}Link{pc} : Link := {link}" +
+            source[(definition.Index + definition.Length)..];
+    }
+
+    /// <summary>
+    /// The arguments of method `method`'s feature-flow obligation that a decided-false report prints on one line,
+    /// naming that method's raw definition and certificate.
+    /// </summary>
+    static string FeatureObligation(object method) =>
+        $"method{method}Closed profile method{method}FeatureStates method{method}Reachable";
+
+    /// <summary>The single binding of this kind in a fixture method.</summary>
+    static (int Pc, string Link) SingleLink(string source, int method, string constructor)
+    {
+        var binding = MethodLink.Matches(source).Single(match => match.Groups[1].Value == $"{method}" &&
+            match.Groups["link"].Value.StartsWith(constructor, StringComparison.Ordinal));
+        return (int.Parse(binding.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture),
+            binding.Groups["link"].Value);
+    }
+
+    /// <summary>The method and pc of each call whose link in `source` is the direct link to method `callee`.</summary>
+    static (int Method, int Pc)[] DirectLinks(string source, int callee) => [.. DirectLink.Matches(source)
+        .Where(match => match.Groups[3].Value == $"{callee}")
+        .Select(match => (int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture),
+            int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)))];
 
     // Keep emitted definitions intact and select one independent validator obligation.
     // Its unchanged form must also be compiled as a positive control by the caller.
     static string NarrowEvidence(string source, string theorem)
     {
         var found = 0;
-        var result = Regex.Replace(source,
-            @"(?m)^(?:@\[[^\r\n]*\] )?theorem (\w+) [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", match =>
+        var result = GeneratedTheorem.Replace(source, match =>
             {
                 // Byte-backed identity definitions carry these checked UTF-8 witnesses.
-                if (Regex.IsMatch(match.Groups[1].Value, @"\AexternalIdentity(?:Chunk\d+|\d+Bytes)_valid\z"))
+                if (IdentityWitnessName.IsMatch(match.Groups[1].Value))
+                    return match.Value;
+                // A body obligation reads its module's lookup tables through their equality with the metadata, the
+                // identity of each assembly it reaches through the assembly's own proof, and the pins through theirs.
+                if (match.Groups[1].Value != theorem &&
+                    RetainedObligationName.IsMatch(match.Groups[1].Value) &&
+                    !theorem.EndsWith("_tables_valid", StringComparison.Ordinal))
                     return match.Value;
                 if (match.Groups[1].Value != theorem) return "";
                 found++;
-                return match.Value;
+                // Isolated layout, object and scalar checks decide the fixture's complete obligation.
+                if (match.Value.Contains(" : Extraction.MethodLayoutsValid ", StringComparison.Ordinal) ||
+                    match.Value.Contains(" : Extraction.ObjectOperandsValid ", StringComparison.Ordinal) ||
+                      match.Value.Contains(" : Extraction.RuntimeModelsAgree ", StringComparison.Ordinal) ||
+                    match.Value.Contains(" : Extraction.ScalarFlowValid ", StringComparison.Ordinal))
+                    return TheoremHead.Replace(match.Value, "$1 := by decide +kernel");
+                return InstructionCheckProjection.Replace(match.Value, " := by decide +kernel");
             });
         if (found != 1) throw new InvalidOperationException("Missing unique evidence obligation: " + theorem);
-        return Regex.Replace(result, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
+        result = ResolutionFactsCommand.Replace(result, "");
+        return AxiomsCommand.Replace(result, "");
     }
+
+    /// <summary>Exchange call and newobj at a constructor site, preserving its exact member.</summary>
+    static string ForgeConstructorOpcode(string source, int pc) => ForgeModelEmission(source, pc, $$"""
+        match method0.code[{{pc}}]'(by decide +kernel) with
+        | .newobj ctor => .call ctor
+        | .call ctor _ => .newobj ctor
+        | original => original
+        """.ReplaceLineEndings(" "));
+
+    /// <summary>A call with the original prefixes and a changed method operand at this instruction position.</summary>
+    static string ChangedCallOperand(int pc, string fields) =>
+        $$"""
+        match (method0.code[{{pc}}]'(by decide +kernel) : CIL.Instruction) with
+        | .call method prefixes => .call { method with {{fields}} } prefixes
+        | original => original
+        """.ReplaceLineEndings(" ");
+
+    /// <summary>Check a replacement instruction at a live pc against the original call operand.</summary>
+    static string ForgeModelEmission(string source, int pc, string instruction)
+    {
+        const string inputs = "method0Closed method0Reachable method0";
+        var narrowed = NarrowEvidence(source, "method0_models_validated");
+        var changed = narrowed.Replace(inputs,
+            $$"""method0Closed method0Reachable { method0 with code := method0.code.set {{pc}} ({{instruction}}) }""",
+            StringComparison.Ordinal);
+        if (changed == narrowed) throw new InvalidOperationException("Missing model agreement inputs");
+        return changed;
+    }
+
+    /// <summary>
+    /// A theorem that the generated model fact of the call or construction at `pc` of method0 is `model`. It
+    /// elaborates only when the runtime table resolves that site to exactly `model`.
+    /// </summary>
+    static string StatedModelFact(int pc, string model) => $$"""
+
+        namespace ModelFactEvidence
+        /-- The generated model fact of the site at pc {{pc}} names the stated model. -/
+        theorem stated_model : True := by
+          have _fact : CIL.Extraction.runtimeModel _ _ _ = some ({{model}}) := Extracted.method0_model{{pc}}
+          trivial
+        #print axioms stated_model
+        end ModelFactEvidence
+
+        """;
+
+    /// <summary>`source` narrowed to its model check, stating that the model fact at `pc` is `model`.</summary>
+    static string ForgeModelFact(string source, int pc, string model) =>
+        $"{NarrowEvidence(source, "method0_models_validated")}{StatedModelFact(pc, model)}";
+
+    /// <summary>The kernel rejected the emitted argument evidence at the closed method's signature.</summary>
+    static bool ClosedArgumentsMismatch(string output) => output.ReplaceLineEndings("\n").Contains(
+        "cil_kernel_rfl: the kernel does not accept the two sides as equal\n" +
+        "left:\n  Extraction.closedArguments rawLayouts method0Closed\nright:\n  some method0RawArguments",
+        StringComparison.Ordinal);
+
+    /// <summary>The rejection of a stated model fact: a type mismatch at the fact of the site at `pc`.</summary>
+    static Func<string, bool> ModelFactMismatch(int pc) => output =>
+        output.Contains("Type mismatch", StringComparison.Ordinal) &&
+        output.Contains($"method0_model{pc}", StringComparison.Ordinal);
 
     // Keep narrowed declarations and exact obligation types checked, but reuse the original
     // proof instead of reducing the same validator twice. Mutations never use these witnesses.
     static string CheckedEvidenceControl(string original, string narrowed, IEnumerable<string> theorems, int index)
     {
         // Explicit references could bypass the projected declarations and reach the original.
-        var code = Regex.Replace(narrowed, @"""(?:\\.|[^""\\])*""", "\"\"");
-        code = Regex.Replace(code, @"(?m)^(?:namespace|end) Extracted\r?$", "");
-        if (Regex.IsMatch(code, @"\bExtracted\b"))
+        var code = StringLiteral.Replace(narrowed, "\"\"");
+        code = ExtractedNamespaceLine.Replace(code, "");
+        if (ExtractedWord.IsMatch(code))
             throw new InvalidOperationException("Evidence controls require namespace-relative references.");
-        if (Regex.Matches(narrowed, @"(?m)^namespace Extracted\r?$").Count != 1 ||
-            Regex.Matches(narrowed, @"(?m)^end Extracted\r?$").Count != 1)
+        if (NamespaceExtracted.Count(narrowed) != 1 || EndExtracted.Count(narrowed) != 1)
             throw new InvalidOperationException("Missing unique evidence control namespace.");
         var witnesses = new StringBuilder();
         var audits = new StringBuilder();
         foreach (var theorem in theorems)
         {
             var witness = $"evidenceControl{index}_{theorem}";
-            var pattern = @"(?m)^(theorem " + Regex.Escape(theorem) + @" : [^\r\n]*?) := [^\r\n]*";
-            var originalMatches = Regex.Matches(original, pattern);
-            var narrowedMatches = Regex.Matches(narrowed, pattern);
-            if (narrowedMatches.Count != 1 || originalMatches.Count != 1 ||
+            Match[] Stated(string text) =>
+                [.. TheoremHead.Matches(text).Where(match => match.Groups["name"].Value == theorem)];
+            var (originalMatches, narrowedMatches) = (Stated(original), Stated(narrowed));
+            if (narrowedMatches.Length != 1 || originalMatches.Length != 1 ||
                 narrowedMatches[0].Groups[1].Value != originalMatches[0].Groups[1].Value)
                 throw new InvalidOperationException("Missing unique control obligation: " + theorem);
             var header = originalMatches[0].Groups[1].Value;
@@ -81,9 +378,9 @@ partial class Program
                 narrowed[(obligation.Index + obligation.Length)..];
             audits.AppendLine($"#print axioms EvidenceControl{index}.{theorem}");
         }
-        narrowed = Regex.Replace(narrowed, @"(?m)^import [^\r\n]+\r?\n", "");
+        narrowed = ImportCommand.Replace(narrowed, "");
         // A nested Extracted namespace can resolve missing names in the original Extracted.
-        narrowed = Regex.Replace(narrowed, @"(?m)^(?:namespace|end) Extracted\r?\n", "");
+        narrowed = ExtractedNamespaceCommand.Replace(narrowed, "");
         return witnesses + $"\nnamespace EvidenceControl{index}\nset_option autoImplicit false\n" + narrowed +
             $"\nend EvidenceControl{index}\n" + audits;
     }
@@ -107,11 +404,11 @@ partial class Program
                 if (!source.Contains("namespace Extracted\n", StringComparison.Ordinal) ||
                     !source.Contains("theorem " + cases[index].Theorem + " :", StringComparison.Ordinal))
                     throw new InvalidOperationException("Expected generated extraction evidence: " + cases[index].Path);
-                var body = Regex.Replace(source, @"^import[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*\r?$", match =>
+                var body = ImportedModule.Replace(source, match =>
                 {
                     imports.Add(match.Groups[1].Value);
                     return "";
-                }, RegexOptions.Multiline);
+                });
                 bodies.AppendLine($"namespace EvidenceCase{index}");
                 bodies.AppendLine(body);
                 bodies.AppendLine("#print axioms Extracted." + cases[index].Theorem);

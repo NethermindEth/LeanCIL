@@ -1,0 +1,31 @@
+import CIL.Extraction.DecodedMethod
+
+/-! The metadata identity of the .NET 11.0.0 Windows x64 CoreLib image. -/
+
+namespace CIL.Runtime.Net11WinX64.CoreLib
+
+open CIL CIL.Extraction
+
+/-- The assembly row and the heaps and table header used for its identity and indexes. -/
+def assembly : AssemblyMetadata := {
+  publicKeyToken := some 0x7cec85d7bea7798e
+  tableHeader := fixedBytes 20 0x000000000200050A55BFB73F011F000000FA0133 ++
+      fixedBytes 20 0x0016C40001000000CB0B00007425000029B20000 ++
+      fixedBytes 20 0xC620010042090000152600004D0F000006760000 ++
+      fixedBytes 20 0x02010000A9000000970000002D1000000C000000 ++
+      fixedBytes 20 0x2000000083040000CB1700000B1A000070130000 ++
+      fixedBytes 20 0x100000001D0A000086020000FE00000001000000 ++
+      fixedBytes 20 0x0400000031040000F01200005B160000240B0000
+  assemblyRow := fixedBytes 28 0x048000000B0000000000000001000000010000000100000000000000
+  strings := [(0, [0]), (1, bytesOf "System.Private.CoreLib" ++ [0])]
+  blobs := [(1, fixedBytes 20 0x80A0002400000480000094000000060200000024 ++
+      fixedBytes 20 0x00005253413100040000010001008D56C76F9E86 ++
+      fixedBytes 20 0x49383049F383C44BE0EC204181822A6C31CF5EB7 ++
+      fixedBytes 20 0xEF486944D032188EA1D3920763712CCB12D75FB7 ++
+      fixedBytes 20 0x7E9811149E6148E5D32FBAAB37611C1878DDC19E ++
+      fixedBytes 20 0x20EF135D0CB2CFF2BFEC3D115810C3D9069638FE ++
+      fixedBytes 20 0x4BE215DBF795861920E5AB6F7DB2E2CEEF136AC2 ++
+      fixedBytes 20 0x3D5DD2BF031700AEC232F6C6B1C785B4305C123B ++
+      fixedBytes 2 0x37AB)] }
+
+end CIL.Runtime.Net11WinX64.CoreLib

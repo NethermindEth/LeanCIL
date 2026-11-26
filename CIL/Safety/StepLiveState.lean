@@ -1,5 +1,6 @@
 import CIL.Safety.LiveState
-import CIL.Safety.StepValues
+import CIL.Safety.StaticReferences
+import CIL.Safety.LocalReferences
 import CIL.Safety.StepLocalReferences
 
 /-!
@@ -25,10 +26,12 @@ def FrameAction.StateValid (program : CIL.Program) (args : List Value) (current 
     LiveState program args frame rest memory ∧ ValuesValid memory childArgs
   | .returned values memory => LiveState program args current values memory
   | .tailCall _ values memory => LiveState program args current values memory
+  | .raise _ _ frame memory => LiveState program args frame [] memory
 
 /-- A successful step from a live state yields a state valid for its action. -/
 theorem step_live_state (program : CIL.Program) (method : Nat) (body : CIL.Method)
-    (operation : CIL.Op) (pc : Nat) (args : List Value) (frame : Frame) (stack : List Value)
+    (operation : CIL.Instruction) (pc : Nat) (args : List Value) (frame : Frame)
+    (stack : List Value)
     (m : Memory) (action : FrameAction) (state : LiveState program args frame stack m)
     (found : program[method]? = some body)
     (h : step body operation pc args frame stack m = .ok action) :
@@ -48,6 +51,8 @@ theorem step_live_state (program : CIL.Program) (method : Nat) (body : CIL.Metho
     exact ⟨memory, arguments, values, references, owned, statics⟩
   | returned result updated => exact ⟨memory, arguments, values, references, owned, statics⟩
   | tailCall callee result updated => exact ⟨memory, arguments, values, references, owned, statics⟩
+  | raise location object frame' updated =>
+    exact ⟨memory, arguments, (fun _ member => nomatch member), references, owned, statics⟩
   | call callee childArgs rest updated =>
     exact ⟨⟨memory, arguments, values.2, references, owned, statics⟩, values.1⟩
   | construct callee childArgs rest frame' temporary kind updated =>

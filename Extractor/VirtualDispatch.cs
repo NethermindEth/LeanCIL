@@ -33,9 +33,6 @@ internal static class VirtualDispatch
         var table = new List<Entry>();
         foreach (var candidate in Hierarchy(reference))
         {
-            if (candidate.Module != declaring.Module)
-                throw Rejected(reference, candidate.FullName + " overrides from another assembly, which the model " +
-                    "does not resolve.");
             if (!ObjectTypes.Is(candidate))
                 throw Rejected(reference, candidate.FullName + " derives from " + declaring.FullName +
                     " but is not an admitted class, so the table would miss its instances.");
@@ -43,7 +40,7 @@ internal static class VirtualDispatch
         }
         if (table.Count == 0)
             throw Rejected(reference, "No admitted class implements the slot.");
-        return [.. table.OrderBy(entry => entry.Class.FullName, StringComparer.Ordinal)];
+        return [.. table.OrderBy(entry => LayoutEvidence.Identity(entry.Class), StringComparer.Ordinal)];
     }
 
     /// <summary>
@@ -73,17 +70,15 @@ internal static class VirtualDispatch
     internal static IEnumerable<TypeDefinition> Hierarchy(MethodReference reference)
     {
         var declaring = reference.DeclaringType.Resolve();
-        return declaring is null ? [] : Classes(declaring.Module).Where(candidate => Derives(candidate, declaring));
+        if (declaring is null) return [];
+        return PinnedAssemblies.Active is { } pins
+            ? pins.DispatchHierarchy(declaring) : DerivedClasses([declaring.Module], declaring);
     }
 
-    // Every class of the pinned assemblies, nested ones included; without pins, the declaring module alone.
-    static IEnumerable<TypeDefinition> Classes(ModuleDefinition module)
-    {
-        IEnumerable<ModuleDefinition> modules = PinnedAssemblies.Active is { } pins
-            ? [pins.Selected, .. pins.References.Select(reference => reference.Module)] : [module];
-        return modules.SelectMany(each => each.GetTypes())
-            .Where(type => type is { IsValueType: false, IsInterface: false });
-    }
+    /// <summary>Every class in the modules, including nested classes, that derives from the slot's class.</summary>
+    internal static IEnumerable<TypeDefinition> DerivedClasses(IEnumerable<ModuleDefinition> modules,
+        TypeDefinition declaring) => modules.SelectMany(module => module.GetTypes())
+        .Where(type => type is { IsValueType: false, IsInterface: false } && Derives(type, declaring));
 
     static bool Derives(TypeDefinition candidate, TypeDefinition declaring)
     {
@@ -127,9 +122,9 @@ internal static class VirtualDispatch
 
     static bool SameSignature(MethodDefinition method, MethodDefinition slot) =>
         method.HasThis == slot.HasThis && !method.HasGenericParameters &&
-        method.ReturnType.FullName == slot.ReturnType.FullName &&
-        method.Parameters.Select(parameter => parameter.ParameterType.FullName)
-            .SequenceEqual(slot.Parameters.Select(parameter => parameter.ParameterType.FullName));
+        StructuralSignatures.Current.Type(method.ReturnType) == StructuralSignatures.Current.Type(slot.ReturnType) &&
+        method.Parameters.Select(parameter => StructuralSignatures.Current.Type(parameter.ParameterType))
+            .SequenceEqual(slot.Parameters.Select(parameter => StructuralSignatures.Current.Type(parameter.ParameterType)));
 
     // The caller names the call site; this states why its hierarchy is not modelled.
     static InvalidDataException Rejected(MethodReference reference, string detail) =>

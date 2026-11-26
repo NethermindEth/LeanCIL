@@ -75,14 +75,18 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     // The longest suite alone bounds the run; no packed job may outlast it or approach its timeout.
     Require(groups[0].Suites is [var alone] && alone == longest.Key, "The longest suite shares its job");
     foreach (var group in groups.Where(group => group.Suites.Length > 1))
-        Require(group.Suites.Length <= VerificationSelection.GroupMembers && Seconds(group) <= target &&
-            Seconds(group) <= group.Timeout * 60 / 2, "Unbounded group: " + group.Suite);
+        Require(group.Suites.Length <= VerificationSelection.GroupMembers && Seconds(group) <= target,
+            "Unbounded group: " + group.Suite);
+    // A suite alone in its job is bounded like a packed one: a job stopped before twice its measured time
+    // would fail a suite that only slowed down.
+    foreach (var group in groups)
+        Require(Seconds(group) <= group.Timeout * 60 / 2, "A job's limit is under twice its time: " + group.Suite);
     // A short job at the tail would queue behind the runner cap and finish last for no reason.
     Require(groups.Zip(groups.Skip(1)).All(pair => Seconds(pair.First) >= Seconds(pair.Second)),
         "Jobs do not start longest first");
     Require(groups.Select(group => group.Suite).Distinct().Count() == groups.Length &&
         groups.All(group => group.Suite.StartsWith(group.Suites[0], StringComparison.Ordinal) &&
-            Regex.IsMatch(group.Suite, @"\A[a-z+-]+(\+\d+more)?\z")), "A job name is ambiguous or not its first suite");
+            WorkflowPatterns.JobName.IsMatch(group.Suite)), "A job name is ambiguous or not its first suite");
     // Eight runners, with the setup every job repeats: packing must cost neither wall time nor jobs.
     const double setupSeconds = 52;
     double Wall(IEnumerable<double> jobs)
@@ -137,6 +141,9 @@ Test("test entry points", () =>
             "Binding and public-surface fixtures must select core without unrelated suites: " + path);
     }
     Equal(VerificationSelection.Select(["Tests/Loops.cs"]), ["loops"]);
+    Equal(VerificationSelection.Select(["Tests/LoopVariants/CountCallsDiscarded.lean.in"]), ["loops"]);
+    foreach (var path in new[] { "Tests/ProofCostFrontend.cs", "Tests/ProofCostDiscovery.lean" })
+        Equal(VerificationSelection.Select([path]), ["core"]);
     Equal(VerificationSelection.Select(["Tests/SteppingScaling.cs"]), ["stepping"]);
     foreach (var module in new[] { "OperationFacts", "VectorLocalCalls", "SimdCarryCalls" })
         Equal(VerificationSelection.Select([$"Tests/{module}.lean"]), ["core"]);
@@ -147,17 +154,20 @@ Test("test entry points", () =>
     Equal(VerificationSelection.Select(["Tests/WordReaderOutlines.cs"]), ["wordreader"]);
     Equal(VerificationSelection.Select(["Tests/SavedWordReaderOutlines.cs"]), ["savedwordreader"]);
     Equal(VerificationSelection.Select(["Tests/WordReaderOutlineSupport.cs"]), ["savedwordreader", "wordreader"]);
+    Equal(VerificationSelection.Select(["Tests/ProgramClosures/Proof.lean"]), ["closures"]);
     Equal(VerificationSelection.Select(["Tests/SkipInitialization.cs"]), ["unsafe"]);
     Equal(VerificationSelection.Select(["Tests/NullReferences.cs"]), ["unsafe"]);
     foreach (var name in new[] { "BatchVerification", "VerificationCache", "VerificationReuse" })
         Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["core"]);
     Equal(VerificationSelection.Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
+    Equal(VerificationSelection.Select(["Tests/MetadataDifferential.cs"]), ["evidence"]);
     Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]),
-        ["assemblies", "blocks", "dispatch", "enums", "evidence", "excluded", "generics", "intrinsics", "scaling",
-            "unsafe"]);
+        ["assemblies", "core", "dispatch", "enums", "evidence", "excluded", "generics", "imports", "intrinsics",
+            "lookups", "scaling", "unsafe"]);
     Equal(VerificationSelection.Select(["Tests/GenericOwners.cs"]), ["generics"]);
     Equal(VerificationSelection.Select(["Tests/MultiAssemblyGenerics.cs"]), ["assemblies"]);
-    Equal(VerificationSelection.Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies"]);
+    Equal(VerificationSelection.Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies", "audit", "cli"]);
+    Equal(VerificationSelection.Select(["Tests/DeepVerify.cs"]), ["audit"]);
     Equal(VerificationSelection.Select(["Tests/GenericLayouts.cs"]), ["generics"]);
     Equal(VerificationSelection.Select(["Tests/NativeManagedDispatch.cs"]), ["dispatch"]);
     Equal(VerificationSelection.Select(["Tests/NativeMethodTables.lean"]), ["dispatch"]);
@@ -172,6 +182,7 @@ Test("test entry points", () =>
     Equal(VerificationSelection.Select(["Tests/VectorStorage.lean"]), ["unsafe"]);
     // Sources compiled into the extractor change the self-admission scan, as does its baseline.
     Equal(VerificationSelection.Select(["Tests/SelfAdmissionBaseline.txt"]), ["blockers"]);
+    Equal(VerificationSelection.Select(["Tests/ExampleAdmissionBaseline.txt"]), ["blockers"]);
     // Suites run the built command, so a script compiled into it selects every suite; `leancil workspace`,
     // `watch`, contract export and verify reports are reached by no include edge.
     var everySuite = VerificationSelection.SuiteInputs().Keys.Order(StringComparer.Ordinal).ToArray();
@@ -232,7 +243,7 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves 23 leaves, 49 base cases and one discovery completion", () =>
+Test("independent export cohort map preserves 23 leaves, 51 base cases and one discovery completion", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
@@ -240,10 +251,11 @@ Test("independent export cohort map preserves 23 leaves, 49 base cases and one d
             "core.caller", "core.internal", "core.instance", "core.generic", "core.virtual", "core.static-values",
             "core.initialized", "core.imports", "core.profile", "core.reference",
             "core.bundle-location", "core.framework-change", "core.interface-text", "core.duplicate",
-            "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post"]),
+            "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post", "core.revised-contract"]),
         ["exportsaudit"] = ("audit", ["audit.proof-source", "audit.wrapper-artifact"]),
         ["exportsprotected"] = ("protected", ["protected.publication", "protected.caller", "protected.visibility"]),
-        ["exportsresolution"] = ("resolution", ["resolution.same-files", "resolution.changed-file"]),
+        ["exportsresolution"] = ("resolution", ["resolution.same-files", "resolution.changed-file",
+            "resolution.rewritten-artifact"]),
         ["exportsfullconsumer"] =
             ("consumer", ["full.consumer-explicit", "full.consumer-repeat", "full.artifact-mode"]),
         ["exportsfullordinary"] = ("ordinary", ["full.ordinary"]),
@@ -309,10 +321,10 @@ Test("independent export cohort map preserves 23 leaves, 49 base cases and one d
     ExportSuite[] all = ExportVerificationSuites.Plan();
     ExactPlan(all);
     string[] baseCases = all.Where(entry => entry.Cohort != "discovery").SelectMany(entry => entry.Cases).ToArray();
-    Require(baseCases.Length == 49 && baseCases.Distinct(StringComparer.Ordinal).Count() == 49,
+    Require(baseCases.Length == 51 && baseCases.Distinct(StringComparer.Ordinal).Count() == 51,
         "Lost or duplicate base behavior");
-    Require(all.SelectMany(entry => entry.Cases).Count() == 50 &&
-        all.SelectMany(entry => entry.Cases).Distinct(StringComparer.Ordinal).Count() == 50,
+    Require(all.SelectMany(entry => entry.Cases).Count() == 52 &&
+        all.SelectMany(entry => entry.Cases).Distinct(StringComparer.Ordinal).Count() == 52,
         "Lost or duplicate discovery completion");
     Equal(ExportVerificationSuites.DiscoveryArguments("sidecar", "caller-proof", "caller-package", "producer-package",
             "producer-proof", "interface-source"),
@@ -487,7 +499,7 @@ Test("required gate, all 192 actual Bash status combinations", () =>
     const string marker = "        run: |\n";
     var start = workflow.LastIndexOf(marker, StringComparison.Ordinal);
     Require(start >= 0, "Missing workflow gate");
-    var gate = Regex.Replace(workflow[(start + marker.Length)..], @"(?m)^ {10}", "");
+    var gate = WorkflowPatterns.StepIndent.Replace(workflow[(start + marker.Length)..], "");
     string[] statuses = ["success", "failure", "cancelled", "skipped"];
     foreach (var planned in statuses)
     foreach (var selected in new[] { "true", "false", "" })
@@ -597,4 +609,172 @@ Test("certified library binding, main republication and observability", () =>
     Require(workflow.ReplaceLineEndings("\n").Split("timeout-minutes: 3\n", StringSplitOptions.None).Length == 3,
         "Both toolchain installation attempts must have bounded timeouts");
 });
+Test("CI and suite scripts reach no repository, package source or path outside this one", () =>
+{
+    var found = ExternalSources.Scan(root, ExternalSources.CiFiles(root));
+    Require(found.Count == 0, "Reaches outside this repository:\n" + string.Join("\n", found));
+    Require(!File.Exists(Path.Combine(root, ".gitmodules")), "A submodule pulls in another repository");
+    Require(!Directory.GetFiles(root).Any(path =>
+            Path.GetFileName(path).Equals("nuget.config", StringComparison.OrdinalIgnoreCase)),
+        "A NuGet configuration can name a package source outside this repository");
+});
+Test("each way to reach another repository is found in a scratch copy of a workflow or script", () =>
+{
+    string scratch = Path.Combine(Path.GetTempPath(), "leancil-external-" + Guid.NewGuid().ToString("N"));
+    string workflowDirectory = Path.Combine(scratch, ".github", "workflows");
+    Directory.CreateDirectory(workflowDirectory);
+    Directory.CreateDirectory(Path.Combine(scratch, "scripts"));
+    try
+    {
+        string original = File.ReadAllText(Path.Combine(root, ".github/workflows/verification.yml"));
+        string copy = Path.Combine(workflowDirectory, "verification.yml");
+        File.WriteAllText(copy, original);
+        Require(ExternalSources.Scan(scratch, [copy]).Count == 0, "An unchanged copy must pass");
+        // Strings are split so that this file does not match its own rules.
+        string checkoutStep = ExternalSources.CheckoutStep.Match(original).Value;
+        Require(checkoutStep.Length > 0, "The workflow has no checkout step to mutate");
+        string indent = checkoutStep[..checkoutStep.IndexOf('-')];
+        int stepStart = original.IndexOf(checkoutStep, StringComparison.Ordinal);
+        File.WriteAllText(copy, original[..stepStart] + checkoutStep + "\n" + indent + "  with:\n" +
+            indent + "    repo" + "sitory: other/owner" + original[(stepStart + checkoutStep.Length)..]);
+        int stepLine = original[..stepStart].Count(character => character == '\n') + 3;
+        Equal(ExternalSources.Scan(scratch, [copy]),
+            [$".github/workflows/verification.yml:{stepLine}: checkout-repository"]);
+        var cases = new (string Rule, string File, string Text)[]
+        {
+            ("fetch-repository", ".github/workflows/mutant.yml",
+                "      - run: git cl" + "one https://example.test/a/b.git"),
+            ("fetch-repository", ".github/workflows/mutant.yml",
+                "      - run: git sub" + "module add https://example.test/a/b"),
+            ("fetch-repository", ".github/workflows/mutant.yml", "      - run: gh repo cl" + "one other/owner"),
+            ("fetch-repository", "scripts/Mutant.cs", "Run([\"git\", \"cl" + "one\", \"other\"]);"),
+            ("package-source", ".github/workflows/mutant.yml",
+                "      - run: dotnet restore --sou" + "rce https://feed.test"),
+            ("package-source", ".github/workflows/mutant.yml",
+                "      - run: dotnet nuget add sou" + "rce https://feed.test"),
+            ("nuget-host", "scripts/Mutant.cs", "var feed = \"https://api.nu" + "get.org/v3/index.json\";"),
+            ("other-url", ".github/workflows/mutant.yml",
+                "      - run: curl https://git" + "hub.com/other/owner/archive/main.tar.gz"),
+            ("other-url", "scripts/Mutant.cs", "var api = \"https://api.git" + "hub.com/repos/other/owner\";"),
+            ("escape", ".github/workflows/mutant.yml", "          working-directory: ../other"),
+            ("escape", ".github/workflows/mutant.yml", "          path: /tmp/other"),
+            ("escape", ".github/workflows/mutant.yml", "      - run: cd .. && ls"),
+            ("directive", "scripts/Mutant.cs", "#:include ../../other/Shared.cs"),
+            ("directive", "scripts/Mutant.cs", "#:project ../../other/Other.csproj"),
+            ("directive", "scripts/Mutant.cs", "#:package Other.Package@1.0.0"),
+        };
+        foreach (var (rule, relative, text) in cases)
+        {
+            string path = Path.Combine(scratch, relative);
+            File.WriteAllText(path, text + "\n");
+            Require(ExternalSources.Scan(scratch, [path])
+                    .Any(finding => finding.EndsWith(": " + rule, StringComparison.Ordinal)),
+                "Not found as " + rule + ": " + text);
+        }
+    }
+    finally { Directory.Delete(scratch, recursive: true); }
+});
 Console.WriteLine($"All {checks} selection checks passed.");
+
+/// <summary>Finds where workflows and suite scripts reach code or packages outside this repository.</summary>
+static partial class ExternalSources
+{
+    /// <summary>Packages a script may reference; every other package is a source outside this repository.</summary>
+    static readonly string[] AllowedPackages = ["Mono.Cecil"];
+
+    /// <summary>Accepted findings by file and rule, with why each cannot reach another repository.</summary>
+    static readonly Dictionary<(string File, string Rule), string> Exempt = new()
+    {
+        [("scripts/ConsumerVerification.cs", "fetch-repository")] =
+            "clones the dependency directories of the repository under verification into a scratch workspace",
+        [("scripts/CertifiedLibraryDonor.cs", "other-url")] =
+            "compares a pull request side with this repository by the API URL that run metadata gives",
+        [("scripts/TestFindCertifiedLibrary.cs", "other-url")] =
+            "uses other and forked repositories as fixtures that donor selection must reject",
+        [("Tests/CompilerCoverage.cs", "nuget-host")] =
+            "the advisory latest run reads the compiler package index and builds no repository",
+        [("Tests/ContractDiscovery.cs", "package-source")] =
+            "restores from a feed directory the test creates in its own scratch folder",
+    };
+
+    [GeneratedRegex(@"^\s*(-\s+)?repository\s*:")]
+    private static partial Regex CheckoutRepository { get; }
+
+    [GeneratedRegex(@"\bgit\s+(clone|submodule|remote\s+add)\b|\bgh\s+repo\s+clone\b|""(clone|submodule)""")]
+    private static partial Regex FetchRepository { get; }
+
+    [GeneratedRegex(@"(?m)^( *)- uses: actions/checkout@.*$")]
+    internal static partial Regex CheckoutStep { get; }
+
+    [GeneratedRegex(@"--sourc[e]\b|\bnuget\s+add\s+sourc[e]\b|<add\s+key=", RegexOptions.IgnoreCase)]
+    private static partial Regex PackageSource { get; }
+
+    [GeneratedRegex(@"nuget\.org", RegexOptions.IgnoreCase)]
+    private static partial Regex NugetHost { get; }
+
+    [GeneratedRegex(@"github\.com/(?!NethermindEth/LeanCIL[/""]|leanprover/elan/releases/download/v4\.2\.4/)")]
+    private static partial Regex OtherRepositoryUrl { get; }
+
+    [GeneratedRegex(@"(path|working-directory)\s*:\s*['""]?(\.\.|/|~|[A-Za-z]:)|\bcd\s+\.\.")]
+    private static partial Regex WorkflowEscape { get; }
+
+    [GeneratedRegex(@"^#:(include|project)\s+(\S+)")]
+    private static partial Regex PathDirective { get; }
+
+    [GeneratedRegex(@"^#:package\s+([^@\s]+)")]
+    private static partial Regex PackageDirective { get; }
+
+    /// <summary>Every workflow and every script or test source that a suite runs.</summary>
+    internal static IEnumerable<string> CiFiles(string root) =>
+        new[] { ".github/workflows/*.yml", ".github/workflows/*.yaml", "scripts/*.cs", "Tests/*.cs" }
+            .SelectMany(pattern => Directory.GetFiles(Path.Combine(root, Path.GetDirectoryName(pattern)!),
+                Path.GetFileName(pattern)));
+
+    /// <summary>One finding per rule broken on a line, as file:line: rule. Cost is linear in total lines.</summary>
+    internal static List<string> Scan(string root, IEnumerable<string> files)
+    {
+        var found = new List<string>();
+        foreach (string file in files)
+        {
+            string relative = Path.GetRelativePath(root, file).Replace('\\', '/');
+            bool workflow = relative.StartsWith(".github/workflows/", StringComparison.Ordinal);
+            string[] lines = File.ReadAllLines(file);
+            for (int index = 0; index < lines.Length; index++)
+                foreach (string rule in Broken(root, file, workflow, lines[index]))
+                    if (!Exempt.ContainsKey((relative, rule))) found.Add($"{relative}:{index + 1}: {rule}");
+        }
+        return found;
+    }
+
+    private static IEnumerable<string> Broken(string root, string file, bool workflow, string line)
+    {
+        if (workflow && CheckoutRepository.IsMatch(line)) yield return "checkout-repository";
+        if (workflow && WorkflowEscape.IsMatch(line)) yield return "escape";
+        if (FetchRepository.IsMatch(line)) yield return "fetch-repository";
+        if (PackageSource.IsMatch(line)) yield return "package-source";
+        if (NugetHost.IsMatch(line)) yield return "nuget-host";
+        if (OtherRepositoryUrl.IsMatch(line)) yield return "other-url";
+        var path = PathDirective.Match(line);
+        string? target = path.Success
+            ? Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, path.Groups[2].Value)) : null;
+        if (target is not null && !Within(root, target)) yield return "directive";
+        var package = PackageDirective.Match(line);
+        if (package.Success && !AllowedPackages.Contains(package.Groups[1].Value)) yield return "directive";
+    }
+
+    private static bool Within(string root, string path) =>
+        path.StartsWith(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+            StringComparison.Ordinal);
+}
+
+/// <summary>The patterns that read job names and steps of the verification workflow.</summary>
+static partial class WorkflowPatterns
+{
+    /// <summary>A job name: its first suite, then the count of the suites packed with it.</summary>
+    [GeneratedRegex(@"\A[a-z+-]+(\+\d+more)?\z")]
+    internal static partial Regex JobName { get; }
+
+    /// <summary>The indentation of a line of a step's script.</summary>
+    [GeneratedRegex(@"(?m)^ {10}")]
+    internal static partial Regex StepIndent { get; }
+}

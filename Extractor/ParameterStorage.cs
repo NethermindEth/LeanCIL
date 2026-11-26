@@ -5,11 +5,11 @@ namespace Nethermind.LeanCIL;
 
 internal static class ParameterStorage
 {
-    // Preserve first occurrence and original slot positions, including malformed duplicate homes.
-    internal static Dictionary<int, int> IndexHomes(IEnumerable<int> homes)
+    /// <summary>Frame slots follow the declared locals, in parameter-home order.</summary>
+    internal static Dictionary<int, int> IndexHomes(IEnumerable<int> homes, int localCount)
     {
         var positions = new Dictionary<int, int>();
-        var position = 0;
+        var position = localCount;
         foreach (var argument in homes) positions.TryAdd(argument, position++);
         return positions;
     }

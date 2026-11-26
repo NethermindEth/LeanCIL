@@ -8,7 +8,8 @@ arrays through these accessors. Core's `xs[i]!`, `Expr.getArg!`, `Expr.appArg!` 
 `Expr.appFn!` return a default value after printing a panic if the term has an unexpected
 shape; the caller then continues with that value. Each accessor here either reports
 the absent part as `none`, for code that probes a term's shape, or fails with an error naming
-its reader and the term, for code that has committed to a shape.
+its reader and the term, for code that has committed to a shape. `addFact` adds a proved
+hypothesis to a goal for the tactics that restate facts at each step.
 -/
 
 namespace CIL
@@ -30,11 +31,6 @@ def argument? (term : Expr) (index : Nat) : Option Expr :=
 /-- The last argument of `term`; `none` when `term` is not an application. -/
 def lastArgument? : Expr → Option Expr
   | .app _ argument => some argument
-  | _ => none
-
-/-- What `term` applies to its last argument; `none` when `term` is not an application. -/
-def appliedFunction? : Expr → Option Expr
-  | .app function _ => some function
   | _ => none
 
 /-- The arguments of `term` when it applies the constant `function` to exactly `arity`
@@ -61,13 +57,6 @@ def lastArgument (reader : String) (term : Expr) : m Expr :=
   | some argument => pure argument
   | none => throwError "{reader}: expected an application, but found{indentExpr term}"
 
-/-- What `term` applies to its last argument, or an error from `reader` showing the term that
-    is not an application. -/
-def appliedFunction (reader : String) (term : Expr) : m Expr :=
-  match appliedFunction? term with
-  | some function => pure function
-  | none => throwError "{reader}: expected an application, but found{indentExpr term}"
-
 /-- The entry of `entries` at `index`, or an error from `reader` giving the number of entries
     there are. -/
 def entryAt {α : Type} (reader : String) (entries : Array α) (index : Nat) : m α :=
@@ -77,5 +66,46 @@ def entryAt {α : Type} (reader : String) (entries : Array α) (index : Nat) : m
       {entries.size}"
 
 end Committed
+
+/-- The name `base`, or `base_index` from the first suffix on, for the hypotheses a step
+    introduces. -/
+def suffixedName (index : Nat) (base : String) : Name :=
+  Name.mkSimple (if index == 0 then base else s!"{base}_{index}")
+
+/-- The least suffix at which no name of `bases` is in use in `context`, found in one pass over
+    the context; probing each suffix in turn would scan the context once per suffix. -/
+def firstUnusedSuffix (context : LocalContext) (bases : Array String) : Nat := Id.run do
+  let mut used : Std.HashSet Nat := {}
+  for declaration in context do
+    let .str .anonymous text := declaration.userName | continue
+    for base in bases do
+      if text == base then
+        used := used.insert 0
+      else if let some digits := text.dropPrefix? (base ++ "_") then
+        let digits := digits.toString
+        -- Only the spelling `suffixedName` produces counts, not `base_01`.
+        if let some suffix := digits.toNat? then
+          if suffix != 0 && toString suffix == digits then used := used.insert suffix
+  let mut index := 0
+  while used.contains index do
+    index := index + 1
+  return index
+
+open Meta in
+/-- Adds the hypothesis `name : type`, proved by `proof`, to `goal`, and returns it with the goal
+    that follows. The proof term is `have name : type := proof; rest`, so `proof` occurs once.
+    `assert` followed by `intro` gives the same goal, but instantiating it substitutes `proof` for
+    each use of the hypothesis; a fact restated from the previous one at every step then carries
+    every earlier proof, under a different number of binders each time, so the term of a walk
+    grows with the square of its steps. -/
+def addFact (goal : MVarId) (name : Name) (type proof : Expr) : MetaM (FVarId × MVarId) :=
+  goal.withContext do
+    let target ← goal.getType
+    withLocalDeclD name type fun fact => do
+      let rest ← mkFreshExprSyntheticOpaqueMVar target (← goal.getTag)
+      let .lam _ _ body _ ← mkLambdaFVars #[fact] rest
+        | throwError "addFact: abstracting {name} gave no binder"
+      goal.assign (.letE name type proof body (nondep := true))
+      return (fact.fvarId!, rest.mvarId!)
 
 end CIL

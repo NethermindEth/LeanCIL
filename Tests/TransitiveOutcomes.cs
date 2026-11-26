@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -15,7 +20,7 @@ string Project(string name, string? reference, string body)
     var directory = Path.Combine(root, name);
     Directory.CreateDirectory(directory);
     File.WriteAllText(Path.Combine(directory, name + ".csproj"),
-        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework>" +
+        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net11.0</TargetFramework>" +
         "<AssemblyName>OutcomeFixture." + name + "</AssemblyName><Optimize>true</Optimize></PropertyGroup>" +
         (reference is null ? "" : "<ItemGroup><ProjectReference Include=\"../" + reference + "/" + reference +
             ".csproj\" /></ItemGroup>") + "</Project>");
@@ -66,7 +71,7 @@ const string forwardProof = """
     theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
         (fun linked => DerivedInterface.percentBounded.Holds linked 0) := by
       intro linked links imported value memory formed
-      have found : linked[0]? = some Extracted.method0 := links.found Extracted.lookup0
+      have found : linked[0]? = some Extracted.method0 := links.found Extracted.program_method0
       have holds : DerivedInterface.percentBounded.Holds linked 1 := imported
       dsimp only [DerivedInterface.percentBounded]
       cases raised : DerivedInterface.percentRaises value with

@@ -44,7 +44,7 @@ starts it with `Error:`. Each Lean error cites `file:line:column` in the file yo
 | `extraction` | Extracting the variant's method failed | Read `error`; run `leancil extract` on the built assembly |
 | `program comparison` | The variant's program does not relate to production's, or to its `programOf` variant's, as its `program` says | Fix the fixture case, or `program` if the change is intended |
 | `refutation template`, `proof template` | The template is missing, or its placeholders and `values` differ | Add the missing values or placeholders |
-| `statement identity` | The kernel did not accept the variant's theorem at production's statement, or its refutation at that statement's negation, or production did not verify | Read both statements in `error`; state the variant's theorem as production's, naming declarations from a module both proofs import |
+| `statement identity` | The kernel did not accept the variant's theorem at production's statement, or a refutation (a variant's, or a `verify-batch` request's) at the `Refuted` form of the statement it refutes, that statement states no contract's `Holds`, or its request did not verify | Read both statements in `error`; state the theorem as the statement it is compared with, or a refutation as that statement's counterexample predicate, naming declarations from a module both proofs import |
 | `binding generation` | A binding catalog is invalid: a variable no placeholder uses, a placeholder without a value, a duplicate gate, conflicting sources at one path or an unsafe path | Correct the catalog entry the diagnostic names |
 
 ## failed.json
@@ -64,8 +64,8 @@ repeats the request
 | `elaboration-error` | A Lean error other than an unsolved goal or a resource limit: a failed tactic, a missing import, an unknown name | Read the error |
 | `unsolved-goal` | A tactic block left goals open, or a `--goals` run found open goals | Rerun with `--goals` |
 | `resource-limit` | Heartbeats or recursion depth ran out; `resource` names which | Confirm the method and profile first: a proof run on another method or of a false property also exhausts limits. Then split the proof or supply the missing fact |
-| `replay-or-audit-rejected` | Kernel replay or the axiom audit rejected the proof | Remove `sorry` and extra axioms |
-| `refutation` | The theorem verified, and it states `Not (contract.Holds ...)` | Report that the contract is refuted; `verified.json` certifies the refutation |
+| `replay-or-audit-rejected` | Kernel replay or the axiom audit rejected the proof, or the theorem states `Not (contract.Holds ...)` | Remove `sorry` and extra axioms; state a refutation as `contract.Refuted ...` |
+| `refutation` | The theorem verified, and it states `contract.Refuted ...`, a definite counterexample | Report that the contract is refuted; `verified.json` certifies the refutation |
 | `unclassified` | Anything else, such as a missing tool | Read `message` |
 
 An unsolved goal or a failed tactic means the proof is incomplete or the property is false, and
@@ -92,7 +92,7 @@ and [traces](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#trac
 | Message | Meaning | Next action |
 | --- | --- | --- |
 | `No method matches selector`, `Ambiguous method selector ... Candidates:` | The selector names no method, or several | Copy the signature from `leancil list` or a candidate, with its parameter list |
-| `Unsupported assembly identity, target framework or build configuration` | The assembly is not a Release, IL-only .NET 10 build, or `--assembly` names another assembly | Build with `-c Release` for `net10.0` |
+| `Unsupported assembly identity, target framework or build configuration` | The assembly is not a Release, IL-only .NET 11 build, or `--assembly` names another assembly | Build with `-c Release` for `net11.0` |
 | `Unsupported static initialisation: T has a static constructor` | The method's type has a static constructor | Ask the user whether every caller runs it first; only then pass `--assume-initialized T` and report it as an assumption |
 | `Unsupported ...` or `Recursive managed dependency` at `metadata and CIL validation` | The named instruction, call, type or signature is outside the supported subset | Report it. `leancil blockers` lists every blocker of a list of methods ([blockers](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#report-extraction-blockers)) |
 | `Stale or mismatched verification artifact: assembly has changed since extraction.` | The DLL was rebuilt after `extract` | Run `extract` again. `verify` does so itself and prints `Re-extracted <directory>: the assembly changed since extraction.` |
@@ -112,11 +112,11 @@ and [traces](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#trac
 | Lean error | Meaning | Next action |
 | --- | --- | --- |
 | `cannot step pc N (op) at memory M` | A loop tactic lacks a fact for that instruction; the message's last line, `Supply ...`, names it | Prove that fact and pass it in the tactic's fact list |
-| `pc N is a call (op); cross it with cil_loop_call` | `cil_loop_steps` or `cil_loop_finish` reached a call | Use `cil_loop_advance`, then `cil_loop_call holds input at site` |
+| `pc N is a call (op); cross it with cil_loop_call` | `cil_loop_steps` or `cil_loop_finish` reached a linked call | Use `cil_loop_advance`, then `cil_loop_call holds input at site` |
 | `target state not matched at pc N` | The path reached the target pc with another frame, stack or memory | State the fact or the target in the reached form the message shows |
 | A stopped walk with `if c then target else next` as the pc, or `cil_lookup: undecided branch` | No fact decides the branch condition | Pass `c = 0` or its negation, or `split` and resume in each case |
 | `Snapshot stepping took no step; justify the local premises` | The snapshot form found no home, write access or `WellFormed` fact for the first local store | Put those premises in context ([snapshot walks](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#walk-local-stores-and-loads-with-snapshots)) |
-| `cil_body: rfl could not prove the method-body binding` | The expected body differs from the extracted one; the message shows the first difference | Update the expected body, or bind by signature with `bind_method` |
+| `cil_body: rfl could not prove the method-body binding` | The expected body differs from the extracted one; the message shows the first difference. A `field declared:`, `field environment:` or `field links:` line means the body lacks the extraction's signature, layout tables or call links | Update the expected body; build it with `Extracted.methodN.withCode code` so it keeps the extraction's `declared` and `environment` and takes the links its code implies, then set `links` after it with the link of each `call` and `newobj`, which imply none, and `staticSites` when the body reads statics, since `withCode` resets both; or bind by signature with `bind_method` |
 | `no extracted method has signature` | A `bind_method` or `bind_callee` signature is not in this extraction; the message lists the extracted methods with that name | Copy a listed signature |
 | `Case tag ... not found` | A `case` names no open goal; the message lists the open tags | Use a listed tag |
 | ``Tactic `rfl` failed`` on an `invoke` equality | The stated result is not what the method computes for those arguments, or the fuel literal is smaller than the number of steps the run takes | Compare the statement with the C#; raise the fuel |

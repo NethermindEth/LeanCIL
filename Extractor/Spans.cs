@@ -3,13 +3,9 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// Folds `stloc s; ldloca s` over a ReadOnlySpan<T> local so the span stays on the stack
-// as the receiver of the next span call. Reused locals retain their typed span storage.
+// Span types, their element widths and the span members and constructors the runtime models cover.
 internal static class Spans
 {
-    internal sealed record Analysis(HashSet<Instruction> Operands, HashSet<Instruction> Interior,
-        Dictionary<Instruction, string> Constructors);
-
     // Shape checks do not select an architecture or recompute aggregate layouts.
     internal static bool Is(TypeReference type) =>
         type is GenericInstanceType span && span.ElementType.FullName is "System.Span`1" or "System.ReadOnlySpan`1" &&
@@ -40,105 +36,203 @@ internal static class Spans
     internal static bool Writable(TypeReference type) =>
         type is GenericInstanceType { ElementType.FullName: "System.Span`1" };
 
-    private sealed class Architectures
+    /// <summary>The array overloads of AsSpan preserve the identity and checked layout of the element.</summary>
+    internal static bool ArrayExtension(MethodReference reference, string architecture)
     {
-        internal readonly Dictionary<string, Analysis> Results = new(StringComparer.Ordinal);
+        if (reference.Name != "AsSpan" || reference.DeclaringType is TypeSpecification ||
+            reference.DeclaringType.FullName != "System.MemoryExtensions" ||
+            reference.HasThis || reference.ExplicitThis ||
+            !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemMemory) ||
+            reference is not GenericInstanceMethod { GenericArguments.Count: 1 } method ||
+            method.ElementMethod.CallingConvention != MethodCallingConvention.Generic ||
+            method.ElementMethod.GenericParameters.Count != 1 || method.Parameters.Count is < 1 or > 3)
+            return false;
+
+        var variable = method.ElementMethod.GenericParameters[0];
+        if (method.Parameters[0].ParameterType is not ArrayType { IsVector: true } array ||
+            array.ElementType != variable || method.ReturnType is not GenericInstanceType result ||
+            result.ElementType.FullName != "System.Span`1" || result.GenericArguments.Count != 1 ||
+            result.GenericArguments[0] != variable ||
+            !RuntimeModels.ExactScope(result.ElementType, PlatformAssemblies.SystemRuntime) ||
+            method.Parameters.Skip(1).Any(parameter => parameter.ParameterType.MetadataType != MetadataType.Int32 ||
+                !RuntimeModels.ExactScope(parameter.ParameterType, PlatformAssemblies.SystemRuntime)))
+            return false;
+
+        if (Arrays.Storage(method.GenericArguments[0], architecture) is null) return false;
+        RuntimeModels.ValidateSignature(reference, architecture);
+        return true;
     }
 
-    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, Architectures> cache = new();
+    static bool OwnerElement(TypeReference type) =>
+        type is GenericParameter { Type: GenericParameterType.Type, Position: 0 };
 
-    internal static Analysis Analyze(MethodDefinition method, FeatureProfile profile)
+    /// <summary>A supported span constructor at its original call site.</summary>
+    internal static bool ConstructorOperation(MethodReference method, string architecture)
     {
-        var results = cache.GetValue(method, static _ => new()).Results;
-        if (!results.TryGetValue(profile.Architecture, out var analysis))
+        if (method.Name != ".ctor" || !method.HasThis || method.ExplicitThis || method.HasGenericParameters ||
+            method is GenericInstanceMethod || method.CallingConvention != MethodCallingConvention.Default ||
+            method.ReturnType.MetadataType != MetadataType.Void ||
+            method.DeclaringType is not GenericInstanceType { GenericArguments.Count: 1 } owner ||
+            owner.ElementType.FullName is not ("System.Span`1" or "System.ReadOnlySpan`1") ||
+            !RuntimeModels.ExactScope(owner.ElementType, PlatformAssemblies.SystemRuntime)) return false;
+        var element = owner.GenericArguments[0];
+        if (ElementWidth(element, architecture) is null) return false;
+        var parameters = method.Parameters;
+        var supported = parameters switch
         {
-            analysis = Compute(method, profile);
-            results.Add(profile.Architecture, analysis);
-        }
-        return analysis;
+            [{ ParameterType: ByReferenceType byref }] when OwnerElement(byref.ElementType) =>
+                true,
+            [{ ParameterType: PointerType { ElementType.MetadataType: MetadataType.Void } },
+                { ParameterType.MetadataType: MetadataType.Int32 }] =>
+                true,
+            _ when parameters.Count is 1 or 3 && parameters[0].ParameterType is ArrayType { IsVector: true } array &&
+                OwnerElement(array.ElementType) &&
+                parameters.Skip(1).All(parameter => parameter.ParameterType.MetadataType == MetadataType.Int32) &&
+                Arrays.Storage(element, architecture) is not null => true,
+            _ => false
+        };
+        if (supported) RuntimeModels.ValidateSignature(method, architecture);
+        return supported;
     }
 
-    static bool Store(Instruction i) => i.OpCode.Code is Code.Stloc or Code.Stloc_S or Code.Stloc_0 or Code.Stloc_1 or Code.Stloc_2 or Code.Stloc_3;
-    static bool Address(Instruction i) => i.OpCode.Code is Code.Ldloca or Code.Ldloca_S;
-    static bool Load(Instruction i) => i.OpCode.Code is Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3;
-    static bool Push(Instruction? i) => i is not null && (Load(i) || i.OpCode.Code is Code.Ldarg or Code.Ldarg_S or
-        Code.Ldarg_0 or Code.Ldarg_1 or Code.Ldarg_2 or Code.Ldarg_3 or Code.Ldc_I4 or Code.Ldc_I4_S or Code.Ldc_I4_M1 ||
-        i.OpCode.Code is >= Code.Ldc_I4_0 and <= Code.Ldc_I4_8);
-    static bool Member(Instruction? i, string name) => i is { OpCode.Code: Code.Call, Operand: MethodReference callee } &&
-        callee.HasThis && callee.Name == name && Is(callee.DeclaringType);
+    static bool DeclaredSpan(TypeReference type, string owner) =>
+        type is GenericInstanceType { GenericArguments.Count: 1 } span &&
+        span.ElementType.FullName == owner && OwnerElement(span.GenericArguments[0]);
 
-    static Analysis Compute(MethodDefinition method, FeatureProfile profile)
+    static bool ElementReference(TypeReference type, bool writable)
     {
-        var analysis = new Analysis([], [], []);
-        var uses = new int[method.Body.Variables.Count];
-        foreach (var instruction in method.Body.Instructions)
-            if (Store(instruction) || Address(instruction) || Load(instruction))
-                uses[FeatureConstants.Local(instruction)]++;
-        foreach (var i in method.Body.Instructions)
+        if (!writable)
         {
-            if (!(Store(i) || Address(i) || Load(i)) ||
-                !Is(method.Body.Variables[FeatureConstants.Local(i)].VariableType) ||
-                analysis.Operands.Contains(i))
-                continue;
-            var local = FeatureConstants.Local(i);
-            if (Address(i) && Constructor(i, method.Body.Variables[local].VariableType, profile) is { } constructor)
-            {
-                analysis.Operands.Add(i);
-                for (var interior = i.Next; interior is not null; interior = interior.Next)
-                {
-                    analysis.Interior.Add(interior);
-                    if (interior != constructor.Call) continue;
-                    analysis.Constructors.Add(interior, $".initializeSpanLocal {local} ({constructor.Descriptor})");
-                    break;
-                }
-                continue;
-            }
-            if (uses[local] != 2)
-                continue;
-            // The receiver is read once: by get_Length, or by get_Item after one index push.
-            if (!Store(i) || i.Next is not { } address || !Address(address) || FeatureConstants.Local(address) != FeatureConstants.Local(i) ||
-                !(Member(address.Next, "get_Length") || (Push(address.Next) && Member(address.Next!.Next, "get_Item"))))
-                continue;
-            analysis.Operands.Add(i);
-            analysis.Operands.Add(address);
-            analysis.Interior.Add(address);
+            if (type is not RequiredModifierType
+                { ModifierType.FullName: "System.Runtime.InteropServices.InAttribute" } modifier) return false;
+            type = modifier.ElementType;
         }
-        return analysis;
+        return type is ByReferenceType reference && OwnerElement(reference.ElementType);
     }
 
-    // The local address cannot escape: only bounded single-value pushes precede its exact constructor.
-    static (Instruction Call, string Descriptor)? Constructor(Instruction address, TypeReference localType,
-        FeatureProfile profile)
+    /// <summary>The element and access mode of a span created from a vector array at this site.</summary>
+    internal static (Arrays.Element Element, bool Writable)? ArrayView(Instruction site, string architecture, bool wholeOnly = false)
     {
-        if (address.Next is { OpCode.Code: Code.Initobj, Operand: TypeReference initialized } reset)
-        {
-            if (MethodSpecialization.SignatureType(initialized) != MethodSpecialization.SignatureType(localType))
-                throw new InvalidDataException("Span default type does not match its local");
-            return Width(localType, profile.Architecture) is int width
-                ? (reset, $".empty {width} {Writable(localType).ToString().ToLowerInvariant()}") : null;
-        }
-        var call = address.Next;
-        var count = 0;
-        while (count < 3 && (Push(call) || call?.OpCode.Code == Code.Ldnull))
-        {
-            count++;
-            call = call!.Next;
-        }
-        if (call is not { OpCode.Code: Code.Call, Operand: MethodReference reference } ||
-            reference.Name != ".ctor" || reference.DeclaringType.FullName != localType.FullName ||
-            reference.Parameters.Count != count)
-            return null;
-        var operation = InstructionTranslation.RuntimeModel(reference, profile);
-        if (operation == ".memory .spanCreate") return (call, ".reference 1 false");
-        const string array = ".memory (.arraySpan ";
-        const string pointer = ".memory (.spanFromReference ";
-        const string single = ".memory (.spanSingleReference ";
-        if (operation?.StartsWith(array, StringComparison.Ordinal) == true)
-            return (call, ".array " + operation[array.Length..^1]);
-        if (operation?.StartsWith(pointer, StringComparison.Ordinal) == true)
-            return (call, ".reference " + operation[pointer.Length..^1]);
-        if (operation?.StartsWith(single, StringComparison.Ordinal) == true)
-            return (call, ".singleReference " + operation[single.Length..^1]);
+        if (site.Operand is not MethodReference method ||
+            method.Parameters.Count == 0 || wholeOnly && method.Parameters.Count != 1 ||
+            method.Parameters[0].ParameterType is not ArrayType { IsVector: true }) return null;
+        if (site.OpCode.Code == Code.Call && method is GenericInstanceMethod extension &&
+            ArrayExtension(extension, architecture))
+            return (Arrays.Storage(extension.GenericArguments[0], architecture)!, true);
+        if (method.DeclaringType is not GenericInstanceType owner) return null;
+        if (site.OpCode.Code == Code.Newobj && ConstructorOperation(method, architecture) ||
+            site.OpCode.Code == Code.Call && method.Name == "op_Implicit" && Member(method, architecture))
+            return (Arrays.Storage(owner.GenericArguments[0], architecture)!, Writable(owner));
         return null;
+    }
+
+    /// <summary>The element width of the specified overload at an original, modelled span call.</summary>
+    internal static int? MemberWidth(Instruction site, string name, int parameterCount, string architecture)
+    {
+        if (site.OpCode.Code != Code.Call || site.Operand is not MethodReference { DeclaringType: GenericInstanceType owner } method ||
+            method.Name != name || method.Parameters.Count != parameterCount ||
+            !Member(method, architecture)) return null;
+        return ElementWidth(owner.GenericArguments[0], architecture);
+    }
+
+    /// <summary>A retained span member uses the element of its closed receiver.</summary>
+    internal static bool Member(MethodReference method, string architecture)
+    {
+        if (method.DeclaringType is not GenericInstanceType { GenericArguments.Count: 1 } owner ||
+            owner.ElementType.FullName is not ("System.Span`1" or "System.ReadOnlySpan`1") ||
+            method.HasGenericParameters || method is GenericInstanceMethod || method.ExplicitThis ||
+            method.CallingConvention != MethodCallingConvention.Default ||
+            method.HasThis == (method.Name is "get_Empty" or "op_Implicit") ||
+            !RuntimeModels.ExactScope(owner.ElementType, PlatformAssemblies.SystemRuntime)) return false;
+
+        var name = owner.ElementType.FullName;
+        var writable = Writable(owner);
+        var parameters = method.Parameters;
+        var result = method.ReturnType;
+        var element = owner.GenericArguments[0];
+        if (method.Name is not ("get_Item" or "get_Length" or "Slice" or "get_IsEmpty" or
+            "GetPinnableReference" or "op_Implicit" or "get_Empty" or "Clear" or "Fill" or "CopyTo" or "TryCopyTo"))
+            return false;
+        if (ElementWidth(element, architecture) is null) return false;
+        var supported = method.Name switch
+        {
+            "Clear" when writable && parameters.Count == 0 && result.MetadataType == MetadataType.Void =>
+                true,
+            "Fill" when writable && parameters.Count == 1 && OwnerElement(parameters[0].ParameterType) &&
+                result.MetadataType == MetadataType.Void => true,
+            "CopyTo" or "TryCopyTo" when parameters.Count == 1 &&
+                DeclaredSpan(parameters[0].ParameterType, "System.Span`1") &&
+                result.MetadataType == (method.Name == "CopyTo" ? MetadataType.Void : MetadataType.Boolean) =>
+                true,
+            "get_Item" when parameters is [{ ParameterType.MetadataType: MetadataType.Int32 }] &&
+                ElementReference(result, writable) => true,
+            "get_Length" when parameters.Count == 0 && result.MetadataType == MetadataType.Int32 => true,
+            "Slice" when parameters.Count is 1 or 2 && DeclaredSpan(result, name) &&
+                parameters.All(parameter => parameter.ParameterType.MetadataType == MetadataType.Int32) =>
+                true,
+            "get_IsEmpty" when parameters.Count == 0 && result.MetadataType == MetadataType.Boolean =>
+                true,
+            "GetPinnableReference" when parameters.Count == 0 && ElementReference(result, writable) =>
+                true,
+            "get_Empty" when parameters.Count == 0 && DeclaredSpan(result, name) => true,
+            "op_Implicit" when parameters is [{ ParameterType: ArrayType { IsVector: true } array }] &&
+                OwnerElement(array.ElementType) && DeclaredSpan(result, name) &&
+                Arrays.Storage(element, architecture) is not null => true,
+            _ => false
+        };
+        if (!supported && !(method.Name == "op_Implicit" && writable && parameters.Count == 1 &&
+            DeclaredSpan(parameters[0].ParameterType, name) && DeclaredSpan(result, "System.ReadOnlySpan`1")))
+            return false;
+        RuntimeModels.ValidateSignature(method, architecture);
+        return true;
+    }
+
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, HashSet<Instruction>>
+        windows = new();
+
+    /// <summary>
+    /// The span constructor calls whose receiver is a span home: the address of a local or parameter of the
+    /// constructed type, then one simple push per parameter, at most three, and no branch target after the address.
+    /// </summary>
+    internal static HashSet<Instruction> ConstructorCalls(MethodDefinition method) =>
+        windows.GetValue(method, static method => Windows(method));
+
+    static bool Push(Instruction i) => i.OpCode.Code is Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or
+        Code.Ldloc_2 or Code.Ldloc_3 or Code.Ldarg or Code.Ldarg_S or Code.Ldarg_0 or Code.Ldarg_1 or Code.Ldarg_2 or
+        Code.Ldarg_3 or Code.Ldc_I4 or Code.Ldc_I4_S or Code.Ldc_I4_M1 or Code.Ldnull ||
+        i.OpCode.Code is >= Code.Ldc_I4_0 and <= Code.Ldc_I4_8;
+
+    /// <summary>The declared type of the local or parameter whose home <paramref name="address"/> pushes.</summary>
+    internal static TypeReference? AddressedType(Instruction? address) => address switch
+    {
+        { OpCode.Code: Code.Ldloca or Code.Ldloca_S, Operand: VariableDefinition local } => local.VariableType,
+        { OpCode.Code: Code.Ldarga or Code.Ldarga_S, Operand: ParameterDefinition parameter } =>
+            parameter.ParameterType,
+        _ => null
+    };
+
+    static HashSet<Instruction> Windows(MethodDefinition method)
+    {
+        var instructions = new InstructionIndex(method);
+        HashSet<Instruction> calls = [];
+        foreach (var call in method.Body.Instructions)
+        {
+            if (call is not { OpCode.Code: Code.Call, Operand: MethodReference { Name: ".ctor" } reference } ||
+                !Is(reference.DeclaringType) || reference.Parameters.Count > 3 || instructions.IsTarget(call))
+                continue;
+            var address = call.Previous;
+            var pushes = 0;
+            while (pushes < reference.Parameters.Count && address is not null && Push(address) &&
+                !instructions.IsTarget(address))
+            {
+                pushes++;
+                address = address.Previous;
+            }
+            var signatures = StructuralSignatures.Current;
+            if (pushes == reference.Parameters.Count && AddressedType(address) is { } addressed &&
+                signatures.Type(addressed) == signatures.Type(reference.DeclaringType))
+                calls.Add(call);
+        }
+        return calls;
     }
 }

@@ -13,6 +13,18 @@ public static class VectorFields
     public struct Holder256 { public byte Prefix; public Vector256<ulong> Value; }
 
     [StructLayout(LayoutKind.Sequential)]
+    public struct Bytes128 { public byte Prefix; public Vector128<byte> Value; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Ints128 { public byte Prefix; public Vector128<int> Value; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct UInts256 { public byte Prefix; public Vector256<uint> Value; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Longs256 { public byte Prefix; public Vector256<long> Value; }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct Nested256 { public byte Prefix; public Holder256 Value; }
 
     [StructLayout(LayoutKind.Explicit, Pack = 1, Size = 35)]
@@ -24,6 +36,10 @@ public static class VectorFields
 
     public static Vector128<ulong> Read128(Holder128 value) => value.Value;
     public static Vector256<ulong> Read256(Holder256 value) => value.Value;
+    public static Vector128<byte> ReadBytes128(Bytes128 value) => value.Value;
+    public static Vector128<int> ReadInts128(Ints128 value) => value.Value;
+    public static Vector256<uint> ReadUInts256(UInts256 value) => value.Value;
+    public static Vector256<long> ReadLongs256(Longs256 value) => value.Value;
     public static Vector128<ulong> Write128(ref Holder128 holder, Vector128<ulong> value)
     {
         holder.Value = value;

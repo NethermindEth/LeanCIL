@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "result": "failed",
   "stage": "proof checking",
   "theorem": "ExampleProof.correctness",
@@ -13,6 +13,7 @@
   "axioms": null,
   "statement": null,
   "specification": null,
+  "binding": null,
   "failures": [
     {
       "kind": "elaboration-error",
@@ -20,10 +21,38 @@
       "module": "Proof",
       "source": {
         "file": "<proof>",
-        "line": 13,
+        "line": 14,
         "column": 2
       },
       "message": "Tactic `rfl` failed: The left-hand side\n  Except.map Prod.snd\n    (Safety.invoke Extracted.program 4 0 [Safety.Value.scalar (Value.i64 x), Safety.Value.scalar (Value.i64 y)]\n      Safety.Memory.empty)\nis not definitionally equal to the right-hand side\n  Except.ok [Safety.Value.scalar (Value.i64 (x + y))]\n\nx y : W64\n⊢ Except.map Prod.snd\n      (Safety.invoke Extracted.program 4 0 [Safety.Value.scalar (Value.i64 x), Safety.Value.scalar (Value.i64 y)]\n        Safety.Memory.empty) =\n    Except.ok [Safety.Value.scalar (Value.i64 (x + y))]",
+      "tactic": null,
+      "stopped": null,
+      "method": null,
+      "cil": null,
+      "state": null,
+      "missing": null,
+      "suggestions": [],
+      "obligations": [],
+      "unknown": {
+        "tactic": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "stopped": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "method": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "cil": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "state": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "missing": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "obligations": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework"
+      }
+    },
+    {
+      "kind": "elaboration-error",
+      "resource": null,
+      "module": "Proof",
+      "source": {
+        "file": "<proof>",
+        "line": 32,
+        "column": 8
+      },
+      "message": "Application type mismatch: The argument\n  rfl\nhas type\n  ?m.38 = ?m.38\nbut is expected to have type\n  invoke Extracted.program 4 0 (addContract.args (List Safety.Value) (x, y)) memory =\n    Except.ok (memory, addContract.results (List Safety.Value) [Value.scalar (Value.i64 (x + y))])\nin the application\n  Exists.intro 4 rfl",
       "tactic": null,
       "stopped": null,
       "method": null,
@@ -46,17 +75,25 @@
   "messages": [
     {
       "file": "<proof>",
-      "line": 15,
+      "line": 16,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.correctness' depends on axioms: [propext, sorryAx, Quot.sound]"
+    },
+    {
+      "file": "<proof>",
+      "line": 34,
+      "column": 0,
+      "severity": "info",
+      "text": "'ExampleProof.holds' depends on axioms: [propext, sorryAx, Quot.sound]"
     }
   ],
   "goals": null,
   "trace": null,
   "unknown": {
     "trace": "not requested; --trace traces each step the proof takes",
-    "goals": "not requested; --goals reports the goal at each sorry and failing tactic"
+    "goals": "not requested; --goals reports the goal at each sorry and failing tactic",
+    "binding": "the run issued no certificate"
   },
   "rerun": [
     "leancil",

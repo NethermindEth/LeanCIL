@@ -37,7 +37,7 @@ private abbrev State (remaining counted : Reference) :=
 
 /-- The loop test, with the remaining count on the stack. -/
 bind_cutpoint header (remaining counted : Reference) (state : State remaining counted) :=
-  countBody at loop.latch matching (· matches .brnonzero _)
+  countBody at loop.latch matching (· matches .brtrue _)
   with entry.frame remaining counted, [.scalar (.i32 state.values.1)], state.memory
 
 /-- `count + remaining` is the input. -/
@@ -105,4 +105,19 @@ theorem correctness : CIL.Safety.Ensures Extracted.program countCalls
 #print axioms terminates
 #print axioms count_calls
 #print axioms correctness
+
+/-- From empty memory, every count is returned unchanged. -/
+def countCallsContract : MethodContract W32 where
+  args input := [.scalar (.i32 input)]
+  pre _ memory := memory = Memory.empty
+  footprint _ := []
+  post input _ _ values := values = [.scalar (.i32 input)]
+
+/-- `correctness` as `countCallsContract`, which also states that no caller storage changes. -/
+theorem holds : countCallsContract.Holds Extracted.program countCalls := by
+  rintro value _ rfl
+  obtain ⟨fuel, final, values, ran, result⟩ := correctness _ _ ⟨value, rfl, rfl⟩
+  exact ⟨fuel, (final, values), ran, by constructor <;> simp [Memory.empty], values, rfl, result⟩
+
+#print axioms holds
 end ExampleProof

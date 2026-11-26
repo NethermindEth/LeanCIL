@@ -19,23 +19,10 @@ unrelated one lie in different allocations (`ClassesConsistent.allocation_ne`).
 
 namespace CIL.Safety
 
-/-- `scope::name` split at its first `::`, the scope read so far kept reversed in the first
-    argument; structural, so the kernel evaluates it on an extraction's owners. -/
-def splitScope : List Char → List Char → Option (List Char × List Char)
-  | scope, ':' :: ':' :: name => some (scope.reverse, name)
-  | scope, char :: rest => splitScope (char :: scope) rest
-  | _, [] => none
-
-/-- The class a method's metadata declares it on, with that class's admitted bases nearest first,
-    when the method takes an object receiver and its owner spells `scope::name` with exactly one
-    `::`. -/
-def declaredClass (method : CIL.Extraction.RawMethod) : Option RuntimeType :=
-  if method.objectReceiver then
-    match splitScope [] method.owner.toList with
-    | some (scope, name) => if (splitScope [] name).isSome then none else
-        some ⟨.object (String.ofList scope) (String.ofList name), method.objectBases⟩
-    | none => none
-  else none
+/-- A class receiver declares its checked metadata type with the admitted base classes. -/
+def declaredClass (method : CIL.Extraction.RawMethod) : Option RuntimeType := do
+  let identity@(.object ..) ← method.receiverClass | none
+  return ⟨identity, method.objectBases⟩
 
 /-- The classes, with their base chains, that the methods of an extraction declare. -/
 def declaredClasses (evidence : List CIL.Extraction.MethodEvidence) : List RuntimeType :=

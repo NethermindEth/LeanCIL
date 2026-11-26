@@ -30,23 +30,15 @@ theorem AllocationRenaming.bitcastValue (mapping : AllocationRenaming)
   repeat first | exact .ok rfl | exact .error _ | split
 #print axioms AllocationRenaming.bitcastValue
 
-/-- The unspecified-operand guard sees the same scalar operands after reference renaming. -/
-theorem AllocationRenaming.unspecifiedOperands (mapping : AllocationRenaming)
-    (count : Nat) (values : List Value) :
-    unspecifiedOperands count (values.map mapping.value) = unspecifiedOperands count values := by
-  simp only [CIL.Safety.unspecifiedOperands, ← List.map_take, List.any_map,
-    Function.comp_def, mapping.hasUnspecified]
-#print axioms AllocationRenaming.unspecifiedOperands
-
-/-- Scalar-only decoding rejects the same non-scalar shapes after allocation renaming. -/
-theorem AllocationRenaming.scalars (mapping : AllocationRenaming) (values : List Value) :
-    scalars (values.map mapping.value) = scalars values := by
+/-- Scalar-only decoding rejects the same non-scalar shapes, homes included, after renaming. -/
+theorem LocalIndexMap.scalars (indices : LocalIndexMap) (mapping : AllocationRenaming)
+    (values : List Value) : scalars (values.map (indices.value mapping)) = scalars values := by
   induction values with
   | nil => rfl
   | cons value rest induction =>
-    cases value <;> simp only [List.map_cons, AllocationRenaming.value, CIL.Safety.scalars,
+    cases value <;> simp only [List.map_cons, LocalIndexMap.value, CIL.Safety.scalars,
       induction]
-#print axioms AllocationRenaming.scalars
+#print axioms LocalIndexMap.scalars
 
 /-- Managed reference extraction maps the successful address and preserves null faults. -/
 theorem AllocationRenaming.referenceAt (mapping : AllocationRenaming)
@@ -66,7 +58,8 @@ theorem Memory.Renamed.checkedValue {mapping : AllocationRenaming}
     ResultRenamed mapping (fun left right => right = mapping.value left)
       (checkedValue source value) (checkedValue target (mapping.value value)) := by
   cases value with
-  | methodPointer _ | methodTable _ => exact .ok rfl
+  | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ => exact .ok rfl
+  | spanHome _ => exact .error .invalidState
   | scalar value =>
     dsimp only [AllocationRenaming.value, CIL.Safety.checkedValue]
     split <;> first | exact .ok rfl | exact .error .invalidState

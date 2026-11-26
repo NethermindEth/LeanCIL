@@ -19,8 +19,8 @@ namespace CIL.Embedding
 
 open CIL
 
-theorem Op.relabel_id (op : Op) : op.relabel id = op := by
-  induction op <;> simp only [Op.relabel, id] <;> simp_all
+theorem Instruction.relabel_id (op : Instruction) : op.relabel id = op := by
+  induction op <;> simp only [Instruction.relabel, id] <;> simp_all
 
 /-- The facts about one method that the simulation consumes. -/
 structure BodyRefines (expected actual : Method) (r : Nat → Nat) : Prop where
@@ -29,23 +29,29 @@ structure BodyRefines (expected actual : Method) (r : Nat → Nat) : Prop where
   locals : actual.locals = expected.locals
   localKinds : actual.localKinds = expected.localKinds
   opaqueVectorLocals : actual.opaqueVectorLocals = expected.opaqueVectorLocals
-  vectorArgs : actual.vectorArgs = expected.vectorArgs
   parameterHomes : actual.parameterHomes = expected.parameterHomes
+  declared : actual.declared = expected.declared
+  environment : actual.environment = expected.environment
   descriptors : actual.staticSites.map Prod.snd = expected.staticSites.map Prod.snd
   entry : r 0 = 0
   /-- Each live expected instruction sits relabeled at its renamed pc with the same static
-      descriptor, and an instruction that falls through keeps its successor adjacent. -/
+      descriptor and link, and an instruction that falls through keeps its successor adjacent. -/
   code : ∀ p op, expected.code[p]? = some op → op.live = true →
-    actual.code[r p]? = some (op.relabel r) ∧ staticAt actual (r p) = staticAt expected p ∧
-    (op.continues = true → r (p + 1) = r p + 1)
+    actual.code[r p]? = some (op.relabel r) ∧ actual.staticAt (r p) = expected.staticAt p ∧
+    actual.linkAt (r p) = expected.linkAt p ∧ (op.continues = true → r (p + 1) = r p + 1)
+  /-- Exception clauses name pcs, so only bodies without them are related. -/
+  expectedHandlers : expected.handlers = []
+  actualHandlers : actual.handlers = []
 
-/-- Every body refines itself under the identity renaming. -/
-theorem BodyRefines.refl (body : Method) : BodyRefines body body id :=
-  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl,
-    fun _ op found _ => ⟨by simp [found, Op.relabel_id], rfl, fun _ => rfl⟩⟩
+/-- Every body without exception clauses refines itself under the identity renaming. -/
+theorem BodyRefines.refl (body : Method) (free : body.handlers = []) : BodyRefines body body id :=
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl,
+    fun _ op found _ => ⟨by simp [found, Instruction.relabel_id], rfl, rfl, fun _ => rfl⟩,
+    free, free⟩
 
 /-- A live instruction at `p` appears in `sites` with its mapped pc and mapped successor. -/
-theorem mem_sites {limit : Nat} {code : List Op} {map : List Nat} {start p : Nat} {op : Op}
+theorem mem_sites {limit : Nat} {code : List Instruction} {map : List Nat} {start p : Nat}
+    {op : Instruction}
     (found : code[p]? = some op) (live : op.live = true) :
     (⟨start + p, map.getD p limit, map.getD (p + 1) limit, op⟩ : Site) ∈
       sites limit start code map := by
@@ -71,26 +77,26 @@ theorem mem_sites {limit : Nat} {code : List Op} {map : List Nat} {start p : Nat
       · exact member
 
 /-- `pick` agrees with pointwise lookup whenever its cursor is `code.drop start`. -/
-theorem pick_eq (code : List Op) (qs : List Nat) (start : Nat) :
+theorem pick_eq (code : List Instruction) (qs : List Nat) (start : Nat) :
     pick code (code.drop start) start qs = qs.map (fun q => code[q]?) := by
   induction qs generalizing start with
   | nil => rfl
   | cons q qs ih =>
-    unfold pick
-    split
-    · rename_i ordered
-      have dropped : (code.drop start).drop (q - start) = code.drop q := by
-        rw [List.drop_drop]; congr 1; omega
-      simp only [dropped, List.head?_drop, ih, List.map_cons]
-    · simp only [ih, List.map_cons]
+    have dropped : (if start ≤ q then (code.drop start).drop (q - start) else code.drop q) =
+        code.drop q := by
+      split
+      · rw [List.drop_drop]; congr 1; omega
+      · rfl
+    simp only [pick, dropped, List.head?_drop, ih, List.map_cons]
 
 /-- The decidable `Embeds` check yields the per-method facts the simulation consumes. -/
 theorem _root_.CIL.Embeds.refines {expected actual : Method} {map : List Nat}
     (embeds : Embeds expected actual map) :
     BodyRefines expected actual (rename map actual.code.length) := by
   refine ⟨embeds.profile, embeds.returnsValue, embeds.locals, embeds.localKinds,
-    embeds.opaqueVectorLocals, embeds.vectorArgs, embeds.parameterHomes, embeds.descriptors,
-    embeds.entry, ?_⟩
+    embeds.opaqueVectorLocals, embeds.parameterHomes, embeds.declared,
+    embeds.environment, embeds.descriptors, embeds.entry, ?_, embeds.expectedHandlers,
+    embeds.actualHandlers⟩
   intro p op found live
   have member := mem_sites (limit := actual.code.length) (map := map) (start := 0) found live
   rw [Nat.zero_add] at member
@@ -101,9 +107,14 @@ theorem _root_.CIL.Embeds.refines {expected actual : Method} {map : List Nat}
   rw [dropped, List.map_map] at picked
   have code := List.map_inj_left.mp picked _ member
   have statics := List.map_inj_left.mp embeds.statics _ member
+  -- The reads are the first entry of each table, as `linkAt` gives.
+  have reads := embeds.links
+  rw [Extraction.linkReads_eq, Extraction.linkReads_eq, List.map_map, List.map_map] at reads
+  have link : actual.linkAt (rename map actual.code.length p) = expected.linkAt p :=
+    List.map_inj_left.mp reads _ member
   have flow := List.all_eq_true.mp embeds.flow _ member
   simp only [Bool.or_eq_true, Bool.not_eq_true', beq_iff_eq] at flow
-  refine ⟨code, statics, fun continues => ?_⟩
+  refine ⟨code, statics, link, fun continues => ?_⟩
   rcases flow with stops | next
   · rw [continues] at stops; cases stops
   · exact next
@@ -119,92 +130,85 @@ theorem enterFrame_congr {expected actual : CIL.Method} {r : Nat → Nat}
     (refines : BodyRefines expected actual r) (args : List Value) (m : Memory) :
     enterFrame actual args m = enterFrame expected args m := by
   simp only [enterFrame, refines.locals, refines.localKinds, refines.opaqueVectorLocals,
-    refines.vectorArgs, refines.parameterHomes]
+    refines.parameterHomes]
 
-/-- `.unsupported` never steps successfully. -/
-theorem step_unsupported {body : CIL.Method} {description : String} {pc : Nat} {args : List Value}
+/-- A hole never steps successfully. -/
+theorem step_unadmitted_ne_ok {body : CIL.Method} {opcode : Nat} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.unsupported description) pc args frame stack m = .ok action) : False := by
-  change Except.error
-    (ExecutionFault.unsupported "Not a memory instruction") =
-      .ok action at h
+    (h : step body (.unadmitted opcode) pc args frame stack m = .ok action) : False := by
   cases h
 
+#print axioms step_unadmitted_ne_ok
+
 /-- `.throw` never steps successfully. -/
-theorem step_throw {body : CIL.Method} {exception : String} {pc : Nat} {args : List Value}
-    {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
+theorem step_throw {body : CIL.Method} {exception : Option ExceptionType} {pc : Nat}
+    {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body (.throw exception) pc args frame stack m = .ok action) : False := by
   cases h
 
 /-- A successful `.ret` step always returns. -/
-theorem step_ret_returns {body : CIL.Method} {narrow : Option NarrowKind} {pc : Nat}
+theorem step_ret_returns {body : CIL.Method} {pc : Nat}
     {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.ret narrow) pc args frame stack m = .ok action) :
+    (h : step body .ret pc args frame stack m = .ok action) :
     ∃ values m', action = .returned values m' := by
-  cases narrow
-  · have known : unspecifiedOperands 1 stack = false := by
-      cases observed : unspecifiedOperands 1 stack with
-      | false => rfl
-      | true => simp [step, observerCount, observed] at h
-    simp only [step, observerCount, known, Bool.false_or, Bool.false_eq_true, ↓reduceIte] at h
-    change (if stack.length = (if body.returnsValue then 1 else 0) then
-        (do return FrameAction.returned (← stack.mapM (checkedValue m)) m)
-      else .error .invalidState) = .ok action at h
-    by_cases sized : stack.length = (if body.returnsValue then 1 else 0)
-    · rw [ite_eq_left sized] at h
-      obtain ⟨_, _, h⟩ := except_bind_ok h
-      cases h
-      exact ⟨_, _, rfl⟩
-    · rw [ite_eq_right sized] at h
-      cases h
-  · rename_i kind
-    cases stack with
-    | nil => cases h
-    | cons value rest =>
-      cases value <;> try (solve | cases rest <;> cases h)
-      rename_i value
-      cases value <;> cases rest <;> try (solve | cases h)
-      rename_i bits
-      change (if body.returnsValue then
-        (do return FrameAction.returned
-              (← [Value.scalar (.i32 (kind.extend bits))].mapM (checkedValue m)) m)
-        else .error .invalidState) = .ok action at h
-      split at h
-      · obtain ⟨_, _, h⟩ := except_bind_ok h
-        cases h
-        exact ⟨_, _, rfl⟩
-      · cases h
+  unfold step at h
+  dsimp only at h
+  split at h
+  · cases h
+  · unfold returnFrom at h
+    repeat' first
+      | (split at h)
+      | (obtain ⟨_, _, h⟩ := except_bind_ok h)
+      | (cases h <;> exact ⟨_, _, rfl⟩)
+
+#print axioms step_ret_returns
 
 /-- Calls and constructions come only from instructions that resume at the next pc. -/
-theorem continues_of_invocation {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Value}
+theorem continues_of_invocation {body : CIL.Method} {op : CIL.Instruction} {pc : Nat}
+    {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body op pc args frame stack m = .ok action)
     (resumes : match action with | .call .. | .construct .. => True | _ => False) :
     op.continues = true := by
   cases op
   case throw => exact (step_throw h).elim
-  case unsupported => exact (step_unsupported h).elim
-  case branch target =>
+  case unadmitted => exact (step_unadmitted_ne_ok h).elim
+  case br target =>
     change Except.ok (.next target stack frame m) = .ok action at h
     cases h
     exact resumes.elim
-  case ret narrow =>
+  case ret =>
     obtain ⟨_, _, rfl⟩ := step_ret_returns h
     exact resumes.elim
-  case tailCall callee argc =>
-    simp only [step] at h
+  case leave target =>
+    unfold step at h
+    dsimp only at h
     repeat' first
-      | contradiction
-      | exact resumes.elim
+      | solve | (obtain ⟨_, ⟨_, rfl⟩ | ⟨_, _, rfl⟩⟩ := leaveStep_resumes h <;> exact resumes.elim)
       | cases h
       | split at h
-      | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  case managed operation =>
-    cases operation <;> try rfl
-    rename_i signature catalog tail
+  case endfinally =>
+    unfold step at h
+    dsimp only at h
+    repeat' first
+      | solve |
+        (obtain ⟨_, ⟨_, rfl⟩ | ⟨_, _, rfl⟩⟩ := endFinallyStep_resumes h <;> exact resumes.elim)
+      | cases h
+      | split at h
+  case call method prefixes =>
+    cases tail : prefixes.tail
+    · simp [CIL.Instruction.continues, tail]
+    · simp only [step, observedCall, tail, ite_true] at h
+      repeat' first
+        | contradiction
+        | exact resumes.elim
+        | cases h
+        | split at h
+        | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  case calli signature tail =>
     cases tail
     · rfl
-    · simp only [step, managedStep] at h
+    · simp only [step, calliStep] at h
       repeat' first
         | contradiction
         | exact resumes.elim
@@ -220,10 +224,12 @@ structure ProgramRefines (expected actual : CIL.Program) (maps : Nat → Nat →
     ∃ target, actual[index]? = some target ∧ BodyRefines body target (maps index)
   descriptors : programStaticDescriptors expected = programStaticDescriptors actual
 
-/-- Every program refines itself with every method renamed by the identity. -/
-theorem ProgramRefines.refl (program : CIL.Program) :
+/-- Every program without exception clauses refines itself with every method renamed by the
+    identity. -/
+theorem ProgramRefines.refl (program : CIL.Program) (free : HandlerFree program) :
     ProgramRefines program program (fun _ => id) :=
-  ⟨fun _ body found => ⟨body, found, BodyRefines.refl body⟩, rfl⟩
+  ⟨fun _ body found =>
+    ⟨body, found, BodyRefines.refl body (free body (List.mem_of_getElem? found))⟩, rfl⟩
 
 /-- Replacing a method by one with the same descriptor list keeps the program-wide list. -/
 theorem programStaticDescriptors_set (program : CIL.Program) (index : Nat) (body : CIL.Method)
@@ -303,16 +309,19 @@ theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat 
     cases thrown
   | succ fuel ih =>
     intro method pc args frame stack m outcome h transported
-    rw [run] at h ⊢
     cases fetched : expected[method]? with
     | none =>
+      rw [run_succ _ _ _ _ _ _ _ _ (unprotected_of_none fetched pc)] at h
       simp only [fetched] at h
       subst h
       obtain ⟨_, thrown⟩ := transported
       cases thrown
     | some body =>
-      simp only [fetched] at h
       obtain ⟨target, found, refined⟩ := refines.method method body fetched
+      rw [run_succ _ _ _ _ _ _ _ _
+        (unprotected_of_handlers_nil fetched refined.expectedHandlers pc)] at h
+      rw [run_succ _ _ _ _ _ _ _ _ (unprotected_of_handlers_nil found refined.actualHandlers _)]
+      simp only [fetched] at h
       cases decoded : body.code[pc]? with
       | none =>
         simp only [decoded] at h
@@ -332,18 +341,26 @@ theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat 
             cases op <;> first
               | rfl
               | (change Except.error (ExecutionFault.unsupported _) = _ at stepped; cases stepped)
-          obtain ⟨code, statics, next⟩ := refined.code pc op decoded live
+          obtain ⟨code, statics, link, next⟩ := refined.code pc op decoded live
+          have arguments := Method.argumentAccess_congr refined.parameterHomes
+            (congrArg List.length refined.localKinds) refined.declared refined.environment
           have actualStep := step_raise op body target (maps method) pc (maps method pc) args
-            frame stack m exception ⟨refined.profile, refined.returnsValue, statics, next⟩ stepped
+            frame stack m exception ⟨refined.profile, refined.returnsValue, refined.declared,
+              refined.environment, arguments, statics, link, next,
+              fun _ => ⟨refined.expectedHandlers, refined.actualHandlers⟩⟩ stepped
           simp only [found, code, actualStep, Except.mapError, bind, Except.bind]
           rfl
         | ok action =>
           simp only [stepped, Except.mapError] at h
           have live : op.live = true := by
-            cases op <;> first | rfl | exact (step_unsupported stepped).elim
-          obtain ⟨code, statics, next⟩ := refined.code pc op decoded live
+            cases op <;> first | rfl | exact (step_unadmitted_ne_ok stepped).elim
+          obtain ⟨code, statics, link, next⟩ := refined.code pc op decoded live
+          have arguments := Method.argumentAccess_congr refined.parameterHomes
+            (congrArg List.length refined.localKinds) refined.declared refined.environment
           have actualStep := step_relabel op body target (maps method) pc (maps method pc) args
-            frame stack m action ⟨refined.profile, refined.returnsValue, statics, next⟩ stepped
+            frame stack m action ⟨refined.profile, refined.returnsValue, refined.declared,
+              refined.environment, arguments, statics, link, next,
+              fun _ => ⟨refined.expectedHandlers, refined.actualHandlers⟩⟩ stepped
           simp only [found, code, actualStep, Except.mapError, bind, Except.bind]
           cases action with
           | next target' stack' frame' m' =>
@@ -399,7 +416,7 @@ theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat 
               split at h
               · subst h; obtain ⟨_, thrown⟩ := transported; cases thrown
               · rename_i returns
-                simp only [returns, ↓reduceIte]
+                simp only [returns]
                 cases checked : arguments.mapM (checkedValue (leaveFrame frame m')) with
                 | error fault => simp only [checked] at h ⊢; subst h; rfl
                 | ok values =>
@@ -454,6 +471,7 @@ theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat 
                         outcome h transported
                       rw [next (continues_of_invocation stepped trivial)] at resumed
                       exact resumed
+          | raise _ _ _ _ => exact (step_ne_raise refined.expectedHandlers stepped).elim
           | returned values m' =>
             dsimp only [FrameAction.relabel] at h ⊢
             cases checked : List.mapM (checkedValue (leaveFrame frame m')) values with
@@ -473,7 +491,8 @@ theorem run_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
 /-- An expected run that throws `exception` throws it in the actual run, at the relocated pc. -/
 theorem run_raise_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
     (refines : ProgramRefines expected actual maps) {fuel method pc : Nat} {args : List Value}
-    {frame : Frame} {stack : List Value} {m : Memory} {fault : LocatedFault} {exception : String}
+    {frame : Frame} {stack : List Value} {m : Memory} {fault : LocatedFault}
+    {exception : ExceptionType}
     (h : run expected fuel method pc args frame stack m = .error fault)
     (thrown : fault.fault = .thrown exception) :
     run actual fuel method (maps method pc) args frame stack m = .error (fault.relocate maps) :=
@@ -486,7 +505,7 @@ theorem invoke_outcome_refines {expected actual : CIL.Program} {maps : Nat → N
     {m : Memory} {outcome : Except LocatedFault (Memory × List Value)}
     (h : invoke expected fuel method args m = outcome) (transported : Transported outcome) :
     invoke actual fuel method args m = outcome.mapError (·.relocate maps) := by
-  unfold invoke at h ⊢
+  rw [invoke_eq] at h ⊢
   cases fetched : expected[method]? with
   | none =>
     simp only [fetched] at h
@@ -528,7 +547,7 @@ theorem invoke_refines {expected actual : CIL.Program} {maps : Nat → Nat → N
     relocated pc. -/
 theorem invoke_raise_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
     (refines : ProgramRefines expected actual maps) {fuel method : Nat} {args : List Value}
-    {m : Memory} {fault : LocatedFault} {exception : String}
+    {m : Memory} {fault : LocatedFault} {exception : ExceptionType}
     (h : invoke expected fuel method args m = .error fault)
     (thrown : fault.fault = .thrown exception) :
     invoke actual fuel method args m = .error (fault.relocate maps) :=
@@ -558,23 +577,29 @@ theorem InvocationCertificate.of_refines {expected actual : CIL.Program} {maps :
 /-- `MethodEmbeds program index expected` lets `program.set index expected` stand in for
     `program`. -/
 theorem _root_.CIL.MethodEmbeds.refines {program : CIL.Program} {index : Nat}
-    {expected : CIL.Method} (embeds : MethodEmbeds program index expected) :
+    {expected : CIL.Method} (embeds : MethodEmbeds program index expected)
+    (free : HandlerFree program := by handler_free) :
     ∃ maps, ProgramRefines (program.set index expected) program maps := by
   obtain ⟨target, map, found, embedded⟩ := embeds
-  exact ⟨_, (ProgramRefines.refl program).set found embedded⟩
+  exact ⟨_, (ProgramRefines.refl program free).set found embedded⟩
 
 /-- Substituting an embedded method keeps the program-wide static descriptors. -/
 theorem _root_.CIL.MethodEmbeds.descriptors {program : CIL.Program} {index : Nat}
     {expected : CIL.Method} (embeds : MethodEmbeds program index expected) :
     programStaticDescriptors (program.set index expected) = programStaticDescriptors program := by
-  obtain ⟨_, refines⟩ := embeds.refines
-  exact refines.descriptors
+  obtain ⟨target, _, found, embedded⟩ := embeds
+  rw [programStaticDescriptors_set _ _ _ ?_]
+  intro old present
+  rw [found] at present
+  cases present
+  exact embedded.descriptors
 
 /-- A successful invocation with `expected` in place of method `index` is one of `program`. -/
 theorem _root_.CIL.MethodEmbeds.invoke {program : CIL.Program} {index : Nat}
     {expected : CIL.Method} (embeds : MethodEmbeds program index expected) {fuel method : Nat}
     {args : List Value} {m : Memory} {result : Memory × List Value}
-    (h : CIL.Safety.invoke (program.set index expected) fuel method args m = .ok result) :
+    (h : CIL.Safety.invoke (program.set index expected) fuel method args m = .ok result)
+    (free : HandlerFree program := by handler_free) :
     CIL.Safety.invoke program fuel method args m = .ok result := by
   obtain ⟨_, refines⟩ := embeds.refines
   exact invoke_refines refines h
@@ -585,10 +610,11 @@ theorem _root_.CIL.Embeds.run {program : CIL.Program} {index : Nat}
     {expected target : CIL.Method} {map : List Nat} (found : program[index]? = some target)
     (embeds : Embeds expected target map) {fuel pc : Nat}
     {args stack : List Value} {frame : Frame} {memory : Memory} {result : Memory × List Value}
-    (ran : run (program.set index expected) fuel index pc args frame stack memory = .ok result) :
+    (ran : run (program.set index expected) fuel index pc args frame stack memory = .ok result)
+    (free : HandlerFree program := by handler_free) :
     run program fuel index (rename map target.code.length pc) args frame stack memory =
       .ok result := by
-  simpa using run_refines ((ProgramRefines.refl program).set found embeds)
+  simpa using run_refines ((ProgramRefines.refl program free).set found embeds)
     fuel index pc args frame stack memory result ran
 
 #print axioms CIL.Embeds.run
@@ -598,12 +624,14 @@ theorem _root_.CIL.Embeds.run {program : CIL.Program} {index : Nat}
 theorem _root_.CIL.Embeds.invoke_raise {program : CIL.Program} {index : Nat}
     {expected target : CIL.Method} {map : List Nat} (found : program[index]? = some target)
     (embeds : Embeds expected target map)
-    {fuel method : Nat} {args : List Value} {m : Memory} {fault : LocatedFault} {exception : String}
+    {fuel method : Nat} {args : List Value} {m : Memory} {fault : LocatedFault}
+    {exception : ExceptionType}
     (h : CIL.Safety.invoke (program.set index expected) fuel method args m = .error fault)
-    (thrown : fault.fault = .thrown exception) :
+    (thrown : fault.fault = .thrown exception)
+    (free : HandlerFree program := by handler_free) :
     CIL.Safety.invoke program fuel method args m =
       .error (fault.relocate fun j => if j = index then rename map target.code.length else id) :=
-  invoke_raise_refines ((ProgramRefines.refl program).set found embeds) h thrown
+  invoke_raise_refines ((ProgramRefines.refl program free).set found embeds) h thrown
 
 /-- An invocation certificate with `expected` in place of method `index` is one of
     `program`. -/
@@ -611,7 +639,8 @@ theorem _root_.CIL.MethodEmbeds.certificate {program : CIL.Program} {index : Nat
     {expected : CIL.Method} (embeds : MethodEmbeds program index expected) {method : Nat}
     {args : List Value} {initial : Memory} {fuel : Nat} {final : Memory} {values : List Value}
     (certificate :
-      InvocationCertificate (program.set index expected) method args initial fuel final values) :
+      InvocationCertificate (program.set index expected) method args initial fuel final values)
+    (free : HandlerFree program := by handler_free) :
     InvocationCertificate program method args initial fuel final values := by
   obtain ⟨_, refines⟩ := embeds.refines
   exact certificate.of_refines refines

@@ -4,8 +4,8 @@ import CIL.Safety.MemorySteps
 /-!
 # Wide multiply
 
-`Math.BigMul(ulong, ulong, out ulong)` and `Math.BigMul(long, long, out long)` as the
-`bigMul64` memory instruction: each returns the unsigned or signed high word of the exact
+`Math.BigMul(ulong, ulong, out ulong)` and `Math.BigMul(long, long, out long)` use the
+checked `bigMul64` memory model. Each returns the unsigned or signed high word of the exact
 128-bit product and writes the low word through the out reference, changing no other cell and
 no allocation. `CIL.WideMultiply.signedHigh64_decomposition` recomposes the signed product.
 -/
@@ -16,12 +16,16 @@ namespace CIL.Safety
     retains the exact high-word expression used by arithmetic proofs. -/
 theorem step_bigMul64_of_write {body : CIL.Method} {pc : Nat} {args rest : List Value}
     {frame : Frame} {memory result : Memory} {reference : Reference} {left right : CIL.W64}
+    {method : CIL.Extraction.MethodRef} (unlinked : body.linkAt pc = none)
+    (model : CIL.Extraction.runtimeModel body.environment .call method =
+      some (.memory (.bigMul64 false)))
     (stored : write memory reference (numberBytes (left * right).toNat 8) 1 = .ok result) :
-    step body (.memory (.bigMul64 false)) pc args frame
+    step body (.call method {}) pc args frame
       (.reference (.address reference) :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest)
       memory = .ok (.next (pc + 1)
         (.scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest) frame result) := by
-  rw [step_memory_bigMul64_eq]
+  rw [step_call_model (link := unlinked) (found := model) (direct := rfl),
+    step_memory_bigMul64_eq]
   simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, referenceAt,
     checkedAt, stored, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
@@ -30,12 +34,16 @@ theorem step_bigMul64_of_write {body : CIL.Method} {pc : Nat} {args rest : List 
 /-- A checked low-word write steps signed wide multiplication with its exact signed high word. -/
 theorem step_bigMul64_signed_of_write {body : CIL.Method} {pc : Nat} {args rest : List Value}
     {frame : Frame} {memory result : Memory} {reference : Reference} {left right : CIL.W64}
+    {method : CIL.Extraction.MethodRef} (unlinked : body.linkAt pc = none)
+    (model : CIL.Extraction.runtimeModel body.environment .call method =
+      some (.memory (.bigMul64 true)))
     (stored : write memory reference (numberBytes (left * right).toNat 8) 1 = .ok result) :
-    step body (.memory (.bigMul64 true)) pc args frame
+    step body (.call method {}) pc args frame
       (.reference (.address reference) :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest)
       memory = .ok (.next (pc + 1)
         (.scalar (.i64 (CIL.WideMultiply.signedHigh64 left right)) :: rest) frame result) := by
-  rw [step_memory_bigMul64_signed_eq]
+  rw [step_call_model (link := unlinked) (found := model) (direct := rfl),
+    step_memory_bigMul64_signed_eq]
   simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, referenceAt,
     checkedAt, stored, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 

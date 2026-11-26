@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // One proof file, unedited, must verify against two builds of a method with two loops and
 // two calls to one helper; the second inserts a statement before the first loop.
@@ -13,7 +18,8 @@ string Build(string name, string inserted)
     var source = Path.Combine(root, name);
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Labels.csproj"), """
-    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+    <Optimize>true</Optimize></PropertyGroup></Project>
     """);
     File.WriteAllText(Path.Combine(source, "Labels.cs"), "namespace Labels; public static class Calls { " +
         "public static uint Step(uint x) => x + 1; " +
@@ -39,14 +45,14 @@ string Proof(string name, string bindings, string count, string countLatch, stri
     bind_method root rootBody := "System.UInt32 Labels.Calls::Root(System.UInt32,System.UInt32)"
     {{bindings}}
 
-    -- Each loop body and back edge, and the final call, stated at its label.
+    -- Each loop body and back edge, and the final call's target and return, stated at its label.
     theorem correctness :
-        (rootBody.code.drop {{count}}).take 4 = [.local 1, .const32 1, .sub, .setLocal 1] ∧
-        rootBody.code[{{countLatch}}]? = some (.brnonzero {{count}}) ∧
-        (rootBody.code.drop {{reduce}}).take 4 = [.local 0, .const32 3, .sub, .setLocal 0] ∧
-        rootBody.code[{{reduceLatch}}]? = some (.bgtu {{reduce}}) ∧
-        (rootBody.code.drop {{after}}).take 2 = [.call {{callee}} 1, .ret] :=
-      ⟨rfl, rfl, rfl, rfl, rfl⟩
+        (rootBody.code.drop {{count}}).take 4 = [.ldarg 1, .ldc_i4 1, .sub, .starg 1] ∧
+        rootBody.code[{{countLatch}}]? = some (.brtrue {{count}}) ∧
+        (rootBody.code.drop {{reduce}}).take 4 = [.ldarg 0, .ldc_i4 3, .sub, .starg 0] ∧
+        rootBody.code[{{reduceLatch}}]? = some (.bgt_un {{reduce}}) ∧
+        rootBody.linkAt {{after}} = some (.direct {{callee}}) ∧ rootBody.code[{{after}} + 1]? = some .ret :=
+      ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
 
     end ExampleProof
     """);

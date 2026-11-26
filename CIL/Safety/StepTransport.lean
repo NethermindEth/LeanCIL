@@ -1,5 +1,7 @@
 import CIL.Safety.ActionRenaming
 import CIL.Safety.MemoryInstructionRenaming
+import CIL.Resolution
+import CIL.Safety.HandlerSteps
 
 /-!
 # Allocation-renaming obligation for a checked step
@@ -15,11 +17,32 @@ structure StepMetadata (source target : CIL.Method) : Prop where
   profile : target.profile = source.profile
   returnsValue : target.returnsValue = source.returnsValue
   staticSites : target.staticSites = source.staticSites
+  returnNarrow : target.returnNarrow = source.returnNarrow
+  /-- Both bodies read every argument from the incoming list, narrowed alike. -/
+  arguments : ∀ index, ∃ narrow, source.argumentAccess index = .value narrow ∧
+    target.argumentAccess index = .value narrow
+  /-- Both bodies declare one signature, so `localloc` zeroes storage alike. -/
+  declared : target.declared = source.declared
+  /-- Both bodies resolve types and layouts in the same environment. -/
+  environment : target.environment = source.environment
+  /-- Both bodies enter the same methods, since each call reads its target from this table. -/
+  links : target.links = source.links
+  /-- Neither body has exception clauses, so `leave` jumps directly, `endfinally` is invalid and
+      no fault is caught. -/
+  sourceHandlers : source.handlers = []
+  targetHandlers : target.handlers = []
+
+/-- Related bodies give every call site the same link. -/
+theorem StepMetadata.linkAt {source target : CIL.Method} (metadata : StepMetadata source target)
+    (pc : Nat) : target.linkAt pc = source.linkAt pc := by
+  unfold CIL.Method.linkAt
+  rw [metadata.links]
+#print axioms StepMetadata.linkAt
 
 /-- One observable checked step transports frames, values and fresh allocation correspondence. -/
 def StepTransport : Prop :=
   ∀ (indices : LocalIndexMap) (mapping : AllocationRenaming) (scopes : Nat → Nat → Prop)
-    (sourceBody targetBody : CIL.Method) (operation : CIL.Op) (pc : Nat)
+    (sourceBody targetBody : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (arguments stack : List Value) (sourceFrame targetFrame : Frame) (source target : Memory),
     StepMetadata sourceBody targetBody →
     Memory.Renamed mapping scopes source target →
@@ -33,6 +56,6 @@ def StepTransport : Prop :=
       ResultRenamed later (FrameAction.Renamed indices later scopes)
         (step sourceBody operation pc arguments sourceFrame stack source)
         (step targetBody (indices.operation operation) pc (arguments.map mapping.value)
-          targetFrame (stack.map mapping.value) target)
+          targetFrame (stack.map (indices.value mapping)) target)
 
 end CIL.Safety

@@ -1,3 +1,4 @@
+import Tests.Support.EnumIdentity
 import CIL.Safety.Execution
 import CIL.Extraction.Scalars
 
@@ -8,16 +9,16 @@ open CIL.Safety
 
 /-- Pointer storage admits characters and integer enums, without admitting other pointee shapes. -/
 theorem pointer_storage_kinds :
-    let runtime := CIL.Extraction.runtimeScope
     let storage := CIL.Extraction.typeStorage []
-    storage (.pointer (.atom runtime "System.Char")) = some .reference ∧
-    storage (.pointer (.enum "Example" (.atom runtime "System.Int16"))) = some .reference ∧
-    storage (.pointer (.enum "Example" (.atom runtime "System.UInt64"))) = some .reference ∧
-    storage (.pointer (.enum "Example" (.atom runtime "System.Boolean"))) = none ∧
-    storage (.pointer (.atom "forged" "System.Char")) = none ∧
-    storage (.pointer (.atom runtime "System.Double")) = none ∧
-    storage (.pointer (.byref (.atom runtime "System.Int32"))) = none ∧
-    storage (.pointer (.pointer (.atom runtime "System.Int32"))) = none := by decide +kernel
+    storage (.pointer (.primitive .char)) = some .reference ∧
+    storage (.pointer (.enum (Tests.enumIdentity "Example") .signed16)) =
+      some .reference ∧
+    storage (.pointer (.enum (Tests.enumIdentity "Example") .unsigned64)) =
+      some .reference ∧
+    storage (.pointer (.atom "forged" "System.Char" .valueType)) = none ∧
+    storage (.pointer (.primitive .double)) = none ∧
+    storage (.pointer (.byref (.primitive .int32))) = none ∧
+    storage (.pointer (.pointer (.primitive .int32))) = none := by decide +kernel
 #print axioms pointer_storage_kinds
 
 private def memory : Memory := {
@@ -28,7 +29,7 @@ private def memory : Memory := {
   nextIdentity := 2 }
 
 private def subtract : CIL.Method := {
-  code := [.arg 0, .arg 1, .sub, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 0, .ldarg 1, .sub, .ret], locals := [], returnsValue := true }
 
 /-- Pointer subtraction checks positions without requiring readable storage. -/
 theorem subtract_bytes :
@@ -101,26 +102,26 @@ theorem interior_before_end :
 
 /-- Pointer subtraction cannot be certified as scalar addition. -/
 theorem changed_subtraction_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 89, .none⟩ [.native, .reference] .add = false :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 89, .none⟩ [.native, .reference] .add = false :=
   by decide +kernel
 #print axioms changed_subtraction_rejected
 
 /-- A difference must retain the exact raw subtraction operation. -/
 theorem difference_encoding :
-    CIL.Extraction.scalarOpMatches ⟨0, 89, .none⟩ [.reference, .reference] .sub = true :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 89, .none⟩ [.reference, .reference] .sub = true :=
   by decide +kernel
 #print axioms difference_encoding
 
-private def comparison (operation : CIL.Op) : CIL.Method := {
-  code := [.arg 0, .arg 1, operation, .ret], locals := [], returnsValue := true }
+private def comparison (operation : CIL.Instruction) : CIL.Method := {
+  code := [.ldarg 0, .ldarg 1, operation, .ret], locals := [], returnsValue := true }
 
-private def branch (operation : CIL.Op) : CIL.Method := {
-  code := [.arg 0, .arg 1, operation, .const32 0, .ret, .const32 1, .ret]
+private def branch (operation : CIL.Instruction) : CIL.Method := {
+  code := [.ldarg 0, .ldarg 1, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
   locals := [], returnsValue := true }
 
 /-- Both unsigned comparisons agree with offset ordering and preserve memory. -/
 theorem unsigned_comparisons :
-    [CIL.Op.ltu, .gtu].map (fun operation =>
+    [CIL.Instruction.clt_un, .cgt_un].map (fun operation =>
       (invoke [comparison operation] 8 0
         [.reference (.address ⟨0, 2⟩), .readOnlyReference (.address ⟨0, 5⟩)] memory).map
         Prod.snd) = [.ok [.scalar (.i32 1)], .ok [.scalar (.i32 0)]] := rfl
@@ -128,7 +129,7 @@ theorem unsigned_comparisons :
 
 /-- All four unsigned branches select the proper successor for the same pair of pointers. -/
 theorem unsigned_branches :
-    [CIL.Op.bltu 5, .bleu 5, .bgtu 5, .bgeu 5].map (fun operation =>
+    [CIL.Instruction.blt_un 5, .ble_un 5, .bgt_un 5, .bge_un 5].map (fun operation =>
       (invoke [branch operation] 10 0
         [.reference (.address ⟨0, 2⟩), .reference (.address ⟨0, 5⟩)] memory).map Prod.snd) =
       [.ok [.scalar (.i32 1)], .ok [.scalar (.i32 1)],
@@ -148,7 +149,7 @@ theorem identical_position_not_less :
 
 /-- Signed ordering cannot be certified from managed-reference operand kinds. -/
 theorem signed_order_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 65028, .none⟩ [.reference, .reference] .lt = false :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 65028, .none⟩ [.reference, .reference] .clt = false :=
   by decide +kernel
 #print axioms signed_order_rejected
 /-- Expired storage cannot participate in a pointer difference. -/
@@ -161,7 +162,7 @@ theorem expired_difference_rejected :
 
 /-- Integer-minus-pointer is not a pointer operation. -/
 theorem reversed_operands_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 89, .none⟩ [.reference, .native] .sub = false :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 89, .none⟩ [.reference, .native] .sub = false :=
   by decide +kernel
 #print axioms reversed_operands_rejected
 
@@ -179,7 +180,7 @@ theorem subtraction_kind (raw : CIL.Extraction.RawMethod) :
 
 /-- Non-strict branches include equality, while strict branches exclude it. -/
 theorem equal_position_branches :
-    [CIL.Op.bltu 5, .bleu 5, .bgtu 5, .bgeu 5].map (fun operation =>
+    [CIL.Instruction.blt_un 5, .ble_un 5, .bgt_un 5, .bge_un 5].map (fun operation =>
       (invoke [branch operation] 10 0
         [.reference (.address ⟨0, 2⟩), .reference (.address ⟨0, 2⟩)] memory).map Prod.snd) =
       [.ok [.scalar (.i32 0)], .ok [.scalar (.i32 1)],

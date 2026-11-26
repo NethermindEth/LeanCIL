@@ -5,7 +5,7 @@ import CIL.Safety.FrameSetupLemmas
 # Frame setup preserves the static world
 
 Building a frame only allocates fresh homes and writes into them, so every valid static
-field binding stays valid. Derived once from `FrameSetup` and projected to each builder.
+field binding stays valid. Derived once from `FrameSetup` and projected to `enterFrame`.
 -/
 
 namespace CIL.Safety
@@ -47,38 +47,6 @@ theorem storeLocal_preserves_static_world (descriptors : List CIL.StaticDescript
       | solve | apply checked_write_preserves_static_world _ _ _ _ _ _ _ _ world; assumption
       | cases h
       | split at h
-
-theorem makeLocal_preserves_static_world (descriptors : List CIL.StaticDescriptor)
-    (m result : Memory) (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value)
-    (slot : LocalSlot) (owned : List AllocationId) (hm : m.WellFormed)
-    (world : StaticWorldValid descriptors m)
-    (h : makeLocal activation kind initial m = .ok (slot, owned, result)) :
-    StaticWorldValid descriptors result := by
-  exact (makeLocal_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
-
-theorem makeLocals_preserves_static_world (descriptors : List CIL.StaticDescriptor)
-    (m result : Memory) (activation : Nat) (kinds : List CIL.LocalKind)
-    (initializers : List CIL.Value) (slots : List LocalSlot) (owned : List AllocationId)
-    (hm : m.WellFormed) (world : StaticWorldValid descriptors m)
-    (h : makeLocals activation kinds initializers m = .ok (slots, owned, result)) :
-    StaticWorldValid descriptors result := by
-  exact (makeLocals_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
-
-theorem makeArgumentHomes_preserves_static_world (descriptors : List CIL.StaticDescriptor)
-    (m result : Memory) (activation : Nat) (indices : List Nat) (args : List Value)
-    (homes : List (Nat × LocalSlot)) (owned : List AllocationId) (hm : m.WellFormed)
-    (world : StaticWorldValid descriptors m)
-    (h : makeArgumentHomes activation indices args m = .ok (homes, owned, result)) :
-    StaticWorldValid descriptors result := by
-  exact (makeArgumentHomes_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
-
-theorem makeParameterHomes_preserves_static_world (descriptors : List CIL.StaticDescriptor)
-    (m result : Memory) (activation : Nat) (parameters : List (Nat × CIL.LocalKind))
-    (args : List Value) (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
-    (hm : m.WellFormed) (world : StaticWorldValid descriptors m)
-    (h : makeParameterHomes activation parameters args m = .ok (homes, owned, result)) :
-    StaticWorldValid descriptors result := by
-  exact (makeParameterHomes_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
 
 theorem enterFrame_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (body : CIL.Method) (args : List Value) (m result : Memory) (frame : Frame)

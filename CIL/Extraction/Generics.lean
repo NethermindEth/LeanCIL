@@ -1,7 +1,10 @@
-import CIL.Extraction.Parameters
+import CIL.RuntimeModel
+import CIL.CallSite
+import CIL.Extraction.TypeStorage
 import CIL.Extraction.FlowIndex
+import CIL.Extraction.LinkIndex
 import CIL.Imports
-import CIL.Extraction.MetadataNames
+import CIL.Extraction.Assemblies
 
 /-!
 # Raw methods, generic instantiation and call binding
@@ -17,203 +20,9 @@ Opcodes are numeric ECMA-335 encodings; two-byte opcodes `0xFE nn` appear as `0x
 
 namespace CIL.Extraction
 
-/-- The exact `System.Runtime.Intrinsics` assembly identity; `runtimeScope` is in `TypeExpr`. -/
-def intrinsicsScope : String :=
-  "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
 
-/-- Byte width of an admitted integer vector, bound to both exact runtime type identities. -/
-def integerVectorWidth : TypeExpr → Option Nat
-  | .apply (.constructor scope name) (.atom elementScope element) =>
-    if scope != intrinsicsScope || elementScope != runtimeScope ||
-        element ∉ ["System.Byte", "System.Int32", "System.UInt32", "System.Int64",
-          "System.UInt64"] then none
-    else if name == "System.Runtime.Intrinsics.Vector128`1" then some 16
-    else if name == "System.Runtime.Intrinsics.Vector256`1" then some 32
-    else if name == "System.Runtime.Intrinsics.Vector512`1" then some 64
-    else none
-  | _ => none
-
-/-- The field type of a primitive runtime type, by full name. -/
-private def primitiveField : String → Option FieldType
-  | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
-  | "System.Boolean" => some .boolean | "System.Int16" => some .signed16
-  | "System.UInt16" => some .unsigned16 | "System.Char" => some .character
-  | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
-  | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
-  | "System.IntPtr" => some .nativeInt | "System.UIntPtr" => some .nativeUInt
-  | _ => none
-
-/-- The integer types an enum may have as its underlying type. -/
-private def enumField : FieldType → Bool
-  | .signed8 | .unsigned8 | .signed16 | .unsigned16 | .signed32 | .unsigned32
-  | .signed64 | .unsigned64 => true
-  | _ => false
-
-/-- Primitive array element identity is derived from the exact runtime metadata scope. -/
-def arrayElementType (type : TypeExpr) (aggregateWidth : Nat := 0) : Option ArrayElement :=
-  match type with
-  | .aggregate identity _ => some (.aggregate identity aggregateWidth)
-  | type@(.apply (.constructor _ name) (.atom _ element)) => do
-    let width ← integerVectorWidth type
-    return .vector (name ++ "<" ++ element ++ ">") width
-  | .enum identity (.atom scope name) => do
-    if scope != runtimeScope then none else pure ()
-    let storage ← match name with
-      | "System.SByte" => some EnumStorage.signed8 | "System.Byte" => some .unsigned8
-      | "System.Int16" => some .signed16 | "System.UInt16" => some .unsigned16
-      | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
-      | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
-      | _ => none
-    return .enumeration identity storage
-  | .atom scope name =>
-    if scope != runtimeScope then none else match name with
-      | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
-      | "System.Int16" => some .signed16 | "System.UInt16" => some .unsigned16
-      | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
-      | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
-      | "System.IntPtr" => some .nativeInt | "System.UIntPtr" => some .nativeUInt
-      | "System.Boolean" => some .boolean | "System.Char" => some .character
-      | _ => none
-  | _ => none
-/-- Primitive/vector widths are intrinsic; aggregate widths come from checked layout uses. -/
-def spanElementWidth (type : TypeExpr) (aggregateWidth : Nat := 0) : Option Nat :=
-  if let .aggregate .. := type then some aggregateWidth else
-  ((arrayElementType type).map ArrayElement.width).orElse (fun _ => integerVectorWidth type)
-
-/-- Exact span metadata, including element width and write capability. -/
-def spanStorage (type : TypeExpr) (aggregateWidth : Nat := 0) : Option StorageType :=
-  match type with
-  | .apply (.constructor scope name) elementType => do
-    if scope != runtimeScope ||
-        name ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none else
-    let width ← spanElementWidth elementType aggregateWidth
-    return .span width (name == "System.Span`1")
-  | _ => none
-
-/-- Whether a local has a supported span metadata shape; layouts are validated separately. -/
-def spanLocal (type : TypeExpr) : Bool := (spanStorage type).isSome
-
-/-- Callable identities retain scoped aggregate names, independent of layout-table ordering.
-    Argument storage still validates the original index against the checked layout metadata. -/
-def callableType : TypeExpr → TypeExpr
-  | .aggregate identity _ => .aggregate identity 0
-  | .byref element => .byref (callableType element)
-  | .apply constructor argument => .apply (callableType constructor) (callableType argument)
-  | .functionPointer result parameters convention hasThis explicitThis =>
-    .functionPointer (callableType result) (callableType parameters) convention hasThis explicitThis
-  | .signatureParameter head tail => .signatureParameter (callableType head) (callableType tail)
-  | type => type
-
-/-- Function pointers admit checked aggregates, integer vectors and integer/reference types. -/
-def managedParameter : TypeExpr → Bool
-  | .atom scope name => scope == runtimeScope && (primitiveField name).isSome
-  | .enum _ (.atom scope name) => scope == runtimeScope &&
-      ((primitiveField name).map enumField).getD false
-  | .byref element => match element with
-      | .atom .. | .enum .. | .aggregate .. | .apply .. => managedParameter element
-      | _ => false
-  | .aggregate .. => true
-  | type => (integerVectorWidth type).isSome
-
-/-- Decode the ordered parameter chain without accepting another metadata constructor. -/
-def managedParameters : TypeExpr → Option (List TypeExpr)
-  | .void => some []
-  | .signatureParameter head tail => do
-    if !managedParameter head then none else pure ()
-    return callableType head :: (← managedParameters tail)
-  | _ => none
-
-/-- Only the exact static managed convention gives callable provenance. -/
-def managedSignature : TypeExpr → Option ManagedSignature
-  | .functionPointer result parameters 0 false false => do
-    if result != .void && !managedParameter result then none else pure ()
-    return ⟨callableType result, ← managedParameters parameters⟩
-  | _ => none
-
-/-- Raw callable types must bind every aggregate index before their identity is canonicalized. -/
-def callableLayoutsValid (layouts : List RawLayout) : TypeExpr → Bool
-  | .aggregate identity index => (layouts[index]?).any (·.identity == identity)
-  | .byref element => callableLayoutsValid layouts element
-  | .functionPointer result parameters _ _ _ =>
-    callableLayoutsValid layouts result && callableLayoutsValid layouts parameters
-  | .signatureParameter head tail =>
-    callableLayoutsValid layouts head && callableLayoutsValid layouts tail
-  | _ => true
-
-/-- Decode storage independently from the exact metadata type identity. -/
-def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
-  | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
-  | .object _ _ => some .object
-  | .aggregate identity index => do
-    let metadata ← layouts[index]?
-    if metadata.identity = identity then return .field (.aggregate index) else none
-  | .enum _ underlying => do
-    let .field kind ← typeStorage layouts underlying | none
-    if enumField kind then return .field kind else none
-  | .byref _ => some .reference
-  -- An array of class references is itself an object on the heap.
-  | .array (.object _ _) => some .object
-  | .array (.aggregate identity index) => do
-    let metadata ← layouts[index]?
-    if metadata.identity == identity && !metadata.byRefLike then
-      some (.aggregateArray identity index) else none
-  | .array element => match managedSignature element with
-    | some signature => if callableLayoutsValid layouts element then some (.methodTable signature)
-      else none
-    | none => StorageType.array <$> arrayElementType element
-  | type@(.functionPointer ..) => if callableLayoutsValid layouts type then
-      StorageType.methodPointer <$> managedSignature type else none
-  | .pointer (.atom scope name) =>
-    if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
-        "System.UInt16", "System.Char", "System.Int32", "System.UInt32", "System.Int64",
-        "System.UInt64", "System.IntPtr", "System.UIntPtr"] then some .reference else none
-  | .pointer (.enum identity underlying) => do
-    let .field _ ← typeStorage layouts (.enum identity underlying) | none
-    return .reference
-  | .pointer (.aggregate identity index) => do
-    let metadata ← layouts[index]?
-    if metadata.identity == identity then some .reference else none
-  | .pointer type => if (integerVectorWidth type).isSome then some .reference else none
-  | type@(.apply (.constructor scope name) elementType) => do
-    if let some storage := spanStorage type then
-      if let .aggregate identity index := elementType then
-        let metadata ← layouts[index]?
-        if metadata.identity != identity then none else
-          return .aggregateSpan index (name == "System.Span`1")
-      else return storage
-    let .atom elementScope element := elementType | none
-    if scope != intrinsicsScope || elementScope != runtimeScope ||
-        element ∉ ["System.UInt64", "System.Int64", "System.UInt32", "System.Int32",
-          "System.Byte", "System.Double", "System.Single"] then none
-    else if name = "System.Runtime.Intrinsics.Vector128`1" then some .vector128
-    else if name = "System.Runtime.Intrinsics.Vector256`1" then some .vector256
-    else if name = "System.Runtime.Intrinsics.Vector512`1" then some .vector512 else none
-  | _ => none
-
-/-- A call target: a method of this module by metadata token, or another assembly's
-    method by its `scope::signature` identity. -/
-inductive MethodId where
-  | managed (token : Nat)
-  | external (identity : String)
-  deriving DecidableEq, Repr
-
-/-- The metadata of a `call` or `newobj` operand, as declared at the call site. -/
-structure CallSite where
-  declaringType : TypeExpr := .void
-  name : String := ""
-  target : MethodId
-  typeArguments : List TypeExpr
-  parameterCount : Nat
-  hasThis : Bool
-  returnsValue : Bool
-  returnType : TypeExpr := .void
-  parameterTypes : List TypeExpr := []
-  /-- The suffix of `typeArguments` belonging to the declaring type, not the method. -/
-  ownerArgumentCount : Nat := 0
-  deriving DecidableEq, Repr
-
-/-- A decoded instruction operand. A field operand names its owner type and the field's
-    index in the owner's raw layout. -/
+/-- A decoded instruction operand. A field operand names its owner type, the field's index in
+    the owner's raw layout, the type it holds and the name of the metadata row its token names. -/
 inductive RawOperand where
   | none
   | integer (value : Int)
@@ -223,11 +32,35 @@ inductive RawOperand where
   | target (pc : Nat)
   | targets (pcs : List Nat)
   | type (value : TypeExpr)
-  | field (owner : TypeExpr) (index : Nat) (type : TypeExpr) (isStatic : Bool)
+  | field (owner : TypeExpr) (index : Nat) (type : TypeExpr) (name : MetadataName)
+      (isStatic : Bool)
   | call (site : CallSite)
   | indirectCall (returnType : TypeExpr) (parameters : List TypeExpr)
       (hasThis explicitThis : Bool) (callingConvention : Nat)
   deriving DecidableEq, Repr
+
+/-- The typed reference a field operand names: its owner, index, held type and name. `none` for
+    any other operand; the opcode, not the reference, says whether the field is static. -/
+def FieldRef.ofOperand? : RawOperand → Option FieldRef
+  | .field owner index type name _ => some { owner, index, type, name }
+  | _ => none
+
+/-- A reference is built exactly from a field operand with its owner, index, type and name. -/
+theorem FieldRef.ofOperand?_eq_some {operand : RawOperand} {reference : FieldRef} :
+    FieldRef.ofOperand? operand = some reference ↔ ∃ isStatic,
+      operand = .field reference.owner reference.index reference.type reference.name isStatic := by
+  cases operand
+  case field owner index type name isStatic =>
+    cases reference
+    simp only [FieldRef.ofOperand?, Option.some.injEq, FieldRef.mk.injEq, RawOperand.field.injEq]
+    constructor
+    · rintro ⟨rfl, rfl, rfl, rfl⟩
+      exact ⟨isStatic, rfl, rfl, rfl, rfl, rfl⟩
+    · rintro ⟨_, rfl, rfl, rfl, rfl, rfl⟩
+      exact ⟨rfl, rfl, rfl, rfl⟩
+  all_goals simp [FieldRef.ofOperand?]
+
+#print axioms FieldRef.ofOperand?_eq_some
 
 /-- One CIL instruction: its byte offset, opcode and operand. Branch operands are
     already instruction indices. -/
@@ -237,6 +70,10 @@ structure RawInstruction where
   operand : RawOperand
   deriving DecidableEq, Repr
 
+/-- Direct calls, virtual calls and constructions take a method token. -/
+def methodTokenCall (opcode : Nat) : Bool :=
+  opcode == 40 || opcode == 111 || opcode == 115
+
 /-- A generic parameter's attribute flags and constraint types. -/
 structure GenericConstraint where
   flags : Nat
@@ -245,6 +82,12 @@ structure GenericConstraint where
   /-- Interface constraints naming generic parameters, such as `T : I<T>`, in the method-then-owner
       parameter numbering; each is closed at the instantiation's arguments before it is checked. -/
   interfaces : List TypeExpr := []
+  deriving DecidableEq, Repr
+
+/-- Each static access carries its storage descriptor. RVA data also has a declared class size. -/
+structure StaticFieldSite where
+  descriptor : StaticDescriptor
+  rvaSize : Option Nat := none
   deriving DecidableEq, Repr
 
 /-- A method definition as read from metadata: signature, locals and body. -/
@@ -268,23 +111,52 @@ structure RawMethod where
   /-- Closed bodies retain the owner arity after their parameter constraints are discharged. -/
   ownerArgumentCount : Nat := 0
   /-- The declaring type is a class, so `this` is an object reference rather than a byref. -/
-  objectReceiver : Bool := false
+  receiverClass : Option TypeExpr := none
   /-- The instance field count of a class declaring type, its bases' fields included; each field
       takes one model slot. -/
   objectFieldCount : Nat := 0
   /-- The admitted base classes of a class declaring type, nearest first. -/
   objectBases : List TypeExpr := []
+  /-- Each reachable static access has a descriptor at its instruction index. -/
+  staticFields : List (Nat × StaticFieldSite) := []
+  /-- The exception clauses of the body in instruction indices, nested clauses first. -/
+  handlers : List ExceptionClause := []
   deriving DecidableEq, Repr
+
+/-- Whether this method takes an object reference for its receiver. -/
+def RawMethod.objectReceiver (method : RawMethod) : Bool := method.receiverClass.isSome
+
+/-- The method frame retains the descriptor at each static instruction index in source order. -/
+def RawMethod.staticDescriptors (method : RawMethod) : List (Nat × StaticDescriptor) :=
+  method.staticFields.map fun (pc, site) => (pc, site.descriptor)
 
 /-- Close metadata storage after substitution without changing callable owner expressions. -/
 def substituteStorageType (layouts : List RawLayout) (arguments : List TypeExpr)
     (type : TypeExpr) : Option TypeExpr :=
   closeLayoutType layouts <$> substituteType arguments type
 
+/-- The closed type of an operand that names a runtime span also names a runtime span. -/
+theorem substituteStorageType_span {layouts : List RawLayout} {arguments : List TypeExpr}
+    {original closed : TypeExpr} (span : original.isRuntimeSpan = true)
+    (storage : substituteStorageType layouts arguments original = some closed) :
+    closed.isRuntimeSpan = true := by
+  cases original <;> try cases span
+  case apply owner element =>
+    change owner.isSpanHead = true at span
+    cases owner <;> try cases span
+    case constructor scope name =>
+      simp only [substituteStorageType, substituteType, Option.pure_def, Option.bind_some,
+        Option.map_eq_map, Option.bind_eq_bind] at storage
+      cases found : substituteType arguments element <;>
+        simp [found, closeLayoutType_span layouts scope name _ span] at storage
+      subst closed
+      exact span
+#print axioms substituteStorageType_span
+
 /-- Whether a type mentions a generic parameter of the method being instantiated. -/
 private def mentionsParameter : TypeExpr → Bool
   | .parameter _ => true
-  | .byref element | .pointer element | .array element | .enum _ element =>
+  | .byref element | .pointer element | .array element | .modified _ _ _ element =>
     mentionsParameter element
   | .functionPointer result parameters .. | .signatureParameter result parameters =>
     mentionsParameter result || mentionsParameter parameters
@@ -321,7 +193,7 @@ private def splitOwner : List Char → List Char → Option (List Char × List C
 
 /-- The assembly scope of an owner's generic type definition. -/
 private def ownerScope : TypeExpr → Option String
-  | .constructor scope _ => some scope
+  | .constructor scope _ | .objectConstructor scope _ => some scope
   | .apply constructor _ => ownerScope constructor
   | _ => none
 
@@ -348,19 +220,22 @@ def substituteTarget (methodArity : Nat) (openOwner closedOwner : TypeExpr) :
 def substituteOperand (arguments : List TypeExpr) (layouts : List RawLayout := [])
     (methodArity : Nat := 0) : RawOperand → Option RawOperand
   | .type type => RawOperand.type <$> substituteStorageType layouts arguments type
-  | .field owner index type isStatic => do
-    return .field (← substituteStorageType layouts arguments owner) index (← substituteStorageType layouts arguments type)
-      isStatic
+  | .field owner index type name isStatic => do
+    return .field (← substituteStorageType layouts arguments owner) index
+      (← substituteStorageType layouts arguments type) name isStatic
   | .call site => do
     let declaringType ← substituteType arguments site.declaringType
     return .call { site with
-      declaringType,
+      method := { site.method with
+        owner := declaringType,
+        returnType := ← substituteStorageType layouts arguments site.returnType,
+        parameters := ← site.parameterTypes.mapM (substituteStorageType layouts arguments),
+        methodArguments :=
+          ← site.method.methodArguments.mapM (substituteStorageType layouts arguments) },
       target := ← if mentionsParameter site.declaringType then
         substituteTarget methodArity site.declaringType declaringType site.target
         else pure site.target,
-      typeArguments := ← site.typeArguments.mapM (substituteStorageType layouts arguments),
-      returnType := ← substituteStorageType layouts arguments site.returnType,
-      parameterTypes := ← site.parameterTypes.mapM (substituteStorageType layouts arguments) }
+      typeArguments := ← site.typeArguments.mapM (substituteStorageType layouts arguments) }
   | .indirectCall returnType parameters hasThis explicitThis convention => do
     return .indirectCall (← substituteStorageType layouts arguments returnType)
       (← parameters.mapM (substituteStorageType layouts arguments)) hasThis explicitThis convention
@@ -373,11 +248,12 @@ private def admittedTypeArgument (layouts : List RawLayout) (type : TypeExpr) : 
     | some _ => true
 
 /-- A generic type application split into its constructor and ordered arguments. -/
-private def appliedArguments : TypeExpr → TypeExpr × List TypeExpr
-  | .apply constructor argument =>
-    let (head, arguments) := appliedArguments constructor
-    (head, arguments ++ [argument])
-  | type => (type, [])
+def appliedArguments (type : TypeExpr) : TypeExpr × List TypeExpr := collect type []
+where
+  /-- Peeled arguments form the suffix after the remaining constructor's own arguments. -/
+  collect : TypeExpr → List TypeExpr → TypeExpr × List TypeExpr
+    | .apply constructor argument, suffix => collect constructor (argument :: suffix)
+    | head, suffix => (head, suffix)
 
 /-- An interface constraint naming generic parameters holds when its closure at `arguments`
     is among the direct interfaces of the constrained argument's layout. -/
@@ -393,10 +269,11 @@ def openConstraintValid (layouts : List RawLayout) (arguments : List TypeExpr)
       | none => false
     | _, _ => false
 
-/-- Instantiation preserves instruction encodings, offsets and branch targets exactly. -/
+/-- Instantiation preserves instruction encodings, offsets and branch targets exactly.
+    Explicit receiver signatures have no supported instantiation. -/
 def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
     (arguments : List TypeExpr) : Option RawMethod := do
-  if original.ownerArgumentCount != 0 ||
+  if original.explicitThis || original.ownerArgumentCount != 0 ||
       arguments.length != original.genericParameters.length + original.ownerParameters.length ||
       !arguments.all (admittedTypeArgument layouts) ||
       !((original.genericParameters ++ original.ownerParameters).zip arguments).all
@@ -411,11 +288,61 @@ def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
       let operand ← substituteOperand arguments layouts original.genericParameters.length
         instruction.operand
       return { instruction with operand }
+    let handlers ← original.handlers.mapM fun clause => match clause.kind with
+      | .catch type => (fun closed => { clause with kind := .catch closed }) <$>
+          substituteType arguments type
+      | .finally => some clause
     -- Masking with 239 clears the generic calling-convention bit (0x10).
     return { original with
-      returnType, parameters, locals, code, genericParameters := [], ownerParameters := [],
+      returnType, parameters, locals, code, handlers, genericParameters := [],
+      ownerParameters := [],
       ownerArgumentCount := original.ownerParameters.length,
       callingConvention := original.callingConvention &&& 239 }
+
+/-- Instantiation keeps the metadata token, so a closed body names the definition it closes. -/
+theorem instantiateMethod_token {layouts : List RawLayout} {original closed : RawMethod}
+    {arguments : List TypeExpr}
+    (instantiated : instantiateMethod layouts original arguments = some closed) :
+    closed.token = original.token := by
+  unfold instantiateMethod at instantiated
+  split at instantiated
+  · cases instantiated
+  · simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      Option.some.injEq] at instantiated
+    obtain ⟨_, _, _, _, _, _, _, _, _, _, rfl⟩ := instantiated
+    rfl
+
+#print axioms instantiateMethod_token
+
+/-- Instantiation keeps the owner, so a closed body is attributed with its definition. -/
+theorem instantiateMethod_owner {layouts : List RawLayout} {original closed : RawMethod}
+    {arguments : List TypeExpr}
+    (instantiated : instantiateMethod layouts original arguments = some closed) :
+    closed.owner = original.owner := by
+  unfold instantiateMethod at instantiated
+  split at instantiated
+  · cases instantiated
+  · simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      Option.some.injEq] at instantiated
+    obtain ⟨_, _, _, _, _, _, _, _, _, _, rfl⟩ := instantiated
+    rfl
+
+#print axioms instantiateMethod_owner
+
+/-- A closed method retains its definition's local initialization flag. -/
+theorem instantiateMethod_initLocals {layouts : List RawLayout} {original closed : RawMethod}
+    {arguments : List TypeExpr}
+    (instantiated : instantiateMethod layouts original arguments = some closed) :
+    closed.initLocals = original.initLocals := by
+  unfold instantiateMethod at instantiated
+  split at instantiated
+  · cases instantiated
+  · simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      Option.some.injEq] at instantiated
+    obtain ⟨_, _, _, _, _, _, _, _, _, _, rfl⟩ := instantiated
+    rfl
+
+#print axioms instantiateMethod_initLocals
 
 /-- Closed argument metadata is derived from this checked body, including short opcodes. -/
 def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
@@ -431,6 +358,37 @@ def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
   | opcode, _ =>
     if opcode ∈ [2, 3, 4, 5, 14, 15, 16, 65033, 65034, 65035] then none else some .other
 
+/-- Whether `instruction` names `pc` as a branch destination or switch arm. -/
+def branchesTo (pc : Nat) (instruction : RawInstruction) : Bool :=
+  match instruction.operand with
+  | .target target => target == pc
+  | .targets targets => targets.contains pc
+  | _ => false
+
+/-- All decoded branch destinations, including switch arms and unreachable instructions. -/
+def branchTargets (raw : List RawInstruction) : List Nat :=
+  raw.flatMap fun instruction => match instruction.operand with
+    | .target target => [target]
+    | .targets targets => targets
+    | _ => []
+
+/-- Collecting branch destinations once answers, for every pc, whether some instruction
+    branches to it. -/
+theorem branchTargets_contains (raw : List RawInstruction) (pc : Nat) :
+    (branchTargets raw).contains pc = raw.any (branchesTo pc) := by
+  induction raw with
+  | nil => rfl
+  | cons instruction rest ih =>
+    cases instruction with
+    | mk offset opcode operand =>
+      change _ = (branchesTo pc ⟨offset, opcode, operand⟩ || rest.any (branchesTo pc))
+      simp only [branchTargets, List.flatMap_cons, List.contains_append]
+      change (_ || (branchTargets rest).contains pc) = _
+      rw [ih]
+      cases operand <;> simp [branchesTo, BEq.beq, eq_comm]
+
+#print axioms branchTargets_contains
+
 /-- The unique raw managed indirect signature and native locals directly consumed as targets. -/
 structure NativeDispatchContext where
   signature : Option ManagedSignature := none
@@ -439,7 +397,7 @@ structure NativeDispatchContext where
 
 /-- Native integer metadata eligible for an authenticated table element. -/
 def nativeDispatchInteger : TypeExpr → Bool
-  | .atom scope name => scope == runtimeScope && name ∈ ["System.IntPtr", "System.UIntPtr"]
+  | .primitive .intPtr | .primitive .uintPtr => true
   | _ => false
 
 /-- Derive callable homes from raw call sites, never from emitted kinds or numerical values. -/
@@ -462,26 +420,50 @@ def nativeDispatchContext (raw : RawMethod) : NativeDispatchContext := Id.run do
     if instruction.opcode != 65044 then previous := some instruction
   return ⟨signature, locals⟩
 
-/-- A native pointer is an input table view; only raw target-feeding integer locals are callable. -/
+/-- A native pointer is an input table view; only raw target-feeding integer locals, those
+    `pointer` holds, are callable. -/
 def nativeDispatchStorage (context : NativeDispatchContext) (type : TypeExpr)
-    (localIndex : Option Nat := none) : Option StorageType := do
+    (localIndex : Option Nat := none) (pointer : Nat → Bool := context.pointerLocals.contains) :
+    Option StorageType := do
   let signature ← context.signature
   if let .pointer element := type then
     if nativeDispatchInteger element then return .methodTable signature
-  if nativeDispatchInteger type && localIndex.any context.pointerLocals.contains then
+  if nativeDispatchInteger type && localIndex.any pointer then
     return .methodPointer signature
   none
 
-/-- Closed argument and local storage, including typed span views, and argument accesses. -/
-def closedArguments (layouts : List RawLayout) (closed : RawMethod) : Option RawArguments := do
-  let context := nativeDispatchContext closed
+/-- Closed argument and local storage, including typed span views, and argument accesses, where
+    `pointer` holds the locals a `calli` consumes. -/
+def closedArgumentsWith (layouts : List RawLayout) (closed : RawMethod)
+    (context : NativeDispatchContext) (pointer : Nat → Bool) : Option RawArguments := do
   let parameters ← closed.parameters.mapM fun type =>
     nativeDispatchStorage context type <|> typeStorage layouts type
   let locals ← closed.locals.zipIdx.mapM fun (type, index) =>
-    nativeDispatchStorage context type (some index) <|> typeStorage layouts type
+    nativeDispatchStorage context type (some index) pointer <|> typeStorage layouts type
   let code ← closed.code.mapM argumentOperation
   let receiver := if closed.objectReceiver then StorageType.object else .reference
   return ⟨(if closed.hasThis then [receiver] else []) ++ parameters, locals, code⟩
+
+/-- Closed argument and local storage, including typed span views, and argument accesses, with
+    the locals a `calli` consumes read from a `Std.TreeSet` built once per body. -/
+def closedArguments (layouts : List RawLayout) (closed : RawMethod) : Option RawArguments :=
+  let context := nativeDispatchContext closed
+  closedArgumentsWith layouts closed context
+    (Std.TreeSet.ofList context.pointerLocals compare).contains
+
+/-- Reading pointer locals from a set built once gives exactly the storage that scanning the
+    pointer local list at each local gives. -/
+theorem closedArguments_eq_list (layouts : List RawLayout) (closed : RawMethod) :
+    closedArguments layouts closed = closedArgumentsWith layouts closed
+      (nativeDispatchContext closed) (nativeDispatchContext closed).pointerLocals.contains := by
+  have pointer : (Std.TreeSet.ofList (nativeDispatchContext closed).pointerLocals
+      compare).contains = (nativeDispatchContext closed).pointerLocals.contains := by
+    funext index
+    rw [Std.TreeSet.contains_ofList]
+  dsimp only [closedArguments]
+  rw [pointer]
+
+#print axioms closedArguments_eq_list
 
 /-- `closed` is `original` instantiated at `arguments`, and `parameterInput` is the
     argument metadata derived from it. -/
@@ -506,32 +488,99 @@ theorem validated_closed_arguments {layouts : List RawLayout} {original closed :
     closedArguments layouts closed = some parameterInput := valid.2
 
 
-/-- One entry of the program's method table: the type arguments and closed body of the
+/-- One entry of the program's method table: type arguments, closed body and assembly pin of the
     extracted method at that index. -/
 structure SpecializedMethod where
   arguments : List TypeExpr
   closed : RawMethod
+  assembly : AssemblyPin
   deriving DecidableEq, Repr
 
 /-- The callee index and argument count of an emitted call, if its kind matches the raw
-    opcode: `call` (40) for `.call`, `callvirt` (111) for a receiver-checked call, `newobj`
-    (115) for a construction. -/
-private def managedCallTarget (opcode : Nat) : Op → Option (Nat × Nat)
-  | .call target count | .tailCall target count =>
-    if opcode = 40 then some (target, count) else none
-  | .callInstance target count => if opcode = 111 then some (target, count) else none
-  | .newAggregate target count _ | .newVector256 target count | .newObject target count .. =>
-    if opcode = 115 then some (target, count) else none
+    opcode: `call` (40) for `.call`, whose callee is the `.direct` link of its pc, and `callvirt`
+    (111) for a receiver-checked call. -/
+private def managedCallTarget (opcode : Nat) (link : Option Link) :
+    Instruction → Option (Nat × Nat)
+  | .call method _ => match link with
+    | some (.direct target) => if opcode = 40 then some (target, method.argumentCount) else none
+    | _ => none
+  | .callvirt method => match link with
+    | some (.direct target) => if opcode = 111 then some (target, method.argumentCount) else none
+    | _ => none
   | _ => none
 
-/-- A class construction allocates an instance of the call site's declaring class, with that
-    class's bases and one slot per instance field, whose constructor takes that instance as its
-    object receiver. -/
-def constructedOwnerMatches (site : CallSite) (callee : RawMethod) : Op → Bool
-  | .newObject _ _ owner bases size => owner == site.declaringType && callee.objectReceiver &&
-    bases == callee.objectBases && size == objectFieldOffset callee.objectFieldCount &&
-    match owner with | .object .. => true | _ => false
+/-- A `call` names the method its raw operand names, unless a `constrained.` prefix lowered the
+    operand to the resolved implementation; the constrained-call check ties that operand. -/
+def callOperandMatches (site : CallSite) : Instruction → Bool
+  | .call method prefixes => prefixes.constrained.isSome || method == site.method
+  | .callvirt method => method == site.method
   | _ => true
+
+/-- Split a scoped declaring type from its ordered generic arguments. -/
+def managedOwner : TypeExpr → Option (String × List TypeExpr)
+  | .primitive type => some (runtimeScope ++ "::" ++ type.display, [])
+  | .atom scope name _ => some (scope ++ "::" ++ name, [])
+  | .object scope name | .constructor scope name | .objectConstructor scope name => do return (scope ++ "::" ++ (← name.signatureName?), [])
+  | .aggregate identity _ => some (identity, [])
+  | .apply owner argument => do
+    let (identity, arguments) ← managedOwner owner
+    return (identity, arguments ++ [argument])
+  | _ => none
+
+/-- Owner arguments occupy the suffix after method arguments, with independently checked arity. -/
+def managedOwnerMatches (site : CallSite) (owner : String) (ownerCount : Nat) : Bool :=
+  match managedOwner site.declaringType with
+  | some (identity, arguments) => identity == owner && ownerCount == site.ownerArgumentCount &&
+    arguments.length == ownerCount && ownerCount ≤ site.typeArguments.length &&
+    site.typeArguments.drop (site.typeArguments.length - ownerCount) == arguments
+  | none => false
+
+/-- `callee` is the extracted method a managed site with metadata token `token` names: the same
+    owner with its type arguments, token, method type arguments and declared signature. -/
+def calleeMatchesSite (site : CallSite) (token : Nat) (callee : SpecializedMethod) : Bool :=
+  managedOwnerMatches site callee.closed.owner callee.closed.ownerArgumentCount &&
+  callee.closed.token == token && callee.arguments == site.typeArguments &&
+  callee.closed.receiverClass.all (· == site.declaringType) &&
+  callee.closed.parameters.length == site.parameterCount &&
+  callee.closed.hasThis == site.hasThis &&
+  (callee.closed.returnType != .void) == site.returnsValue &&
+  callee.closed.returnType == site.returnType &&
+  callee.closed.parameters == site.parameterTypes &&
+  site.declaringType.headScope.any callee.assembly.identity.spelledAs
+
+/-- What a live `newobj` of `constructor` may be linked to. Its raw instruction is `newobj` (115)
+    of a managed site naming `constructor`, and the linked method is the one the site names. A
+    value-type constructor, whose owner is no object or class-headed atom and whose receiver is
+    no object, is linked `.aggregate`; a class constructor taking its instance as object receiver
+    is linked `.object` with the class's bases and one slot per instance field. An
+    interface-headed owner is refused. A dead site passes. -/
+def validateConstructionWith (methods : Nat → Option SpecializedMethod) (raw : RawInstruction)
+    (live : Bool) (link : Option Link) (constructor : MethodRef) : Bool :=
+  if !live then true else
+  match link with
+  | none => false
+  | some link =>
+    let isClass := match constructor.owner with
+      | .object .. | .atom _ _ .classType => true
+      | _ => false
+    -- An interface declares no constructor.
+    !(constructor.owner matches .atom _ _ .interfaceType) && raw.opcode == 115 &&
+    match raw.operand with
+    | .call site => site.method == constructor && match site.target with
+      | .managed token => match link with
+        | .aggregate index _ => match methods index with
+          | some callee => calleeMatchesSite site token callee && !isClass &&
+            !callee.closed.objectReceiver
+          | none => false
+        | .object index bases size => match methods index with
+          | some callee => calleeMatchesSite site token callee && isClass &&
+            callee.closed.objectReceiver && bases == callee.closed.objectBases &&
+            size == objectFieldOffset callee.closed.objectFieldCount
+          | none => false
+        | _ => false
+      | .external _ => false
+    | _ => false
+
 
 /-- The `Virtual` flag of a method's metadata attributes (ECMA-335 II.23.1.10). -/
 def virtualMethodAttribute : Nat := 0x40
@@ -543,8 +592,8 @@ def RawMethod.isVirtual (method : RawMethod) : Bool :=
 /-- A receiver-checked call enters a non-virtual method of an admitted class, whose receiver is an
     object reference; no other managed call checks its receiver. A virtual callee would need
     dispatch, which one fixed target does not perform. -/
-def checkedReceiverMatches (callee : RawMethod) : Op → Bool
-  | .callInstance .. => callee.objectReceiver && !callee.isVirtual
+def checkedReceiverMatches (callee : RawMethod) : Instruction → Bool
+  | .callvirt .. => callee.objectReceiver && !callee.isVirtual
   | _ => true
 
 /-- Legacy slots accept only primitive signatures; new families require exact typed metadata. -/
@@ -585,24 +634,6 @@ def managedTargetMatches (methods : Nat → Option SpecializedMethod)
     callee.closed.parameters.map callableType == signature.parameters &&
     managedSignature signature.typeExpr == some signature
 
-/-- Split a scoped declaring type from its ordered generic arguments. -/
-def managedOwner : TypeExpr → Option (String × List TypeExpr)
-  | .atom scope name | .constructor scope name | .object scope name =>
-    some (scope ++ "::" ++ name, [])
-  | .aggregate identity _ => some (identity, [])
-  | .apply owner argument => do
-    let (identity, arguments) ← managedOwner owner
-    return (identity, arguments ++ [argument])
-  | _ => none
-
-/-- Owner arguments occupy the suffix after method arguments, with independently checked arity. -/
-def managedOwnerMatches (site : CallSite) (owner : String) (ownerCount : Nat) : Bool :=
-  match managedOwner site.declaringType with
-  | some (identity, arguments) => identity == owner && ownerCount == site.ownerArgumentCount &&
-    arguments.length == ownerCount && ownerCount ≤ site.typeArguments.length &&
-    site.typeArguments.drop (site.typeArguments.length - ownerCount) == arguments
-  | none => false
-
 /-- Exact function address evidence; integer constants cannot acquire callable provenance. -/
 def managedAddressMatches (methods : Nat → Option SpecializedMethod)
     (raw : RawInstruction) (target : ManagedTarget) (signature : ManagedSignature) : Bool :=
@@ -610,7 +641,8 @@ def managedAddressMatches (methods : Nat → Option SpecializedMethod)
   match raw.operand with
   | .call site => site.target == .managed target.identity.token &&
     (match methods target.method with
-      | some callee => managedOwnerMatches site target.identity.owner callee.closed.ownerArgumentCount &&
+      | some callee => site.declaringType.headScope.any callee.assembly.identity.spelledAs &&
+        managedOwnerMatches site target.identity.owner callee.closed.ownerArgumentCount &&
         site.typeArguments == callee.arguments &&
         site.returnType == callee.closed.returnType && site.parameterTypes == callee.closed.parameters
       | none => false) &&
@@ -636,20 +668,24 @@ def managedIndirectMatches (methods : Nat → Option SpecializedMethod)
   | _ => false
 
 /-- Every live managed call must select the independently instantiated definition
-with the exact substituted type arguments and signature; an external one, a matching import slot. -/
+with the exact substituted type arguments and signature; an external one, a matching import slot.
+`link` is the link of the call's pc, which names the body a `call` enters. -/
 def validateManagedCallWith (methodCount : Nat)
     (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
-    (raw : RawInstruction) (live : Bool) (emitted : Op) : Bool :=
+    (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
   if !live then true else
-  match emitted with
-  | .managed (.address target signature) => managedAddressMatches methods raw target signature
-  | .managed (.call signature catalog _) => managedIndirectMatches methods raw signature catalog
+  match emitted, link with
+  | .ldftn identity signature, some (.address index) =>
+    managedAddressMatches methods raw ⟨identity, index⟩ signature
+  | .calli signature _, some (.indirect catalog) =>
+    managedIndirectMatches methods raw signature catalog
+  | .ldftn .., _ | .calli .., _ => false
   -- Each listed body is a virtual instance method of a class with the slot's signature; which
   -- body each class selects is checked against the dispatch catalog.
-  | .callVirtual targets count => match raw.operand with
-    | .call site => raw.opcode == 111 && site.hasThis && !targets.isEmpty &&
-      (match site.target with | .managed _ => true | .external _ => false) &&
-      count == site.parameterCount + 1 &&
+  | .callvirt method, some (.virtual targets) => match raw.operand with
+    | .call site => raw.opcode == 111 && method == site.method && site.hasThis &&
+      !targets.isEmpty && (match site.target with | .managed _ => true | .external _ => false) &&
+      method.argumentCount == site.parameterCount + 1 &&
       targets.all fun (_, index) => match methods index with
         | some callee => callee.arguments.isEmpty && callee.closed.objectReceiver &&
           callee.closed.hasThis && callee.closed.isVirtual &&
@@ -657,35 +693,117 @@ def validateManagedCallWith (methodCount : Nat)
           callee.closed.returnType == site.returnType
         | none => false
     | _ => false
-  | _ =>
+  -- A live construction is checked with its link by `validateConstructionWith`; without the link
+  -- it passes nothing.
+  | .newobj _, _ => false
+  | _, _ =>
   match raw.operand with
   | .call site => match site.target with
-    | .managed token => match managedCallTarget raw.opcode emitted with
+    | .managed token => match managedCallTarget raw.opcode link emitted with
       | none => false
       | some (target, count) => match methods target with
         | none => false
         | some callee =>
-          managedOwnerMatches site callee.closed.owner callee.closed.ownerArgumentCount &&
-          callee.closed.token == token && callee.arguments == site.typeArguments &&
-          callee.closed.parameters.length == site.parameterCount &&
-          callee.closed.hasThis == site.hasThis &&
-          (callee.closed.returnType != .void) == site.returnsValue &&
-          callee.closed.returnType == site.returnType &&
-          callee.closed.parameters == site.parameterTypes &&
-          count == site.parameterCount + (if raw.opcode != 115 && site.hasThis then 1 else 0) &&
-          constructedOwnerMatches site callee.closed emitted &&
-          checkedReceiverMatches callee.closed emitted
-    | .external identity => match emitted with
-      | .call target count =>
-        validateImportCallWith methodCount imports raw.opcode site identity target count
-      | .callInstance .. | .tailCall .. | .newAggregate .. | .newVector256 .. | .newObject .. =>
-        false
-      | _ => true
+          calleeMatchesSite site token callee &&
+          count == site.parameterCount + (if site.hasThis then 1 else 0) &&
+          checkedReceiverMatches callee.closed emitted && callOperandMatches site emitted
+    | .external identity => match emitted, link with
+      | .call method prefixes, some (.direct target) =>
+        !prefixes.tail && prefixes.constrained.isNone && method == site.method &&
+          validateImportCallWith methodCount imports raw.opcode site identity target
+            method.argumentCount
+      | .call .., _ | .callvirt .., _ => false
+      | _, _ => true
   | .indirectCall .. => false
   | _ => match emitted with
-    | .call .. | .callInstance .. | .tailCall .. | .newAggregate .. | .newVector256 ..
-    | .newObject .. => false
+    | .call .. | .callvirt .. => false
     | _ => true
+
+/-- Link kinds for receiver calls, managed addresses and indirect calls. -/
+private def operandLinkFits (emitted : Instruction) (link : Option Link) : Bool :=
+  match emitted, link with
+  | .callvirt _, some (.direct _) | .callvirt _, some (.virtual _)
+  | .ldftn .., some (.address _) | .calli .., some (.indirect _) => true
+  | .callvirt _, _ | .ldftn .., _ | .calli .., _ => false
+  | _, _ => link.isNone
+
+/-- The link kind permitted at an instruction other than a construction. -/
+def _root_.CIL.Instruction.linkFits (modelled : CallOpcode × MethodRef → Bool)
+    (emitted : Instruction) (link : Option Link) : Bool :=
+  match emitted with
+  | .call method _ => match link with
+    | some (.direct _) => !modelled (.call, method)
+    | none => modelled (.call, method)
+    | some _ => false
+  | _ => operandLinkFits emitted link
+
+/-- A live call that states no link keeps the call its raw site makes: a `call` of an external
+    method, naming the site's own method, with no prefix. A dead one passes. -/
+def validateModelCall (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
+  !live || match raw.opcode, raw.operand, emitted with
+  | 40, .call site, .call method prefixes =>
+    (site.target matches .external _) && method == site.method && !prefixes.tail &&
+      prefixes.constrained.isNone
+  | _, _, _ => false
+
+/-- A raw call or construction claims the runtime model registered for that opcode. -/
+def modelledCallSite (modelled : CallOpcode × MethodRef → Bool) (raw : RawInstruction) : Bool :=
+  match raw.opcode, raw.operand with
+  | 40, .call site => modelled (.call, site.method)
+  | 115, .call site => modelled (.newobj, site.method)
+  | _, _ => false
+
+/-- A modelled site keeps its opcode and external method without a link. Live linked sites must
+    agree with the managed method or import selected by their link. -/
+def validateLinkedCallWith (modelled : CallOpcode × MethodRef → Bool) (methodCount : Nat)
+    (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
+    (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
+  match emitted.constructor? with
+  | some constructor =>
+    if modelled (.newobj, constructor) then
+      link.isNone && (!live || (raw.opcode == 115 && match raw.operand with
+        | .call site => (site.target matches .external _) && site.method == constructor
+        | _ => false))
+    else validateConstructionWith methods raw live link constructor
+  | none =>
+    -- The arms decide `Instruction.linkFits` in the same match, since a second match on the
+    -- instruction costs the kernel about 700 heartbeats at every pc.
+    match emitted, link with
+    | .call method _, none => modelled (.call, method) && validateModelCall raw live emitted
+    | .call method _, some (.direct _) => !modelled (.call, method) &&
+        ((!live || !modelledCallSite modelled raw) &&
+          validateManagedCallWith methodCount methods imports raw live link emitted)
+    | .call .., some _ => false
+    | _, _ => operandLinkFits emitted link &&
+        ((!live || !modelledCallSite modelled raw) &&
+          validateManagedCallWith methodCount methods imports raw live link emitted)
+
+/-- A pc other than a construction that passes the linked call rule fits its link. -/
+theorem validateLinkedCallWith_linkFits {modelled : CallOpcode × MethodRef → Bool}
+    {methodCount : Nat}
+    {methods : Nat → Option SpecializedMethod} {imports : Nat → Option ImportSlot}
+    {raw : RawInstruction} {live : Bool} {link : Option Link} {emitted : Instruction}
+    (unnamed : emitted.constructor? = none)
+    (checked : validateLinkedCallWith modelled methodCount methods imports raw live link emitted =
+      true) :
+    emitted.linkFits modelled link = true := by
+  simp only [validateLinkedCallWith, unnamed] at checked
+  split at checked
+  · simp only [Bool.and_eq_true] at checked
+    simp [Instruction.linkFits, checked.1]
+  · simp only [Bool.and_eq_true] at checked
+    simp [Instruction.linkFits, checked.1]
+  · simp at checked
+  · rename_i noModel _ noOther
+    simp only [Bool.and_eq_true] at checked
+    unfold Instruction.linkFits
+    split
+    · cases link with
+      | none => exact (noModel _ _ rfl rfl).elim
+      | some _ => exact (noOther _ _ _ rfl rfl).elim
+    · exact checked.1
+
+#print axioms validateLinkedCallWith_linkFits
 
 /-- The external-call rule stated against the original lists, including bounds and offset. -/
 def validateImportCall (methods : List SpecializedMethod) (imports : List ImportSlot)
@@ -694,83 +812,193 @@ def validateImportCall (methods : List SpecializedMethod) (imports : List Import
 
 /-- The call rule stated against the original lists for use in semantic consequences. -/
 def validateManagedCall (methods : List SpecializedMethod) (imports : List ImportSlot)
-    (raw : RawInstruction) (live : Bool) (emitted : Op) : Bool :=
-  validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live emitted
+    (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
+  validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live link emitted
 
-/-- Every call emitted at a live call site of `raw` binds to the method table or an import
-    slot, and no other instruction emits a call. An external site may instead emit a
-    non-call translation, which other validators check. -/
+/-- The linked call rule stated against the original lists. -/
+def validateLinkedCall (modelled : CallOpcode × MethodRef → Bool) (methods : List SpecializedMethod)
+    (imports : List ImportSlot) (raw : RawInstruction) (live : Bool) (link : Option Link)
+    (emitted : Instruction) : Bool :=
+  validateLinkedCallWith modelled methods.length (methods[·]?) (imports[·]?) raw live link
+    emitted
+
+/-- Each live managed transfer binds its operand to the indicated method, import or dispatch
+    table. Modelled calls and constructors keep their external operand and have no link. -/
 def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot)
-    (raw : RawMethod) (reachable : List Bool) (emitted : Method) : Prop :=
+    (modelled : CallOpcode × MethodRef → Bool) (raw : RawMethod) (reachable : List Bool)
+    (emitted : Method) :
+    Prop :=
+  keysAscend 0 emitted.links = true ∧
+  emitted.links.all (fun entry => decide (entry.1 < emitted.code.length)) = true ∧
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
-  all3 (validateManagedCallWith methods.length (FlowIndex.ofList methods).get?
-    (FlowIndex.ofList imports).get?) raw.code reachable emitted.code = true
+  all3 (fun instruction (live, link) op => validateLinkedCallWith modelled methods.length
+      (FlowIndex.ofList methods).get? (FlowIndex.ofList imports).get? instruction live link op)
+    raw.code (reachable.zip (linkWalk emitted.links emitted.links 0
+      (List.range emitted.code.length))) emitted.code = true
 
-/-- Indexed call lookup preserves every metadata check and rejects the same invalid targets. -/
+/-- The check accepts exactly the bodies whose instructions pass the list-indexed rules with the
+    link a scan of the table gives each pc: indexed lookups and links read beside the code lose
+    no evidence the scans accept and admit none they reject. -/
 theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
-    (imports : List ImportSlot) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
-    ManagedCallsValid methods imports raw reachable emitted ↔
+    (imports : List ImportSlot) (modelled : CallOpcode × MethodRef → Bool) (raw : RawMethod)
+    (reachable : List Bool) (emitted : Method) :
+    ManagedCallsValid methods imports modelled raw reachable emitted ↔
+      keysAscend 0 emitted.links = true ∧
+      emitted.links.all (fun entry => decide (entry.1 < emitted.code.length)) = true ∧
       raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
-        all3 (validateManagedCall methods imports) raw.code reachable emitted.code = true := by
+      all3 (fun instruction (live, link) op => validateLinkedCallWith modelled methods.length
+          (methods[·]?) (imports[·]?) instruction live link op)
+        raw.code (reachable.zip ((List.range emitted.code.length).map emitted.linkAt))
+        emitted.code = true := by
   have index {α : Type} (values : List α) :
       (FlowIndex.ofList values).get? = (values[·]?) := by
     funext target
     exact FlowIndex.get?_ofList values target
+  have reads (ascending : keysAscend 0 emitted.links = true) :
+      linkWalk emitted.links emitted.links 0 (List.range emitted.code.length) =
+        (List.range emitted.code.length).map emitted.linkAt :=
+    linkWalk_eq _ ascending _ _ 0 (dropBelow_zero _).symm
   unfold ManagedCallsValid
   rw [index, index]
-  rfl
+  constructor
+  · rintro ⟨ascending, rest⟩
+    rw [reads ascending] at rest
+    exact ⟨ascending, rest⟩
+  · rintro ⟨ascending, rest⟩
+    rw [reads ascending]
+    exact ⟨ascending, rest⟩
 
 #print axioms ManagedCallsValid_iff_original
 
-instance (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : RawMethod)
-    (reachable : List Bool) (emitted : Method) :
-    Decidable (ManagedCallsValid methods imports raw reachable emitted) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+/-- An admitted body gives every pc of an instruction other than a construction a link the
+    instruction fits: no link at a `call` of a modelled method, a `.direct` link at any other
+    `call` and the link its program index implies elsewhere, so a step of such an instruction
+    never takes the `unlinkedCall` branch for want of a link. -/
+theorem ManagedCallsValid.linkFits {methods : List SpecializedMethod}
+    {imports : List ImportSlot} {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod}
+    {reachable : List Bool} {emitted : Method}
+    (valid : ManagedCallsValid methods imports modelled raw reachable emitted) {pc : Nat}
+    {op : Instruction} (found : emitted.code[pc]? = some op) (implied : op.constructs = false) :
+    op.linkFits modelled (emitted.linkAt pc) = true := by
+  obtain ⟨_, _, statesLength, codeLength, checks⟩ :=
+    (ManagedCallsValid_iff_original _ _ _ _ _ _).mp valid
+  have inside : pc < emitted.code.length := (List.getElem?_eq_some_iff.mp found).1
+  obtain ⟨instruction, rawFound⟩ :
+      ∃ instruction, raw.code[pc]? = some instruction :=
+    ⟨raw.code[pc]'(codeLength ▸ inside), List.getElem?_eq_getElem _⟩
+  have liveInside : pc < reachable.length := statesLength ▸ codeLength ▸ inside
+  have paired : (reachable.zip ((List.range emitted.code.length).map emitted.linkAt))[pc]? =
+      some (reachable[pc], emitted.linkAt pc) := by
+    simp [List.getElem?_zip_eq_some, liveInside, inside]
+  have checked := all3_at checks rawFound paired found
+  have unnamed : op.constructor? = none := by
+    simpa [Instruction.constructs] using implied
+  exact validateLinkedCallWith_linkFits unnamed checked
 
-/-- Checks generated call bindings structurally, retaining kernel decision for residual checks.
-    Reflexive metadata comparisons use equality proofs instead of re-evaluating strings. -/
-macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
-  `(tactic| first
-    | (apply (ManagedCallsValid_iff_original _ _ _ _ _).mpr
-       refine ⟨?_, ?_, ?_⟩
-       · rfl
-       · rfl
-       · simp [all3, validateManagedCall, validateManagedCallWith, managedCallTarget,
-           constructedOwnerMatches,
-           $[$facts:term],*] <;>
-           decide +kernel)
-    | decide +kernel)
+#print axioms ManagedCallsValid.linkFits
 
+/-- A direct managed call enters a method whose owner, signature, definition token and type
+    arguments all match its checked operand. -/
+theorem ManagedCallsValid.direct_callee {methods : List SpecializedMethod}
+    {imports : List ImportSlot} {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod}
+    {reachable : List Bool} {emitted : Method}
+    (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
+    {pc target token : Nat} {method : MethodRef} {prefixes : CallPrefixes}
+    {instruction : RawInstruction} {site : CallSite}
+    (found : emitted.code[pc]? = some (.call method prefixes))
+    (live : reachable[pc]? = some true) (rawFound : raw.code[pc]? = some instruction)
+    (operand : instruction.operand = .call site) (managed : site.target = .managed token)
+    (linked : emitted.linkAt pc = some (.direct target)) :
+    callOperandMatches site (.call method prefixes) = true ∧
+    ∃ callee, methods[target]? = some callee ∧ calleeMatchesSite site token callee = true := by
+  obtain ⟨_, _, _, _, checks⟩ := (ManagedCallsValid_iff_original _ _ _ _ _ _).mp valid
+  have inside : pc < emitted.code.length := (List.getElem?_eq_some_iff.mp found).1
+  have paired : (reachable.zip ((List.range emitted.code.length).map emitted.linkAt))[pc]? =
+      some (true, some (.direct target)) := by
+    simp [List.getElem?_zip_eq_some, live, inside, linked]
+  have checked := all3_at checks rawFound paired found
+  simp only [validateLinkedCallWith, Instruction.constructor?, validateManagedCallWith,
+    managedCallTarget, operand, managed, Bool.not_true, Bool.false_eq_true, ite_false,
+    Bool.and_eq_true] at checked
+  obtain ⟨_, _, checked⟩ := checked
+  by_cases opcode : instruction.opcode = 40
+  · simp only [opcode, ite_true] at checked
+    cases selected : methods[target]? with
+    | none => simp [selected] at checked
+    | some callee =>
+      simp only [selected, Bool.and_eq_true] at checked
+      exact ⟨checked.2, callee, rfl, checked.1.1.1⟩
+  · simp [opcode] at checked
+
+#print axioms ManagedCallsValid.direct_callee
+
+/-- At a live `call` whose raw operand names managed token `token`, the method its `.direct`
+    link enters has that token and the site's type arguments. Its operand passes the name check. -/
+theorem ManagedCallsValid.direct_operand {methods : List SpecializedMethod}
+    {imports : List ImportSlot} {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod}
+    {reachable : List Bool} {emitted : Method}
+    (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
+    {pc target token : Nat} {method : MethodRef} {prefixes : CallPrefixes}
+    {instruction : RawInstruction} {site : CallSite}
+    (found : emitted.code[pc]? = some (.call method prefixes))
+    (live : reachable[pc]? = some true) (rawFound : raw.code[pc]? = some instruction)
+    (operand : instruction.operand = .call site) (managed : site.target = .managed token)
+    (linked : emitted.linkAt pc = some (.direct target)) :
+    callOperandMatches site (.call method prefixes) = true ∧
+    ∃ callee, methods[target]? = some callee ∧ callee.closed.token = token ∧
+      callee.arguments = site.typeArguments := by
+  obtain ⟨reference, callee, selected, agrees⟩ := valid.direct_callee found live rawFound operand
+    managed linked
+  simp only [calleeMatchesSite, Bool.and_eq_true, beq_iff_eq, and_assoc] at agrees
+  exact ⟨reference, callee, selected, agrees.2.1, agrees.2.2.1⟩
+
+#print axioms ManagedCallsValid.direct_operand
+
+instance (methods : List SpecializedMethod) (imports : List ImportSlot)
+    (modelled : CallOpcode × MethodRef → Bool) (raw : RawMethod) (reachable : List Bool)
+    (emitted : Method) :
+    Decidable (ManagedCallsValid methods imports modelled raw reachable emitted) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
+
+/-- Every live pc passes the linked call rule with the link the table gives it. -/
 theorem validated_managed_call {methods : List SpecializedMethod} {imports : List ImportSlot}
-    {raw : RawMethod} {reachable : List Bool} {emitted : Method}
-    (valid : ManagedCallsValid methods imports raw reachable emitted) (pc : Fin raw.code.length) :
-    validateManagedCall methods imports raw.code[pc] reachable[pc.val]!
-      (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true := by
-  have valid := (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
-  have live : pc.val < reachable.length := valid.1 ▸ pc.isLt
-  have present : pc.val < emitted.code.length := valid.2.1 ▸ pc.isLt
+    {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod} {reachable : List Bool}
+    {emitted : Method}
+    (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
+    (pc : Fin raw.code.length) :
+    validateLinkedCall modelled methods imports raw.code[pc] reachable[pc.val]!
+      (emitted.linkAt pc.val) (emitted.code[pc.val]?.getD (.unadmitted 0)) = true := by
+  obtain ⟨_, _, statesLength, codeLength, checks⟩ :=
+    (ManagedCallsValid_iff_original _ _ _ _ _ _).mp valid
+  have live : pc.val < reachable.length := statesLength ▸ pc.isLt
+  have present : pc.val < emitted.code.length := codeLength ▸ pc.isLt
   rw [getElem!_pos reachable pc.val live, List.getElem?_eq_getElem present, Option.getD_some]
-  exact all3_at valid.2.2 (List.getElem?_eq_getElem pc.isLt) (List.getElem?_eq_getElem live)
+  have paired : (reachable.zip ((List.range emitted.code.length).map emitted.linkAt))[pc.val]? =
+      some (reachable[pc.val], emitted.linkAt pc) := by
+    simp [List.getElem?_zip_eq_some, live, present]
+  have pass := all3_at checks (List.getElem?_eq_getElem pc.isLt) paired
     (List.getElem?_eq_getElem present)
+  exact pass
 
-/-- An accepted live `call` past every extracted method is an external site calling a slot
-    with its identity and arity. -/
+/-- An accepted live `call` linked past every extracted method is an external site calling a
+    slot with its identity and arity. -/
 theorem validated_import_call {methods : List SpecializedMethod} {imports : List ImportSlot}
-    {raw : RawInstruction} {target count : Nat}
-    (valid : validateManagedCall methods imports raw true (.call target count) = true)
+    {raw : RawInstruction} {method : MethodRef} {prefixes : CallPrefixes} {target : Nat}
+    (valid : validateManagedCall methods imports raw true (some (.direct target))
+      (.call method prefixes) = true)
     (outside : methods.length ≤ target) :
     ∃ site identity slot, raw.operand = .call site ∧ site.target = .external identity ∧
       raw.opcode = 40 ∧ importSignatureMatches slot site = true ∧
       imports[target - methods.length]? = some slot ∧ slot.identity = identity ∧
       slot.parameterCount = site.parameterCount ∧ slot.hasThis = site.hasThis ∧
       slot.returnsValue = site.returnsValue ∧
-      count = site.parameterCount + (if site.hasThis then 1 else 0) := by
+      method.argumentCount = site.parameterCount + (if site.hasThis then 1 else 0) := by
   obtain ⟨offset, opcode, operand⟩ := raw
   cases operand with
   | call site =>
-    obtain ⟨declaringType, name, method, typeArguments, parameterCount, hasThis, returnsValue,
-      returnType, parameterTypes, ownerArgumentCount⟩ := site
-    cases method with
+    obtain ⟨methodRef, declared, name, called, typeArguments, parameterCount, returnsValue,
+      ownerArgumentCount⟩ := site
+    cases called with
     | managed token =>
       have missing : methods[target]? = none := List.getElem?_eq_none_iff.mpr outside
       simp only [validateManagedCall, validateManagedCallWith, managedCallTarget,
@@ -785,15 +1013,17 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
       | none => simp [found] at valid
       | some slot =>
         simp [found] at valid
-        obtain ⟨⟨opcode40, _⟩, ⟨⟨⟨⟨⟨same, arity⟩, receiver⟩, result⟩, argc⟩, typed⟩⟩ := valid
+        obtain ⟨_, ⟨opcode40, _⟩, ⟨⟨⟨⟨⟨same, arity⟩, receiver⟩, result⟩, argc⟩, typed⟩⟩ :=
+          valid
         exact ⟨_, identity, slot, rfl, rfl, opcode40, typed, rfl, same, arity, receiver, result,
           argc⟩
   | _ => simp [validateManagedCall, validateManagedCallWith] at valid
 
-/-- Every accepted live `call` targets an extracted method or an existing import slot. -/
+/-- Every accepted live `call` is linked to an extracted method or an existing import slot. -/
 theorem validated_call_bound {methods : List SpecializedMethod} {imports : List ImportSlot}
-    {raw : RawInstruction} {target count : Nat}
-    (valid : validateManagedCall methods imports raw true (.call target count) = true) :
+    {raw : RawInstruction} {method : MethodRef} {prefixes : CallPrefixes} {target : Nat}
+    (valid : validateManagedCall methods imports raw true (some (.direct target))
+      (.call method prefixes) = true) :
     target < methods.length + imports.length := by
   by_cases inside : target < methods.length
   · exact Nat.lt_add_right _ inside

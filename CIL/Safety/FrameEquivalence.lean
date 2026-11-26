@@ -97,8 +97,8 @@ theorem Memory.Equivalent.loadLocal {m n : Memory} (same : m.Equivalent n)
     cases value <;> simp only [CIL.Safety.loadLocal, same.arrayValidate]
 
 theorem Memory.Equivalent.localAddress {m n : Memory} (same : m.Equivalent n)
-    (slot : LocalSlot) :
-    CIL.Safety.localAddress m slot = CIL.Safety.localAddress n slot := by
+    (index : Nat) (slot : LocalSlot) :
+    CIL.Safety.localAddress m index slot = CIL.Safety.localAddress n index slot := by
   cases slot <;> simp only [CIL.Safety.localAddress, same.formValue]
 
 theorem Memory.Equivalent.allocateHome {m n : Memory} (same : m.Equivalent n)
@@ -136,7 +136,7 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
     | reference _ => exact .error _
     | span _ _ => exact .error _
     | bufferSpan _ | readOnlyReference _ | array _
-    | methodPointer _ | methodTable _ | object _ => exact .error _
+    | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
   | root root | readOnlyRoot root =>
     cases value with
     | reference reference | readOnlyReference reference =>
@@ -147,7 +147,8 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
       exact .ok ⟨rfl, same⟩
     | scalar scalar => cases scalar <;> exact .error _
     | span reference length => exact .error _
-    | bufferSpan _ | array _ | methodPointer _ | methodTable _ | object _ => exact .error _
+    | typeHandle _ | runtimeType _ | bufferSpan _ | array _ | methodPointer _ | methodTable _ | object _ | spanHome _ =>
+      exact .error _
   | bytes kind reference =>
     cases value with
     | scalar value =>
@@ -170,7 +171,7 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
     | reference reference => exact .error _
     | span reference length => exact .error _
     | bufferSpan _ | readOnlyReference _ | array _
-    | methodPointer _ | methodTable _ | object _ => exact .error _
+    | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
   | span width writable stored =>
     cases value
     case scalar scalar => cases scalar <;> exact .error _
@@ -323,44 +324,6 @@ theorem Memory.Equivalent.makeSelectedLocals {m n : Memory} (same : m.Equivalent
   · exact same.makeLocals _ _ _
   · exact same.makeSelectedLocalsFrom _ _ _ _ _
 
-theorem Memory.Equivalent.makeArgumentHomes {m n : Memory} (same : m.Equivalent n)
-    (activation : Nat) (indices : List Nat) (args : List Value) :
-    ResultEquivalent OwnedEquivalent (CIL.Safety.makeArgumentHomes activation indices args m)
-      (CIL.Safety.makeArgumentHomes activation indices args n) := by
-  induction indices generalizing m n with
-  | nil => exact .ok ⟨rfl, rfl, same⟩
-  | cons index indices ih =>
-    simp only [CIL.Safety.makeArgumentHomes]
-    cases found : args[index]? with
-    | none =>
-      simp only [Option.map_none, Option.getD_none, Bool.false_eq_true, ite_false]
-      exact .error _
-    | some value =>
-      simp only [Option.map_some, Option.getD_some]
-      cases value with
-      | reference reference => exact .error _
-      | span reference length => exact .error _
-      | bufferSpan _ | readOnlyReference _ | array _
-      | methodPointer _ | methodTable _ | object _ => exact .error _
-      | scalar value =>
-        cases value <;> first | exact .error _ | skip
-        apply ResultEquivalent.bind (same.allocateHome _ _ _)
-        intro left right related
-        obtain ⟨reference, memory⟩ := left
-        obtain ⟨other, otherMemory⟩ := right
-        obtain ⟨rfl, equivalent⟩ := related
-        apply ResultEquivalent.bind (equivalent.storeLocal _ _)
-        intro left right related
-        obtain ⟨slot, stored⟩ := left
-        obtain ⟨otherSlot, otherStored⟩ := right
-        obtain ⟨rfl, storedEquivalent⟩ := related
-        apply ResultEquivalent.bind (ih storedEquivalent)
-        intro left right related
-        obtain ⟨homes, owned, result⟩ := left
-        obtain ⟨otherHomes, otherOwned, otherResult⟩ := right
-        obtain ⟨rfl, rfl, resultEquivalent⟩ := related
-        exact .ok ⟨rfl, rfl, resultEquivalent⟩
-
 theorem Memory.Equivalent.makeParameterHomes {m n : Memory} (same : m.Equivalent n)
     (activation : Nat) (parameters : List (Nat × CIL.LocalKind)) (args : List Value) :
     ResultEquivalent OwnedEquivalent (CIL.Safety.makeParameterHomes activation parameters args m)
@@ -400,12 +363,7 @@ theorem Memory.Equivalent.enterFrame {m n : Memory} (same : m.Equivalent n)
   obtain ⟨locals, owned, memory⟩ := left
   obtain ⟨otherLocals, otherOwned, otherMemory⟩ := right
   obtain ⟨rfl, rfl, equivalent⟩ := related
-  apply ResultEquivalent.bind (equivalent.makeArgumentHomes _ _ _)
-  intro left right related
-  obtain ⟨arguments, argumentIds, stored⟩ := left
-  obtain ⟨otherArguments, otherIds, otherStored⟩ := right
-  obtain ⟨rfl, rfl, storedEquivalent⟩ := related
-  apply ResultEquivalent.bind (storedEquivalent.makeParameterHomes _ _ _)
+  apply ResultEquivalent.bind (equivalent.makeParameterHomes _ _ _)
   intro left right related
   obtain ⟨parameters, parameterIds, result⟩ := left
   obtain ⟨otherParameters, otherParameterIds, otherResult⟩ := right
@@ -422,7 +380,6 @@ theorem Memory.Equivalent.leaveFrame {m n : Memory} (same : m.Equivalent n)
   | cons id ids ih => exact ih (same.expire id)
 
 #print axioms Memory.Equivalent.makeLocals
-#print axioms Memory.Equivalent.makeArgumentHomes
 #print axioms Memory.Equivalent.makeParameterHomes
 #print axioms Memory.Equivalent.enterFrame
 #print axioms Memory.Equivalent.leaveFrame

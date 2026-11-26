@@ -1,6 +1,8 @@
+using ILOpCode = System.Reflection.Metadata.ILOpCode;
 using System.Text;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -36,6 +38,9 @@ internal static partial class ProofOutline
         /// `.signed32`.</summary>
         internal string ArrayElement { get; init; } = "";
 
+        /// <summary>The element of a word or value array argument, as the extraction names it.</summary>
+        internal Arrays.Element? Element { get; init; }
+
         /// <summary>The element term a value array argument's `ArrayElement` names, when it is too long to state
         /// inline and no named field's `elementType` names it.</summary>
         internal string? ElementDefinition { get; init; }
@@ -67,9 +72,12 @@ internal static partial class ProofOutline
     /// <summary>The method's return as a Lean type and value constructor, or none for `void`; a `bool`
     /// is a `Bool` the returned word encodes as 1 or 0, an object a possibly null reference, and a value array
     /// the view of its origin, length and element.</summary>
-    sealed record Result(string Lean, string Constructor, bool Boolean = false, bool Object = false,
+    sealed record Result(string Lean, int Width, bool Boolean = false, bool Object = false,
         bool Array = false)
     {
+        /// <summary>The value constructor of the result: by word width for a scalar.</summary>
+        internal string Constructor => Object ? ".object" : Array ? ".array" : Width == 8 ? ".i64" : ".i32";
+
         internal string Encode(string term) => Object ? $".object {term}"
             : Array ? $".array {term}" : $".scalar ({Constructor} {term})";
     }
@@ -100,14 +108,14 @@ internal static partial class ProofOutline
         var names = new Names();
         var views = new FieldViews(extraction);
         var receiver = method.HasThis ? new[] { Receiver(method, names, views) } : [];
+        var body = new Body(emitted);
         var parameters = WrittenArrays(method, receiver.Concat(method.Parameters.Select(parameter =>
-            Describe(method, parameter, names, views, extraction.Architecture))).ToArray(), emitted.Ops,
-            new Body(emitted.Ops).Loops().Count);
+            Describe(method, parameter, names, views, extraction.Architecture))).ToArray(), body.Method,
+            body.Loops().Count, extraction.Architecture);
         var result = DescribeResult(method, extraction.Architecture);
         bool symbolic = parameters.Any(parameter => parameter.Shape is ParameterShape.Reference or
             ParameterShape.Span or ParameterShape.Object or ParameterShape.StructReference or
             ParameterShape.Array or ParameterShape.WordArray or ParameterShape.ValueArray);
-        var body = new Body(emitted.Ops);
         var lean = new Writer();
         var loops = body.Loops();
         var spec = new Specification(method, parameters, result, symbolic, extraction.Views.Length > 0);
@@ -131,14 +139,16 @@ internal static partial class ProofOutline
         var spanStore = loops.Count == 0 ? SpanStores(extraction, 0) : null;
         if (loops.Count == 0 && spanStore is null && parameters.Any(parameter => parameter.Writable))
             throw Unsupported($"{method.FullName} writes a span outside a loop other than by storing its value " +
-                "into `target[0]`; new-proof follows a span written from the front by a loop or that one store");
+                "into `target[0]`; new-proof follows a span written from the front by a loop or that one store" +
+                (parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.Narrow) is { } narrow
+                    ? $", of a word argument where `{narrow.Name}` is a narrow integer" : ""));
         if (spanStore is { } store)
-            source = SpanStoreLine(spec, store.Op, lean);
+            source = SpanStoreLine(spec, store.Lemma, lean);
         else if (structReceiver && loops.Count > 0)
             source = new ReceiverLoop(spec, body, lean).Generate();
         else if (structReceiver)
             source = StructStraightLine(spec, body, names, lean);
-        else if (loops.Count == 0 && !spec.Framed && ArrayRead(extraction, spec, body.Ops) is { } read)
+        else if (loops.Count == 0 && !spec.Framed && ArrayRead(extraction, spec, body.Method) is { } read)
             source = ArrayReadLine(spec, read, lean);
         else if (loops.Count == 0)
             source = StraightLine(extraction, spec, body, lean);
@@ -161,11 +171,14 @@ internal static partial class ProofOutline
     /// <summary>`parameters` with the array a loop stores into, by index or through a writable span over it,
     /// marked written; a loop's store is followed only into a method's one array argument. A straight-line store
     /// stays a hole over the array's contents.</summary>
-    static Parameter[] WrittenArrays(MethodDefinition method, Parameter[] parameters, string[] ops, int loops)
+    static Parameter[] WrittenArrays(MethodDefinition method, Parameter[] parameters, Method outline, int loops,
+        string architecture)
     {
         var arrays = parameters.Where(parameter => parameter.Shape == ParameterShape.WordArray).ToArray();
-        if (loops == 0 || arrays.Length == 0 || !ops.Any(op => op.StartsWith(".memory (.arrayStore ",
-            StringComparison.Ordinal) || Regex.IsMatch(op, @"\A\.memory \(\.arraySpan \S+ true "))) return parameters;
+        if (loops == 0 || arrays.Length == 0 || !Enumerable.Range(0, outline.InstructionCount).Any(pc =>
+            Arrays.Numeric(outline.StackCodeAt(pc), method, pc) is { Store: true } ||
+            outline.StackCodeAt(pc) is null &&
+            Spans.ArrayView(method.Body.Instructions[pc], architecture) is { Element.Compound: false, Writable: true })) return parameters;
         if (arrays.Length > 1)
             throw Unsupported($"{method.FullName} stores into one of {arrays.Length} array arguments in a loop; " +
                 "new-proof follows a loop's stores into a method's one array argument");
@@ -210,16 +223,17 @@ internal static partial class ProofOutline
         if (ReferenceArrays.Is(type)) return new(name, ParameterShape.Array, "Reference", 8);
         if (type is ArrayType { IsVector: true } array && WordArrayElement(array.ElementType) is { } word)
             return new(name, ParameterShape.WordArray, "ArrayView", ElementWidth(array.ElementType)!.Value)
-                { ArrayElement = word };
+                { ArrayElement = word.Expression, Element = word };
         if (Arrays.Of(type, architecture) is { } values)
         {
             // A struct, vector or enumeration element names its type by a quoted identity, often wider than a line.
-            var named = views.ElementType(values.Expression);
-            var quoted = named is null && values.Expression.Contains('"', StringComparison.Ordinal);
+            var named = views.ElementType(values);
+            var quoted = named is null && values.Compound;
             return new(name, ParameterShape.ValueArray, "Reference", values.Width)
             {
                 ArrayElement = named ?? (quoted ? name + "Element" : values.Expression),
-                ElementDefinition = quoted ? values.Expression : null
+                ElementDefinition = quoted ? values.Expression : null,
+                Element = values
             };
         }
         if (type is ByReferenceType reference && ElementWidth(reference.ElementType) is { } width)
@@ -248,12 +262,8 @@ internal static partial class ProofOutline
     }
 
     /// <summary>The `ArrayElement` the extraction gives an array of 32- or 64-bit integers.</summary>
-    static string? WordArrayElement(TypeReference type) => type.FullName switch
-    {
-        "System.Int32" => ".signed32", "System.UInt32" => ".unsigned32",
-        "System.Int64" => ".signed64", "System.UInt64" => ".unsigned64",
-        _ => null
-    };
+    static Arrays.Element? WordArrayElement(TypeReference type) =>
+        ElementWidth(type) is null ? null : Arrays.Primitive(type);
 
     static int? ElementWidth(TypeReference type) => type.FullName switch
     {
@@ -265,12 +275,12 @@ internal static partial class ProofOutline
     static Result? DescribeResult(MethodDefinition method, string architecture) => method.ReturnType.FullName switch
     {
         "System.Void" => null,
-        "System.Boolean" => new("Bool", ".i32", Boolean: true),
+        "System.Boolean" => new("Bool", 4, Boolean: true),
         "System.UInt32" or "System.Int32" or "System.Byte" or "System.SByte" or "System.UInt16"
-            or "System.Int16" or "System.Char" => new("W32", ".i32"),
-        "System.UInt64" or "System.Int64" => new("W64", ".i64"),
-        _ when ObjectTypes.Is(method.ReturnType) => new("ManagedReference", ".object", Object: true),
-        _ when Arrays.Of(method.ReturnType, architecture) is not null => new("ArrayView", ".array", Array: true),
+            or "System.Int16" or "System.Char" => new("W32", 4),
+        "System.UInt64" or "System.Int64" => new("W64", 8),
+        _ when ObjectTypes.Is(method.ReturnType) => new("ManagedReference", 0, Object: true),
+        _ when Arrays.Of(method.ReturnType, architecture) is not null => new("ArrayView", 0, Array: true),
         var other => throw Unsupported($"{method.Name} returns {other}; new-proof states integer, object, " +
             "value array and void results")
     };
@@ -442,7 +452,14 @@ internal static partial class ProofOutline
             lean.Line();
             var subject = Symbolic ? "its result and the caller's memory" : "its result";
             lean.Quiet();
-            lean.Line($"/-- Replace with what `{Method.Name}` guarantees about {subject}. -/");
+            // A specialized method's name carries its type arguments, so the sentence may need two lines.
+            var guarantee = $"/-- Replace with what `{Method.Name}` guarantees about {subject}. -/";
+            if (guarantee.Length <= 100) lean.Line(guarantee);
+            else
+            {
+                lean.Line($"/-- Replace with what `{Method.Name}` guarantees about");
+                lean.Line($"    {subject}. -/");
+            }
             var results = Binders.Concat(Symbolic ? [("initial", "Memory"), ("final", "Memory")] : []);
             if (Result is not null) results = results.Append(("result", Result.Lean));
             lean.Wrapped("def Postcondition", Grouped(results), ": Prop := sorry");
@@ -503,16 +520,19 @@ internal static partial class ProofOutline
     static string StraightLine(Extraction extraction, Specification spec, Body body, Writer lean)
     {
         if (spec.Framed) return ObjectStraightLine(extraction, spec, body, lean)!;
+        var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
+        var homes = extraction.Emitted[0].Frame.IndexParameterHomes();
         var steppable = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
-            ParameterShape.StructValue) && body.Ops.All(op => Body.Pure(op) ||
-                Regex.IsMatch(op, @"\A\.(localAddr \d+|local \d+|setLocal \d+|initAggregate \d+|" +
-                    @"fieldAddress \d+|(?:setFieldAt|fieldAt|aggregateFieldAt|setAggregateFieldAt) \d+ \d+|dup)\z"));
-        var split = !steppable && SplitsOnBooleans(body.Ops, spec.Parameters);
-        var paths = steppable || split ? null : ScalarPaths(spec, body.Ops);
+            ParameterShape.StructValue) &&
+            Enumerable.Range(0, body.Method.InstructionCount).All(pc => body.Method.PureAt(pc, plainReturn) ||
+                Steps(body.Method, spec.Method, pc, homes));
+        var split = !steppable && SplitsOnBooleans(body.Method, spec.Parameters, plainReturn);
+        var paths = steppable || split ? null : ScalarPaths(spec, body.Method);
         // A body over words that calls helpers composes them through stub contracts, as a body over objects does.
         if (!steppable && !split && paths is null &&
             spec.Parameters.All(parameter => parameter.Shape == ParameterShape.Scalar) &&
-            body.Ops.Any(op => op.StartsWith(".call ", StringComparison.Ordinal)) &&
+            Enumerable.Range(0, body.Method.InstructionCount)
+                .Any(pc => body.Method.CallAt(pc) is { Kind: CallKind.Static }) &&
             ObjectStraightLine(extraction, spec, body, lean, stubsOnly: true) is { } composed)
             return composed;
         Header(lean, spec, paths is null ? ["CIL.Verification", "CIL.Safety.SymbolicExecution"]
@@ -540,12 +560,37 @@ internal static partial class ProofOutline
         {
             lean.Line("  -- Choose a fuel bound and step the body with `cil_checked_steps [facts]`,");
             lean.Line("  -- splitting cases where it branches.");
-            lean.Noted("  ", "sorry", $"{NotOutlined}{Unstepped(spec.Method, body.Ops, spec.Parameters)}; " +
+            lean.Noted("  ", "sorry", $"{NotOutlined}{Unstepped(spec.Method, body.Method, spec.Parameters)}; " +
                 "prove its run and Postcondition");
         }
         Footer(lean);
         return lean.ToString();
     }
+
+    /// <summary>A frame, field or duplicate operation the stepping tactics take without facts: a local access
+    /// other than to a narrow integer local, an aggregate initialisation or a field access whose load is not
+    /// sign-extending.</summary>
+    static bool Steps(Method emitted, MethodDefinition method, int pc, IReadOnlyDictionary<int, int> homes)
+    {
+        var site = method.Body.Instructions[pc];
+        return emitted.StackCodeAt(pc) switch
+        {
+            null when InstructionOperands.LoadSlot(method, site, homes) is int loaded =>
+                !NarrowLocal(method, loaded),
+            null when InstructionOperands.StoreSlot(method, site, homes) is int stored =>
+                !NarrowLocal(method, stored),
+            null => site.OpCode.Code is Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S ||
+                emitted.StructFieldAt(pc) is { Signed: false } || emitted.ObjectAt(pc, Code.Initobj) is not null,
+            Code.Dup => true,
+            _ => false
+        };
+    }
+
+    /// <summary>Whether local `index` is a declared local of a narrow integer type, whose loads and stores the
+    /// outlines leave to the author. A `byte` or `bool` argument's home has a narrow slot too, but its index follows
+    /// the declared locals, so this is false for it.</summary>
+    static bool NarrowLocal(MethodDefinition method, int index) => index < method.Body.Variables.Count &&
+        LeanEmitter.Narrow(method.Body.Variables[index].VariableType) is not null;
 
     /// <summary>The checked run of a body `cil_checked_steps` takes alone, and its postcondition hole; `suffix`
     /// keeps the named holes of each side of a split apart, since a named hole is shared across tactics.</summary>
@@ -562,19 +607,23 @@ internal static partial class ProofOutline
 
     /// <summary>Whether a body over words and `bool`s steps once each `bool` is a literal: every operation is
     /// pure or a jump, and every test reads a `bool` argument just loaded.</summary>
-    static bool SplitsOnBooleans(string[] ops, Parameter[] parameters)
+    static bool SplitsOnBooleans(Method emitted, Parameter[] parameters, bool plainReturn)
     {
         var booleans = parameters.Count(parameter => parameter.Shape == ParameterShape.Boolean);
         if (booleans is 0 or > MaxBooleanSplits ||
             parameters.Any(parameter => parameter.Shape is not (ParameterShape.Scalar or ParameterShape.Boolean)))
             return false;
-        bool LoadsBoolean(string op) => Regex.Match(op, @"\A\.arg (\d+)(?: \(some \.unsigned8\))?\z") is
-            { Success: true } load && parameters[int.Parse(load.Groups[1].Value,
-                System.Globalization.CultureInfo.InvariantCulture)].Shape == ParameterShape.Boolean;
-        return ops.Select((op, pc) => Body.Pure(op) || LoadsBoolean(op) ||
-                Body.Target(op) is not null && !Body.Conditional(op) ||
-                Regex.IsMatch(op, @"\A\.br(non)?zero \d+\z") && pc > 0 && LoadsBoolean(ops[pc - 1]))
-            .All(stepped => stepped);
+        var previousBoolean = false;
+        for (var pc = 0; pc < emitted.InstructionCount; pc++)
+        {
+            var loadsBoolean = emitted.ArgumentAt(pc) is int index && parameters[index].Shape == ParameterShape.Boolean;
+            var jump = emitted.BranchAt(pc);
+            if (!loadsBoolean && !emitted.PureAt(pc, plainReturn) && jump?.Kind != ILOpCode.Br &&
+                !(previousBoolean && jump?.Kind is ILOpCode.Brfalse or ILOpCode.Brtrue))
+                return false;
+            previousBoolean = loadsBoolean;
+        }
+        return true;
     }
 
     /// <summary>A straight-line body over object arguments: stepped when it loads fields and stores at most one
@@ -605,12 +654,13 @@ internal static partial class ProofOutline
         // keeps locals, whose homes change the memory a stub's `post` keeps.
         Func<int, Callee?> summarized = !stubsOnly ? Summary
             : index => Stubbed(index) is null && Summary(index) is { Walk.NumericHomes: true } read ? read : null;
-        var numericHomes = HasNumericObjectHomes(spec.Method) || body.Ops.Select(op =>
-            Regex.Match(op, @"\A\.call(?:Instance)? (\d+) (\d+)\z")).Where(match => match.Success)
-            .Any(match => summarized(int.Parse(match.Groups[1].Value))?.Walk.NumericHomes == true);
+        var numericHomes = HasNumericObjectHomes(spec.Method) || Enumerable.Range(0, body.Method.InstructionCount)
+            .Any(pc => body.Method.CallAt(pc) is { Kind: not CallKind.Tail } call &&
+                summarized(call.Method)?.Walk.NumericHomes == true);
         // Local homes belong to the entry memory, so the statement accepts any well-formed entry memory.
         if (numericHomes && !spec.Symbolic) spec = spec.InMemory();
-        var walk = new ObjectWalk(spec, body.Ops, views, summarized, numericHomes: numericHomes, stubs: Stubbed);
+        var walk = new ObjectWalk(spec, body.Method, views, summarized,
+            extraction.Emitted[0].Frame.IndexParameterHomes(), numericHomes: numericHomes, stubs: Stubbed);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.Object or ParameterShape.Array or ParameterShape.ValueArray or ParameterShape.WordArray) &&
             walk.Run(pc => Location(spec.Method, pc));
@@ -650,7 +700,7 @@ internal static partial class ProofOutline
         {
             lean.Line("  -- Choose a fuel bound and step the body with `cil_checked_steps [facts]`, giving a store");
             lean.Line("  -- its `Owned.store`; a scalar field's load is read from its fact in the context.");
-            var reason = walk.Stopped ?? Unstepped(spec.Method, body.Ops, spec.Parameters);
+            var reason = walk.Stopped ?? Unstepped(spec.Method, body.Method, spec.Parameters);
             lean.Noted("  ", "sorry", $"{NotOutlined}the body meets {reason}; prove its run and Postcondition");
         }
         Footer(lean);
@@ -772,9 +822,11 @@ internal static partial class ProofOutline
 
     /// <summary>Why the outline leaves a body to the author: the first argument or operation that
     /// `cil_checked_steps` cannot take without facts or a case split.</summary>
-    static string Unstepped(MethodDefinition method, string[] ops, IEnumerable<Parameter> parameters)
+    static string Unstepped(MethodDefinition method, Method emitted, IEnumerable<Parameter> parameters)
     {
-        if (parameters.FirstOrDefault(parameter => parameter.Shape != ParameterShape.Scalar) is { } argument)
+        // A narrow parameter is named first: its load is what refuses an otherwise outlined body.
+        if (parameters.OrderBy(parameter => parameter.Shape != ParameterShape.Narrow)
+                .FirstOrDefault(parameter => parameter.Shape != ParameterShape.Scalar) is { } argument)
             return $"the body reads `{argument.Name}`, " + argument.Shape switch
             {
                 ParameterShape.Boolean => "a `bool` that needs a case split",
@@ -787,23 +839,39 @@ internal static partial class ProofOutline
                 ParameterShape.WordArray => "an array of caller memory",
                 _ => "a span of caller memory"
             };
-        var pc = Array.FindIndex(ops, op => !Body.Pure(op));
+        var plainReturn = LeanEmitter.Narrow(method.ReturnType) is null;
+        var pc = Enumerable.Range(0, emitted.InstructionCount).FirstOrDefault(i => !emitted.PureAt(i, plainReturn), -1);
         if (pc < 0) return "the body has locals";
         // A call the outline cannot compose names the contract the author must write and prove.
-        return Regex.Match(ops[pc], @"\A\.call(?:Instance)? (\d+) \d+\z") is { Success: true } call
-            ? $"`{ops[pc]}` at {Location(method, pc)} calls method {call.Groups[1].Value}, which " +
-                "`cil_contract_steps` composes through a `MethodContract` you write and prove with " +
-                $"`Holds Extracted.program {call.Groups[1].Value}`"
-            : $"`{ops[pc]}` at {Location(method, pc)} needs facts or a case split";
+        var instruction = InstructionAt(method, pc);
+        return emitted.CallAt(pc) is { Kind: not CallKind.Tail } call
+            ? $"""
+                {instruction} calls method {call.Method}, which `cil_contract_steps` composes through a
+                `MethodContract` you write and prove with `Holds Extracted.program {call.Method}`
+                """.ReplaceLineEndings(" ")
+            : $"{instruction} needs facts or a case split";
     }
+
+    static string? SourceLine(MethodDefinition method, int offset) =>
+        Symbols.Location(method, offset, Path.GetFileName) is { } at ? at[..at.LastIndexOf(':')] : null;
 
     /// <summary>The source line of the instruction at `pc`, or its IL offset without a PDB.</summary>
     static string Location(MethodDefinition method, int pc)
     {
         var offset = method.Body.Instructions[pc].Offset;
-        return Symbols.Location(method, offset, Path.GetFileName) is { } at
-            ? at[..at.LastIndexOf(':')] : $"IL_{offset:x4}";
+        return SourceLine(method, offset) ?? $"IL_{offset:x4}";
     }
+
+    /// <summary>Cecil's instruction and its source line, with embedded line breaks escaped for a comment.</summary>
+    static string InstructionAt(MethodDefinition method, int pc)
+    {
+        var instruction = method.Body.Instructions[pc];
+        var raw = instruction.ToString().ReplaceLineEndings(@"\n");
+        return SourceLine(method, instruction.Offset) is { } at ? $"`{raw}` at {at}" : $"`{raw}`";
+    }
+
+    static string StopAt(MethodDefinition method, int pc, string reason, bool showInstruction) =>
+        showInstruction ? $"{InstructionAt(method, pc)}{reason}" : $"{reason} at {Location(method, pc)}";
 
     // `tags` names the goals the generated tactics leave, or is null when the proof is one hole.
     static void Header(Writer lean, Specification spec, IEnumerable<string> imports, string? tags)
@@ -851,7 +919,7 @@ internal static partial class ProofOutline
         internal string Claim(string? wanted, string fallback)
         {
             // A parameter named like a generated hypothesis would be captured by the names the proof introduces.
-            var name = Regex.IsMatch(wanted ?? "", @"\A[A-Za-z][A-Za-z0-9_]*\z") && !Generated().IsMatch(wanted!)
+            var name = Regex.IsMatch(wanted ?? "", @"\A[A-Za-z][A-Za-z0-9_]*\z") && !Generated.IsMatch(wanted!)
                 ? wanted! : fallback;
             var candidate = name;
             for (var suffix = 1; !used.Add(candidate); suffix++) candidate = name + suffix;
@@ -865,7 +933,7 @@ internal static partial class ProofOutline
         @"encoded|changed|combined|formed|form|loadSigned|arrayApart|localHome|localWritten|localLoaded|" +
         @"frameFacts|below|fuel|invoked|callFormed|permitted)\d*|held\d+Final|" +
         @"(?:owned|kept|added|loaded)\d+(?:Field\d+)?(?:Signed)?)\z")]
-    private static partial Regex Generated();
+    private static partial Regex Generated { get; }
 
     /// <summary>Lean source with two-space indentation and lines kept under 100 characters.</summary>
     sealed class Writer
@@ -936,18 +1004,31 @@ internal static partial class ProofOutline
                 if (current.Length + word.Length + 1 > Limit && current.Length > first.Length)
                 {
                     Line(current);
-                    current = rest + word;
+                    current = rest;
                 }
-                else current += (current == first ? "" : " ") + word;
+                else if (current != first) current += " ";
+                // A single metadata name or string literal can exceed a whole comment line.
+                var remaining = word.AsSpan();
+                while (current.Length + remaining.Length > Limit)
+                {
+                    var count = Limit - current.Length;
+                    Line(string.Concat(current, remaining[..count]));
+                    current = rest;
+                    remaining = remaining[count..];
+                }
+                current = string.Concat(current, remaining);
             }
             Line(current);
         }
+
+        /// <summary>The indentation of wrapped proof terms following a head.</summary>
+        internal static int ContinuationIndent(string head) => head.Length - head.TrimStart().Length + 4;
 
         /// <summary>A head followed by binders and a tail, wrapped at binder boundaries.</summary>
         internal void Wrapped(string head, IEnumerable<string> binders, string tail)
         {
             var current = head;
-            var continuation = new string(' ', head.Length - head.TrimStart().Length + 4);
+            var continuation = new string(' ', ContinuationIndent(head));
             foreach (var part in binders.Append(tail).Where(part => part.Length > 0))
             {
                 if (current.Length + 1 + part.Length > Limit)

@@ -6,13 +6,17 @@ namespace Nethermind.LeanCIL;
 internal static class GenericStructs
 {
     internal static bool DirectInterfaceConstraint(TypeReference constraint, TypeReference argument,
-        ModuleDefinition module) =>
-        PinnedAssemblies.Declares(constraint, module) && !constraint.ContainsGenericParameter &&
-        constraint.Resolve() is { IsInterface: true } declared && Pinned(declared.Module, module) &&
-        argument.Resolve() is { } concrete && Pinned(concrete.Module, module) && concrete.IsValueType &&
-        concrete.Interfaces.Any(implemented => MethodSpecialization.SignatureType(Substitute(
-            implemented.InterfaceType, argument as GenericInstanceType)) ==
-            MethodSpecialization.SignatureType(constraint));
+        ModuleDefinition module)
+    {
+        if (!PinnedAssemblies.Declares(constraint, module) || constraint.ContainsGenericParameter ||
+            constraint.Resolve() is not { IsInterface: true } declared || !Pinned(declared.Module, module) ||
+            argument.Resolve() is not { } concrete || !Pinned(concrete.Module, module) || !concrete.IsValueType)
+            return false;
+        if (concrete.Interfaces.Count == 0) return false;
+        var expected = StructuralSignatures.Current.Type(constraint);
+        return concrete.Interfaces.Any(implemented => StructuralSignatures.Current.Type(Substitute(
+            implemented.InterfaceType, argument as GenericInstanceType)) == expected);
+    }
 
     static bool Pinned(ModuleDefinition candidate, ModuleDefinition module) =>
         candidate == module || PinnedAssemblies.Active?.Contains(candidate) == true;
@@ -56,9 +60,10 @@ internal static class GenericStructs
                 if (DirectInterfaceConstraint(type, argument, definition.Module)) continue;
                 if (type is RequiredModifierType modifier &&
                     modifier.ModifierType.FullName == "System.Runtime.InteropServices.UnmanagedType" &&
-                    RuntimeModels.ExactScope(modifier.ModifierType.Scope, "System.Runtime"))
+                    RuntimeModels.ExactScope(modifier.ModifierType, PlatformAssemblies.SystemRuntime))
                     type = modifier.ElementType;
-                if (type.FullName != "System.ValueType" || !RuntimeModels.ExactScope(type.Scope, "System.Runtime"))
+                if (type.FullName != "System.ValueType" ||
+                    !RuntimeModels.ExactScope(type, PlatformAssemblies.SystemRuntime))
                     throw new InvalidDataException("Unsupported generic struct constraint type");
             }
         }

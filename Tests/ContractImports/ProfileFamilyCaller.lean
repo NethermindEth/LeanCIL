@@ -9,7 +9,7 @@ open CIL.Safety
 theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (fun linked => FamilyContract.supported.Holds linked 0) := by
   intro linked links imported input memory formed
-  have found : linked[0]? = some Extracted.method0 := links.found Extracted.lookup0
+  have found : linked[0]? = some Extracted.method0 := links.found Extracted.program_method0
   have holds : FamilyContract.supported.Holds linked 1 := imported
   dsimp only [FamilyContract.supported, MethodContract.Returns]
   apply WP.enter found (by rfl) (by rfl)

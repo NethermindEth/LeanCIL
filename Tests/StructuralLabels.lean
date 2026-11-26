@@ -1,5 +1,6 @@
 import Tests.LoopScaffold
 import CIL.StructuralLabels
+import Tests.Support
 
 /-! A synthetic extraction: `Root` calls `Step` before two loops and again after them. -/
 namespace Extracted
@@ -9,12 +10,12 @@ open CIL
 def method0Signature : String := "System.UInt32 Labels.Calls::Root(System.UInt32)"
 def method1Signature : String := "System.UInt32 Labels.Calls::Step(System.UInt32)"
 def method0 : Method :=
-  { code := [.arg 0, .call 1 1, .setLocal 0,
-      .local 0, .brzero 6, .branch 3,
-      .local 0, .brnonzero 6,
-      .arg 0, .call 1 1, .ret],
+  { code := [.ldarg 0, .call (Tests.callee 1) {}, .stloc 0,
+      .ldloc 0, .brfalse 6, .br 3,
+      .ldloc 0, .brtrue 6,
+      .ldarg 0, .call (Tests.callee 1) {}, .ret], links := [(1, .direct 1), (9, .direct 1)],
     locals := [.i32 0], returnsValue := true }
-def method1 : Method := { code := [.arg 0, .ret], locals := [], returnsValue := true }
+def method1 : Method := { code := [.ldarg 0, .ret], locals := [], returnsValue := true }
 def program : Program := [method0, method1]
 def signatures : List String := [method0Signature, method1Signature]
 
@@ -24,10 +25,11 @@ namespace Tests.StructuralLabels
 
 open CIL
 
-/-- `n` nops, a call to method 1 and a back edge to the call's argument, as one list literal. -/
+/-- `n` nops, a one-argument call and a back edge to the call's argument, as one list literal. -/
 macro "long_code% " n:num : term => do
-  let nops ← (List.range n.getNat).toArray.mapM fun _ => `(Op.nop)
-  let tail ← #[`(Op.arg 0), `(Op.call 1 1), `(Op.branch $(Lean.quote n.getNat))].mapM id
+  let nops ← (List.range n.getNat).toArray.mapM fun _ => `(Instruction.nop)
+  let tail ← #[`(Instruction.ldarg 0), `(Instruction.call (Tests.callee 1)),
+      `(Instruction.br $(Lean.quote n.getNat))].mapM id
   `([$(nops ++ tail),*])
 
 bind_method root rootBody := "System.UInt32 Labels.Calls::Root(System.UInt32)"
@@ -45,7 +47,7 @@ bind_loop outer := rootBody [0]
 bind_loop inner := rootBody [1]
 
 example : outer = 3 ∧ outer.latch = 5 ∧ inner = 6 ∧ inner.latch = 7 := ⟨rfl, rfl, rfl, rfl⟩
-example : rootBody.code[inner.latch]? = some (.brnonzero inner) := rfl
+example : rootBody.code[inner.latch]? = some (.brtrue inner) := rfl
 example := inner.backEdge
 
 /--
@@ -76,9 +78,9 @@ bind_callee step stepBody := "System.UInt32 Labels.Calls::Step(System.UInt32)" f
 bind_call before := step from rootBody [0]
 bind_call after := step from rootBody [1]
 
-example : rootBody.code[9]? = some (.call step 1) := step.call
+example : rootBody.code[9]? = some (.call (Tests.callee 1)) := step.call
 example : before = 1 ∧ after = 9 := ⟨rfl, rfl⟩
-example : rootBody.code[before]? = some (.call step 1) := before.call
+example : rootBody.code[before]? = some (.call (Tests.callee 1)) := before.call
 
 /--
 error: rootBody calls
@@ -91,12 +93,13 @@ at 2 sites; select one with [i]:
 bind_call either := step from rootBody
 
 -- `relabel` and `targets` agree, so loop detection sees every branch `cil_embed` maps.
-example : (Op.switch [3, 0, 7]).targets = [3, 0, 7] ∧ (Op.nativeBinary (.blt 2)).targets = [2] ∧ (Op.call 1 1).targets = [] :=
+example : (Instruction.switch [3, 0, 7]).targets = [3, 0, 7] ∧
+    (Instruction.blt 2).targets = [2] ∧ (Instruction.call (Tests.callee 1)).targets = [] :=
   ⟨rfl, rfl, rfl⟩
 
 -- Extracted bodies run to thousands of ops; labels past the default recursion depth still bind.
 def longBody : Method :=
-  { code := long_code% 800, locals := [], returnsValue := false }
+  { code := long_code% 800, links := [(801, .direct 1)], locals := [], returnsValue := false }
 
 bind_callee late lateBody := call 1 from longBody
 /-- The call to the late helper. -/
@@ -105,7 +108,7 @@ bind_call lateCall := late from longBody
 bind_loop tail := longBody
 
 example : lateCall = 801 ∧ tail = 800 ∧ tail.latch = 802 ∧ lateBody = stepBody := ⟨rfl, rfl, rfl, rfl⟩
-example : longBody.code[lateCall]? = some (.call late 1) := lateCall.call
+example : longBody.code[lateCall]? = some (.call (Tests.callee 1)) := lateCall.call
 example := late.call
 example := tail.backEdge
 

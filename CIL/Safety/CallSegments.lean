@@ -12,18 +12,25 @@ the helper's complete contract and the actual checked write reach the continuati
 namespace CIL.Safety
 
 /-- Load two input words, call a binary scalar helper, and store its result to the output. -/
-def loadCallStoreCode (callee : Nat) : List CIL.Op :=
-  [.arg 2, .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 0 8, .call callee 2, .store64]
+def loadCallStoreCode (helper : Extraction.MethodRef) (left right : Extraction.FieldRef) :
+    List CIL.Instruction :=
+  [.ldarg 2, .ldarg 0, .ldfld left, .ldarg 1, .ldfld right, .call helper {}, .stind .i8]
 
 /-- Compose a load/call/store segment once for any proved helper with scalar encodings.
     The continuation receives the real call result and checked write, not an assumed summary. -/
 theorem WP.load_call_store {Input Output : Type} {contract : MethodContract Input Output}
     {program : CIL.Program} {method start callee : Nat} {body : CIL.Method}
+    {helper : Extraction.MethodRef} {leftField rightField : Extraction.FieldRef}
     {frame : Frame} {memory : Memory} {post : (Memory × List Value) → Prop}
     (holds : contract.Holds program callee) (input : Input) (decode : Output → CIL.W64)
     (left right output : Reference)
     (found : program[method]? = some body)
-    (placed : CodeAt body start (loadCallStoreCode callee))
+    (placed : CodeAt body start (loadCallStoreCode helper leftField rightField))
+    (leftShape : body.fieldShape leftField = .value 0 8 false)
+    (rightShape : body.fieldShape rightField = .value 0 8 false)
+    (arity : helper.argumentCount = 2)
+    (linked : body.linkAt (start + 5) = some (.direct callee))
+    (plainArguments : ∀ index, index < 3 → body.argumentAccess index = .value none)
     (call : ValidCall memory [⟨left, 8⟩, ⟨right, 8⟩] [⟨output, 8⟩])
     (encoded : contract.args input =
       [.scalar (.i64 ((⟨left, 8⟩ : ArgumentView).word memory 0)),
@@ -39,16 +46,21 @@ theorem WP.load_call_store {Input Output : Type} {contract : MethodContract Inpu
     WP (Execution (fun fuel => run program fuel method start
       [.reference (.address left), .reference (.address right), .reference (.address output)]
       frame [] memory)) post := by
-  cil_contract_steps [found, placed]
+  have outputAccess := plainArguments 2 (by decide)
+  have leftAccess := plainArguments 0 (by decide)
+  have rightAccess := plainArguments 1 (by decide)
+  have leftRead := call.input_word_step ⟨left, 8⟩ (by simp) ⟨0, by change 0 < 8 / 8; decide⟩ body leftField leftShape
+  have rightRead := call.input_word_step ⟨right, 8⟩ (by simp) ⟨0, by change 0 < 8 / 8; decide⟩ body rightField rightShape
+  cil_contract_steps [found, placed, outputAccess, leftAccess, rightAccess, leftRead, rightRead]
   apply run_call_of_contract holds input found
-    (by cil_lookup [placed]) (by cil_checked_step []) encoded.symm permitted
+    (by cil_lookup [placed]) (by cil_checked_step [linked, arity]) encoded.symm permitted
   intro middle value result
   have writable : access middle output 8 1 true = .ok () :=
     (result.framed.access_write output
       (call.output_bound (output := ⟨output, 8⟩) (by simp)) 8 1).trans
       (call.writable ⟨output, 8⟩ (by simp))
   obtain ⟨after, written, _, _⟩ := store_word64 (decode value) writable
-  have stored := step_store64_of_write written
+  have stored := step_stind_i8_of_write written
   rw [results]
   cil_contract_steps [found, placed, stored] until suffix middle value after result written
 

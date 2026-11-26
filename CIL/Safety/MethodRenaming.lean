@@ -22,17 +22,28 @@ structure MethodRenaming (source target : CIL.Method) where
 
 /-- Fetching an actual instruction selects its relocated target instruction at the same pc. -/
 theorem MethodRenaming.instruction {source target : CIL.Method}
-    (related : MethodRenaming source target) {pc : Nat} {operation : CIL.Op}
+    (related : MethodRenaming source target) {pc : Nat} {operation : CIL.Instruction}
     (found : source.code[pc]? = some operation) :
     target.code[pc]? = some (related.indices.operation operation) := by
   rw [related.code, List.getElem?_map, found]
   rfl
 #print axioms MethodRenaming.instruction
 
-/-- Every source method has a corresponding target at the same callable index. -/
-def ProgramRenaming (source target : CIL.Program) : Prop :=
-  ∀ (method : Nat) (sourceBody : CIL.Method), source[method]? = some sourceBody →
+/-- The target program has no exception clauses, and every source method has a corresponding
+    target at the same callable index. -/
+structure ProgramRenaming (source target : CIL.Program) : Prop where
+  targetFree : HandlerFree target
+  methods : ∀ (method : Nat) (sourceBody : CIL.Method), source[method]? = some sourceBody →
     ∃ targetBody, target[method]? = some targetBody ∧
       Nonempty (MethodRenaming sourceBody targetBody)
+
+/-- Every source method is related to a target, so the source has no exception clauses either. -/
+theorem ProgramRenaming.sourceFree {source target : CIL.Program}
+    (programs : ProgramRenaming source target) : HandlerFree source := by
+  intro body member
+  obtain ⟨method, found⟩ := List.mem_iff_getElem?.mp member
+  obtain ⟨_, _, ⟨methods⟩⟩ := programs.methods _ _ found
+  exact methods.metadata.sourceHandlers
+#print axioms ProgramRenaming.sourceFree
 
 end CIL.Safety

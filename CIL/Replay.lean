@@ -31,17 +31,52 @@ Each definition, theorem, opaque and axiom is added unchecked in dependency orde
 checked against the environment that preceded it, which is exactly what sequential replay checks.
 Inductives, the quotient and postponed constructor/recursor comparisons stay sequential. -/
 
+/-- Checking-boundary failures that can identify a rejected owned declaration. -/
+inductive RejectionKind where
+  | unknownConstant | alreadyDeclared | declTypeMismatch | declHasMVars | declHasFVars
+  | funExpected | typeExpected | letTypeMismatch | exprTypeMismatch | appTypeMismatch
+  | invalidProj | thmTypeIsNotProp | constructorMismatch | recursorMismatch
+  deriving BEq, Repr
+
+/-- Classifies kernel failures without interpreting diagnostic text. -/
+def rejectionKind : Lean.Kernel.Exception → Option RejectionKind
+  | .unknownConstant .. => some .unknownConstant
+  | .alreadyDeclared .. => some .alreadyDeclared
+  | .declTypeMismatch .. => some .declTypeMismatch
+  | .declHasMVars .. => some .declHasMVars
+  | .declHasFVars .. => some .declHasFVars
+  | .funExpected .. => some .funExpected
+  | .typeExpected .. => some .typeExpected
+  | .letTypeMismatch .. => some .letTypeMismatch
+  | .exprTypeMismatch .. => some .exprTypeMismatch
+  | .appTypeMismatch .. => some .appTypeMismatch
+  | .invalidProj .. => some .invalidProj
+  | .thmTypeIsNotProp .. => some .thmTypeIsNotProp
+  | .other .. | .deterministicTimeout | .excessiveMemory | .deepRecursion | .interrupted => none
+
+/-- A declaration rejected at a kernel checking boundary. -/
+structure ReplayRejection where
+  declaration : Lean.Name
+  kind : RejectionKind
+
+/-- Diagnostic replay never establishes verification success. -/
+inductive ReplayDiagnostic where
+  | accepted
+  | rejected (rejection : ReplayRejection)
+  | unavailable (message : String)
+
 /-- Kernel verdict for one deferred declaration check. -/
 inductive CheckOutcome where
   | accepted
   | cancelled
-  | rejected (message : String)
+  | rejected (message : String) (kind : Option RejectionKind)
 
 /-- Constants being replayed and the deferred checks issued so far. -/
 structure ReplayContext where
   newConstants : Std.HashMap Lean.Name Lean.ConstantInfo
   cancel : IO.CancelToken
   checks : IO.Ref (Array (Lean.Name × Task (Except IO.Error CheckOutcome)))
+  rejection : IO.Ref (Option ReplayRejection)
 
 /-- The environment built so far and the names still to replay. -/
 structure ReplayState where
@@ -73,7 +108,7 @@ Written inline in `IO.asTask`, the check would run eagerly on the calling thread
   | .error .interrupted => return .cancelled
   | .error ex =>
     cancel.set
-    return .rejected (← kernelMessage ex)
+    return .rejected (← kernelMessage ex) (rejectionKind ex)
 
 /-- Adds a declaration; a deferred check sees only the declarations added before it. -/
 def addDecl (decl : Lean.Declaration) : ReplayM Unit := do
@@ -91,7 +126,11 @@ def addDecl (decl : Lean.Declaration) : ReplayM Unit := do
   | _ =>
     match before.addDeclCore 0 0 decl (cancelTk? := none) with
     | .ok env => modify fun s => { s with env }
-    | .error ex => throw <| .userError (← kernelMessage ex)
+    | .error ex =>
+      let message ← kernelMessage ex
+      if let some kind := rejectionKind ex then
+        (← read).rejection.set (some ⟨decl.getNames.headD .anonymous, kind⟩)
+      throw <| .userError message
 
 /-- The constant `name` among those being replayed; a name the replay reaches but the replayed
     constants lack is an error naming it. -/
@@ -160,43 +199,61 @@ def checkPostponed : ReplayM Unit := do
   for ctor in (← get).postponedConstructors do
     match (← get).env.find? ctor, (← read).newConstants[ctor]? with
     | some (.ctorInfo info), some (.ctorInfo info') =>
-      if !(info == info') then throw <| .userError s!"Invalid constructor {ctor}"
+      if !(info == info') then
+        (← read).rejection.set (some ⟨ctor, .constructorMismatch⟩)
+        throw <| .userError s!"Invalid constructor {ctor}"
     | _, _ => throw <| .userError s!"No such constructor {ctor}"
   for recursor in (← get).postponedRecursors do
     match (← get).env.find? recursor, (← read).newConstants[recursor]? with
     | some (.recInfo info), some (.recInfo info') =>
-      if !(info == info') then throw <| .userError s!"Invalid recursor {recursor}"
+      if !(info == info') then
+        (← read).rejection.set (some ⟨recursor, .recursorMismatch⟩)
+        throw <| .userError s!"Invalid recursor {recursor}"
     | _, _ => throw <| .userError s!"No such recursor {recursor}"
+
+/-- Joins every deferred check and retains only the first terminal failure's classification. -/
+def awaitChecks (checks : IO.Ref (Array (Lean.Name × Task (Except IO.Error CheckOutcome))))
+    (rejection : IO.Ref (Option ReplayRejection)) : IO (Option String) := do
+  let mut failure := none
+  for (name, check) in ← checks.get do
+    match ← IO.wait check with
+    | .ok (.rejected message kind) =>
+      if failure.isNone then rejection.set (kind.map fun kind => ⟨name, kind⟩)
+      failure := failure <|> some s!"while replaying declaration '{name}':\n{message}"
+    | .ok _ => pure ()
+    | .error ex =>
+      if failure.isNone then rejection.set none
+      failure := failure <|> some s!"while replaying declaration '{name}':\n{ex}"
+  return failure
 
 /-- Kernel-checks every safe, total constant into `env`, accepting exactly what sequential replay
 accepts.
 Every deferred check has finished when this returns or throws, so imported regions may be freed. -/
 def replay (newConstants : Std.HashMap Lean.Name Lean.ConstantInfo)
-    (env : Lean.Kernel.Environment) : IO Lean.Kernel.Environment := do
+    (env : Lean.Kernel.Environment)
+    (diagnostic : Option (IO.Ref (Option ReplayRejection)) := none) :
+    IO Lean.Kernel.Environment := do
   let remaining := newConstants.fold (init := {}) fun remaining name ci =>
     if !ci.isUnsafe && !ci.isPartial then remaining.insert name else remaining
   let cancel ← IO.CancelToken.new
   let checks ← IO.mkRef #[]
-  let awaitChecks : IO (Option String) := do
-    let mut failure := none
-    for (name, check) in ← checks.get do
-      match ← IO.wait check with
-      | .ok (.rejected message) =>
-        failure := failure <|> some s!"while replaying declaration '{name}':\n{message}"
-      | .ok _ => pure ()
-      | .error ex => failure := failure <|> some s!"while replaying declaration '{name}':\n{ex}"
-    return failure
+  let rejection ← IO.mkRef none
+  let awaitChecks := awaitChecks checks rejection
   let replayed ← try
       let (_, s) ← (do
           for n in remaining do replayConstant n
-          checkPostponed : ReplayM Unit).run { newConstants, cancel, checks }
+          checkPostponed : ReplayM Unit).run { newConstants, cancel, checks, rejection }
         |>.run { env, remaining }
       pure s.env
     catch ex =>
       cancel.set
+      let sequential ← rejection.get
       discard awaitChecks
+      if let some diagnostic := diagnostic then diagnostic.set sequential
       throw ex
-  if let some failure ← awaitChecks then throw <| .userError failure
+  if let some failure ← awaitChecks then
+    if let some diagnostic := diagnostic then diagnostic.set (← rejection.get)
+    throw <| .userError failure
   return replayed
 
 /-- Replays every target and exposes the checked environment while its imported regions live.
@@ -303,5 +360,98 @@ unsafe def replayModulesSeparately (args : List String) : IO UInt32 := do
       IO.println (Lean.Json.mkObj (fields ++ [("error", Lean.toJson (toString error))])).compress
       failed := true
   return if failed then 1 else 0
+
+/-- Stable protocol spellings for checking-boundary rejection kinds. -/
+def RejectionKind.protocolName : RejectionKind → String
+  | .unknownConstant => "unknownConstant"
+  | .alreadyDeclared => "alreadyDeclared"
+  | .declTypeMismatch => "declTypeMismatch"
+  | .declHasMVars => "declHasMVars"
+  | .declHasFVars => "declHasFVars"
+  | .funExpected => "funExpected"
+  | .typeExpected => "typeExpected"
+  | .letTypeMismatch => "letTypeMismatch"
+  | .exprTypeMismatch => "exprTypeMismatch"
+  | .appTypeMismatch => "appTypeMismatch"
+  | .invalidProj => "invalidProj"
+  | .thmTypeIsNotProp => "thmTypeIsNotProp"
+  | .constructorMismatch => "constructorMismatch"
+  | .recursorMismatch => "recursorMismatch"
+
+/-- Requires every complete declaration and mutual member to belong uniquely to this module. -/
+unsafe def diagnosticConstants (complete : Lean.ModuleData) (env : Lean.Environment) :
+    IO (Std.HashMap Lean.Name Lean.ConstantInfo) := do
+  unless complete.constNames.size == complete.constants.size do
+    throw <| IO.userError "Mismatched declaration inventory"
+  let mut constants : Std.HashMap Lean.Name Lean.ConstantInfo := {}
+  for name in complete.constNames, info in complete.constants do
+    if name.isAnonymous || name != info.name || constants.contains name ||
+        (env.find? name).isSome then
+      throw <| IO.userError s!"Ambiguous declaration ownership: {name}"
+    constants := constants.insert name info
+  let mut extra : Std.HashSet Lean.Name := {}
+  for name in complete.extraConstNames do
+    if extra.contains name || (env.find? name).isSome then
+      throw <| IO.userError s!"Ambiguous auxiliary ownership: {name}"
+    extra := extra.insert name
+  -- Shared physical tails retain their validated ownership for this module inventory.
+  let mut checked : Lean.PtrSet (List Lean.Name) := Lean.mkPtrSet
+  for (_, info) in constants do
+    let mut members := info.all
+    while !members.isEmpty do
+      if checked.contains members then break
+      let member := members.head!
+      unless constants.contains member do
+        throw <| IO.userError s!"Unowned mutual declaration: {member}"
+      checked := checked.insert members
+      members := members.tail!
+    if let .inductInfo inductiveInfo := info then
+      for ctor in inductiveInfo.ctors do
+        unless constants.contains ctor do
+          throw <| IO.userError s!"Unowned constructor: {ctor}"
+  return constants
+
+/-- Diagnoses one module against precisely its exported imports and complete declaration part. -/
+unsafe def diagnoseModule (name : String) : IO ReplayDiagnostic := do
+  let operation : IO ReplayDiagnostic := do
+    let (exported, complete) ← readReplayParts name.toName
+    let (_, state) ← Lean.importModulesCore exported.imports |>.run
+    let env ← Lean.finalizeImport state exported.imports {} 0 false false (isModule := true)
+    let check : IO ReplayDiagnostic := do
+      let constants ← diagnosticConstants complete env
+      let rejection ← IO.mkRef none
+      try
+        discard <| replay constants env.toKernelEnv (some rejection)
+        return .accepted
+      catch error =>
+        if let some rejected ← rejection.get then
+          if constants.contains rejected.declaration then return .rejected rejected
+        return .unavailable (toString error)
+    try check
+    finally env.freeRegions
+  try operation
+  catch error => return .unavailable (toString error)
+
+/-- Emits one strict diagnostic record for each unique target and a terminal completion record. -/
+unsafe def diagnoseModules (targets : List String) : IO UInt32 := do
+  Lean.initSearchPath (← Lean.findSysroot)
+  let mut seen : Std.HashSet String := {}
+  for target in targets do
+    if target.isEmpty || seen.contains target then
+      throw <| IO.userError "Diagnostic targets must be unique nonempty names"
+    seen := seen.insert target
+  for target in targets do
+    let outcome ← diagnoseModule target
+    let fields := [("module", Lean.toJson target)]
+    let result := match outcome with
+      | .accepted => [("outcome", Lean.toJson "accepted")]
+      | .unavailable message => [("outcome", Lean.toJson "unavailable"),
+          ("error", Lean.toJson message)]
+      | .rejected rejection => [("outcome", Lean.toJson "rejected"),
+          ("declaration", Lean.toJson rejection.declaration.toString),
+          ("kind", Lean.toJson rejection.kind.protocolName)]
+    IO.println (Lean.Json.mkObj (fields ++ result)).compress
+  IO.println (Lean.Json.mkObj [("complete", Lean.toJson true)]).compress
+  return 0
 
 end CIL.Replay

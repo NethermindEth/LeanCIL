@@ -2,8 +2,15 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
+#:include PinnedMetadata.cs
+#:include GenericImportIdentities.cs
+#:include ../Extractor/ExternalIdentityEvidence.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -20,9 +27,14 @@ foreach (string directory in new[] { libRoot, appRoot, package, callerPackage })
 string[] cli = ["dotnet", ExtractorPath];
 string libProject = Path.Combine(libRoot, "Lib.csproj");
 string appProject = Path.Combine(appRoot, "App.csproj");
-const string libProjectText = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>TypedFixture.Lib</AssemblyName><Optimize>true</Optimize></PropertyGroup></Project>";
+const string libProjectText = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>" +
+    "<TargetFramework>net11.0</TargetFramework><AssemblyName>TypedFixture.Lib</AssemblyName>" +
+    "<Optimize>true</Optimize></PropertyGroup></Project>";
 File.WriteAllText(libProject, libProjectText);
-File.WriteAllText(appProject, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>TypedFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include=\"../Lib/Lib.csproj\" /></ItemGroup></Project>");
+File.WriteAllText(appProject, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>" +
+    "<TargetFramework>net11.0</TargetFramework><AssemblyName>TypedFixture.App</AssemblyName>" +
+    "<Optimize>true</Optimize></PropertyGroup>" +
+    "<ItemGroup><ProjectReference Include=\"../Lib/Lib.csproj\" /></ItemGroup></Project>");
 string libSource = Path.Combine(libRoot, "Library.cs");
 const string libSourceText = """
 using System;
@@ -41,11 +53,14 @@ public static class Library
         destination.Head.Value = source.Head.Value;
     }
     public static T Identity<T>(T value) where T : unmanaged => value;
+    public static void Ignore<T>(T value) where T : unmanaged { }
+    public static T First<T, U>(T left, U right) where T : unmanaged where U : unmanaged => left;
     public static T Overload<T>(T value) where T : unmanaged => value;
     public static ulong Overload<T>(ulong value) where T : unmanaged => value + 1;
     public static T Unsupported<T>(T value) where T : class => value;
 }
 public static class Generic<T> { public static ulong Value(ulong value) => value; }
+public static class \u03A9wner { public static T \u03A9dentity<T>(T value) where T : unmanaged => value; }
 """;
 File.WriteAllText(libSource, libSourceText);
 File.WriteAllText(Path.Combine(appRoot, "Application.cs"), """
@@ -98,8 +113,9 @@ string app = Path.Combine(appRoot, "bin", "TypedFixture.App.dll");
 Type methodMetadata = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.ContractMethodMetadata", throwOnError: true)!;
 MethodInfo selectMethod = methodMetadata.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
 List<(string Selector, string Definition, string Closed, string Identity)> overloads = [];
-using (ModuleDefinition module = ModuleDefinition.ReadModule(lib))
+using (var pinned = new PinnedMetadata(methodMetadata.Assembly, lib))
 {
+    var module = pinned.Module;
     foreach (string selector in new[] { "TypedFixture.Library::Overload(T)", "TypedFixture.Library::Overload(ulong)" })
     {
         object selection = selectMethod.Invoke(null, [module, selector, new[] { "System.UInt64" }, "scalar"])!;
@@ -128,6 +144,8 @@ for (int index = 0; index < overloads.Count; index++)
 if (overloadBodies[0] == overloadBodies[1])
     throw new InvalidOperationException("Generic overload regression requires distinct actual method bodies.");
 Console.WriteLine("PASS distinct generic definitions retain distinct closed contract identities");
+CheckGenericImportIdentities(lib, root, methodMetadata);
+if (args is ["--identities-only"]) return;
 
 string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
 File.WriteAllText(Path.Combine(package, "lakefile.toml"),
@@ -220,6 +238,12 @@ string InterfaceDigest(JsonObject contract)
 
 foreach ((string name, Action<JsonObject> mutate) in new (string, Action<JsonObject>)[]
 {
+    ("DottedDeclaration", contract =>
+    {
+        var level = contract["declaration"]![0]!;
+        level["namespace"] = "";
+        level["name"] = Convert.ToBase64String("TypedFixture.Pair"u8);
+    }),
     ("Packing", contract => contract["packing"] = 1),
     ("Size", contract => contract["declaredSize"] = 16),
     ("NestedScope", contract => contract["fields"]![0]!["type"]!["scope"] = "Other, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null")
@@ -270,7 +294,9 @@ foreach (string modifierScope in new[] { "ModifierA", "ModifierB" })
         MethodReference call = module.GetType("TypedFixture.Application").Methods.Single(method => method.Name == "Forward")
             .Body.Instructions.Where(instruction => instruction.OpCode.Code == Code.Call).Select(instruction => (MethodReference)instruction.Operand).Single();
         ByReferenceType parameter = (ByReferenceType)call.Parameters[0].ParameterType;
-        TypeReference modifier = new("System.Runtime.InteropServices", "InAttribute", module, new AssemblyNameReference(modifierScope, new Version(1, 0, 0, 0)));
+        AssemblyNameReference scope = new(modifierScope, new Version(1, 0, 0, 0));
+        module.AssemblyReferences.Add(scope);
+        TypeReference modifier = new("System.Runtime.InteropServices", "InAttribute", module, scope);
         call.Parameters[0].ParameterType = new ByReferenceType(new RequiredModifierType(modifier, parameter.ElementType));
         module.Write(malformed);
     }
@@ -282,8 +308,9 @@ using (ModuleDefinition module = ModuleDefinition.ReadModule(app))
 {
     GenericInstanceMethod call = module.GetType("TypedFixture.Application").Methods.Single(method => method.Name == "Identity")
         .Body.Instructions.Select(instruction => instruction.Operand).OfType<GenericInstanceMethod>().Single();
-    call.GenericArguments[0] = new TypeReference("System", "UInt64", module,
-        new AssemblyNameReference("Other", new Version(1, 0, 0, 0))) { IsValueType = true };
+    AssemblyNameReference otherScope = new("Other", new Version(1, 0, 0, 0));
+    module.AssemblyReferences.Add(otherScope);
+    call.GenericArguments[0] = new TypeReference("System", "UInt64", module, otherScope) { IsValueType = true };
     module.Write(wrongScope);
 }
 Reject("WrongScope", "exact scoped", wrongScope, "TypedFixture.Application::Identity(ulong)", sidecar, interfaceDigest);
@@ -301,13 +328,54 @@ foreach ((string name, string selector, string proof) in new[]
     string artifact = Path.Combine(root, "App-" + name);
     Run([.. cli, "extract", app, selector, artifact, .. Import(sidecar, interfaceDigest)]);
     string author = Path.Combine(callerPackage, proof + ".lean");
-    Run([.. cli, "verify", artifact, "--proof", author, "--theorem", proof + ".correctness", "--proof-root", callerPackage]);
-    Run([.. cli, "verify", artifact, "--proof", author, "--theorem", proof + ".correctness", "--proof-root", callerPackage, "--force-full-verify"]);
+    string[] verify = [.. cli, "verify", artifact, "--proof", author, "--theorem", proof + ".correctness",
+        "--proof-root", callerPackage];
+    if (name == "Identity")
+    {
+        string pins = Path.Combine(root, "generic-imports.sha256");
+        void CheckImportBinding(string[] images, string expected, string? theorem, params string[] options)
+        {
+            File.WriteAllLines(pins, images.Select(image => Sha(image) + "  " + image));
+            Run([.. verify, "--deep-checks", pins, .. options]);
+            using var certificate = JsonDocument.Parse(File.ReadAllText(Path.Combine(artifact, "verified.json")));
+            var fact = certificate.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+                .Single(entry => entry.GetProperty("id").GetString() == "import-identities");
+            if (fact.GetProperty("status").GetString() != expected || fact.GetProperty("theorem").GetString() != theorem)
+                throw new InvalidOperationException("Incorrect physical import evidence: " + fact);
+        }
+        CheckImportBinding([app], "not covered", null);
+        CheckImportBinding([app, lib], "reconfirmed", "BindingAudit.genericImports", "--force-full-verify");
+    }
+    else
+    {
+        if (name == "Forward")
+        {
+            // Pair nests Leaf, so the selected layouts stay uncovered even with the implementation pinned.
+            string pins = Path.Combine(root, "imported-layouts.sha256");
+            foreach (var (images, reason) in new[]
+            {
+                (new[] { app }, "the implementation digest"), (new[] { app, lib }, "a nested struct field")
+            })
+            {
+                File.WriteAllLines(pins, images.Select(image => Sha(image) + "  " + image));
+                Run([.. verify, "--deep-checks", pins]);
+                using var certificate = JsonDocument.Parse(File.ReadAllText(Path.Combine(artifact, "verified.json")));
+                var fact = certificate.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+                    .Single(entry => entry.GetProperty("id").GetString() == "imported-layouts");
+                if (fact.GetProperty("status").GetString() != "not covered" ||
+                    fact.GetProperty("reason").GetString()?.Contains(reason, StringComparison.Ordinal) != true)
+                    throw new InvalidOperationException("Incorrect imported layout coverage: " + fact);
+            }
+        }
+        Run(verify);
+        Run([.. verify, "--force-full-verify"]);
+    }
     JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
     JsonElement imported = report.GetProperty("imports")[0];
     if (imported.GetProperty("acceptedVia").GetString() != "independently-verified" ||
         imported.GetProperty("implementationSha256").GetString() != Sha(lib) || !imported.TryGetProperty("typedSignature", out _))
         throw new InvalidOperationException("Full verification omitted typed import or exact implementation evidence.");
+
     Console.WriteLine("PASS typed imported " + name + ": actual SDK DLL, exact contract and independent linked proof");
 }
 Console.WriteLine("PASS typed layout metadata, closed instances, modifier rejection and canonical sidecar digest");

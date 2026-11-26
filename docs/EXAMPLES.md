@@ -15,15 +15,35 @@ Sentences about what a suite checks describe the repository's own tests
 (`dotnet run --file scripts/Test.cs -- --suite <name>`, see [validation](VALIDATION.md)). Those
 sentences name the wrong implementations that each unchanged proof rejects.
 
+When a suite pairs a proved contract with a counterexample, Lean checks the exact statement
+of the positive proof against the refutation in the changed assembly. For example,
+the reference-array length contract requires a live array to return its length with memory
+unchanged and a null array to raise `NullReferenceException`. A compiled variant returns zero
+on null. Weakening the live-array clause also changes the statement and invalidates that pairing.
+
+`Add`, `Choose`, `GenericIdentity`, `Struct`, `Countdown` and `CountCalls` each name their
+contract (`addContract`, `chooseContract`, `identityContract`, `structContract`,
+`countdownContract`, `countCallsContract`) and prove its `Holds` as `holds`, alongside the
+`correctness` theorem described below. Each refutation of a mutant states that contract's
+`Refuted`: `WrongAdd.lean` restates `addContract`, and the suites build each other refutation
+from the definition in the example file. Verification accepts a refutation only when the kernel
+accepts it at the counterexample predicate of the example's `holds` statement. A contract
+changed in the example therefore rejects a refutation of the contract it replaced; the
+`contracts` suite checks this by narrowing `chooseContract` to empty memory.
+
 ## Independent examples
 
-- `Add`: universal modular arithmetic correctness in the specified empty initial memory.
+- `Add`: universal modular arithmetic correctness in the specified empty initial memory, and
+  `addContract`: the wrapping sum for every caller memory, which is left unchanged.
 - `AddModel`: carries a theorem about a pure Lean model to the compiled `Add` through one theorem
   that the method returns the model's result, without re-proving the model theorem.
-- `CheckedArithmetic.Add64`: universal checked addition for every pair whose sum fits, over
-  arbitrary caller memory, with exact memory preservation. The checked automation follows generated
-  instruction lookups; the same contract is tested after inserting NOPs and rejected for
-  subtraction.
+- `DecodedAdd`: the `Add` contract for the program `Extraction.decodedProgram?` reads from the
+  extraction's body bytes, proved by evaluating the decoded method without the translator's output.
+  Its instruction-region proof states the stack result of `add` at pc 2 and preserves the frame and memory.
+- `CheckedArithmetic.Add` and `Add64` return the unsigned sum whenever it fits and preserve
+  arbitrary caller memory. The 64-bit proof also holds with NOPs inserted before each instruction.
+  In each width, replacing addition with subtraction returns one for inputs two and one. The
+  verifier certifies that result as a counterexample to the contract, which requires three.
 - `Choose`: universal checked selection for both Boolean inputs and every pair of 64-bit values,
   preserving arbitrary caller memory exactly.
 - `GenericIdentity`: universal identity through direct, repeated and nested generic calls in C#, and
@@ -35,6 +55,24 @@ sentences name the wrong implementations that each unchanged proof rejects.
 - `Loops.AllZero` and `Loops.Sum`: an early-exit predicate and a wrapping fold over the symbolic
   contents of an arbitrary-length `ReadOnlySpan<uint>` or `ReadOnlySpan<ulong>`.
 - `Calls`: a managed-call chain with an address-taken mutable local.
+- `CallsSummary`: `Calls` for every input over well-formed caller memory, returning `x + 3` and
+  keeping all memory below its entry, proved once by stepping `Increment` and the byref `Mutate`
+  and once from a `DecodedSummary` of each.
+- `IdentitySummary` and `RepeatedSummary`: the identity of `GenericIdentity` for `Identity64` and
+  `Repeated`, proved once by stepping `Identity<ulong>` and once from a `DecodedSummary` of it that
+  each call applies without stepping its body. Each file also proves that every call names the
+  metadata token and type arguments the summary is bound to
+  ([decoded summaries](PROOFS-CONTRACTS.md#bind-a-contract-to-a-decoded-method)).
+- `CountCallsSummary`: `Loops.CountCalls` returns its input for every `uint`, proved once by
+  stepping `Decrement` at the call of each iteration and once from a `DecodedSummary` of
+  `Decrement` that `cil_loop_call` applies at that call. The file also proves that every summary
+  of the index the call enters is bound to the token of `Decrement`, and refutes one bound to
+  the token of `CountCalls`.
+- `VectorSummary`: `DivisionIntrinsics.UnsafeLowNext` returns its input plus one for every
+  `ulong`, proved once by stepping `UnsafeLow`, whose `Vector128.CreateScalarUnsafe` and
+  `GetElement` calls run through their runtime models, and once from a `DecodedSummary` of
+  `UnsafeLow` that the call applies without stepping its body. The summary's type lists both
+  runtime models, and the caller discharges them from the extraction's model facts.
 - `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the
   modular additive inverse for every input, including the signed minimum.
 - `NarrowIntegers`: signed/unsigned casts, character values, calls and an eight-byte struct
@@ -54,7 +92,7 @@ sentences name the wrong implementations that each unchanged proof rejects.
 - `PastEnd`: a permitted end sentinel whose dereference is rejected as outside the allocation, for
   every fuel budget.
 - `Escape`: a reference to an expired local is rejected on return, for every fuel budget.
-- `WrongAdd`: a mathematical counterexample to the intended addition contract.
+- `WrongAdd`: a verified refutation of `addContract` from `Add.lean` at inputs `(0, 1)`.
 - A separate `Examples.Hardware` assembly, built from the file-based library
   `Examples/Hardware/Hardware.cs`, tests runtime capability extraction.
 - A Cecil-generated independent fixture tests extraction-bound static RVA bytes.
@@ -83,9 +121,11 @@ sentences name the wrong implementations that each unchanged proof rejects.
   returns that head, advances the list past it, clears its link, decrements the idle count and
   marks it rented, writing no other field, and under the class catalog premise leaves the live
   count unchanged; with an empty list and room under the capacity it creates an item owned by the
-  pool, numbered with the next id and marked rented; an exhausted pool throws
-  `InvalidOperationException` and a null pool `NullReferenceException`. Its object sites agree
-  with the catalog, so the premise stated at entry holds after any invocation of the program.
+  pool, numbered with the next id and marked rented; an exhausted pool runs the CoreLib
+  `InvalidOperationException(string)` constructor on its bound message literal, given heap room
+  for the exception, and throws it, and a null pool throws `NullReferenceException`. Its object
+  sites agree with the catalog, so the premise stated at entry holds after any invocation of the
+  program.
 - `ItemPool.IsIdle` walks the free list through an object local. `PoolIdle.lean` takes the list
   as a `Segment` to null visiting `nodes`, whose length is the loop's measure, and proves that
   the method answers whether the item is one of `nodes`, for a null or any live item, and writes
@@ -108,8 +148,9 @@ sentences name the wrong implementations that each unchanged proof rejects.
 - `Guards` calls the framework argument guards. `GuardCount.lean` proves `ThrowIfNegative` raises
   `ArgumentOutOfRangeException` exactly for a negative count, `GuardIndex.lean` proves the unsigned
   `ThrowIfGreaterThanOrEqual` compares as unsigned, and `GuardRequired.lean` proves `ThrowIfNull`
-  raises `ArgumentNullException` exactly for null. The `guards` test shows `GuardCount.lean`
-  fails once the guard becomes `ThrowIfNegativeOrZero`.
+  raises `ArgumentNullException` exactly for null. Replacing the compiled guard with
+  `ThrowIfNegativeOrZero` raises `ArgumentOutOfRangeException` at zero. The refutation certificate
+  binds that counterexample to the changed entry and its assembly.
 
 Concrete example proofs establish their displayed inputs. Only explicitly universally quantified
 theorems claim arbitrary-input correctness. `CheckedAdd64`, `Choose` and `GenericIdentity` quantify
@@ -154,7 +195,8 @@ and `cil_loop_call`, which names the returned count and keeps both locals of the
 across the call through `LoopFrame.after_confined`; `cil_loop_recurse` stores them and steps back to
 the head, and the invariant states only `count + remaining = value`. The suite verifies the
 unchanged loop proof against a build whose helper computes `value + 0xFFFFFFFF`, re-proving only
-the helper contract, and rejects builds that discard the helper result or count twice.
+the helper contract. It rejects a build that discards the helper result and refutes the counting
+contract for a build that counts twice.
 
 [The struct-local loop proof](../Examples/Proofs/TallyTwice.lean) shows that `Loops.TallyTwice`
 returns twice its input for every `uint` and allocates nothing the caller sees. Its loop state is a
@@ -235,8 +277,8 @@ leancil verify artifacts/FSharpAdd --proof Examples/Proofs/Add.lean
 ```
 
 The theorem proves `(x + y) mod 2^64` for every pair of 64-bit inputs. The `fsharp` suite also
-checks universal store/load and constructor contracts and rejects subtraction under the unchanged
-addition contract.
+checks universal store/load and constructor contracts. At inputs zero and one, the compiled
+subtraction returns the largest unsigned word. The kernel checks this counterexample to addition.
 
 These examples cover F# programs that compile into the supported CIL subset. F# lists, closures,
 discriminated unions and arbitrary FSharp.Core calls are not generally supported; the suite

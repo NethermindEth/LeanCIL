@@ -44,7 +44,12 @@ modified output files.
   reuse it within that phase, so no analysis is cached across method mutation or profile changes.
   Feature evidence uses the same incoming states as instruction selection.
   `Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
-  profiles, feature queries and a loop backedge, and checks source/assembly tampering.
+  profiles, feature queries and a loop backedge, and checks source/assembly tampering. Two outputs
+  that name one directory, also through a directory link, reject the batch. It also extracts
+  scalar, generic-layout and static-initialization methods twice into separate directories, in separate
+  processes and in reversed batch and `--assume-initialized` order, and requires every file to match byte
+  for byte. `Tests/MultiAssembly.cs` does the same with pinned references, where only the same
+  `--reference` order yields identical files because the order numbers the pins.
 
 ### Feature evidence
 
@@ -74,6 +79,10 @@ that omit or split `aesX64` or `armAes64` are rejected. `BitConverter.IsLittleEn
 big-endian branch on those profiles; forged owners and values are rejected by both certificates,
 and lookalike scopes, fields and same-named module types are rejected by the extractor.
 
+The runtime profile cases include an x64 set with `x86Base64` and `sse2` on and SSSE3, SSE4.1 and
+SSE4.2 off, which no .NET 11 process reports: the extractor rejects it with a message naming the
+three missing sets, and a generated kernel-checked theorem proves it is not `FeatureProfile.Valid`.
+
 ### Exact intrinsics
 
 `Tests/ExactIntrinsics.cs` compares each intrinsic below with the host CPU, except where the row
@@ -82,12 +91,14 @@ model from them:
 
 | Intrinsic | Inputs | Must separate the model from | Rejections |
 | --- | --- | --- | --- |
-| `Avx2.Shuffle` and `Ssse3.Shuffle`, fed by `Vector256.Create<byte>` and `Vector128.Create<byte>` over byte spans | Twelve seeded span pairs each, one a 32-byte reversal mask; both short-span calls raise `ArgumentOutOfRangeException` in the runtime and the model | Shuffles that ignore bit 7 or cross 128-bit halves | A profile without the feature; forged load widths; substituted intrinsics |
-| `Sse2.Multiply` on `Vector128.Create` lanes reinterpreted as `uint` | Twelve argument sets, two with set high halves and both 32-bit extremes | Odd lanes, a signed product, a full 64-bit product | `scalar`; forged evidence substituting the 256-bit multiply or another exact SSE call |
-| A portable AES hash round on `Aes.Encrypt` | Eight seeded blocks; the extraction returns the same vectors under a custom x64 profile declaring `aes` and under a custom ARM64 profile declaring `armAes`, where it uses AESE and AESMC | | Every built-in profile rejects the reachable ARM64 calls; forged evidence substituting another AES step |
-| A 256-bit arithmetic shift window: `Avx512F.VL.PermuteVar4x64x2` over a sign fill from `Vector256.LessThan<long>` | The five windows such a shift loads and seven random index vectors; the x64-v4 extraction returns the same vectors | A bit-3 table select and swapped tables | See below |
-| `Vector256.Create` of eight `uint`s | Compared the same way | | |
-| `AdvSimd.ReverseElement8` under arm64-advsimd | Checked against `BinaryPrimitives.ReverseEndianness` of each lane, since no ARM64 host runs it | | See below |
+| `Avx2.Shuffle` on `Vector256.Create<byte>` | Twelve seeded span pairs, including a 32-byte reversal mask. A short source or control raises `ArgumentOutOfRangeException` | The contract preserves caller memory for every pair of readable spans of at least 32 bytes. Swapping the source halves returns byte one in the high half. Clearing mask bit 7 returns byte one in the low half. The contract requires a zero low half and byte two in the high half | Both compiled variants have checked refutations. A missing feature, forged read width or substituted intrinsic is rejected |
+| `Ssse3.Shuffle` on `Vector128.Create<byte>` | Twelve seeded span pairs. A short source or control raises `ArgumentOutOfRangeException` | The contract preserves caller memory for every pair of readable spans of at least 16 bytes, including overlapping spans. Given sixteen source bytes of `0x01` and sixteen control bytes of `0x80`, the compiled operand reversal returns sixteen `0x80` bytes. The contract requires zeros | Checked refutation under `x64-sse42`. The native comparison also runs on SSSE3 hosts |
+| `Sse2.Multiply` on `Vector128.Create` lanes reinterpreted as `uint` | The compiled entry returns both unsigned low-half products for all four input words and preserves caller memory. Twelve cases also run on the host | Shifting all four inputs by 32 selects the odd lanes and returns `(5, 21)` where the contract requires `(12, 32)`. Other inputs distinguish signed and full-width products | Checked odd-lane refutation under `x64-sse42`. The scalar profile and forged intrinsic substitutions are rejected |
+| `Avx512F.CompareLessThan` followed by `Avx512DQ.MoveMask` | The compiled broadcast returns 255 for unsigned `left < right` and 0 otherwise, for every pair of words in well-formed caller memory | Replacing the comparison with `CompareGreaterThan` returns 0 for `(1, 2⁶³)` where the contract requires 255 | Checked refutation under `x64-v4`. Both binaries also run on hosts with AVX-512 F and DQ |
+| A portable AES hash round on `Aes.Encrypt` | Every 128-bit state and key, with eight seeded blocks compared against hardware. The x64 AESENC and ARM64 AESE/AESMC paths preserve caller storage | Loading the low key half twice drops bit 64 when only that bit is set. The modified assembly returns `0x63` in every byte for the zero state | Both AES profiles check the same contract and its refutation. Built-in profiles reject a reachable missing instruction, and forged AES call evidence fails |
+| `Avx512F.VL.PermuteVar4x64x2` over a sign fill from `Vector256.LessThan<long>` | For every four-limb value and every selector vector, the result draws from the four limbs or the high limb's sign fill and preserves caller memory. Twelve cases also run against a scalar reference | With limbs (0, 1, 2, 2⁶³) and selectors (4, 5, 6, 7), the contract requires four all-one words. Broadcasting the low sign returns four zeros. Exchanging tables or selecting the table with bit 3 returns the four input limbs | All three compiled variants have checked refutations under `x64-v4`. On AVX-512 VL hosts, each variant also runs against its scalar reference on the twelve inputs and the counterexample |
+| `Vector256.Create` of eight `uint`s | The compiled method packs all eight arguments in lane order and preserves caller memory. One byte-for-byte case also runs on the host | Swapping the first two argument loads puts the only nonzero word in lane one instead of lane zero | Checked refutation under the scalar profile |
+| `AdvSimd.ReverseElement8` under arm64-advsimd | Every pair of 64-bit lanes, with native checks on AdvSimd hosts | Swapping the two compiled argument loads exchanges the lanes at `(1, 2)` | Checked refutation under `arm64-advsimd`. See below |
 | A method that swaps two halves through `Vector128.LoadUnsafe` and `StoreUnsafe`, with and without an offset | Matches the host and faults on the second store into a 31-byte destination | | See below |
 
 For the last four rows, profiles without AdvSimd or AVX-512 VL reject the reachable calls, and
@@ -115,6 +126,67 @@ workflow.
   batch compilation/replay time.
 - `GenericEvidence` also checks that an invalid proof fails batch compilation and that an
   unchecked declaration reaches, and fails, independent kernel replay.
+- `GenericEvidence` mutates the emitted `declared` signature (a parameter, the return type, the
+  receiver and its kind), the call-link table (a changed callee, a dropped entry, an entry at the
+  wrong pc or at a non-call) and the shared layout environment. Each fails its own conjunct with the
+  kernel's failed-decision or definitional-equality message. A changed call target moves its link
+  definition too, so only the call binding can reject it, and each mutation fails the fixture when its
+  text replacement matched nothing.
+- `GenericEvidence` mutates the body evidence of its first sample: a body byte, the header, a token
+  operand byte, a token table key, a token table operand, an emitted instruction offset, `maxStack` and
+  a branch index. Each must fail a body obligation with the kernel's failed-decision message, so a
+  mutation that only breaks parsing does not count, and the unmutated obligation is the positive
+  control.
+  `Tests/BodyDecoding.lean` decodes hand-made tiny and fat bodies with short and long branches, a
+  switch, two-byte opcodes, token operands and float constants, rejects each kind of malformed
+  body separately with its specific error, and compares the operand table with a static list
+  generated once from the opcodes of Mono.Cecil.
+  `Tests/BodyEncoding.lean` writes bytes and the metadata slice for the hand-built methods of
+  other Lean fixtures.
+  `Tests/MetadataDecoding.lean` decodes rows, headers, heap entries, signature blobs and
+  assembly names copied from `Examples.dll` (two-byte columns) and from the runtime's
+  `System.Private.CoreLib.dll` (four-byte columns) and compares them with the values
+  System.Reflection.Metadata and Mono.Cecil read from the same positions, and rejects malformed
+  rows, headers, heaps and signatures with their specific errors.
+  `Tests/MetadataBinding.lean` checks every operand form, the locals and a method definition
+  against a hand-built pair of pinned assemblies, and changes one row byte, blob byte, heap
+  offset, scope, instantiation, field index, local or link at a time, each with its exact error.
+  It checks each claim of a struct field operand, including the owner kind and the arity of a
+  generic struct owner.
+  `Tests/MetadataDifferential.cs` writes every reference, type definition, type specification and
+  method specification row of `Examples.dll`, with the links that locate nested types and the
+  definitions of its own methods and Cecil's full name for each method reference, and Lean must
+  spell the same names from the bytes and refuse every reference that names a general array. The
+  kernel decides 128 references per theorem, one theorem at a time, so the memory of a run does
+  not grow with the assembly, and the cost per added reference must stay within 1.25 times from
+  64 to 128 references.
+  Tests/BodyLiteral.lean writes the evidence of one method with `fixedBytes` byte literals, with
+  literals over 32 bytes split into 32-byte ones to keep lines short, proves in the kernel that
+  each kind of literal equals its list literal, proves its body check with the kernel, rejects a
+  changed byte of the body literal, and requires the elaborator's decide to refuse the check within
+  a small heartbeat budget. Its cost rows write literals as the extractor does, one code joined
+  from numerals of at most 256 bytes. Elaborating the literal of a body of 16384, 65536 and 262144
+  `nop`s must stay within 4.5 times the heartbeats and, taking the fastest of three runs, 8 times
+  the time at 4 times the body, and within 200 heartbeats per byte; a numeral parse quadratic in
+  its digits grows 16 times. Body-checking the literal of a body of 128, 512 and 2048 `nop`s must stay within 4.5
+  times the heartbeats at 4 times the body. Bodies of 5, 10 and 20 KB of `ldc.i4` and `pop`
+  pairs, once with every 256-byte numeral ending in the same eight `nop`s and once with random
+  operands, must cost the kernel at most 1.15 times as much per byte as at the size before, both
+  for a fold over the bytes and for the body check. The kernel's caches hash a numeral by its low
+  64 bits, so the same bodies written as separate numerals joined by `++` cost about twice as much
+  per byte at each doubling. Tests/BodyLiteral.lean also fails if the import closure of
+  `CIL.Extraction.FixedDigits`, the only CIL module an image module imports, reaches a module of
+  `Lean`. Tests/StrictBindingScaling.cs proves the SHA-256 digest of a 4 KB
+  image page whose 64-byte chunks all end in the same eight bytes within 1.1 times the heartbeats
+  of the same page with random ends; written as one numeral per chunk, it costs 22 times as much.
+  Tests/ScalarEvidence.lean requires the same
+  refusal and kernel decision for a whole certificate, and reduces the fixture encoder in the
+  elaborator at two method sizes.
+  Tests/LookupScaling.cs also compares the metadata check's cost per token for 125 and 500 user
+  string and field tokens and for 25 and 100 call tokens, for the whole extraction and for
+  `Extracted.method0_calls_validated` alone, within 1.15 times, and the body check's cost per
+  instruction for a method of 125, 500 and 1,000 string tokens, within 1.1 times of the size
+  before.
 - Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,
   so each distinct typed input runs once; every rotation count runs as supplied, including
   negative and out-of-width counts. Replay fallback tests check rejection and attribution in one
@@ -125,7 +197,7 @@ workflow.
 dotnet run --file Tests/PrimitiveArrays.cs -- --measure
 ```
 
-The positive controls for generic, constrained-call, feature-flow and folded-span mutations follow
+The positive controls for generic, constrained-call and feature-flow mutations follow
 these rules:
 
 - Generic and constrained-call positive controls keep their narrowed declarations and exact
@@ -146,7 +218,7 @@ these rules:
 - Regression cases cover removed declarations used by definitions or obligation types, changed
   definitions, qualified references and opened namespaces. Rejection diagnostics keep their case
   boundaries with or without Lean's diagnostic classification codes.
-- Feature-flow and folded-span mutations use the same checked controls and keep only the intended
+- Feature-flow mutations use the same checked controls and keep only the intended
   feature-flow obligation in each negative fixture. Every rejection must identify
   `FeatureFlowValid` as false. Full positive certificates, runtime comparisons and consumer replay
   run as well; folded instructions with an unrecognized theorem cannot silently skip a test.
@@ -227,10 +299,11 @@ processes, each with its private process and worker checks. Run one with
 | `--check` name | Fixture | Checks |
 | --- | --- | --- |
 | `source-resolution` | `Tests/ConsumerSourceResolution.cs` | Consumer source resolution |
+| `package-paths` | `Tests/ConsumerPackagePaths.cs` | Package containment decided with links followed on both sides: a package reached through a directory link holds its own directories in either spelling, an audited module reported with links followed is the checked file and a shadow elsewhere is not, containment, identity and compiled module names decide on the location rather than the spelling, a case variant of a directory is the same location exactly where the file system finds it, each name is matched under the case rule of the directory holding it, which the operating system reports where it can (the volume on macOS, the case-sensitive flag on Windows, the case-folding flag on Linux) and the directory's entries show otherwise, an unknown rule never admits a name in another case into a package while it keeps two outputs apart, an answer is kept only for a directory that existed when asked, a sibling whose name differs only in case lies outside the package on a case-sensitive volume (a disk image on macOS, a directory with the case-sensitive flag on Windows, the temporary directory on Linux), a path with `..` after a link is kept only where reading the `..` after following the link, as POSIX does, and as spelled, as Windows does, name one location inside the package, and a path that leaves it through `..`, an absolute path, a link (also a dangling one) or a cycle of links is rejected. On Windows the link cases print SKIP where no symbolic link or junction can be made; the case-sensitive volume check prints SKIP where fsutil cannot set the flag on Windows or where the Linux temporary directory ignores case. |
 | `compile-check` | `Tests/ConsumerComponents.cs` | The components fixture run with `--compile-check` |
 | `support-union` | `Tests/ConsumerSupportUnion.cs` | A fixed three-extraction consumer batch in two orders. Support imported only by later groups must build and replay once; direct and indirect extraction-dependent modules must replay in every consuming group, including repeated import commands on one line. Compiled import headers are authoritative when scheduling misses an import. |
 | `certificate-reuse` | `Tests/ConsumerCertificateReuse.cs` | Four independent verifier processes with distinct proof sources. Unchanged generated certificates keep their authenticated build outputs and run no certificate `lake build`. Reuse requires the complete certificate module parts and traces, unchanged authenticated restored artifacts, and the source/import closure binding. Changed extraction text and self-rehashed corrupt artifacts force rebuilding `Extracted`. Every successful request independently replays `Extracted` and the proof and audits the certificate. Expected rejection groups keep the separate `ExtractionAudit` module. Generated-source tampering is rejected before receipt reuse, and proof code cannot replace restored or freshly built certificate artifacts; both rejection paths remove a stale report. |
-| `components` | `Tests/ConsumerComponents.cs` | Four independently certified wrappers around one helper. The common profile/layout and helper modules must compile and replay once, while all four complete extraction certificates must replay. Profile, helper and call-target changes invalidate their component identities; a consumer source shadowing a generated component must fail without a certificate. |
+| `components` | `Tests/ConsumerComponents.cs` | Four independently certified wrappers around one helper. The common profile/layout and helper modules must compile and replay once, while all four complete extraction certificates must replay. Profile, helper and call-target changes invalidate their component identities. A helper whose callee sits at another index in a second extraction shares only the header with it, and with method numbers and imports erased its two texts differ only in its call and its link; a consumer source shadowing a generated component must fail without a certificate. |
 | `fingerprints` | `Tests/ConsumerFingerprintReuse.cs` | Authenticated canonical fingerprints across independent verifier processes, using two framework modules and a multipart fixture: corrupt receipts, changed or missing parts, module names, auditor bytes, fresh and disabled caches, diagnostic normalization, source/import invalidation and kernel replay. |
 | `certified-fingerprints` | `Tests/CertifiedFingerprints.cs` | Direct normalization compared with an authenticated prepared-library table while local receipts are disabled: identical canonical results across independent receivers, relocation, renamed modules, changed parts and native tools, metadata mutation before publication and consumption, and self-rehashed corruption. The fixture uses two framework modules plus one consumer module. |
 
@@ -300,10 +373,22 @@ performance fixture is never supplied to a verifier as a certified library.
   checked module.
 - CLI regressions cover unchecked-theorem and transitive-helper rejection, stale-report removal
   and changed-code proof failure.
-- `Tests/TranslationScaling.cs` checks the extraction prefix once, then imports it into the
-  compositional certificate and a deliberately failing monolithic certificate. `--measure` also
+- `Tests/TranslationScaling.cs` requires the elaborator's `decide` to fail on the six-method
+  monolithic certificate, either at a reduction it cannot perform or at the default heartbeat
+  limit while reducing to weak head normal form. `--measure` also
   checks both complete files and records command timings for the identical six-method workload.
-  The consumer verifies the original extraction.
+  The kernel decides the monolithic certificate of call graphs of 2, 4 and 8 methods, and the
+  heartbeats and peak memory of a method added from 4 to 8 may be at most 1.2 times those of one
+  added from 2 to 4. The consumer verifies the original extraction, the extraction checks at the
+  default heartbeat budget with the kernel counted on the elaborating thread, and the same file
+  fails at 100 heartbeats with a deterministic timeout. The fixture then checks the emitted
+  `Extracted.layouts_validated` theorem over a chain of nested structs, each holding the one
+  before it, and over a chain of generic structs, each holding the previous distinct closed
+  generic owner, and the emitted `Extracted.method0_layouts_validated` theorem over the nested
+  chain. It compiles them with
+  `-DElab.async=false` so kernel heartbeats are counted and under `lean -M 8192`, and requires
+  axioms `[propext, Classical.choice, Quot.sound]`; heartbeats per layout may grow by at most 1.5
+  times from chains of 64 to chains of 512.
 
 ### Proof workspace
 
@@ -326,6 +411,17 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   states, out-of-bounds targets and mismatched certificate lengths. The feature and scalar
   equivalence theorems keep the list-indexed rules, including rejection when the feature and
   scalar certificate lengths differ.
+- `Tests/ScalarEvidence.lean` evaluates the local slot reads of `ScalarFlowValid`, which come
+  from indexes built once per body, at single sites and in whole certificates. They reject a
+  store or load past the declared locals, a null store into an int32 local, a method address
+  stored into a native-int local that no `calli` consumes and the address of a local that a
+  `calli` consumes, as the metadata lists do. `closedArguments`, which reads pointer locals from a
+  set built once per body, gives a method pointer home only to the native-int local a `calli`
+  consumes, as scanning the pointer local list does. It accepts a struct field site through each
+  receiver kind and for an integer, enum, vector, nested struct and generic instance field, and
+  refuses each forged struct field site: a load where the raw opcode stores, a load from an object
+  receiver, a field address or store through a value, a stored value of the wrong kind, and a field
+  of another index, owner, held type or name. It runs in the `evidence` suite.
 - `Tests/LocalSnapshotSteps.lean` checks opt-in local snapshot stepping:
   - Vector and int32 stores, reloads and overwrites with abstract homes and memory, plus
     signed-byte narrowing. The mixed-width case carries Vector256, Vector128 and int32 locals
@@ -361,18 +457,34 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   indices, initialization, authority, invalid extents, local storage and neighboring-byte
   preservation. Both run in the `evidence` suite.
 - `Tests/ArrayElementReferences.cs` checks compiled `ldelema` returns, helper reads and writes
-  against runtime behavior, preserving neighboring contents and rejecting a forged element type.
+  against runtime behavior, preserving neighboring contents and rejecting a forged element type at
+  the raw token the address is decoded from.
   `Tests/ArrayElementReferences.lean` covers null, empty and out-of-range accesses, expired
   references and address formation without granting memory authority. Both run in the `evidence`
   suite.
+- `Tests/SpanHomeReads.cs` adds a method that stores a span local, takes its address, stores
+  another span and reads the length through the address, checks the CLR result and proves that the
+  extracted method returns the second length for both argument orders. `Tests/SpanHomes.lean`
+  covers a recursive callee that stores to its own slot while the caller holds a home, a linked
+  callee receiving the view, a homed parameter, uninitialized slots, a relocated home, homes refused
+  at entry, return, `stloc` and `stobj`, and shows that `ScalarFlowValid` refuses an address at a
+  by-value span parameter for every certificate. The first runs in the `evidence` suite and the
+  second in the `core` suite.
 - `Tests/ReadOnlyArrayReferences.cs` inserts `readonly.` prefixes into compiled fixtures,
   checks returned and locally stored references, and proves that caller stores fail despite
-  writable backing memory. It rejects independently forged writable evidence, separated prefixes
-  and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates,
-  read access and rejection of an adapter that would remove the restriction, plus readonly
-  `GetReference` results for nonempty, empty and out-of-extent views and field loads, field
-  addresses and rejected field stores through restricted references. Both run in the `evidence`
-  suite.
+  writable backing memory. It rejects a raw body with the prefix removed, whose bytes body decoding
+  refuses, separated prefixes and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean`
+  also checks alias updates, read access and rejection of an adapter that would remove the
+  restriction, plus readonly `GetReference` results for nonempty, empty and out-of-extent views and
+  field loads, field addresses and rejected field stores through restricted references. It shows
+  that the equation of the emitted code with its decoding rejects a writable address under a
+  prefix, that `ScalarFlowValid` rejects a prefix with an operand,
+  and leaves a branch into the prefixed address, or into a live instruction after a dead
+  `readonly.`, to `PrefixEntryFree`, which refuses it. Against a readonly and a writable address
+  body that the scalar check and that equation accept, it shows that the pair refuses a forged
+  flag or element type, a final `readonly.`, a second `readonly.`, a `nop` or an `ldelem` after
+  `readonly.`, and `ldelema` after `unaligned.`, and that a call after `readonly.` has no
+  decoding and the `readonly.` before it is refused at its own site. Both run in the `evidence` suite.
 - `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
   covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper
   initialization and copies. It rejects missing initialization assumptions, mutable fields,
@@ -416,7 +528,16 @@ Its CLI regressions cover initial proof selection and theorem output, an
 addition-to-subtraction source edit and rebuild, recovery using settings kept after the failed
 proof, the invalid-memory-access theorem, the integer opcode, narrow-storage and
 primitive-operation matrices, `new-proof` rejecting an existing file, a stale extraction and a
-struct parameter, and an isolated installation of the packaged .NET tool.
+struct parameter, and an isolated installation of the packaged .NET tool. They also check that a
+default certificate lists every binding fact as trusted, in order, and that a run without settings
+or `--proof` takes no proof from an earlier certificate.
+
+The `core` suite checks that `verify` refuses a certificate of the previous schema, one without a
+binding section, one whose binding facts are missing, reordered, repeated or unknown, one with an
+unknown, numeric, absent or misplaced status, one whose default section names a digest file or lacks
+its images, and one whose binding section has mode `deep`. Its consumer test republishes an
+authenticated proof receipt with an unknown status and checks that the next run verifies afresh.
+`scripts/TestProofCost.cs` checks that the proof cost measurement refuses the same certificates.
 
 The runner, the tool and library preparation reject every run of Lean, Lake or the audit
 executable whose output holds an [internal error](CLI.md#diagnostics), so a panic while building
@@ -472,8 +593,10 @@ These tests cover preparation:
   the CLI document, a package whose lakefile names the entry keeps it however old its pin and
   however the cache directory is spelled, and no pass raises. A lakefile that never answers, and
   an injected reader that blocks, delay a pass by a bounded time; the named-pipe check prints SKIP
-  on Windows. Opening an entry evicts nothing, and a publication reports its removal as a stage
-  with the number removed and nothing else on stderr. Malformed settings keep the defaults and
+  on Windows. The pass limit is checked on an injected clock, so a read under way when the limit
+  comes is cut off there and the pass gives up whatever the machine's load. Opening an entry
+  evicts nothing, and a publication reports its removal as a stage with the number removed and
+  nothing else on stderr. Malformed settings keep the defaults and
   huge ones clamp. The link checks print SKIP when no symbolic link or junction can be made. The
   `workspace` suite checks that both package kinds pin the entry they require.
 - The `workspace` suite checks that a full audit, contract imports and a package import are never
@@ -499,16 +622,16 @@ These tests cover preparation:
 | Block memory and alignment prefixes | 251 checks; ten malformed-prefix/type cases rejected; universal out-of-bounds fill rejection |
 | Layout-based Unsafe helpers | 418 checks across 19 element types and all three managed offset overloads; ten malformed generic calls rejected |
 | Checked Unsafe value transfers | Runtime comparisons and checked execution proofs cover signed and unsigned scalars, aggregates and integer vectors through byte references and pointers. Aligned pointer cases use physically aligned runtime buffers, while unaligned cases access byte offset one. Shared boundary proofs cover initialization masks, unreadable scalars, bounds and readonly destinations; aligned cases additionally check misalignment and write-only authority. Certificate mutations reject incorrect widths, signedness, helper identity, transfer direction, scalar/vector alignment and aggregate layout alignment. |
-| Byte-span value transfers | Eight compiled MemoryMarshal wrappers cover reads, writes and their try forms for scalars, aggregates and integer vectors. Nineteen checked behavior claims include short-span exceptions, default-initialized out values, write-free failed try-writes, write authority and initialization masks. Seven certificate mutations reject changed signatures, operations, flags and scalar/vector/aggregate widths. |
+| Byte-span value transfers | Eight compiled MemoryMarshal wrappers cover reads, writes and their try forms for scalars, aggregates and integer vectors. Nineteen checked behavior claims include short-span exceptions, default-initialized out values, write-free failed try-writes, write authority and initialization masks. Seven call-site checks bind open signatures, operations, flags and scalar/vector/aggregate widths. |
 | Span reinterpretation | Compiled mutable and readonly AsBytes/Cast wrappers cover enum types, aliasing writes, empty and uninitialized storage, truncated lengths and overflow. Lean certificate mutations reject changed widths, capability and operation. |
 | Overlapping span copies | Six compiled wrappers and seventeen checked claims cover mutable and readonly sources, enums and 64-bit elements, both overlap directions, self-copy, disjoint slices within one allocation, empty spans, short destinations, initialization, write authority and neighboring bytes. Six independent certificate mutations reject changed widths, operation, try flag, external identity, readonly destination and enum identity. Runtime checks compare copied contents with snapshot copying. |
 | Typed indirect dispatch | Compiled pointer locals and supplied handler tables cover ordinary calls, indirect tail cycles, return/throw outcomes, null tables, bounds, unknown targets and local-reference expiration. Independent Lean certificate mutations reject forged targets, identities, signatures, numeric pointers, conventions and dropped tail semantics. Malformed calling conventions and branches into a tail transfer are rejected during extraction. |
 | Aggregate and vector spans (`AggregateSpans`) | Reference-free aggregate buffers and integer vectors cover views, slicing, typed reads/writes, reinterpretation, overlap-safe copying and clearing. Vector masks and neighboring bytes are checked; vector-field layouts are certified for x64 and ARM64. Evidence mutations reject forged widths and write capabilities. |
 | Aggregate/vector fills (`AggregateSpanFill`) | Five compiled aggregate, Vector128/256/512 and aliased-source wrappers check repeated values, initialization masks, unknown-lane rejection, empty views, write authority and neighboring bytes. Independent evidence mutations reject changed aggregate/vector widths and clear/fill flags. |
-| Span constructors (`SpanConstructors`) | Single-reference and pointer constructors cover primitive, aggregate and integer-vector elements, mutable/readonly views and in-place local initialization without readable bytes. Empty getters and explicit default resets cover returns, helper calls and empty slices. Vector-field aggregate layouts are checked on x64 and ARM64; evidence mutations reject changed widths, capabilities and aggregate identities. Wrong scoped reset types and branches into reset folds are rejected. |
+| Span constructors (`SpanConstructors`) | Single-reference and pointer constructors cover primitive, aggregate and integer-vector elements, mutable/readonly views and in-place local initialization without readable bytes, including a read-only byte span over caller storage. Empty getters and explicit default resets cover returns, helper calls and empty slices. Vector-field aggregate layouts are checked on x64 and ARM64; evidence mutations reject changed widths, capabilities and aggregate identities. Wrong scoped reset types and branches to a reset are rejected. |
 | Span reference parameters (`SpanReferences`, `SpanReferenceContracts`, `SpanReferenceWordContract`, `SpanReferenceSecondContract`) | `in` and `ref readonly` span parameters cover loops, indexing, slicing, element writes, copies, forwarding, caller-side local, parameter and temporary addresses, closed generic helpers, a struct constructor, field reads and field addresses through writable and readonly aggregate elements, and `MemoryMarshal.GetReference` of readonly views, including a byte-order read and `Unsafe.Add`, `Subtract` and `AddByteOffset` offsets and an advancing cursor loop that stay readonly; symbolic `Contents` contracts prove an indexed read, a first-word read and a second-word read through `Unsafe.Add`. Kernel fixtures check expired backing storage, readonly element stores, writes and field stores through readonly `GetReference` results and their offsets against writable controls, one-past, beyond-end and negative readonly offsets, empty and out-of-extent readonly views and forged reference arguments. Evidence mutations reject a span-valued raw argument and a load in place of a span copy; rebinding, addressing or storing to the parameter, writable span parameters (including a generic helper's `ref` span and a generic definition stripped of its readonly markers), span reference returns and indirect copy sources are rejected during extraction. |
-| Supplied aggregate/vector arrays (`AggregateArrays`, `AggregateArrayStorage`) | Typed element addresses, loads/stores, lengths, span conversions and data references cover reference-free structs and integer vectors over existing storage. Kernel fixtures check masks, authority, bounds, lifetime and readonly views; independent evidence mutations reject changed element descriptors and operations. |
-| Closed generic structs (`GenericLayouts`) | Sequential same-assembly reference-free instantiations cover nested layouts, fields, direct instance methods and constructors through checked owner substitution and ordinary aggregate storage. Unsupported reference-bearing, open, non-sequential and interface/reference-constrained generic layouts remain rejected. |
+| Supplied aggregate/vector arrays (`AggregateArrays`, `AggregateArrayStorage`) | Typed element addresses, writable and after an inserted `readonly.`, loads/stores, lengths, span conversions and data references cover reference-free structs and integer vectors over existing storage. Kernel fixtures check masks, authority, bounds, lifetime and readonly views; independent evidence mutations reject changed element descriptors and operations and a readonly struct address whose raw prefix is removed. |
+| Closed generic structs (`GenericLayouts`) | Sequential same-assembly reference-free instantiations cover nested layouts, fields, direct instance methods and constructors through checked owner substitution and ordinary aggregate storage. An extracted table of 512 generic rows, each holding the struct before it, compiles. Unsupported reference-bearing, open, non-sequential and interface/reference-constrained generic layouts remain rejected. |
 | Byte-order span transfers (`BinarySpans`) | Compiled wrappers exercise all 64 signed/unsigned 16-, 32-, 64-bit and native integer read/write/try endian overloads, short spans, read/write authority and uninitialized reads. Evidence mutations reject altered widths, endian choices, signedness and try behavior. |
 | No-read view observations (`ViewAccessors`) | Span emptiness, pinnable references, `MemoryMarshal.GetReference` of writable and readonly spans and array data references cover empty/default/readonly views, empty and null arrays and observations without readable bytes or byte authority. Evidence mutations reject mismatched accessors and capabilities. |
 | Closed generic owners (`GenericOwners`) | Static helpers on closed same-assembly generic owners, nested owners and combined owner/method arguments certify through structural substitution; evidence mutations reject incorrect owner and argument bindings. Span indexer, `Length` and `Slice` calls on owners built from method (`!!0`), owner (`!0`) and nested owner (`!1`) parameters execute against caller views; unsubstituted, wrongly instantiated, swapped-member, wrong-owner and misspelled open targets fail instantiation. |
@@ -516,8 +639,8 @@ These tests cover preparation:
 | Null managed references | `IsNullRef` of `NullRef` and of a live argument, reads and writes through `NullRef` (indirect and field) and an optional `ref` local: ten outcomes compared with .NET, each `NullReferenceException` matched to a located null-dereference fault; forged `NullRef`/`IsNullRef` translations rejected by the call binding; 22 malformed generic calls rejected |
 | Reference/null observations | Emitted CIL fixtures compare .NET and checked Lean execution for `ceq`, `brtrue`, `brfalse`, `beq`, `bne.un` and bounded `ldnull`; an independently changed equality operation must fail scalar evidence. Semantic fixtures cover readonly views, null, lifetime, invalid addresses, end pointers and disjoint allocation interiors. A null-message throw fixture preserves existing folding. |
 | Integer Math helpers | 21,804 runtime comparisons across 40 overloads; universal signed-minimum proof; incorrect implementation and seven malformed calls rejected |
-| `X86Base.X64.DivRem` through `ValueTuple<ulong, ulong>` Item1/Item2 reads | Runtime tuple offset probe; 500 checked-execution boundary cases across five read shapes compared with hardware and a `UInt128` oracle, including divide-by-zero and overflow faults; universal quotient and fault proof; remainder substituted for quotient rejected; eight forged calls, scopes and tuple layouts rejected |
-| `Math.DivRem` tuple and `out` overloads | Runtime equal-width tuple offset probe; 562 checked-execution comparisons with .NET over the ten tuple overloads, a narrow Item2 read and both `out` overloads, including divide-by-zero, wide `MinValue / -1` overflow, wrapping narrow `MinValue / -1` and null output faults; universal `int` quotient, divide-by-zero and overflow proof; remainder substituted for quotient rejected; forged mixed-width tuple rejected |
+| `X86Base.X64.DivRem` through `ValueTuple<ulong, ulong>` Item1/Item2 reads | The runtime field offsets are 0 and 8 bytes. Across five read shapes, 500 boundary cases agree with hardware and a `UInt128` oracle. The universal proof covers the quotient, divide-by-zero and overflow. Returning the remainder for 7 divided by 3 refutes the quotient postcondition. Eight forged calls, scopes and tuple layouts are rejected. |
+| `Math.DivRem` tuple and `out` overloads | Runtime probes check the equal-width tuple offsets. Across ten tuple overloads, a narrow Item2 read and both `out` overloads, 562 cases agree with .NET. The cases include divide-by-zero, wide `MinValue / -1` overflow, narrow wrapping and null output faults. The universal `int` proof covers the quotient and arithmetic faults. Returning the remainder for 7 divided by 3 refutes its quotient postcondition. A forged mixed-width tuple is rejected. |
 | Signed and 32-bit `Math.BigMul` | Universal signed high/low proof with exact `Int` recomposition and 81 signed boundary cases with uninitialized output storage; unsigned high-word contract rejected for the signed call; universal exact `BigMul(int, int)` proof; 36 signed and 36 unsigned 32-bit boundary cases compared with .NET |
 | Library, scalar/SIMD semantics, allocation, permissions, initialization, lifetime and symbolic automation | Regression checks |
 | Ten extracted arithmetic, branching, call, aliasing, aggregate and semantic-negative proofs, each with artifact checks | Regression checks |
@@ -549,11 +672,12 @@ These tests cover preparation:
 | Installed `leancil verify`: explicit proof, printed theorem, portable settings, source mutation, failure/recovery, memory fault theorem and stdout/stderr | Four CLI regression stages |
 | Method discovery includes canonical selectors and unsupported candidates without claiming support | Regression checks |
 | Malformed settings, missing proof, unsupported CIL, changed assembly and missing Lake produce stage-specific guidance | Regression checks |
-| Subtraction rejected by the unchanged universal addition contract | Rejects the implementation and removes any successful report |
+| Subtraction refuted against the addition contract | Verifies `MethodContract.Refuted` at inputs `(0, 1)`, bound to the subtracting method's extraction |
 | Reference-free array allocation | Checked primitive/enum, packed/nested aggregate and vector zero initialization, payload alignment, empty/non-null identity, negative/native lengths, helper returns and packed field stores; forged element identity, layout identity/width and byref-like certificates, malformed markers and unsupported extents rejected |
 | Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against .NET execution and corresponding Lean proofs, including divide-by-zero and signed overflow |
 | Extracted unsigned quotient for arbitrary inputs with a nonzero divisor | Universal proofs for 32 and 64 bits; multiplication substituted for division rejected by the unchanged contract |
-| Division with mixed widths, references, stack underflow or a zero divisor | Semantic rejection tests |
+| Division with references, stack underflow or a zero divisor | Semantic rejection tests |
+| Division and remainder of a mixed native/int32 pair, both operand orders, including the zero-divisor and signed-overflow faults | Semantic tests that both interpreters sign-extend the int32 operand and agree |
 | Checked add/subtract/multiply, signed and unsigned at both widths | 2,028 comparisons against .NET results or overflow exceptions and corresponding Lean proofs |
 | Checked addition with a sum that fits | Universal 32-/64-bit natural-number addition proofs; subtraction substituted for addition rejected |
 | All 20 integer checked-conversion encodings, from both input widths | 762 comparisons against .NET execution and corresponding Lean proofs, including native destinations and overflow |
@@ -561,7 +685,7 @@ These tests cover preparation:
 | Native signatures, locals, calls, fields, references, arithmetic, shifts, casts and `sizeof`, plus exact mixed native/int32 operations in both operand orders | 2,511 comparisons against .NET results or arithmetic exceptions and corresponding Lean proofs; all 60 ambiguous mixed unsigned-branch forms rejected unless explicitly widened |
 | Extracted native addition on the admitted 64-bit target | Universal modular-addition proof |
 | Required-32-bit assembly, forged native type identity, native field overrun, native/int64 operands and 32-bit execution profile | Five intended extraction rejections |
-| Native widening wrapper with memory instructions, nested wrappers or references | Semantic rejection tests; unsigned branch/comparison widening differences checked explicitly |
+| Mixed native/int32 operands of every widened instruction, overflow-checked arithmetic, memory instructions, unsigned branches or references | Both interpreters give the sign- or zero-extended result in both operand orders; memory instructions and references keep their operands; unsigned branches refused; a test proves the widened instruction list complete |
 | Argument assignment/addressing, both full and short encodings, all admitted integer storage types, aliases, calls, byref reassignment and structs | 639 runtime/memory cases, including 636 .NET comparisons |
 | Overwriting an argument with a replacement value | Universal proof for arbitrary inputs; assignment to the wrong parameter rejected |
 | Returning an address into a parameter home | Lifetime fault proved for every input; successful execution ruled out for every fuel budget |
@@ -571,7 +695,7 @@ These tests cover preparation:
 | Invalid packing, oversized layout, auto layout, reference/float fields, inline arrays, generics, explicit offsets on sequential fields, nested reference-bearing and recursive fields | Ten intended metadata rejections |
 | Synchronized methods, wrong framework/identity, invalid field layout, unsupported locals, static initializer and forged runtime scope | Seven intended metadata rejections |
 | Identity-bound static RVA data | Regression checks |
-| Static `ReadOnlySpan<uint>`/`<ulong>` tables | Indexed reads, length and first element compared with .NET, including negative and past-end indices faulting with `System.IndexOutOfRangeException`; forged receiver folds fail the feature certificate; tampered RVA bytes change the proved word; branches into the fold rejected |
+| Static `ReadOnlySpan<uint>`/`<ulong>` tables | Indexed reads, length and first element compared with .NET, including negative and past-end indices faulting with `System.IndexOutOfRangeException`; receiver stores and addresses remain local instructions, and erased stores fail the feature certificate; tampered RVA bytes change the proved word |
 | Memory-backed primitive spans | Compiled readonly and writable slices to helpers; sequence-content read and update contracts, and readonly/writable caller composition without unfolding helper bodies; creation over an existing reference; forged element widths and write capabilities rejected by specialization evidence; empty end slices, invalid indexes and slices, alias visibility, missing write authority, uninitialized reads and expired local storage; by-reference and floating-point span signatures rejected |
 | Static readonly struct values | `Zero`, `One` and `MinValue` limbs proved and compared with the values .NET's static constructor stored, also through an out parameter; a changed constructor argument changes the proved limbs; forged value bytes fail `Extracted.translation_valid`; a missing initialization assumption, a `newobj` initializer, `ldsflda`, a store outside the static constructor and a second store rejected; Lean regressions for the load semantics and a self-justifying initializer |
 | Static `ReadOnlySpan<byte>` lookup tables | First and last byte proved; past-end read and write to immutable data rejected; tampered RVA bytes change the proved value; four intended span metadata rejections and positive stored-span parameter/local fixtures |
@@ -581,12 +705,14 @@ The `loops` suite checks cyclic control flow and termination:
 
 - A universal checked countdown proof holds for every `uint`, including zero and the maximum
   value, with 17 runtime comparisons, and holds unchanged after inserted NOPs and reordered
-  blocks. An incorrect implementation is rejected under the unchanged contract, and an infinite
-  loop is proved to exhaust every fuel budget. Backward switch, native arithmetic and
-  fixed-feature loops are checked, and eight malformed or unsupported fixtures are rejected.
+  blocks. On input 1, one incorrect implementation returns 1 and another subtracts zero
+  on every iteration. The latter exhausts every fuel budget. Each refutation binds the
+  compiled entry. The suite also checks backward switch, native arithmetic and fixed-feature
+  loops, and rejects eight malformed or unsupported fixtures.
 - `CountCalls` is proved through its helper's contract, unchanged for a helper reimplemented as
-  `value + 0xFFFFFFFF` with only its contract re-proved; builds that discard the helper result or
-  count twice are rejected. On the correct build, measuring by the count fails the decrease
+  `value + 0xFFFFFFFF` with only its contract re-proved. Discarding the helper result keeps the
+  guard true on input 1 and exhausts every fuel budget. Counting twice returns 6 on input 3.
+  Both counterexamples refute the counting contract. On the correct build, measuring by the count fails the decrease
   obligation, and the non-inductive invariant `count + remaining = value + count * remaining`
   fails only its preservation.
 - `CountUntil`, which returns or raises its helper's exception after earlier calls, is proved for
@@ -613,13 +739,13 @@ The outline suites check `new-proof` outlines:
     element of the span it is passed, one summing and one filling an array by index, and three
     slicing a span local, which sum a span and an array and fill an array;
   - straight-line methods with `bool`, narrow, writable span and array parameters, a `bool`
-    result, unsigned and signed checked adds, a bit count and splits on unsigned and signed word
-    tests;
+    result, unsigned and signed checked adds, a `BitOperations` bit count and the same count an
+    integer type declares, each stepped whole, and splits on unsigned and signed word tests;
   - straight-line methods over class instances, string fields and arrays of class references,
     including element facts carried across element and field stores and an array the method
     allocates;
   - methods over value arrays of words, structs and vectors that class fields hold, including a
-    struct element named across lines;
+    struct element named across lines that equals the element its span constructor resolves;
   - struct instance methods storing fields.
 - The countdown outline is rejected for `sorryAx` and verifies once only its holes are filled, as
   do filled outlines for array/class composition, multiple struct-field stores, signed and
@@ -643,8 +769,8 @@ The outline suites check `new-proof` outlines:
 The addition theorem proves modular arithmetic correctness for arbitrary 64-bit inputs in the
 checked execution model. The unsigned-short theorem proves reduction modulo 65,536 for arbitrary
 32-bit inputs. The invalid-access and expired-reference theorems classify faults and rule out
-successful execution for every fuel budget. The subtraction theorem independently refutes the
-intended addition result. Other example claims have the quantifiers and inputs displayed in their
+successful execution for every fuel budget. The subtraction theorem proves the addition contract
+`Refuted` at inputs `(0, 1)`. Other example claims have the quantifiers and inputs displayed in their
 theorem statements; concrete examples do not establish universal method correctness.
 
 Audited example theorems meet the axiom rules of the
@@ -696,15 +822,15 @@ missing arguments, zero initialization and a non-void constructor result.
 
 F# validation compares .NET execution for addition, unsigned branching, managed calls,
 mutable structs and by-reference stores across 324 cases. The addition, store/load and constructor
-contracts are checked against the F# assembly. Subtraction must fail the addition contract,
-and a list-returning function must fail extraction. These examples use the shared CIL semantics.
+contracts are checked against the F# assembly. The subtraction fixture must prove a counterexample
+to addition at zero and one. A list-returning function must fail extraction.
 
 ## Contracts and extraction evidence
 
 `Tests/StackAllocation.cs` extracts compiled pointer and span stack allocations, checks results
 with and without localsinit, rejects uninitialized reads and escaped storage, and checks
-insufficient-budget failure. Mutating the emitted initialization flag is rejected by the Lean
-certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations and expiry;
+insufficient-budget failure. Mutating the localsinit flag of the emitted declared signature is
+rejected by the Lean certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations and expiry;
 `Tests/StackAllocationEvidence.lean` rejects forged flags, injected allocations, extra stack items
 and non-native 64-bit size operands. These run in the `dispatch` suite.
 
@@ -742,8 +868,42 @@ These fixtures cover constrained and constant calls, all in the `dispatch` suite
 
 The core and universal-contract suites cover checked execution and memory preservation. Choose
 and GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller
-memory under its well-formedness hypothesis. Each unchanged contract rejects its incorrect
-compiled implementation.
+memory under its well-formedness hypothesis. A verified refutation of each contract, at an input
+where a mutant returns another value, is bound to that incorrect compiled implementation. IdentitySummary and RepeatedSummary prove the statement of
+GenericIdentity for one and two calls twice: by stepping `Identity<ulong>`, and from a
+`DecodedSummary` of it bound to its pinned bytes, metadata token and type arguments.
+CallsSummary does the same for `Calls`, whose second callee writes through a reference, and
+`Tests/SummaryCalls.cs` for callers that pass one local to that callee 1, 4 and 16 times. It
+fails when, through the summary, a call costs more than 1.6 times as many frontend or kernel
+heartbeats from 4 to 16 calls as from 1 to 4, or when 16 calls through it cost at least as much
+as stepping them. It refuses a contract of the callee without its write, a caller that leaves the callee's
+precondition unproved, and, for a callee whose original is forged, its record, its contract and
+the summary built on them.
+CountCallsSummary proves `Loops.CountCalls` twice: by stepping `Decrement` at the call in its
+loop, and from a `DecodedSummary` of it. `Tests/SummaryCalls.cs` refuses that loop with a summary
+that bounds `Decrement`'s result without stating it, at the invariant, and with a summary claimed
+for the caller's own token, at the site check.
+VectorSummary proves `DivisionIntrinsics.UnsafeLowNext` twice: by stepping `UnsafeLow`, whose
+`Vector128.CreateScalarUnsafe` and `GetElement` calls run through their runtime models, and from a
+`DecodedSummary` of it that lists both calls with their models and takes their resolution in the
+runtime table as the premise of its contract. `Tests/SummaryCalls.cs` refuses that summary for a
+record of `UnsafeLow`
+whose original is forged to read the other lane, so that it claims a body other than its pinned
+bytes.
+`Tests/DecodedSummary.lean` refutes a summary bound to another token than the call names, and a
+summary of a body with a `Vector128.CreateScalarUnsafe` call whose models omit that call.
+`Tests/DecodedSegment.lean` reuses a `DecodedSegmentSummary` of an add and its return after the
+argument loads before it change, joins it with a summary of the load before it, and refutes the
+same summary for another instruction at the add's position or another return convention.
+`Tests/LoopSummary.lean` proves a countdown loop's summary from an invariant and a decreasing
+measure, including that it changes no caller memory, and refutes an exit summary for a loop that
+branches to itself.
+`Tests/ProgramClosures.cs` proves the contract of a method whose two callees have the same body
+once in its extraction, carries it to the method's closure and binds it there as a
+`DecodedSummary`. It carries that summary back to the extraction, to a program that holds the
+closure at other indices, and to one that holds both callees at one index, and steps a caller
+through it in each. It refutes a relocation into a program whose method at an index the closure
+links to has other bytes, and one that sends two methods with different bodies to one index.
 
 Extraction evidence validation covers Lean regressions, compiled certificate fixtures,
 generated-evidence mutations and mandatory-certificate positive/negative checks.

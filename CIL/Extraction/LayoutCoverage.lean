@@ -4,10 +4,9 @@ import CIL.Extraction.Generics
 # Layout coverage
 
 `MethodLayoutsValid` checks only the layout uses it is given. `LayoutUsesComplete` closes
-that gap: it derives every layout-dependent site from the raw body (field accesses, struct
-loads, stores, copies, initializations, sizes, constructions and Unsafe element offsets), plus every
-struct-typed local and homed parameter, and requires the extractor's list to be exactly
-that list.
+that gap by deriving the rows for model calls, constructions, struct-typed locals and homed
+parameters. Typed object instructions resolve their operands
+through the method's checked layout environment.
 -/
 
 namespace CIL.Extraction
@@ -22,91 +21,35 @@ private def aggregateIndex : TypeExpr → Option Nat
 def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     (instruction : RawInstruction) : Option (List LayoutUse) := do
   match instruction.opcode, instruction.operand with
-  -- Class fields use model offsets that `scalarEmissionMatches` checks without a layout table;
-  -- a field holding an array of structs takes its element width from the struct's layout.
-  | 0x7b, .field (.object _ _) _ type false | 0x7d, .field (.object _ _) _ type false =>
-    match type with
-    | .array (.aggregate identity index) =>
-      if typeStorage layouts (.aggregate identity index) != some (.field (.aggregate index)) then
-        none else return [.size pc index .arrayElement]
-    | _ => return []
-  -- `ldfld`, `ldflda` and `stfld` on an instance field, whose declared type must match.
-  | 0x7b, .field owner index type false
-  | 0x7c, .field owner index type false
-  | 0x7d, .field owner index type false =>
+  -- A class field access carries no layout data: its step resolves the slot, and the size of a
+  -- struct array element, from the checked layouts.
+  | 0x7b, .field (.object _ _) _ _ _ false | 0x7c, .field (.object _ _) _ _ _ false
+  | 0x7d, .field (.object _ _) _ _ _ false => return []
+  -- `ldfld`, `ldflda` and `stfld` on a struct instance field, whose declared type must match.
+  -- The step reads the offset and width from the checked layouts, so the site needs no use.
+  | 0x7b, .field owner index type _ false
+  | 0x7c, .field owner index type _ false
+  | 0x7d, .field owner index type _ false =>
     let .field (.aggregate parent) ← typeStorage layouts owner | none
     let metadata ← layouts[parent]?
     let field ← metadata.fields[index]?
-    let storage := match field.type with
-      | .vector128 => StorageType.vector128
-      | .vector256 => StorageType.vector256
-      | kind => .field kind
-    if typeStorage layouts type != some storage then none else
-      return [.field pc parent index (if instruction.opcode = 0x7b then .load
-        else if instruction.opcode = 0x7c then .address else .store)]
-  -- `ldobj`, `stobj`, `initobj`, `cpobj` and `sizeof` of a struct.
-  | 0xfe15, .type (.apply (.constructor scope owner) (.aggregate identity index)) =>
-    if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] then
-      if typeStorage layouts (.aggregate identity index) != some (.field (.aggregate index)) then
-        none else return [.size pc index .spanElement]
-    else return []
-  | opcode, .type type =>
+    if fieldKind? layouts type != some field.type then none else return []
+  | _, .type type =>
     match aggregateIndex type with
     | none => return []
     | some index =>
       if typeStorage layouts type ≠ some (.field (.aggregate index)) then none
-      else if opcode = 0x71 then return [.size pc index .load]
-      else if opcode = 0x81 then return [.size pc index .store]
-      else if opcode = 0xfe15 then return [.size pc index .initialize]
-      else if opcode = 0x70 then return [.size pc index .copy]
-      else if opcode = 0xfe1c then return [.size pc index .sizeOf]
-      else if opcode ∈ [0x8d, 0x8f, 0xa3, 0xa4] then return [.size pc index .arrayElement]
       else return []
-  -- `newobj` of a struct, then `Unsafe.SizeOf<T>` and `Unsafe.Add<T>`.
+  -- `newobj` of a struct, then `Unsafe.Add<T>`.
   | 0x73, .call site =>
-    if let .apply (.constructor scope owner) (.aggregate _ index) := site.declaringType then
-      if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
-          site.name == ".ctor" then
-        let access := match site.parameterTypes.head? with
-          | some (.array _) => SizeAccess.arrayElement | _ => .spanElement
-        return [.size pc index access]
     return (aggregateIndex (closeLayoutType layouts site.declaringType)).toList.map
-      fun index => .size pc index .construct
+      fun index => .size pc index
   | 0x28, .call site =>
-    if site.name ∈ ["AsBytes", "Cast"] &&
-        site.declaringType == .atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal" then
-      return ((site.typeArguments[0]?).bind aggregateIndex).toList.map
-        (fun index => .size pc index .spanSource) ++
-        ((site.typeArguments[1]?).bind aggregateIndex).toList.map
-        (fun index => .size pc index .spanTarget)
     match site.declaringType, site.typeArguments with
-    | .apply (.constructor scope owner) (.aggregate identity index), [] =>
-      if site.name == "get_Empty" &&
+    | .apply head@(.constructor ..) (.aggregate identity index), [] =>
+      if !head.isSpanHead && site.name == "get_Empty" &&
           typeStorage layouts (.aggregate identity index) != some (.field (.aggregate index)) then
-        none else
-      if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
-          site.name ∈ [".ctor", "op_Implicit"] &&
-          (site.parameterTypes.head?.map fun type => match type with
-            | .array _ => true | _ => false).getD false then
-        return [.size pc index .arrayElement]
-      else if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
-          site.name ∈ ["get_Item", "CopyTo", "TryCopyTo", "Clear", "Fill", ".ctor", "get_Empty"] then
-        return [.size pc index .spanElement] else return []
-    | .atom _ "System.MemoryExtensions", [.aggregate _ index] =>
-      if site.name == "AsSpan" then return [.size pc index .arrayElement] else return []
-    | .atom _ "System.Runtime.InteropServices.MemoryMarshal", [.aggregate _ index] =>
-      if site.name = "Read" || site.name = "TryRead" then return [.size pc index .load]
-      else if site.name = "Write" || site.name = "TryWrite" then return [.size pc index .store]
-      else if site.name ∈ ["CreateSpan", "CreateReadOnlySpan"] then
-        return [.size pc index .spanElement]
-      else return []
-    | .atom _ "System.Runtime.CompilerServices.Unsafe", [.aggregate _ index] =>
-      if site.name = "SizeOf" then return [.size pc index .sizeOf]
-      else if site.name = "Add" then return [.size pc index .referenceAdd]
-      else if site.name = "Subtract" then return [.size pc index .referenceSubtract]
-      else if site.name ∈ ["ReadUnaligned", "Read"] then return [.size pc index .load]
-      else if site.name ∈ ["WriteUnaligned", "Write"] then return [.size pc index .store]
-      else return []
+        none else return []
     | _, _ => return []
   | _, _ => return []
 
@@ -135,9 +78,5 @@ instance (layouts : List RawLayout) (closed : RawMethod) (parameters : RawArgume
     (reachable : List Bool) (uses : List LayoutUse) :
     Decidable (LayoutUsesComplete layouts closed parameters reachable uses) :=
   inferInstanceAs (Decidable (_ = _))
-
-theorem layout_uses_complete {layouts closed parameters reachable uses}
-    (valid : LayoutUsesComplete layouts closed parameters reachable uses) :
-    expectedLayoutUses layouts closed parameters reachable = some uses := valid
 
 end CIL.Extraction

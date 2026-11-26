@@ -10,7 +10,7 @@ theorem Memory.Renamed.stepNumeric {indices : LocalIndexMap} {mapping : Allocati
     (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
     (formed : source.WellFormed) (sourceBody targetBody : CIL.Method)
-    (metadata : StepMetadata sourceBody targetBody) (operation : CIL.Op)
+    (metadata : StepMetadata sourceBody targetBody) (operation : CIL.Instruction)
     (family : fixedStepFamily operation = .numeric) (pc : Nat) (arguments stack : List Value)
     (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow
@@ -18,30 +18,32 @@ theorem Memory.Renamed.stepNumeric {indices : LocalIndexMap} {mapping : Allocati
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (step sourceBody operation pc arguments sourceFrame stack source)
       (step targetBody operation pc (arguments.map mapping.value)
-        targetFrame (stack.map mapping.value) target) := by
+        targetFrame (stack.map (indices.value mapping)) target) := by
   allocation_fixed_step (
   all_goals try simp only [List.length_map, ← List.map_take, ← List.map_drop,
-    ← List.map_reverse, List.map_cons, AllocationRenaming.value]
+    ← List.map_reverse]
   all_goals repeat first
     | exact .error _
     | exact .ok (.next related frames)
     | (apply (ResultRenamed.arithmetic mapping _).bind
        intro first second same
        subst second)
-    | (apply (mapping.scalarOperands _).bind
+    | (apply (indices.scalarOperands mapping _).bind
        intro first second same
        subst second)
     | (apply (mapping.checkedIntrinsic _ _).bind
        intro first second same
        subst second)
-    | (apply (related.checkedValue _ (by trivial)).bind
-       intro first second same
+    | (apply (related.checkedValue _ (by trivial)).bindWithSuccess
+       intro first second checkedStep same
        subst second
+       rw [indices.push_of_not_home mapping _ (checkedValue_not_spanHome checkedStep)]
        exact .ok (.next related frames))
-    | (apply (related.scalarChecks _).bind
-       intro first second same
+    | (apply (related.scalarChecks _).bindWithSuccess
+       intro first second checkedStep same
        subst second
-       simp only [← List.map_append]
+       rw [← indices.values_of_not_home mapping (checkedValues_not_spanHome checkedStep),
+         ← List.map_append]
        exact .ok (.next related frames))
     | (split <;> try simp only [*, Bool.false_eq_true, ite_false])
   skip)

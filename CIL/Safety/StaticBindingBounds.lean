@@ -139,9 +139,9 @@ theorem StackAllocationEffect.staticBindingsBounded {source target : Memory}
 #print axioms StackAllocationEffect.staticBindingsBounded
 
 /-- Every checked dispatcher effect preserves static allocation bounds. -/
-theorem StepEffect.staticBindingsBounded {body : CIL.Method} {operation : CIL.Op}
-    {source target : Memory} {frame final : Frame}
-    (effect : StepEffect body operation frame source final target)
+theorem StepEffect.staticBindingsBounded {body : CIL.Method} {site : Nat}
+    {operation : CIL.Instruction} {source target : Memory} {frame final : Frame}
+    (effect : StepEffect body site operation frame source final target)
     (bounded : source.StaticBindingsBounded) : target.StaticBindingsBounded := by
   cases effect with
   | arrayAllocation effect => exact bounded.preserve effect.registry effect.allocations.next
@@ -157,6 +157,7 @@ theorem StepEffect.staticBindingsBounded {body : CIL.Method} {operation : CIL.Op
   | localHome allocated stored =>
     exact (allocateHome_staticBindingsBounded bounded allocated).preserve
       (storeLocal_staticBindings stored) (storeLocal_extends_allocations _ _ _ _ _ stored).next
+  | resume => exact bounded
 #print axioms StepEffect.staticBindingsBounded
 
 /-- Successful frame entry only adds fresh homes and keeps the static registry. -/
@@ -175,32 +176,28 @@ theorem leaveFrame_staticBindingsBounded {source : Memory} (frame : Frame)
   exact bounded.preserve retained.2.2.1 (Nat.le_of_eq retained.2.2.2.symm)
 #print axioms leaveFrame_staticBindingsBounded
 
-/-- Every successful run, including nested calls, keeps cached static identities allocated. -/
+/-- Every run, through nested calls and caught faults, keeps cached static identities allocated in
+    the memory it ends in and in both memories a fault leaves. -/
+theorem OutcomeTrace.staticBindingsBounded {program : CIL.Program} {fuel method pc : Nat}
+    {arguments stack : List Value} {frame : Frame} {source : Memory}
+    {outcome : Except FaultState (Memory × List Value)}
+    (trace : OutcomeTrace program fuel method pc arguments frame stack source outcome)
+    (bounded : source.StaticBindingsBounded) :
+    OutcomeHolds Memory.StaticBindingsBounded outcome :=
+  trace.preserves
+    (fun _ _ stepped bounded => (step_effect _ _ _ _ _ _ _ _ stepped).staticBindingsBounded bounded)
+    (fun frame _ bounded => leaveFrame_staticBindingsBounded frame bounded)
+    (fun entered bounded => enterFrame_staticBindingsBounded bounded entered) bounded
+#print axioms OutcomeTrace.staticBindingsBounded
+
+/-- Every successful run, including nested calls and caught faults, keeps cached static
+    identities allocated. -/
 theorem run_staticBindingsBounded {program : CIL.Program} {fuel method pc : Nat}
     {arguments stack values : List Value} {frame : Frame} {source target : Memory}
     (bounded : source.StaticBindingsBounded)
     (success : run program fuel method pc arguments frame stack source = .ok (target, values)) :
-    target.StaticBindingsBounded := by
-  have trace := run_success_trace _ _ _ _ _ _ _ _ _ _ success
-  clear success
-  induction trace with
-  | next step _ induction =>
-    obtain ⟨body, operation, _, _, stepped⟩ := step
-    exact induction ((step_effect _ _ _ _ _ _ _ _ stepped).staticBindingsBounded bounded)
-  | returned step _ =>
-    obtain ⟨body, operation, _, _, stepped⟩ := step
-    exact leaveFrame_staticBindingsBounded _
-      ((step_effect _ _ _ _ _ _ _ _ stepped).staticBindingsBounded bounded)
-  | tailCall step _ _ _ _ entered _ _ induction =>
-    obtain ⟨body, operation, _, _, stepped⟩ := step
-    exact induction (enterFrame_staticBindingsBounded
-      (leaveFrame_staticBindingsBounded _
-        ((step_effect _ _ _ _ _ _ _ _ stepped).staticBindingsBounded bounded)) entered)
-  | call step _ entered _ _ _ childInduction induction
-  | construct step _ entered _ _ _ _ childInduction induction =>
-    obtain ⟨body, operation, _, _, stepped⟩ := step
-    exact induction (childInduction (enterFrame_staticBindingsBounded
-      ((step_effect _ _ _ _ _ _ _ _ stepped).staticBindingsBounded bounded) entered))
+    target.StaticBindingsBounded :=
+  (run_ok_trace success).staticBindingsBounded bounded
 #print axioms run_staticBindingsBounded
 
 end CIL.Safety

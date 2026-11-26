@@ -24,7 +24,7 @@ private def State (memory : Memory) :=
 
 -- The loop guard observes the current span length.
 bind_cutpoint header (memory : Memory) (state : State memory) := Extracted.method0
-  at loop.latch matching (· matches .brnonzero _)
+  at loop.latch matching (· matches .brtrue _)
   with entry.frame memory state.val, [.scalar (.i32 (BitVec.ofNat 32 state.val.length))], memory
 
 /-- Every valid readonly integer span is consumed without changing any caller memory. -/
@@ -32,7 +32,7 @@ theorem drain (memory : Memory) (view : SpanView) (valid : view.validate memory 
     (width : view.width = 4) (readOnly : view.writable = false) :
     ∃ fuel, invoke Extracted.program fuel 0 [.bufferSpan view] memory =
       .ok (memory, [.scalar (.i32 0)]) := by
-  refine invoke_loop_returns Extracted.lookup0 (by simp [cil_checked, valid])
+  refine invoke_loop_returns Extracted.program_method0 (by simp [cil_checked, valid])
     (entry.checked memory view valid width readOnly) (header memory) (fun _ => True)
     (·.val.length) ⟨view, valid, width, readOnly⟩ (by cil_loop_steps) trivial ?_
   rintro ⟨view, valid, width, readOnly⟩ -

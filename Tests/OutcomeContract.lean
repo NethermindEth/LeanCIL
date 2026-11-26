@@ -1,6 +1,7 @@
 import CIL.MethodIdentity
 import CIL.StructuralLabels
 import CIL.Safety.OutcomeContract
+import Tests.Support
 
 /-! A synthetic extraction with the bodies the C# fixture compiles to:
     `Percent(v) => v <= 100 ? v : throw new ArgumentOutOfRangeException(...)`,
@@ -12,13 +13,16 @@ open CIL
 def method0Signature : String := "System.UInt64 Outcomes.Calls::Root(System.UInt64)"
 def method1Signature : String := "System.UInt64 Outcomes.Calls::Strict(System.UInt64)"
 def method2Signature : String := "System.UInt64 Outcomes.Calls::Percent(System.UInt64)"
-@[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 1 1, .const32 1, .convI8, .add, .ret] }
-@[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 2 1, .brzero 5, .arg 0, .ret, .nop, .nop, .throw "System.ArgumentException"] }
+@[cil_code] def method0 : Method := {
+  returnsValue := true, locals := [], links := [(1, .direct 1)], code :=
+    [.ldarg 0, .call (Tests.callee 1) {}, .ldc_i4 1, .conv_i8, .add, .ret] }
+@[cil_code] def method1 : Method := { links := [(1, .direct 2)], returnsValue := true,
+                                      locals := [], code :=
+  [.ldarg 0, .call (Tests.callee 1) {}, .brfalse 5, .ldarg 0, .ret, .nop, .nop,
+      .throw (some .argument)] }
 @[cil_code] def method2 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .const32 (BitVec.ofInt 32 100), .convI8, .bleu 7, .nop, .nop,
-    .throw "System.ArgumentOutOfRangeException", .arg 0, .ret] }
+  [.ldarg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
+    .throw (some .argumentOutOfRange), .ldarg 0, .ret] }
 @[cil_code] def program : Program := [method0, method1, method2]
 def signatures : List String := [method0Signature, method1Signature, method2Signature]
 
@@ -27,6 +31,18 @@ end Extracted
 namespace Tests.OutcomeContract
 
 open CIL.Safety
+
+/-- Load the caller's exception reference and throw it at the next instruction. -/
+@[cil_code] private def raiseArgument : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.ldarg 0, .throw] }
+
+/-- Any live supported exception raises its own type, independently of its fields. -/
+theorem raises_argument (memory : Memory) (reference : Reference) (kind : CIL.ExceptionType)
+    (object : ExceptionObject memory reference kind) :
+    Raises [raiseArgument] 0 [.object (.address reference)] memory kind := by
+  cil_raise_steps [object.forms, object.thrown []]
+
+#print axioms raises_argument
 
 bind_method root rootBody := "System.UInt64 Outcomes.Calls::Root(System.UInt64)"
 bind_callee strict strictBody := "System.UInt64 Outcomes.Calls::Strict(System.UInt64)" from rootBody
@@ -40,11 +56,11 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
   pre _ _ := True
   footprint _ := []
   post v _ _ out := out = v
-  raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+  raises v _ := if v ≤ 100 then none else some .argumentOutOfRange
 
-def strictRaises (v : CIL.W64) : Option String :=
-  if v ≤ 100 then if v = 0 then some "System.ArgumentException" else none
-  else some "System.ArgumentOutOfRangeException"
+def strictRaises (v : CIL.W64) : Option CIL.ExceptionType :=
+  if v ≤ 100 then if v = 0 then some .argument else none
+  else some .argumentOutOfRange
 
 def strictContract : OutcomeContract CIL.W64 CIL.W64 where
   args v := [.scalar (.i64 v)]
@@ -169,7 +185,7 @@ theorem root_formed (strictHolds : strictContract.Holds Extracted.program strict
 
 /-- The raising-after form: zero returns from `Percent` and then raises here. -/
 example (percentHolds : percentContract.Holds Extracted.program percent) (m : Memory) (formed : m.WellFormed) :
-    Raises Extracted.program strict [.scalar (.i64 0)] m "System.ArgumentException" := by
+    Raises Extracted.program strict [.scalar (.i64 0)] m .argument := by
   cil_raise_steps []
   cil_formed_outcome_call percentHolds 0 at percentSite []
   case precondition => trivial
@@ -184,18 +200,17 @@ example (percentHolds : percentContract.Holds Extracted.program percent) (m : Me
 
 /-! A raised outcome is exactly `.thrown`: no other fault satisfies it at any fuel. -/
 
-@[cil_code] def stuck : CIL.Method := { returnsValue := false, locals := [], code := [.unsupported "fixture"] }
-@[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.branch 0] }
+@[cil_code] def stuck : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.unadmitted 0] }
+@[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.br 0] }
 
-example (m : Memory) : ¬ Raises [stuck] 0 [] m "System.Exception" := by
-  rintro ⟨fuel, fault, ran, thrown⟩
-  cases fuel with
-  | zero =>
-    rw [show invoke [stuck] 0 0 [] m = .error ⟨0, 0, .fuelExhausted⟩ from rfl] at ran
-    cases ran; simp at thrown
-  | succ fuel =>
-    rw [show invoke [stuck] (fuel + 1) 0 [] m = .error ⟨0, 0, .unsupported "Not a memory instruction"⟩ from rfl] at ran
-    cases ran; simp at thrown
+/-- A hole gives an unsupported fault and leaves the method's exception behavior unknown. -/
+example (m : Memory) :
+    invoke [stuck] 1 0 [] m = .error ⟨0, 0, .unsupported "Opcode not admitted"⟩ ∧
+      (∀ exception, ExecutionFault.unsupported "Opcode not admitted" ≠ .thrown exception) ∧
+      ¬ Settled (.error ⟨0, 0, .unsupported "Opcode not admitted"⟩ :
+        Except LocatedFault (Memory × List Value)) :=
+  ⟨rfl, fun _ => by simp, by decide⟩
 
 theorem spin_exhausts (m : Memory) (frame : Frame) (fuel : Nat) :
     run [spin] fuel 0 0 [] frame [] m = .error ⟨0, 0, .fuelExhausted⟩ := by
@@ -203,7 +218,7 @@ theorem spin_exhausts (m : Memory) (frame : Frame) (fuel : Nat) :
   | zero => rfl
   | succ fuel ih => exact (show run [spin] (fuel + 1) 0 0 [] frame [] m = run [spin] fuel 0 0 [] frame [] m from rfl).trans ih
 
-example (m : Memory) : ¬ Raises [spin] 0 [] m "System.Exception" := by
+example (m : Memory) : ¬ Raises [spin] 0 [] m .baseException := by
   rintro ⟨fuel, fault, ran, thrown⟩
   change run [spin] fuel 0 0 [] _ [] m = _ at ran
   rw [spin_exhausts] at ran

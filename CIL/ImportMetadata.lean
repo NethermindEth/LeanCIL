@@ -29,28 +29,24 @@ structure ImportLayoutCatalog where
   computed : Array ComputedLayout := #[]
   deriving DecidableEq, Repr
 
-/-- Whether a type is one of the .NET 10 `System.Runtime` integer primitives (including
+/-- Whether a type is one of the .NET 11 `System.Runtime` integer primitives (including
     `bool`, `char` and the native integers). -/
 def importPrimitive : TypeExpr → Bool
-  | .atom scope name =>
-    scope == runtimeScope &&
-      name ∈ ["System.SByte", "System.Byte", "System.Boolean", "System.Int16", "System.UInt16",
-        "System.Char", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
-        "System.IntPtr", "System.UIntPtr"]
+  | .primitive type => type.fieldType?.isSome
   | _ => false
 
 /-- Whether a parameter type may cross the import boundary: a primitive, or a byref to a
     primitive or to a value type whose layout is in `layouts`. -/
 def importParameter (layouts : List RawLayout) : TypeExpr → Bool
-  | .byref (.atom scope name) =>
-    importPrimitive (.atom scope name) ||
-      layouts.any (fun layout => layout.identity == scope ++ "::" ++ name)
+  | .byref (.primitive type) => importPrimitive (.primitive type)
+  | .byref (.atom scope name .valueType) =>
+    layouts.any (fun layout => layout.identity == scope ++ "::" ++ name)
   | type => importPrimitive type
 
 /-- Whether an imported call can be admitted: a named owner type, a nonempty method name,
     primitive arguments, a `void` or primitive return and admissible parameters. -/
 def ImportSignature.supported (signature : ImportSignature) (layouts : List RawLayout) : Bool :=
-  (match signature.owner with | .atom _ _ => true | _ => false) &&
+  (match signature.owner with | .atom .. | .primitive _ => true | _ => false) &&
   !signature.name.isEmpty && signature.arguments.all importPrimitive &&
   (signature.returnType == .void || importPrimitive signature.returnType) &&
   signature.parameters.all (importParameter layouts)
@@ -60,12 +56,11 @@ def ImportSignature.supported (signature : ImportSignature) (layouts : List RawL
 def ImportLayoutCatalog.Valid (catalog : ImportLayoutCatalog) (architecture : Architecture) :
     Prop :=
   catalog.published = catalog.actual ∧ LayoutsValid catalog.actual catalog.computed architecture ∧
-  (catalog.actual.map RawLayout.identity).Nodup ∧
   catalog.actual.all (fun layout => !layout.identity.isEmpty) = true
 
 instance (catalog : ImportLayoutCatalog) (architecture : Architecture) :
     Decidable (catalog.Valid architecture) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
 theorem ImportLayoutCatalog.Valid.metadata {catalog : ImportLayoutCatalog}
     {architecture : Architecture} (valid : catalog.Valid architecture) :

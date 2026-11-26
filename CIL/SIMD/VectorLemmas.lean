@@ -62,19 +62,12 @@ theorem pack256_lanes (x : V256) :
     BitVec.extractLsb'_append_extractLsb'_eq_extractLsb' (by decide)]
   exact BitVec.extractLsb'_append_extractLsb'
 
-theorem reinterpret_identity (x : BitVec n) : reinterpret x = x := rfl
-theorem reinterpret_roundtrip (x : BitVec n) : reinterpret (reinterpret x) = x := rfl
-
 @[simp] theorem adv_incoming (a b c d : W64) :
     advExtract64 (pack128 a b) (pack128 c d) 1 = pack128 b c := by
   simp only [advExtract64, pack128]
   ext i hi
   simp only [BitVec.getElem_extractLsb']
   grind
-
-theorem sse_arm_alignment (a b c d : W64) :
-    ssseAlignBytes (pack128 c d) (pack128 a b) 8 =
-      advExtract64 (pack128 a b) (pack128 c d) 1 := rfl
 
 @[simp] theorem sse_incoming_low (a b : W64) :
     sseShiftLeftBytes (pack128 a b) 8 = pack128 0 a := by
@@ -113,14 +106,6 @@ theorem permute4x64_reverse (a0 a1 a2 a3 : W64) :
   have mid : (pack256 a b c d).extractLsb' 64 64 = b := lane256_1 a b c d
   rw [high, mid]
   rfl
-
-theorem avx2_incoming_blend_normal (a b c d : W64) :
-    blend32 (permute4x64 (pack256 a b c d) (BitVec.ofNat 8 144))
-      (BitVec.ofNat 256 0) (BitVec.ofNat 8 3) = pack256 (BitVec.ofNat 64 0) a b c := by
-  have hp := avx2_permute_incoming a b c d
-  change permute4x64 (pack256 a b c d) (BitVec.ofNat 8 144) = pack256 a a b c at hp
-  rw [hp]
-  exact avx2_blend_incoming a a b c
 
 /-- An arithmetic shift right by 63 broadcasts the sign bit to the whole lane. -/
 theorem arithmetic_sign_mask (a : W64) :

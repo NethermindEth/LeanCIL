@@ -1,4 +1,5 @@
 import CIL.Safety.ArrayAllocation
+import CIL.Extraction.MetadataNames
 
 /-!
 # Heap objects
@@ -7,7 +8,7 @@ Class instances on the checked heap. An object reference is null or offset 0 of 
 allocation whose kind records the object's runtime type (`formObject`). It carries no byte
 position, so code can neither observe nor forge one, and since allocation identities are never
 reused, reference equality compares identities alone. `CIL/Safety/Execution.lean` uses these
-observations for `ceq`, `beq`, `bne`, `brtrue`, `brfalse` and `cgt.un` against null, and
+observations for `ceq`, `beq`, `bne.un`, `brtrue`, `brfalse` and `cgt.un` against null, and
 `allocateObject` for `newobj`, which charges each instance to `Memory.heapBudget`.
 -/
 
@@ -38,6 +39,51 @@ def runtimeTypeOf (memory : Memory) (receiver : Reference) : ExecutionResult Run
   match allocation.kind with
   | .object type => .ok type
   | _ => .error .invalidState
+
+/-- The fault raised by `throw` at the top of the evaluation stack. A live object raises its
+    exact runtime exception type. A class outside the exception model is inconclusive. -/
+def throwFault (memory : Memory) : List Value → ExecutionFault
+  | .object .null :: _ => .thrown .nullReference
+  | .object (.address receiver) :: _ =>
+    match runtimeTypeOf memory receiver with
+    | .error fault => fault
+    | .ok type =>
+      if receiver.offset != 0 then .invalidState else
+      match CIL.Extraction.runtimeException? type.identity with
+      | some exception => .thrown exception
+      | none => .unsupported "Thrown object has an unmodelled runtime exception type"
+  | _ => .invalidState
+
+/-- A reference to the start of a live object of the named runtime exception class. -/
+structure ExceptionObject (memory : Memory) (reference : Reference)
+    (exception : CIL.ExceptionType) : Prop where
+  start : reference.offset = 0
+  classOf : ∃ type, runtimeTypeOf memory reference = .ok type ∧
+    CIL.Extraction.runtimeException? type.identity = some exception
+
+/-- A live exception object is a valid argument to a method taking an object reference. -/
+theorem ExceptionObject.forms {memory reference exception}
+    (object : ExceptionObject memory reference exception) :
+    formObject memory (.address reference) = .ok (.object (.address reference)) := by
+  obtain ⟨type, live, _⟩ := object.classOf
+  unfold runtimeTypeOf at live
+  unfold formObject
+  cases checked : checkedAt (.address reference) 0
+      (liveAllocation memory reference.allocation) with
+  | error fault => simp [checked, bind, Except.bind] at live
+  | ok allocation =>
+    cases kind : allocation.kind <;> simp_all [bind, Except.bind, object.start]
+
+#print axioms ExceptionObject.forms
+
+/-- Throwing the object reports its exact exception class and discards the rest of the stack. -/
+theorem ExceptionObject.thrown {memory reference exception}
+    (object : ExceptionObject memory reference exception) (rest : List Value) :
+    throwFault memory (.object (.address reference) :: rest) = .thrown exception := by
+  obtain ⟨type, live, named⟩ := object.classOf
+  simp [throwFault, live, object.start, named]
+
+#print axioms ExceptionObject.thrown
 
 /-- The model fault of a virtual call on an instance of a class its dispatch table omits: the
     class is outside the extraction's closed set, so the model selects no body for it. -/
@@ -90,8 +136,48 @@ def objectTest (memory : Memory) (type : CIL.Extraction.TypeExpr) (throwing : Bo
   | .address object =>
     let runtime ← runtimeTypeOf memory object
     if type ∈ runtime.lineage then pure reference
-    else if throwing then .error (.thrown "System.InvalidCastException")
+    else if throwing then .error (.thrown .invalidCast)
     else pure .null
+
+/-- `System.Exception` as CoreLib defines it and as a reference assembly names it. -/
+def exceptionClasses : List CIL.Extraction.TypeExpr :=
+  [.object CIL.Extraction.coreLibraryScope CIL.ExceptionType.baseException.ownerName,
+    .atom CIL.Extraction.runtimeScope CIL.ExceptionType.baseException.ownerName .classType]
+
+/-- `System.Object` as CoreLib defines it and as a reference assembly names it. -/
+def objectClasses : List CIL.Extraction.TypeExpr :=
+  [.object CIL.Extraction.coreLibraryScope "System.Object",
+    .atom CIL.Extraction.runtimeScope "System.Object" .classType]
+
+/-- The scope and full name of a class spelling. -/
+private def classSpelling :
+    CIL.Extraction.TypeExpr → Option (String × CIL.Extraction.ClassName)
+  | .object scope name => some (scope, name)
+  | .atom scope name .classType => some (scope, .ofText name)
+  | _ => none
+
+/-- Runtime identity of two class spellings: two full names are two classes, while one full name
+    in two scopes may be one forwarded class. Other spellings defer to `sameRuntimeType`. -/
+def sameClass (left right : CIL.Extraction.TypeExpr) : Option Bool :=
+  match classSpelling left, classSpelling right with
+  | some (scope, name), some (otherScope, otherName) =>
+    if name != otherName then some false else if scope == otherScope then some true else none
+  | _, _ => CIL.Extraction.sameRuntimeType left right
+
+/-- Whether a catch of class `type` takes the live object `reference`: its runtime class or a base
+    its lineage lists is `type`, or `type` is `System.Object`. The lineage must include
+    `System.Exception`, since the runtime wraps any other thrown object before a handler sees it,
+    and a class identity metadata cannot settle (`sameClass`) is inconclusive. -/
+def catchesObject (memory : Memory) (type : CIL.Extraction.TypeExpr) (reference : Reference) :
+    ExecutionResult Bool := do
+  let runtime ← runtimeTypeOf memory reference
+  let isException := runtime.lineage.any fun base =>
+    exceptionClasses.any (sameClass base · == some true)
+  if !isException then .error (.unsupported "Raised object outside System.Exception") else
+  let verdicts := (runtime.lineage ++ objectClasses).map (sameClass type)
+  if verdicts.contains (some true) then .ok true
+  else if verdicts.all (· == some false) then .ok false
+  else .error (.unsupported "Catch type identity is not settled by metadata")
 
 /-- Object storage is aligned to the 8-byte field slots of the admitted 64-bit targets. -/
 def objectAlignment : Nat := 8
@@ -109,19 +195,19 @@ def objectMemory (memory : Memory) (type : RuntimeType) (size : Nat) : Memory :=
       if identity = memory.nextIdentity then .null else memory.slots identity offset
     views := ⟨memory.nextIdentity, 0, size, true, true⟩ :: memory.views
     nextIdentity := memory.nextIdentity + 1
-    heapBudget := memory.heapBudget - size }
+    heapBudget := memory.heapBudget.map (· - size) }
 
 /-- A fresh instance of `type` with `size` zeroed bytes and authority over all of them, or
     `allocationFailure` when `size` exceeds the heap budget, which it otherwise consumes. No
     frame owns the instance, so it lives as long as some reference to it can be observed. -/
 def allocateObject (memory : Memory) (type : RuntimeType) (size : Nat) :
     ExecutionResult (Reference × Memory) := do
-  if size > memory.heapBudget then
-    .error (.allocationFailure size memory.heapBudget) else pure ()
+  if size > memory.heapBudget.getD size then
+    .error (.allocationFailure size (memory.heapBudget.getD size)) else pure ()
   let (identity, allocated) ← checkedAt .null size
     (allocate memory ⟨.object type, ⟨size, objectAlignment, []⟩, true, [size]⟩)
   return (⟨identity, 0⟩,
-    { arrayMemory allocated identity size with heapBudget := memory.heapBudget - size })
+    { arrayMemory allocated identity size with heapBudget := memory.heapBudget.map (· - size) })
 
 /-- The runtime type of an array of `element` references. System.Array and System.Object are
     left out of its bases, as System.Object is left out of a class's. -/
@@ -130,16 +216,16 @@ def referenceArrayType (element : CIL.Extraction.TypeExpr) : RuntimeType :=
 
 /-- `newarr` of a class: a fresh array of `length` null references, one 8-byte slot each, charged
     to the heap budget like an instance of that size. A negative CLI length throws
-    `OverflowException`; one above the CoreCLR ceiling is outside the model, as for `newArray`. -/
+    `OverflowException`. Counts above the CoreCLR ceiling raise the same exception as `newArray`. -/
 def newReferenceArray (memory : Memory) (element : CIL.Extraction.TypeExpr)
     (value : CIL.Value) : ExecutionResult (Reference × Memory) := do
   let length ← match value with
     | .i32 bits => pure bits.toInt
     | .i64 bits => pure bits.toInt
     | _ => .error .invalidState
-  if length < 0 then .error (.thrown "System.OverflowException") else
+  if length < 0 then .error (.thrown .overflow) else
   if length.toNat > maxArrayLength then
-    .error (.unsupported "Array length outside supported extent") else
+    .error (.thrown (oversizedArrayException length.toNat)) else
   allocateObject memory (referenceArrayType element) (objectFieldSlot * length.toNat)
 
 end CIL.Safety

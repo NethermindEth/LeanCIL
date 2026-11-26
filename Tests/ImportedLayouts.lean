@@ -1,18 +1,18 @@
+import Tests.Support.EnumIdentity
 import CIL.Extraction.Translation
 import CIL.Extraction.ImportLayouts
 import CIL.Extraction.LayoutProjection
+import Tests.LayoutAccumulation
 
 /-! Certificate regression fixtures, evaluated against the checked CIL extraction model. -/
 
 namespace Tests.ImportedLayouts
 open CIL CIL.Extraction
 
-/-- The primitive assembly identity with its checked byte representation. -/
-def runtime : String := runtimeScope
 def library : String := "Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-def word : TypeExpr := .atom runtime "System.UInt64"
-def owner : TypeExpr := .atom library "Library.Methods"
-def pair : TypeExpr := .atom library "Library.Pair"
+def word : TypeExpr := .primitive .uint64
+def owner : TypeExpr := .atom library "Library.Methods" .classType
+def pair : TypeExpr := .atom library "Library.Pair" .valueType
 
 def privateRaw : RawLayout := {
   identity := library ++ "::Library.Private", explicit := false,
@@ -55,9 +55,12 @@ def copySlot : ImportSlot := {
   parameterCount := 2, hasThis := false, returnsValue := false,
   signature := some copySignature, layouts := catalog }
 def copySite : CallSite := {
-  declaringType := owner, name := "Copy", target := .external copySlot.identity,
-  typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := false,
-  returnType := .void, parameterTypes := [.byref pair, .byref pair] }
+  declared := { convention := 0, parameters := [.byref pair, .byref pair] },
+  method := {
+    owner := owner, name := name!"Copy", hasThis := false, genericArity := 0, returnType := .void,
+    parameters := [.byref pair, .byref pair] },
+  name := "Copy", target := .external copySlot.identity, typeArguments := [], parameterCount := 2,
+  returnsValue := false }
 
 theorem imported_pair_valid : ImportedLayoutsValid [copySlot] .scalar := by decide +kernel
 #print axioms imported_pair_valid
@@ -78,11 +81,13 @@ theorem rejection_8 : ¬ ImportedLayoutsValid [{ copySlot with layouts := ⟨[le
 theorem rejection_9 : validateImportCall [] [{ copySlot with signature := none, layouts := {} }]
     40 copySite copySlot.identity 0 2 = false := by decide +kernel
 #print axioms rejection_9
-theorem rejection_10 : validateImportCall [] [copySlot] 40 { copySite with parameterTypes := [.byref pair] }
+theorem rejection_10 : validateImportCall [] [copySlot] 40
+    { copySite with method.parameters := [.byref pair] }
     copySlot.identity 0 2 = false := by decide +kernel
 #print axioms rejection_10
 theorem rejection_11 : validateImportCall [] [copySlot] 40
-    { copySite with parameterTypes := [.byref (.atom "Other" "Library.Pair"), .byref pair] }
+    { copySite with method.parameters := [.byref (.atom "Other" "Library.Pair" .valueType),
+        .byref pair] }
     copySlot.identity 0 2 = false := by decide +kernel
 #print axioms rejection_11
 
@@ -91,9 +96,12 @@ def identitySlot : ImportSlot := {
   identity := library ++ "::Identity<UInt64>", closureDigest := "digest",
   parameterCount := 1, hasThis := false, returnsValue := true, signature := some identitySignature }
 def identitySite : CallSite := {
-  declaringType := owner, name := "Identity", target := .external identitySlot.identity,
-  typeArguments := [word], parameterCount := 1, hasThis := false, returnsValue := true,
-  returnType := word, parameterTypes := [word] }
+  declared := { convention := 0x10, returnType := .parameter 0, parameters := [.parameter 0] },
+  method := {
+    owner := owner, name := name!"Identity", hasThis := false, genericArity := 1,
+    returnType := word, parameters := [word], methodArguments := [word] },
+  name := "Identity", target := .external identitySlot.identity, typeArguments := [word],
+  parameterCount := 1, returnsValue := true }
 
 theorem closed_generic_valid : ImportedLayoutsValid [identitySlot] .scalar := by decide +kernel
 #print axioms closed_generic_valid
@@ -101,7 +109,8 @@ theorem closed_generic_call :
     validateImportCall [] [identitySlot] 40 identitySite identitySlot.identity 0 1 = true := by decide +kernel
 #print axioms closed_generic_call
 
-theorem rejection_12 : validateImportCall [] [identitySlot] 40 { identitySite with typeArguments := [.atom runtime "System.UInt32"] }
+theorem rejection_12 : validateImportCall [] [identitySlot] 40
+    { identitySite with typeArguments := [.primitive .uint32] }
     identitySlot.identity 0 1 = false := by decide +kernel
 #print axioms rejection_12
 theorem rejection_13 : validateImportCall [] [identitySlot] 40 { identitySite with typeArguments := [.parameter 0] }
@@ -117,17 +126,19 @@ theorem rejection_16 : ¬ ImportedLayoutsValid [{ identitySlot with signature :=
 theorem rejection_17 : ¬ ImportedLayoutsValid [{ copySlot with signature := some { copySignature with parameters := [pair, .byref pair] } }] .scalar := by decide +kernel
 #print axioms rejection_17
 
-theorem complete_certificate_valid : TranslationValid [] #[] [] [identitySlot] [] := by decide +kernel
+theorem complete_certificate_valid : TranslationValid [] #[] [] {} [] [identitySlot] [] := by
+  decide +kernel
 #print axioms complete_certificate_valid
 
 theorem complete_certificate_rejects_open_argument :
-    ¬ TranslationValid [] #[] []
+    ¬ TranslationValid [] #[] [] {} []
       [{ identitySlot with signature := some { identitySignature with arguments := [.parameter 0] } }] [] := by
   decide +kernel
 #print axioms complete_certificate_rejects_open_argument
 
 theorem complete_certificate_rejects_changed_layout :
-    ¬ TranslationValid [] #[] [] [{ copySlot with layouts := { catalog with actual := [] } }] [] := by
+    ¬ TranslationValid [] #[] [] {} []
+      [{ copySlot with layouts := { catalog with actual := [] } }] [] := by
   decide +kernel
 #print axioms complete_certificate_rejects_changed_layout
 
@@ -138,7 +149,7 @@ theorem imported_local_bound :
     ImportedLocalLayoutsBound artifactRaw artifactComputed [copySlot] := by decide +kernel
 #print axioms imported_local_bound
 theorem imported_local_certificate :
-    TranslationValid artifactRaw artifactComputed [] [copySlot] [] := by decide +kernel
+    TranslationValid artifactRaw artifactComputed [] {} [] [copySlot] [] := by decide +kernel
 #print axioms imported_local_certificate
 
 /-- A caller layout that no slot publishes is not bound by an import. -/
@@ -177,7 +188,7 @@ theorem local_rejects_disagreeing_slot : ¬ ImportedLocalLayoutsBound artifactRa
 
 theorem complete_certificate_rejects_changed_local :
     ¬ TranslationValid [privateRaw, leafRaw, { pairArtifact with packing := 1 }] artifactComputed
-      [] [copySlot] [] := by decide +kernel
+      [] {} [] [copySlot] [] := by decide +kernel
 #print axioms complete_certificate_rejects_changed_local
 
 end Tests.ImportedLayouts

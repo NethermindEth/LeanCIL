@@ -10,15 +10,17 @@ open CIL CIL.Safety
 set_option maxRecDepth 65536
 set_option maxHeartbeats 0
 
-/-- Reference implementation with repeated instruction and region list scans. -/
+/-- Reference implementation with repeated instruction, link and region list scans. -/
 def baselineRegionClosedCheck (program : CIL.Program) (starts : List (Nat × Nat)) : Bool :=
   starts.all fun start => match program[start.1]? with
     | none => true
-    | some body => (List.range body.code.length).all fun pc =>
+    | some body => ((List.range body.code.length).all fun pc =>
       !(start.2 ≤ pc) || match body.code[pc]? with
       | none => true
       | some op => (!op.continues || inStarts starts start.1 (pc + 1)) &&
-          op.targets.all (inStarts starts start.1) && op.callees.all (inStarts starts · 0)
+          op.targets.all (inStarts starts start.1)) &&
+      body.links.all fun entry =>
+        !(start.2 ≤ entry.1) || entry.2.callees.all (inStarts starts · 0)
 
 
 /-- A long method with a single full-method region. -/

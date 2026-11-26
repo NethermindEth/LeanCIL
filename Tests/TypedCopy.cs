@@ -2,6 +2,12 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
@@ -208,17 +214,38 @@ foreach (var (name, size) in types)
             method.Body.Instructions[1].OpCode = OpCodes.Ldarg_0;
             wrong.Write(wrongDll);
         }
-        var failed = false;
-        try
-        {
-            verification.Verify(wrongDll, "Examples", selector, At("Examples/Proofs/TypedCopy.lean"), wrongOutput);
-        }
-        catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-        {
-            failed = true;
-        }
-        if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-            throw new InvalidOperationException("Incorrect copy direction accepted");
+        verification.VerifyContractVariant(dll, "Examples", selector, Path.Combine(root, "CopyContract"), wrongDll,
+            selector, wrongOutput, """
+            /-- The source holds the input word and the writable destination starts uninitialized. -/
+            def storage (word : W64) : Memory where
+              allocations id := if id < 2 then some ⟨.callerStack, ⟨8, 1, []⟩, true, [8]⟩ else none
+              cells id offset :=
+                if id = 0 then ⟨(numberBytes word.toNat 8)[offset]?.getD 0, true⟩ else ⟨0, false⟩
+              views := [⟨0, 0, 8, true, true⟩, ⟨1, 0, 8, true, true⟩]
+              nextIdentity := 2
+
+            /-- The copy returns the source word and may write the destination's eight bytes. -/
+            def contract : MethodContract W64 where
+              args _ := [.reference (.address ⟨1, 0⟩), .reference (.address ⟨0, 0⟩)]
+              pre word memory := memory = storage word
+              footprint _ := [(⟨1, 0⟩, 8)]
+              post word _ _ values := values = [.scalar (.i64 word)]
+            """, """
+            /-- Every input survives the copy and load. -/
+            theorem correctness : contract.Holds Extracted.program 0 := by
+              rintro word _ rfl
+              refine ⟨8, _, rfl, ?_, _, rfl, ?_⟩
+              · exact Confined.write
+                  (rfl : write (storage word) ⟨1, 0⟩ (numberBytes word.toNat 8) 1 = .ok _)
+                  (by simp [contract, numberBytes])
+              · exact Except.ok.inj (ExampleProof.correctness word)
+            """, """
+            /-- Reversing the copy reads an uninitialized word from allocation one. -/
+            theorem correctness : contract.Refuted Extracted.program 0 :=
+              .of_fault (input := 0) (initial := storage 0) rfl (by decide)
+                (rfl : invoke Extracted.program 8 0 (contract.args 0) (storage 0) =
+                  .error ⟨0, 2, .memory .uninitialized (.address ⟨1, 0⟩) 8⟩)
+            """, example: At("Examples/Proofs/TypedCopy.lean"));
 
         // Invalid tokens must be rejected before any Lean artifact is emitted.
         foreach (var mutation in new[] { "float", "object", "array", "scope" })

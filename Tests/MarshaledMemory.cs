@@ -2,9 +2,14 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
-#:include RejectedEvidence.cs
+#:include MarshalModelEvidence.cs
 
 using System.Numerics;
 using System.Reflection;
@@ -60,7 +65,7 @@ foreach (var method in methods.Where(method => method.IsPublic))
     else
     {
         claims.Add($"({Run(width - 1)}).map Prod.snd = " +
-            $".error ⟨0, {(read ? 1 : 2)}, .thrown \"System.ArgumentOutOfRangeException\"⟩");
+            $".error ⟨0, {(read ? 1 : 2)}, .thrown .argumentOutOfRange⟩");
         proofs.Add("by rfl");
     }
     if (name == "Read")
@@ -106,35 +111,16 @@ foreach (var method in methods.Where(method => method.IsPublic))
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS checked MemoryMarshal: " + name));
 }
 queue.Flush();
-var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
-var index = 0;
-foreach (var (name, before, after) in new[]
-{
-    ("Read", ".marshalRead (.scalar 8 false) false", ".marshalRead (.scalar 4 false) false"),
-    ("TryRead", ".marshalRead (.scalar 8 false) true", ".marshalRead (.scalar 8 false) false"),
-    ("TryWrite", ".marshalWrite (.scalar 8 false) true", ".marshalRead (.scalar 8 false) true"),
-    ("Write", "target := .external externalIdentity0", "target := .external \"forged\""),
-    ("ReadVector", ".snapshot .vector128", ".snapshot .vector256")
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_unsafe_validated");
-    if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing marshal mutation: " + before);
-    var path = Path.Combine(root, $"Rejected{index++}.lean");
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS exact MemoryMarshal evidence rejection: " + name, "UnsafeCallsValid");
-}
-foreach (var name in new[] { "ReadAggregate", "WriteAggregate" })
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_layouts_validated");
-    const string before = ".snapshot (.aggregate 32)";
-    if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing aggregate transfer");
-    var path = Path.Combine(root, $"Rejected{index++}.lean");
-    File.WriteAllText(path, source.Replace(before, ".snapshot (.aggregate 16)", StringComparison.Ordinal));
-    rejected.Add(path, "PASS exact aggregate transfer width: " + name, "MethodLayoutsValid");
-}
-rejected.Check();
+CheckMarshalModels(root,
+[
+    ("Read", 1, ".marshalRead (.scalar 8 false) false", ".marshalRead (.scalar 2 false) false"),
+    ("TryRead", 2, ".marshalRead (.scalar 8 false) true", ".marshalRead (.scalar 2 false) true"),
+    ("TryWrite", 2, ".marshalWrite (.scalar 8 false) true", ".marshalWrite (.scalar 2 false) true"),
+    ("Write", 2, ".marshalWrite (.scalar 8 false) false", ".marshalWrite (.scalar 2 false) false"),
+    ("ReadVector", 1, ".marshalRead (.snapshot .vector128) false", ".marshalRead (.scalar 2 false) false"),
+    ("ReadAggregate", 1, ".marshalRead (.snapshot (.aggregate 32)) false", ".marshalRead (.scalar 2 false) false"),
+    ("WriteAggregate", 2, ".marshalWrite (.snapshot (.aggregate 32)) false", ".marshalWrite (.scalar 2 false) false")
+]);
 
 partial class Program
 {

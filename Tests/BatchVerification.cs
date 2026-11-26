@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Diagnostics;
@@ -166,6 +171,36 @@ try
     if (!rejected || File.Exists(Path.Combine(requests[0].Output, "verified.json")))
         throw new InvalidOperationException("Unchecked helper bypassed batch kernel replay");
     Console.WriteLine("PASS unchecked transitive helper rejected by batch kernel replay");
+
+    // A genuine counterexample about the empty program refutes nothing in the fixture's extraction.
+    File.WriteAllText(requests[0].Proof, """
+        import Extracted
+        import CIL.Safety.MethodContract
+
+        open CIL.Safety
+
+        /-- Promises a return from any memory. -/
+        def ExampleProof.returns : MethodContract Unit :=
+          { args := fun _ => [], pre := fun _ _ => True, footprint := fun _ => [], post := fun _ _ _ _ => True }
+
+        /-- The empty program has no method zero, so a call to it faults. -/
+        theorem ExampleProof.correctness : ExampleProof.returns.Refuted [] 0 :=
+          .of_fault (input := ()) (initial := Memory.empty) (observed := 1)
+            (fault := { method := 0, instruction := 0, fault := .invalidState }) trivial (by decide) rfl
+        """);
+    rejected = false;
+    try
+    {
+        verification.VerifyGeneratedBatch(assembly, "Examples", [requests[0]]);
+    }
+    catch (InvalidOperationException error)
+        when (error.Message.Contains("a refutation states BatchCase0.Extracted.program", StringComparison.Ordinal))
+    {
+        rejected = true;
+    }
+    if (!rejected || File.Exists(Path.Combine(requests[0].Output, "verified.json")))
+        throw new InvalidOperationException("A batch certificate carried a refutation of another program");
+    Console.WriteLine("PASS a batch refuses a counterexample about another program");
 }
 finally
 {

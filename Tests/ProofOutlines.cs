@@ -2,6 +2,12 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -31,6 +37,7 @@ if (group is not (null or "control" or "objects" or "buffers") || group is null 
 var catalog = new (string Name, string Selector, string Group)[]
 {
     ("Countdown", "Loops::Countdown(uint)", "control"),
+    ("WordByte", "Nethermind.LeanCIL.StaticValues/<>c__DisplayClass10_0::<Bytes>b__0(System.Int32)", "control"),
     ("FillWords", "Loops::FillWords(ulong&,ulong,int)", "control"),
     ("CountUntil", "Loops::CountUntil(uint,uint)", "control"),
     ("CountCalls", "Loops::CountCalls(uint)", "control"),
@@ -38,11 +45,21 @@ var catalog = new (string Name, string Selector, string Group)[]
     ("SpanAllZero", "Loops::AllZero(System.ReadOnlySpan`1<System.UInt32>)", "control"),
     ("SpanSum", "Loops::Sum(System.ReadOnlySpan`1<System.UInt64>)", "control"),
     ("TallyTwice", "Loops::TallyTwice(uint)", "control"),
+    ("TwoStructs", "Loops::TwoStructs(uint)", "control"),
+    ("InnerCount", "Loops::InnerCount(Examples.Loops/Outer,uint)", "control"),
+    ("FillWordsDown", "Loops::FillWordsDown(ulong&,ulong,int)", "control"),
     ("CopyUntilZero", "Loops::CopyUntilZero(System.ReadOnlySpan`1<System.UInt32>,uint&)", "control"),
     ("Choose", "Arithmetic::Choose(bool,ulong,ulong)", "control"),
+    // A SizeOf call steps as the constant of its element's size, alone and tested by a branch.
+    ("SizeOfInt", "UnsafeLayouts::Size6()", "control"),
+    ("SizeOfBranch", "Arithmetic::WordAdjusted(int)", "control"),
+    ("SizeOfEqual", "Arithmetic::WordSized(int)", "control"),
     ("Narrow", "Arguments::Narrow(byte)", "control"),
     ("ReverseI16", "Bits::ReverseI16(short)", "control"),
     ("PowerU32", "Bits::PowerU32(uint)", "control"),
+    // A bit count of BitOperations and the same count an integer type declares.
+    ("Population64", "Bits::Population64(ulong)", "control"),
+    ("PopulationU32", "Bits::PrimitivePopulationU32(uint)", "control"),
     ("Deposit", "Account::Deposit(System.UInt64)", "objects"),
     ("Headroom", "Account::get_Headroom()", "objects"),
     ("SetLimit", "Objects::SetLimit(Examples.Account,System.UInt32)", "objects"),
@@ -59,6 +76,18 @@ var catalog = new (string Name, string Selector, string Group)[]
     ("Withdraw", "Objects::Withdraw(Examples.Account,System.UInt64)", "objects"),
     ("LinkedValue", "Objects::LinkedValue(Examples.Node,Examples.Node)", "objects"),
     ("IsIdle", "ItemPool::IsIdle(Examples.PooledItem)", "objects"),
+    // A field tested against a small constant, in a signed, an equality and an unsigned branch.
+    ("BelowFive", "Gauge::BelowFive()", "objects"),
+    ("IsFive", "Gauge::IsFive()", "objects"),
+    ("UnderFive", "Objects::UnderFive(Examples.Account)", "objects"),
+    // The same tests of words over a loop, a branching helper and straight-line code.
+    ("CountToFive", "Loops::CountToFive(int)", "control"),
+    ("CountUpToFive", "Loops::CountUpToFive(uint)", "control"),
+    ("ReachFive", "Loops::ReachFive(uint)", "control"),
+    ("AtLeastFive", "Arithmetic::AtLeastFive(int)", "control"),
+    ("AtMostFive", "Arithmetic::AtMostFive(uint)", "control"),
+    ("FiveToOne", "Arithmetic::FiveToOne(int)", "control"),
+    ("Floored", "Gauge::Floored(int)", "control"),
     // A static helper that tests its word arguments gets a contract stub: its result returned, stored into a
     // field after the call, and returned by a caller over words alone.
     ("HelperResult", "Gauge::Current()", "objects"),
@@ -122,6 +151,9 @@ var catalog = new (string Name, string Selector, string Group)[]
     ("ArrayReadInt32", "PrimitiveArrays::ReadInt32(int[],int)", "buffers"),
     ("ArrayReadUInt64", "PrimitiveArrays::ReadUInt64(ulong[],int)", "buffers"),
     ("ArrayRead", "ArrayElementReferences::Read(int[],int)", "buffers"),
+    // A generic read specialized to a word, whose typed `ldelem` steps from the element type's shape fact.
+    ("TypedReadUInt32", "PrimitiveArrays::ReadGeneric(T[],int)", "buffers"),
+    ("TypedReadUInt64", "PrimitiveArrays::ReadGeneric(T[],int)", "buffers"),
     ("ArraySum", "Loops::SumIndexed(ulong[])", "buffers"),
     ("ArrayFill", "Loops::FillIndexed(uint[],uint)", "buffers"),
     // The receiver of a class instance method beside the array it indexes.
@@ -142,6 +174,12 @@ var catalog = new (string Name, string Selector, string Group)[]
     // A struct array argument no field names: its element is a definition whose identity spans two lines.
     ("PairLength",
         "AggregateArrays::ConstructedLength(Examples.AggregateArrays/Pair[],System.Int32,System.Int32)", "buffers")
+};
+// The type arguments a generic entry is extracted at.
+var typeArguments = new Dictionary<string, string[]>(StringComparer.Ordinal)
+{
+    ["TypedReadUInt32"] = ["--type-argument", "System.UInt32"],
+    ["TypedReadUInt64"] = ["--type-argument", "System.UInt64"]
 };
 var outlined = catalog.Where(entry => (group is null || entry.Group == group) &&
     (cases is null || cases.Contains(entry.Name, StringComparer.Ordinal))).ToArray();
@@ -172,7 +210,22 @@ var elaborated = outlined.AsParallel().WithDegreeOfParallelism(Environment.Proce
     var scratch = Path.Combine(outlineRoot, name);
     Directory.CreateDirectory(scratch);
     var extraction = Path.Combine(scratch, "Extraction");
-    Run(Extract("extract", assembly, "Examples", selector, extraction));
+    var sourceAssembly = name == "WordByte" ? At("Extractor/bin/Nethermind.LeanCIL.dll") : assembly;
+    if (name == "TypedReadUInt32")
+    {
+        // The live generic read and the unreachable byte allocation have different closed element types.
+        sourceAssembly = Path.Combine(scratch, "Examples.dll");
+        using var image = ModuleDefinition.ReadModule(assembly);
+        var read = image.GetType("Examples.PrimitiveArrays").Methods.Single(method => method.Name == "ReadGeneric");
+        var il = read.Body.GetILProcessor();
+        il.Emit(OpCodes.Ldc_I4_0);
+        il.Emit(OpCodes.Newarr, image.TypeSystem.Byte);
+        il.Emit(OpCodes.Pop);
+        il.Emit(OpCodes.Br, read.Body.Instructions[0]);
+        image.Write(sourceAssembly);
+    }
+    Run([.. Extract("extract", sourceAssembly, name == "WordByte" ? null : "Examples", selector, extraction),
+        .. typeArguments.GetValueOrDefault(name, [])]);
     var outline = Path.Combine(scratch, "Proof.lean");
     Run(Cli("new-proof", extraction, outline));
     Run(Cli("new-proof", extraction, Path.Combine(scratch, "Again.lean")));
@@ -203,21 +256,59 @@ Console.WriteLine($"PASS new-proof outlines {outlined.Length} methods that elabo
 
 if (Selected("PairLength"))
 {
-    // The element definition must read back as the extraction's own element, or the outline states another array type,
-    // and a body the outline does not step may write the array, so its footprint is the author's to state.
-    var pairOutline = File.ReadAllText(Path.Combine(outlineRoot, "PairLength", "Proof.lean"));
+    // The element definition must read back as the element the constructor call's model resolves from the
+    // extraction's layouts, or the outline states another array type; a changed width must be refused.
+    // A body the outline does not step may write the array, so its footprint is the author's to state.
+    var pairScratch = Path.Combine(outlineRoot, "PairLength");
+    var pairOutline = File.ReadAllText(Path.Combine(pairScratch, "Proof.lean"));
     var pairElement = Regex.Match(pairOutline,
         @"@\[reducible\] def sourceElement : CIL\.ArrayElement :=\n  (?<term>(?:[^\n]*\\\n)+[^\n]*)\n");
-    var pairExtraction = File.ReadAllText(Path.Combine(outlineRoot, "PairLength", "Extraction", "Extracted.lean"));
     if (!pairElement.Success ||
-        !pairExtraction.Contains($"({Regex.Replace(pairElement.Groups["term"].Value, @"\\\n\s*", "")})",
-            StringComparison.Ordinal) ||
         !pairOutline.Contains("  sorry -- caller memory the method may write", StringComparison.Ordinal))
         throw new InvalidOperationException("The PairLength outline does not name its struct element across lines " +
             "or leaves its footprint stated:\n" + pairOutline);
-    Console.WriteLine("PASS a struct element wider than a line reads back as the extraction's element, and an " +
-        "unstepped body over a value array leaves its footprint to the author");
+    var pairTerm = Regex.Replace(pairElement.Groups["term"].Value, @"\\\n\s*", "");
+    var widened = Regex.Replace(pairTerm, @"\d+$", digits => (int.Parse(digits.Value) + 1).ToString());
+    (int Code, string Output) ResolvedElement(string element)
+    {
+        var check = Path.Combine(pairScratch, "Element.lean");
+        File.WriteAllText(check, pairOutline + $"""
+
+            open CIL in
+            /-- The constructor call's resolved model builds spans of the outline's element. -/
+            example : (Extracted.program[0]?.bind fun body => body.code.findSome? fun
+                | .call method _ => Extraction.runtimeModel body.environment .call method
+                | _ => none) = some (.spanInPlace (.array {element} true .counted)) := by
+              decide +kernel
+
+            """);
+        var result = Execute([verification.LeanExecutable, check],
+            leanPath: pairScratch + Path.PathSeparator + libraryPath);
+        return (result.Code, result.Output);
+    }
+    var resolved = ResolvedElement("ExampleProof.sourceElement");
+    var changed = ResolvedElement($"({widened})");
+    if (resolved.Code != 0 || changed.Code == 0 || !changed.Output.Contains("is false", StringComparison.Ordinal))
+        throw new InvalidOperationException("The PairLength element is not the one its constructor resolves:\n" +
+            resolved.Output + "\n" + changed.Output);
+    Console.WriteLine("PASS a struct element wider than a line reads back as the element its constructor resolves, " +
+        "and an unstepped body over a value array leaves its footprint to the author");
 }
+
+string[] sizeCases = ["SizeOfInt", "SizeOfBranch", "SizeOfEqual"];
+foreach (var name in sizeCases.Where(Selected))
+{
+    // A SizeOf call runs as the constant of its element's size, so the outline steps through it as a literal.
+    var sizeOutline = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
+    if (sizeOutline.Contains("-- not outlined:", StringComparison.Ordinal) ||
+        !sizeOutline.Contains("cil_checked_steps", StringComparison.Ordinal))
+        throw new InvalidOperationException($"The {name} outline does not step its SizeOf call:\n{sizeOutline}");
+    // A test of two literals is decided by the outline rather than split into an infeasible side.
+    if (name == "SizeOfEqual" && sizeOutline.Contains("by_cases", StringComparison.Ordinal))
+        throw new InvalidOperationException($"The {name} outline splits on a test of literals:\n{sizeOutline}");
+}
+if (sizeCases.Any(Selected))
+    Console.WriteLine("PASS an outline steps SizeOf as a constant, tested by an argument or decided on literals");
 
 if (Selected("DepositFrom"))
 {
@@ -230,6 +321,35 @@ if (Selected("DepositFrom"))
             depositFrom);
     Console.WriteLine("PASS a loop outline asks Owned only of the object its callee stores and " +
         "Readable of the one it reads");
+}
+
+{
+    // A literal operand is written as `simp` normalizes it, so the split's fact rewrites the simplified goal:
+    // by its word for an equality or an unsigned order, and by its value for a signed one.
+    (string Case, string Fact)[] branches =
+    [
+        ("BelowFive", "branch1 : (Gauge.Level.of initial gauge).toInt < 5"),
+        ("IsFive", "branch1 : (Gauge.Level.of initial gauge) = 5#32"),
+        ("UnderFive", "branch1 : (Account.Limit.of initial account) < 5#32"),
+        ("CountToFive", "guard : count.toInt < 5"),
+        ("CountUpToFive", "guard : count < 5#32"),
+        ("ReachFive", "guard : count = 5#32"),
+        ("AtLeastFive", "branch1 : x.toInt < 5"),
+        ("AtMostFive", "branch1 : 5#32 < x"),
+        ("FiveToOne", "branch1 : x = 5#32"),
+        ("Floored", "branch1 : value.toInt < 5")
+    ];
+    var checkedBranches = 0;
+    foreach (var (name, fact) in branches.Where(branch => Selected(branch.Case)))
+    {
+        checkedBranches++;
+        if (!File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"))
+                .Contains($"by_cases {fact}\n", StringComparison.Ordinal))
+            throw new InvalidOperationException($"The {name} outline does not split on `{fact}`");
+    }
+    if (checkedBranches > 0)
+        Console.WriteLine($"PASS {checkedBranches} outlines write a branch against a small constant as simp " +
+            "normalizes it");
 }
 
 if (Selected("IsIdle"))
@@ -1522,6 +1642,8 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("    sorry -- Precondition excludes an empty `target1`",
             "    simp [Precondition, target1Count] at assumed"),
         ("    case postcondition => sorry", "    case postcondition => exact target1Filled")]),
+    ("TypedReadUInt32", ArrayReadSpecification("W32", "")),
+    ("TypedReadUInt64", ArrayReadSpecification("W64", "")),
     ("ArrayReadInt32", ArrayReadSpecification("W32", "")),
     ("ArrayReadUInt64", ArrayReadSpecification("W64", "")),
     ("ArrayRead", ArrayReadSpecification("W32", ", leaveFrame")),
@@ -1824,7 +1946,7 @@ Console.WriteLine($"PASS filled {group} outlines verify with only their specific
 
 if (Selected("PacketValue"))
 {
-    // The same filled packet proof must reject a changed stored value for all initial byte patterns.
+    // Compare the filled outline and the changed store against the same packet contract.
     var wrongPacket = Path.Combine(outlineRoot, "WrongPacket.dll");
     using (var module = ModuleDefinition.ReadModule(assembly))
     {
@@ -1833,14 +1955,32 @@ if (Selected("PacketValue"))
         module.Write(wrongPacket);
     }
     var wrongPacketOutput = Path.Combine(outlineRoot, "WrongPacket");
-    Run(Extract("extract", wrongPacket, "Examples", "Arguments::Struct(Examples.Packet)", wrongPacketOutput));
-    var wrongPacketResult = Execute(Cli("verify", wrongPacketOutput, "--proof",
-        Path.Combine(outlineRoot, "PacketValue", "Filled.lean")));
-    if (wrongPacketResult.Code == 0 || !wrongPacketResult.Output.Contains("Stage: proof checking") ||
-        File.Exists(Path.Combine(wrongPacketOutput, "verified.json")))
-        throw new InvalidOperationException("The filled packet outline accepted a wrong stored value:\n" +
-            wrongPacketResult.Output);
-    Console.WriteLine("PASS the filled packet outline rejects a wrong stored value");
+    const string packetSelector = "Arguments::Struct(Examples.Packet)";
+    verification.VerifyContractVariant(assembly, "Examples", packetSelector,
+        Path.Combine(outlineRoot, "PacketContract"),
+        wrongPacket, packetSelector, wrongPacketOutput, """
+        /-- The returned payload is 23 for every twelve-byte packet, including its padding. -/
+        def packet : MethodContract (Vector (BitVec 8) 12) W64 where
+          args value := [.scalar (.aggregate (List.ofFn value.get))]
+          results value := [.scalar (.i64 value)]
+          pre _ memory := memory = Memory.empty
+          footprint _ := []
+          post _ _ _ value := value = 23
+        """, """
+        /-- The filled outline proves the payload contract for all initial byte patterns. -/
+        theorem correctness : packet.Holds Extracted.program 0 := by
+          rintro value _ rfl
+          obtain ⟨fuel, final, values, ran, result, encoded, exactValue⟩ :=
+            ExampleProof.correctness value _ _ ⟨rfl, rfl, trivial⟩
+          exact ⟨fuel, (final, values), ran, by constructor <;> simp [Memory.empty],
+            result, encoded, exactValue⟩
+        """, """
+        /-- The mutant writes and returns 24 for an all-zero packet. -/
+        theorem correctness : packet.Refuted Extracted.program 0 :=
+          .of_return (input := Vector.replicate 12 0) (initial := Memory.empty) rfl
+            (rfl : invoke Extracted.program 32 0 (packet.args (Vector.replicate 12 0)) Memory.empty = .ok _)
+            (by rintro ⟨-, _, encoded, rfl⟩; revert encoded; decide)
+        """, example: Path.Combine(outlineRoot, "PacketValue", "Filled.lean"));
 
     // A source parameter named index must remain the byte vector, not a generated byte-index binder.
     var indexedPacket = Path.Combine(outlineRoot, "IndexedPacket.dll");
@@ -1902,6 +2042,17 @@ if (Selected("ArraySum"))
             admitsNull.Output);
     Console.WriteLine("PASS an indexed loop's outline states the null exclusion, and a precondition without it " +
         "fails naming null");
+}
+
+foreach (var name in new[] { "Population64", "PopulationU32" })
+{
+    if (!Selected(name)) continue;
+    // A bit-count call steps as its total intrinsic, so the outline takes the whole body in one run.
+    var countOutline = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
+    if (countOutline.Contains("-- not outlined:", StringComparison.Ordinal) ||
+        !countOutline.Contains("case run => cil_checked_steps", StringComparison.Ordinal))
+        throw new InvalidOperationException($"The {name} outline does not step its bit-count calls:\n" + countOutline);
+    Console.WriteLine($"PASS the {name} outline steps its bit-count calls");
 }
 
 if (Selected("ReceiverArraySum"))
@@ -1992,16 +2143,13 @@ if (unfinished.Count > 0) Console.WriteLine(unstepped is null
 
 string OutlineExtraction(string name) => Path.Combine(outlineRoot, name, "Extraction");
 
-if (group == "control")
+if (Selected("WordByte"))
 {
     // LeanCIL's own closure that lays out a static word's bytes: its outline states the getter's contract
     // and steps through it, and the checked-in proof fills only the outline's holes and verifies.
     var wordByte = Path.Combine(outlineRoot, "WordByte");
-    var wordByteExtraction = Path.Combine(wordByte, "Extraction");
-    Run(Cli("extract", At("Extractor/bin/Nethermind.LeanCIL.dll"),
-        "Nethermind.LeanCIL.StaticValues/<>c__DisplayClass10_0::<Bytes>b__0(System.Int32)", wordByteExtraction));
+    var wordByteExtraction = OutlineExtraction("WordByte");
     var wordByteOutline = Path.Combine(wordByte, "Proof.lean");
-    Run(Cli("new-proof", wordByteExtraction, wordByteOutline));
     var wordByteSource = File.ReadAllText(wordByteOutline);
     if (wordByteSource.Contains("-- not outlined:", StringComparison.Ordinal) ||
         !wordByteSource.Contains("theorem get_Bits_holds", StringComparison.Ordinal))

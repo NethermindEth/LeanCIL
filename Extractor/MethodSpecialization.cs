@@ -13,7 +13,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
     static readonly ConditionalWeakTable<MethodDefinition, TypeReference[]> ownerArguments = new();
     static readonly ConditionalWeakTable<MethodDefinition, MethodDefinition> definitions = new();
     static readonly ConditionalWeakTable<MethodDefinition, TypeReference> declaringTypes = new();
-    readonly Dictionary<string, MethodDefinition> instances = new(StringComparer.Ordinal);
+    readonly SortedDictionary<StructuralSignatures.Signature, MethodDefinition> instances = [];
 
     internal static Origin? Source(MethodDefinition method) => origins.TryGetValue(method, out var origin) ? origin : null;
 
@@ -29,23 +29,6 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
     internal static TypeReference DeclaringType(MethodDefinition method) =>
         declaringTypes.TryGetValue(method, out var owner) ? owner : method.DeclaringType;
 
-    internal static string SignatureType(TypeReference type) => type switch
-    {
-        GenericParameter parameter => $"{parameter.Type}:{parameter.Position}",
-        ByReferenceType reference => SignatureType(reference.ElementType) + "&",
-        // Other modifiers keep their full spelling below and cannot equal an `in` or `init` tag.
-        RequiredModifierType modifier when InReferences.Is(modifier) => SignatureType(modifier.ElementType) + " in",
-        RequiredModifierType modifier when InitAccessors.Is(modifier) => SignatureType(modifier.ElementType) + " init",
-        PointerType pointer => SignatureType(pointer.ElementType) + "*",
-        ArrayType { IsVector: true } array => SignatureType(array.ElementType) + "[]",
-        GenericInstanceType instance => LayoutEvidence.Identity(instance.ElementType) + "<" +
-            string.Join(",", instance.GenericArguments.Select(SignatureType)) + ">",
-        FunctionPointerType pointer => $"fn:{pointer.CallingConvention}:{pointer.HasThis}:{pointer.ExplicitThis}:" +
-            SignatureType(pointer.ReturnType) + "(" +
-            string.Join(",", pointer.Parameters.Select(parameter => SignatureType(parameter.ParameterType))) + ")",
-        _ => LayoutEvidence.Identity(type)
-    };
-
     internal MethodDefinition Instantiate(MethodReference reference)
     {
         var definition = reference.Resolve() ?? throw new InvalidDataException($"Unresolved generic method: {reference.FullName}");
@@ -60,12 +43,17 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
             reference.ExplicitThis || methodArguments.Length != definition.GenericParameters.Count ||
             declaringArguments.Length != definition.DeclaringType.GenericParameters.Count ||
             (methodArguments.Length == 0 && declaringArguments.Length == 0) ||
-            member.Name != definition.Name || SignatureType(member.ReturnType) != SignatureType(definition.ReturnType) ||
-            !member.Parameters.Select(parameter => SignatureType(parameter.ParameterType))
-                .SequenceEqual(definition.Parameters.Select(parameter => SignatureType(parameter.ParameterType))) ||
+            member.Name != definition.Name ||
+            StructuralSignatures.Current.Type(member.ReturnType) !=
+                StructuralSignatures.Current.Type(definition.ReturnType) ||
+            StructuralSignatures.Current.Ordered(member.Parameters.Select(parameter => parameter.ParameterType)) !=
+                StructuralSignatures.Current.Ordered(
+                    definition.Parameters.Select(parameter => parameter.ParameterType)) ||
             (declaringArguments.Length != 0 && !definition.IsStatic && !GenericStructs.Is(reference.DeclaringType)) ||
             (definition.IsConstructor && (methodArguments.Length != 0 || definition.IsStatic)) ||
-            !definition.HasBody || definition.Body.ExceptionHandlers.Count != 0 ||
+            !definition.HasBody ||
+            definition.Body.ExceptionHandlers.Any(handler =>
+                handler.HandlerType is not (ExceptionHandlerType.Catch or ExceptionHandlerType.Finally)) ||
             (reference.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default ||
             (definition.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
             throw new InvalidDataException($"Unsupported generic method signature or body: {reference.FullName}");
@@ -91,21 +79,21 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                 var type = constraint.ConstraintType;
                 if (type is RequiredModifierType modifier &&
                     modifier.ModifierType.FullName == "System.Runtime.InteropServices.UnmanagedType" &&
-                    RuntimeModels.ExactScope(modifier.ModifierType.Scope, "System.Runtime"))
+                    RuntimeModels.ExactScope(modifier.ModifierType, PlatformAssemblies.SystemRuntime))
                     type = modifier.ElementType;
                 // A constraint naming parameters, such as `T : I<T>`, is checked at these arguments.
                 if (GenericStructs.DirectInterfaceConstraint(
                         type.ContainsGenericParameter && type is GenericInstanceType ? Substitute(type) : type,
                         argument, module))
                     continue;
-                if (type.FullName != "System.ValueType" || !RuntimeModels.ExactScope(type.Scope, "System.Runtime"))
+                if (type.FullName != "System.ValueType" ||
+                    !RuntimeModels.ExactScope(type, PlatformAssemblies.SystemRuntime))
                     throw new InvalidDataException($"Unsupported generic method constraints: {definition.FullName}");
                 RuntimeModels.ValidateTypeIdentity(type, module, architecture);
             }
         }
 
-        var key = definition.MetadataToken.ToInt32() + ":" + SignatureType(reference.DeclaringType) +
-            "<" + string.Join(",", methodArguments.Select(SignatureType)) + ">";
+        var key = StructuralSignatures.Current.Specialization(definition, reference.DeclaringType, methodArguments);
         if (instances.TryGetValue(key, out var existing)) return existing;
         if (instances.Count >= 256)
             throw new InvalidDataException("Generic specialization limit exceeded (possible expanding recursion)");
@@ -227,6 +215,15 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                 Mono.Cecil.CallSite site => SubstituteSite(site),
                 _ => instruction.Operand
             };
+
+        Instruction? Mapped(Instruction? boundary) => boundary is null ? null : instructions[boundary];
+        foreach (var handler in definition.Body.ExceptionHandlers)
+            clone.Body.ExceptionHandlers.Add(new ExceptionHandler(handler.HandlerType)
+            {
+                TryStart = Mapped(handler.TryStart), TryEnd = Mapped(handler.TryEnd),
+                HandlerStart = Mapped(handler.HandlerStart), HandlerEnd = Mapped(handler.HandlerEnd),
+                CatchType = handler.CatchType is { } caught ? Substitute(caught) : null
+            });
 
         instances.Add(key, clone);
         origins.Add(clone, new(definition.FullName, arguments.Select(t => t.FullName).ToArray()));

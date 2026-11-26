@@ -38,7 +38,7 @@ The extractor, CIL model and verification machinery have an explicit
 
 ## Quick start
 
-Install **Lean 4.35.0** through elan and **.NET SDK 10.0.403**, as pinned in
+Install **Lean 4.35.0** through elan and **.NET SDK 11.0.100**, as pinned in
 [lean-toolchain](lean-toolchain) and [global.json](global.json). From this checkout:
 
 ```sh
@@ -86,6 +86,7 @@ generic methods, loops, memory access and compiled F#.
 | `leancil bindings` | Generate the proof sources of a binding catalog, or check them |
 | `leancil export-contracts` | Publish verified method contracts for separately compiled callers |
 | `leancil audit-library` | Kernel-replay and axiom-audit the theorems of a Lean library |
+| `leancil verify --deep-checks` | Reconfirm in the kernel that an extraction's method bodies and carried metadata rows are those of assembly files with stated digests |
 
 `verify --goals` prints the goal at each `sorry` and failing tactic of an unfinished proof. A
 failing command returns a nonzero exit code. See the [CLI reference](docs/CLI.md) for every
@@ -133,7 +134,7 @@ correctness and memory-safety claims.
 Other classes and field types, arrays of references other than one-dimensional arrays of
 admitted classes or of non-generic classes such as `string`, reading a string's characters,
 virtual dispatch outside the extracted classes, interface calls, type tests against interfaces,
-`System.Object` or value types, boxing, ordinary recursive calls, exception handlers,
+`System.Object` or value types, boxing, ordinary recursive calls, filter and fault clauses,
 floating-point arithmetic and arbitrary external calls are outside the supported subset.
 Concurrency, GC implementation correctness and equivalence to arbitrary .NET runtimes are
 outside the model's guarantees. See [soundness and limitations](docs/SOUNDNESS.md).

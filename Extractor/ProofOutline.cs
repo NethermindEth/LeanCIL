@@ -1,6 +1,8 @@
 using System.Runtime.ExceptionServices;
+using ILOpCode = System.Reflection.Metadata.ILOpCode;
 using System.Text;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -9,11 +11,157 @@ namespace Nethermind.LeanCIL;
 // the extraction's keyed module, which resolves both in the editor workspace and under verify.
 internal static partial class ProofOutline
 {
-    /// <summary>A checked extraction: its methods while still loaded, their emitted operations and
-    /// the layout identities in emission order, the checked `Extracted.lean` source, its named class fields, and
+    /// <summary>The source instructions, bound operands and frame used to outline a proof of this method.</summary>
+    internal sealed class Method(FrameMetadata frame, MethodDefinition source,
+        IReadOnlySet<Instruction> reachable, IReadOnlyDictionary<int, int> parameterHomes,
+        FeatureProfile profile, MetadataValidation.LayoutContext layouts, InstructionIndex instructions,
+        ResolvedCallSites calls, IReadOnlyDictionary<MethodDefinition, int> methodIndices, ImportResolution? imports,
+        NativeOperands.Certificate? nativeOperands = null)
+    {
+        internal FrameMetadata Frame { get; } = frame;
+        internal int InstructionCount => source.Body.Instructions.Count;
+
+        /// <summary>The word-stack operation at a reachable source instruction, including admitted call and prefix patterns.</summary>
+        internal Code? StackCodeAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            if (!reachable.Contains(site)) return null;
+            var code = site.OpCode.Code;
+            if (code is Code.Ldelem_Any or Code.Stelem_Any)
+                return code == Code.Ldelem_Any && nativeOperands is not null &&
+                    InstructionOperands.MethodTableLoad(site, nativeOperands) ? null : code;
+            if (code is Code.Ldlen or Code.Ldelem_Ref or Code.Stelem_Ref || Arrays.NumericElement(code).HasValue)
+                return code;
+            if (TypeTests.Analyze(source).Operands.Contains(site)) return null;
+            if (code is Code.Tail or Code.Constrained or Code.Readonly or Code.Unaligned) return Code.Nop;
+            var throws = Throws.Analyze(source);
+            if (throws.Raises.ContainsKey(site)) return code;
+            if (code != Code.Ldnull && throws.Operands.Contains(site)) return Code.Nop;
+            if (code == Code.Call && calls.IsModel(site) && site.Operand is MethodReference reference)
+                return RuntimeModels.ObjectConstructor(reference) ? Code.Pop :
+                    UnsafeModels.StackCode(reference, profile.Architecture);
+            return OutlineInstructions.IsStackCode(code) || code == Code.Nop ? code : null;
+        }
+
+        /// <summary>The argument read directly at a reachable site. Addressed and assigned arguments use a frame slot.</summary>
+        internal int? ArgumentAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            return StackCodeAt(pc) is null && reachable.Contains(site) &&
+                MethodArguments.LoadIndex(source, site) is int index && !parameterHomes.ContainsKey(index)
+                ? index : null;
+        }
+
+        /// <summary>The callee selected by the original reachable call and its binding.</summary>
+        internal (CallKind Kind, int Method, int Arguments)? CallAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            return StackCodeAt(pc) is null && reachable.Contains(site)
+                ? calls.OutlineTarget(site, methodIndices, imports) : null;
+        }
+
+        /// <summary>The normalized opcode and instruction index of the branch's original destination.</summary>
+        internal (ILOpCode Kind, int Target)? BranchAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            if (StackCodeAt(pc) is not null || site.Operand is not Instruction target ||
+                site.OpCode.OperandType is not (OperandType.InlineBrTarget or OperandType.ShortInlineBrTarget) ||
+                site.OpCode.Code is Code.Leave or Code.Leave_S || !reachable.Contains(site)) return null;
+            int opcode = site.OpCode.Value;
+            // ECMA-335 assigns both branch families in the same order.
+            if (opcode is >= (int)ILOpCode.Br_s and <= (int)ILOpCode.Blt_un_s)
+                opcode += (int)ILOpCode.Br - (int)ILOpCode.Br_s;
+            return ((ILOpCode)opcode, instructions.Position(target));
+        }
+
+        /// <summary>The storage shape of a reachable CIL type operand with the requested opcode.</summary>
+        internal (int? Bytes, int? ScalarWidth, bool Signed)? ObjectAt(int pc, Code opcode)
+        {
+            var site = source.Body.Instructions[pc];
+            if (site.OpCode.Code != opcode || StackCodeAt(pc) is not null ||
+                !reachable.Contains(site) || site.Operand is not TypeReference operand) return null;
+            return InstructionOperands.ObjectStorage(source, site, operand, instructions, layouts, profile);
+        }
+
+        /// <summary>The word pushed by a literal, a modelled call or the size of a closed type.</summary>
+        internal (int Width, long Value, bool Numeral)? ConstantAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            if (StackCodeAt(pc) is not null || !reachable.Contains(site)) return null;
+            var code = site.OpCode.Code;
+            return code switch
+            {
+                Code.Ldc_I4_M1 => (32, -1, false),
+                >= Code.Ldc_I4_0 and <= Code.Ldc_I4_8 => (32, code - Code.Ldc_I4_0, true),
+                Code.Ldc_I4 or Code.Ldc_I4_S => (32, Convert.ToInt64(site.Operand), false),
+                Code.Ldc_I8 => (64, (long)site.Operand, false),
+                Code.Sizeof when ObjectAt(pc, code)?.Bytes is int size => (32, size, true),
+                Code.Ldsfld when site.Operand is FieldReference field &&
+                    FeatureProfile.PlatformField(field) is int value => (32, value, true),
+                Code.Call when calls.IsModel(site) && site.Operand is MethodReference member &&
+                    (FeatureProfile.PlatformConstant(member) ??
+                     ReferenceQueries.Constant(member, profile.Architecture) ??
+                     UnsafeModels.SizeOf(member, profile.Architecture)) is int value => (32, value, true),
+                _ => null
+            };
+        }
+
+        /// <summary>The result width of a reachable bit-count call bound to its runtime declaration.</summary>
+        internal int? BitCountWidthAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            return StackCodeAt(pc) is null && site.OpCode.Code == Code.Call &&
+                site.Operand is MethodReference member && reachable.Contains(site) && calls.IsModel(site)
+                ? BitModels.CountWidth(member, profile) : null;
+        }
+
+        /// <summary>Whether one checked, straight-line word step suffices for this site.</summary>
+        internal bool PureAt(int pc, bool plainReturn) => StackCodeAt(pc) switch
+        {
+            Code.Ret => plainReturn,
+            null when ArgumentAt(pc) is int argument => MethodArguments.Plain(source, argument),
+            var operation => ConstantAt(pc) is { Width: 32 or 64 } ||
+                BitCountWidthAt(pc) is not null || operation is Code.Add or Code.Sub or Code.Mul or Code.And or Code.Or or Code.Xor or Code.Nop or
+                    Code.Conv_I8 or Code.Conv_I or Code.Conv_U8 or Code.Conv_U4 or Code.Conv_I4
+        };
+
+        /// <summary>The admitted struct field at this instruction, using the extraction's layout context.</summary>
+        internal (Code Opcode, int Offset, int Width, bool Signed, bool IsAggregate)? StructFieldAt(int pc)
+        {
+            var site = source.Body.Instructions[pc];
+            if (site.OpCode.Code is not (Code.Ldfld or Code.Ldflda or Code.Stfld) ||
+                !reachable.Contains(site) || site.Operand is not FieldReference field ||
+                ObjectTypes.Candidate(field.DeclaringType)) return null;
+            var definition = field.Resolve() ?? throw new InvalidDataException("Unresolved field");
+            return InstructionOperands.StructField(field, definition, site.OpCode.Code, source, profile, layouts);
+        }
+    }
+
+    /// <summary>The loaded methods and their outline inputs, with
+    /// its computed layouts in emission order, each with its identity, its named class fields, and
     /// the architecture that sizes its struct array elements.</summary>
-    internal sealed record Extraction(MethodDefinition[] Methods, TemplateEmitter.Method[] Emitted,
-        string[] LayoutIdentities, string Source, ClassViews.View[] Views, string Architecture);
+    internal sealed record Extraction(MethodDefinition[] Methods, Method[] Emitted,
+        ClassViews.View[] Views, IReadOnlyDictionary<(int Method, int Pc), ClassViews.FieldOperation> ClassFields,
+        string Architecture,
+        ComputedLayout[] Layouts);
+
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ComputedLayout[],
+        Dictionary<string, int>> LayoutIndices = new();
+
+    /// <summary>The index of the first computed layout with this identity, or -1 when none has it.</summary>
+    internal static int LayoutIndex(Extraction extraction, string identity) =>
+        LayoutIndices.GetValue(extraction.Layouts, static layouts =>
+        {
+            var indices = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (var index = 0; index < layouts.Length; index++) indices.TryAdd(layouts[index].Identity, index);
+            return indices;
+        }).GetValueOrDefault(identity, -1);
+
+    static string? ArithmeticSymbol(Code? code) => code switch
+    {
+        Code.Add => "+", Code.Sub => "-", Code.Mul => "*", Code.And => "&&&",
+        Code.Or => "|||", Code.Xor => "^^^", _ => null
+    };
 
     const string Usage = "Usage: leancil new-proof extraction-directory proof.lean";
 

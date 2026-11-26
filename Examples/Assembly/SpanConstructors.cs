@@ -51,6 +51,12 @@ internal static class SpanConstructors
         return span.Length;
     }
 
+    public static unsafe int BytePointerLocal(byte* value, int length)
+    {
+        var span = new ReadOnlySpan<byte>(value, length);
+        return span.Length;
+    }
+
     public static unsafe int LayoutLocal(AggregateSpans.VectorRecord* value, int length)
     {
         var span = new Span<AggregateSpans.VectorRecord>(value, length);

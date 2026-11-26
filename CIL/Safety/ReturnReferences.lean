@@ -1,23 +1,14 @@
-import CIL.Safety.LiveValues
+import CIL.Safety.ExecutionLifetime
 
 /-!
 # Returned references are valid
 
 Every value a successful run or invocation returns passed `checkedValue` against the final
 memory, after the returning frame was torn down, so the results are `ValuesValid` in the
-memory the caller receives.
+memory the caller receives and none of them is a home.
 -/
 
 namespace CIL.Safety
-
-/-- Values that pass the result check, under any fault relocation, are valid in that memory. -/
-theorem checkedValues_mapError_valid (m : Memory) (values result : List Value)
-    (locate : ExecutionFault → α)
-    (h : (values.mapM (checkedValue m)).mapError locate = .ok result) : ValuesValid m result := by
-  cases hc : values.mapM (checkedValue m) <;> simp only [hc, Except.mapError] at h
-  · cases h
-  · cases h
-    exact (checkedValues_valid _ _ _ hc).2
 
 /-- Normal results have passed the reference check after frame expiration.
     This includes results returning through arbitrary nested call chains. -/
@@ -26,12 +17,8 @@ theorem run_result_valid (program : CIL.Program) (fuel method pc : Nat)
     (values : List Value)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     ValuesValid final values := by
-  have trace := run_success_trace program fuel method pc args frame stack m final values h
-  clear h
-  induction trace with
-  | returned _ checked => exact (checkedValues_valid _ _ _ checked).2
-  | next _ _ ih | call _ _ _ _ _ _ _ ih | construct _ _ _ _ _ _ _ _ ih
-  | tailCall _ _ _ _ _ _ _ _ ih => exact ih
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, checked⟩ := (run_ok_trace h).returnedBy rfl
+  exact (checkedValues_valid _ _ _ checked).2
 
 theorem invoke_result_valid (program : CIL.Program) (fuel method : Nat)
     (args values : List Value) (m final : Memory)
@@ -41,5 +28,26 @@ theorem invoke_result_valid (program : CIL.Program) (fuel method : Nat)
 
 #print axioms run_result_valid
 #print axioms invoke_result_valid
+
+/-- No run returns a home, so no result names a slot of a frame that has expired. -/
+theorem run_result_not_spanHome (program : CIL.Program) (fuel method pc : Nat)
+    (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
+    (values : List Value)
+    (h : run program fuel method pc args frame stack m = .ok (final, values)) :
+    ∀ value ∈ values, value.isHome = false := by
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, checked⟩ := (run_ok_trace h).returnedBy rfl
+  exact checkedValues_not_spanHome checked
+
+#print axioms run_result_not_spanHome
+
+/-- No invocation returns a home. -/
+theorem invoke_result_not_spanHome (program : CIL.Program) (fuel method : Nat)
+    (args values : List Value) (m final : Memory)
+    (h : invoke program fuel method args m = .ok (final, values)) :
+    ∀ value ∈ values, value.isHome = false := by
+  obtain ⟨_, _, _, _, _, _, _, executed⟩ := invoke_success_setup h
+  exact run_result_not_spanHome _ _ _ _ _ _ _ _ _ _ executed
+
+#print axioms invoke_result_not_spanHome
 
 end CIL.Safety

@@ -5,7 +5,7 @@ import CIL.Safety.InstructionMemory
 
 Array allocation reuses fresh allocation identities and existing typed array views, enforcing
 the .NET 10 element-count ceiling. Success still assumes runtime allocation availability;
-the model does not certify heap capacity or GC behavior. Unsupported extents remain model faults.
+the model does not certify heap capacity or GC behavior.
 Composite payloads retain the runtime's eight-byte base alignment independently of element stride.
 -/
 
@@ -13,6 +13,11 @@ namespace CIL.Safety
 
 /-- The .NET 10 CoreCLR single-dimensional array element-count ceiling. -/
 def maxArrayLength : Nat := 0x7fffffc7
+
+/-- For a count above `maxArrayLength`, CoreCLR checks whether it fits an `Int32` before
+    reporting that its array dimensions exceed the element-count ceiling. -/
+def oversizedArrayException (length : Nat) : CIL.ExceptionType :=
+  if length ≤ 0x7fffffff then .outOfMemory else .overflow
 
 /-- Initialize only the fresh payload and grant its complete read/write view. -/
 def arrayMemory (allocated : Memory) (identity size : Nat) : Memory :=
@@ -28,7 +33,7 @@ def allocateArray (memory : Memory) (element : CIL.ArrayElement) (length : Nat) 
   if !element.allocationSupported then
     .error (.unsupported "Unsupported array element allocation") else pure ()
   if length > maxArrayLength then
-    .error (.unsupported "Array length outside supported extent") else pure ()
+    .error (.thrown (oversizedArrayException length)) else pure ()
   let size := length * element.width
   let (identity, allocated) ← checkedAt .null size
     (allocate memory ⟨.managedHeap, ⟨size, element.allocationAlignment, []⟩, true, [size]⟩)
@@ -43,7 +48,7 @@ def newArray (memory : Memory) (element : CIL.ArrayElement) (value : CIL.Value) 
     | .i32 bits => pure bits.toInt
     | .i64 bits => pure bits.toInt
     | _ => .error .invalidState
-  if length < 0 then .error (.thrown "System.OverflowException") else
+  if length < 0 then .error (.thrown .overflow) else
     allocateArray memory element length.toNat
 
 end CIL.Safety

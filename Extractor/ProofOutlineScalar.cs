@@ -1,5 +1,7 @@
+using ILOpCode = System.Reflection.Metadata.ILOpCode;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -8,6 +10,18 @@ internal static partial class ProofOutline
 {
     /// <summary>The most return paths a scalar outline splits a body into.</summary>
     const int MaxScalarPaths = 8;
+
+    /// <summary>The arithmetic lemma, expression and signedness for a checked CIL opcode.</summary>
+    static (string Name, string Symbol, bool Signed)? CheckedWord(Code opcode) => opcode switch
+    {
+        Code.Add_Ovf => ("add", "+", true),
+        Code.Add_Ovf_Un => ("add", "+", false),
+        Code.Sub_Ovf => ("sub", "-", true),
+        Code.Sub_Ovf_Un => ("sub", "-", false),
+        Code.Mul_Ovf => ("mul", "*", true),
+        Code.Mul_Ovf_Un => ("mul", "*", false),
+        _ => null
+    };
 
     /// <summary>What a scalar body does from one pc to a return along every path.</summary>
     abstract record ScalarStep;
@@ -24,49 +38,43 @@ internal static partial class ProofOutline
         ScalarStep Fails) : ScalarStep;
 
     /// <summary>A word on the walked stack: its term, or null when the outline does not name it.</summary>
-    sealed record ScalarWord(string? Term, int Bits);
+    sealed record ScalarWord(string? Term, int Bits, long? Numeral = null);
 
     /// <summary>The paths of a body over word arguments that tests named words or checks arithmetic, with no
     /// backward jump; null when it does neither, has another operation or splits into too many paths.</summary>
-    static ScalarStep? ScalarPaths(Specification spec, string[] ops)
+    static ScalarStep? ScalarPaths(Specification spec, Method emitted)
     {
+        var outline = emitted;
+        var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
         if (spec.Parameters.Any(parameter => parameter.Shape != ParameterShape.Scalar)) return null;
         var paths = 0;
         var decided = false;
         ScalarStep? Walk(int pc, ImmutableStack stack)
         {
-            for (; pc < ops.Length; pc++)
+            for (; pc < outline.InstructionCount; pc++)
             {
-                var op = ops[pc];
-                Match match;
-                if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
+                var op = outline.StackCodeAt(pc);
+                if (emitted.ArgumentAt(pc) is int argument && MethodArguments.Plain(spec.Method, argument))
                 {
-                    var parameter = spec.Parameters[int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture)];
+                    var parameter = spec.Parameters[argument];
                     stack = stack.Push(new(parameter.Name, 8 * parameter.Width));
                 }
-                else if ((match = Regex.Match(op,
-                    @"\A\.const(32|64) (?:(\d+)|\(BitVec\.ofInt \d+ \((-?\d+)\)\))\z")).Success)
-                    stack = stack.Push(new(match.Groups[2].Success ? match.Groups[2].Value
-                        : $"({match.Groups[3].Value})", match.Groups[1].Value == "32" ? 32 : 64));
-                else if ((match = Regex.Match(op, @"\A\.(add|sub|mul|band|bor|bxor)\z")).Success)
+                else if (emitted.ConstantAt(pc) is { } constant)
+                    stack = stack.Push(new(constant.Numeral ? $"{constant.Value}" : $"({constant.Value})",
+                        constant.Width == 32 ? 32 : 64, constant.Numeral ? constant.Value : null));
+                else if (ArithmeticSymbol(op) is { } arithmeticSymbol)
                 {
                     if (stack.Count < 2) return null;
                     stack = stack.Pop(out var right).Pop(out var left);
-                    var symbol = match.Groups[1].Value switch
-                    {
-                        "add" => "+", "sub" => "-", "mul" => "*", "band" => "&&&", "bor" => "|||", _ => "^^^"
-                    };
                     stack = stack.Push(new(left.Term is null || right.Term is null ? null
-                        : $"{Operand(left.Term)} {symbol} {Operand(right.Term)}", right.Bits));
+                        : $"{Operand(left.Term)} {arithmeticSymbol} {Operand(right.Term)}", right.Bits));
                 }
-                else if ((match = Regex.Match(op, @"\A\.checkedArithmetic \.(add|sub|mul) (false|true)\z")).Success)
+                else if (op is Code stackOp && CheckedWord(stackOp) is { } checkedWord)
                 {
                     if (stack.Count < 2) return null;
                     stack = stack.Pop(out var right).Pop(out var left);
                     if (left.Term is null || right.Term is null || left.Bits != right.Bits) return null;
-                    var operation = match.Groups[1].Value;
-                    var signed = match.Groups[2].Value == "true";
-                    var symbol = operation switch { "add" => "+", "sub" => "-", _ => "*" };
+                    var (operation, symbol, signed) = checkedWord;
                     var fits = Fits(operation, signed, Operand(left.Term), Operand(right.Term), symbol, left.Bits);
                     stack = stack.Push(new($"{Operand(left.Term)} {symbol} {Operand(right.Term)}", left.Bits));
                     decided = true;
@@ -75,33 +83,45 @@ internal static partial class ProofOutline
                     return new ScalarCheck(fits, $"CIL.checkedValues_{operation}_{reading}_i{left.Bits}",
                         operation, pc, next);
                 }
-                else if (Body.Target(op) is { } target)
+                else if (emitted.BranchAt(pc) is { } jump)
                 {
+                    var target = jump.Target;
                     if (target <= pc) return null;
-                    if (!Body.Conditional(op)) { pc = target - 1; continue; }
-                    var name = Regex.Match(op, @"\A\.(\w+)").Groups[1].Value;
-                    var operands = new ScalarWord[name is "brzero" or "brnonzero" ? 1 : 2];
+                    if (jump.Kind == ILOpCode.Br) { pc = target - 1; continue; }
+                    var operands = new ScalarWord[Body.BranchOperands(jump.Kind)];
                     if (stack.Count < operands.Length) return null;
                     for (var position = operands.Length - 1; position >= 0; position--)
                         stack = stack.Pop(out operands[position]);
                     if (operands.Any(operand => operand.Term is null || operand.Bits != operands[0].Bits))
                         return null;
-                    var (condition, takenWhenTrue) = Body.Test(name, [.. operands.Select(operand =>
-                        Operand(operand.Term!))], operands[0].Bits);
+                    // A test of literals is decided here; a split on it leaves an infeasible side no step closes.
+                    if (operands.All(operand => operand.Numeral is not null))
+                    {
+                        decided = true;
+                        long[] literals = [.. operands.Select(operand => operand.Numeral!.Value)];
+                        if (Taken(jump.Kind, literals, operands[0].Bits)) pc = target - 1;
+                        continue;
+                    }
+                    var (condition, takenWhenTrue) = Body.Test(jump.Kind, [.. operands.Select(operand =>
+                        new Body.Operand(Operand(operand.Term!), operand.Numeral))], operands[0].Bits);
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     decided = true;
                     if (Walk(holds, stack) is not { } holdsStep || Walk(fails, stack) is not { } failsStep)
                         return null;
                     return new ScalarSplit(condition, pc, holds, holdsStep, fails, failsStep);
                 }
-                else if (op is ".ret") return ++paths > MaxScalarPaths ? null : new ScalarReturn();
-                else if (op is ".nop") { }
-                else if (Body.Pure(op))
+                else if (op is Code.Ret && plainReturn)
+                    return ++paths > MaxScalarPaths ? null : new ScalarReturn();
+                else if (op == Code.Nop) { }
+                else if (emitted.PureAt(pc, plainReturn))
                 {
                     // Conversions and bit counts compute a word the outline does not name; it may be returned.
                     if (stack.Count == 0) return null;
-                    stack = stack.Pop(out var word).Push(new(null, op is ".convU8" or ".convI8" ? 64
-                        : op is ".convU4" or ".convI4" || op.Contains(".word32", StringComparison.Ordinal) ? 32
+                    stack = stack.Pop(out var word).Push(new(null,
+                        op is Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I
+                            ? 64
+                        : op is Code.Conv_U4 or Code.Conv_I4 ||
+                            emitted.BitCountWidthAt(pc) == 32 ? 32
                         : word.Bits));
                 }
                 else return null;
@@ -110,6 +130,30 @@ internal static partial class ProofOutline
         }
         var walked = Walk(0, ImmutableStack.Empty);
         return decided ? walked : null;
+    }
+
+    /// <summary>Whether a conditional branch of `kind` on literal operands, read at `bits` bits, is taken.
+    /// </summary>
+    static bool Taken(ILOpCode kind, long[] values, int bits)
+    {
+        ulong Word(int index) => bits == 32 ? (uint)values[index] : (ulong)values[index];
+        long Signed(int index) => bits == 32 ? (int)values[index] : values[index];
+        return kind switch
+        {
+            ILOpCode.Brfalse => Word(0) == 0,
+            ILOpCode.Brtrue => Word(0) != 0,
+            ILOpCode.Beq => Word(0) == Word(1),
+            ILOpCode.Bne_un => Word(0) != Word(1),
+            ILOpCode.Blt => Signed(0) < Signed(1),
+            ILOpCode.Ble => Signed(0) <= Signed(1),
+            ILOpCode.Bgt => Signed(0) > Signed(1),
+            ILOpCode.Bge => Signed(0) >= Signed(1),
+            ILOpCode.Blt_un => Word(0) < Word(1),
+            ILOpCode.Ble_un => Word(0) <= Word(1),
+            ILOpCode.Bgt_un => Word(0) > Word(1),
+            ILOpCode.Bge_un => Word(0) >= Word(1),
+            _ => throw new ArgumentException($"`{kind}` is not a conditional branch", nameof(kind))
+        };
     }
 
     static string Operand(string term) => Regex.IsMatch(term, @"\A[\w.]+\z") ? term : $"({term})";

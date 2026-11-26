@@ -1,6 +1,7 @@
 import CIL.Safety.LocalCalls
 import CIL.Safety.WideMultiply
 import Tests.LoopFrames
+import Tests.Support
 
 /-!
 # Private outputs of checked helpers
@@ -13,10 +14,19 @@ The same transition applies to vector outputs without assuming any previous init
 namespace Tests.LocalCalls
 open CIL.Safety
 
+/-- The static unsigned multiplication overload taking a low-word destination. -/
+private def multiplyMethod : CIL.Extraction.MethodRef :=
+  let word := CIL.Extraction.TypeExpr.primitive .uint64
+  { owner := .atom CIL.Extraction.runtimeScope "System.Math" .classType, name := name!"BigMul",
+    hasThis := false, genericArity := 0, parameters := [word, word, .byref word],
+    returnType := word }
+
 /-- The checked body of an unsigned wide multiply with an out reference. -/
 @[cil_code] def multiplyBody : CIL.Method :=
   { locals := [], returnsValue := true,
-    code := [.arg 0, .arg 1, .arg 2, .memory (.bigMul64 false), .ret] }
+    code := [.ldarg 0, .ldarg 1, .ldarg 2, .call multiplyMethod {}, .ret] }
+
+cil_runtime_models multiplyBody
 
 /-- Inputs name the two factors and the actual low-word destination. -/
 structure BinaryOutputInput where
@@ -41,7 +51,10 @@ theorem multiply_holds {program : CIL.Program} {callee : Nat}
   intro input memory writable
   obtain ⟨final, written, _, readback⟩ := store_word64 (input.left * input.right) writable
   have formed := access_reference_valid _ _ _ _ _ writable
-  cil_contract_steps [found, formed, step_bigMul64_of_write written]
+  cil_contract_steps [found, formed]
+  refine run_next_exists _ found rfl (step_bigMul64_of_write (pc := 3) rfl
+    multiplyBody_model3 written) ?_
+  cil_contract_steps [found]
   exact ⟨Confined.write written (by simp [numberBytes_length]),
     CIL.WideMultiply.high64 input.left input.right, rfl, rfl, readback⟩
 
@@ -54,7 +67,8 @@ theorem multiply_updates_mixed_frame {program : CIL.Program} {callee : Nat}
     {known : Nat → Option CIL.Value} {low : Reference}
     (context : LoopFrame [] caller current kinds slots known)
     (found : program[callee]? = some multiplyBody)
-    (slot : slots[0]? = some (.bytes .word64 low)) (left right : CIL.W64) :
+    (slot : slots[0]? = some (.bytes .word64 low)) (left right : CIL.W64)
+    (free : HandlerFree program := by handler_free) :
     WP (Execution (fun fuel => invoke program fuel callee
       [.scalar (.i64 left), .scalar (.i64 right), .reference (.address low)] current))
       (fun (final, values) => values = [.scalar (.i64 (CIL.WideMultiply.high64 left right))] ∧
@@ -77,7 +91,8 @@ theorem multiply_updates_mixed_frame {program : CIL.Program} {callee : Nat}
 @[cil_code] def callerBody : CIL.Method :=
   { locals := [.unmodeled, .v256 42], localKinds := [.word64, .vector256],
     returnsValue := true,
-    code := [.arg 0, .arg 1, .localAddr 0, .call 1 3, .pop, .local 0, .ret] }
+    code := [.ldarg 0, .ldarg 1, .ldloca 0, .call (Tests.callee 3) {}, .pop, .ldloc 0, .ret],
+    links := [(3, .direct 1)] }
 
 bind_entry callerEntry (memory : Memory) (left right : CIL.W64)
     (formed : memory.WellFormed) := callerBody
@@ -129,7 +144,7 @@ theorem caller_invokes (memory : Memory) (formed : memory.WellFormed) (left righ
 
 /-- Omitting the helper exposes the actual uninitialized local read, at its checked location. -/
 theorem uninitialized_output_rejected :
-    invoke [{ callerBody with code := [.local 0, .ret] }] 1 0 [] Memory.empty =
+    invoke [{ callerBody with code := [.ldloc 0, .ret] }] 1 0 [] Memory.empty =
       .error ⟨0, 0, .memory .uninitialized (.address ⟨0, 0⟩) 8⟩ := by
   rfl
 
@@ -137,15 +152,15 @@ theorem uninitialized_output_rejected :
 
 /-- A returned address to a private home is checked after teardown and cannot escape. -/
 theorem escaped_home_rejected :
-    invoke [{ callerBody with code := [.localAddr 0, .ret] }] 2 0 [] Memory.empty =
+    invoke [{ callerBody with code := [.ldloca 0, .ret] }] 2 0 [] Memory.empty =
       .error ⟨0, 1, .memory .expiredLifetime (.address ⟨0, 0⟩) 0⟩ := by
   rfl
 
 #print axioms escaped_home_rejected
 
-/-- Changing the selected helper to a missing method fails at the actual call instruction. -/
+/-- Linking the call to a missing method fails at the actual call instruction. -/
 theorem wrong_helper_rejected :
-    invoke [{ callerBody with code := callerBody.code.set 3 (.call 2 3) }, multiplyBody]
+    invoke [{ callerBody with links := [(3, .direct 2)] }, multiplyBody]
       4 0 [.scalar (.i64 2), .scalar (.i64 3)] Memory.empty =
       .error ⟨0, 3, .invalidState⟩ := by
   rfl
@@ -154,7 +169,7 @@ theorem wrong_helper_rejected :
 
 /-- Writing the vector home instead of the selected word leaves the word uninitialized. -/
 theorem wrong_output_home_rejected :
-    invoke [{ callerBody with code := callerBody.code.set 2 (.localAddr 1) }, multiplyBody]
+    invoke [{ callerBody with code := callerBody.code.set 2 (.ldloca 1) }, multiplyBody]
       10 0 [.scalar (.i64 2), .scalar (.i64 3)] Memory.empty =
       .error ⟨0, 5, .memory .uninitialized (.address ⟨0, 0⟩) 8⟩ := by
   rfl
@@ -203,9 +218,9 @@ def arithmeticFlag (subtract : Bool) (left right : CIL.W64) : CIL.W32 :=
 /-- Both helpers store their wrapped word before returning the unsigned carry or borrow. -/
 @[cil_code] def arithmeticBody (subtract : Bool) : CIL.Method :=
   { locals := [], returnsValue := true,
-    code := [.arg 2, .arg 0, .arg 1, if subtract then .sub else .add, .store64] ++
-      (if subtract then [.arg 0, .arg 1] else [.arg 0, .arg 1, .add, .arg 0]) ++
-      [.ltu, .ret] }
+    code := [.ldarg 2, .ldarg 0, .ldarg 1, if subtract then .sub else .add, .stind .i8] ++
+      (if subtract then [.ldarg 0, .ldarg 1] else [.ldarg 0, .ldarg 1, .add, .ldarg 0]) ++
+      [.clt_un, .ret] }
 
 /-- Arithmetic output storage needs write authority, while the returned flag remains exact. -/
 def arithmeticContract (subtract : Bool) : MethodContract BinaryOutputInput CIL.W32 where
@@ -225,7 +240,7 @@ theorem arithmetic_holds (subtract : Bool) {program : CIL.Program} {callee : Nat
   obtain ⟨final, written, _, readback⟩ :=
     store_word64 (arithmeticWord subtract input.left input.right) writable
   have formed := access_reference_valid _ _ _ _ _ writable
-  have stored := step_store64_of_write written
+  have stored := step_stind_i8_of_write written
   cases subtract <;>
     cil_contract_steps [found, formed, stored, arithmeticBody, arithmeticContract,
       multiplyContract, arithmeticWord, arithmeticFlag]

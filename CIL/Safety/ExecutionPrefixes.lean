@@ -94,7 +94,8 @@ inductive RunVisits (program : CIL.Program) : Nat → Nat → Nat → List Value
 theorem runVisits_wellFormed {program : CIL.Program} {fuel method pc : Nat}
     {args : List Value} {frame : Frame} {stack : List Value} {m observed : Memory}
     (visit : RunVisits program fuel method pc args frame stack m observed)
-    (hm : m.WellFormed) : observed.WellFormed := by
+    (hm : m.WellFormed) :
+    observed.WellFormed := by
   induction visit with
   | initial => exact hm
   | stepped step => exact programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step
@@ -126,13 +127,15 @@ theorem runVisits_wellFormed {program : CIL.Program} {fuel method pc : Nat}
 
 #print axioms runVisits_wellFormed
 
-/-- The final memory of a successful run is one of its observed memories. -/
+/-- The final memory of a successful run of a program without exception clauses is one of its
+    observed memories. -/
 theorem run_success_visits (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (values : List Value)
-    (h : run program fuel method pc args frame stack m = .ok (final, values)) :
+    (h : run program fuel method pc args frame stack m = .ok (final, values))
+    (free : HandlerFree program := by handler_free) :
     RunVisits program fuel method pc args frame stack m final := by
-  have trace := run_success_trace program fuel method pc args frame stack m final values h
+  have trace := run_success_trace program free fuel method pc args frame stack m final values h
   clear h
   induction trace with
   | next step _ ih => exact .next step ih

@@ -1,5 +1,5 @@
 import CIL.Extraction.Constrained
-import CIL.Extraction.ExactIntrinsics
+import CIL.Extraction.OpaqueLocals
 
 /-! Standalone comparisons between indexed and streaming sequential metadata checks. -/
 namespace Tests.StreamingValidationScaling
@@ -26,13 +26,13 @@ def indexedConstrained (raw : RawMethod) (reachable : List Bool) (emitted : Meth
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
     (List.range raw.code.length).all (constrainedSiteCheck [] (FlowIndex.ofList []).get?
       (FlowIndex.ofList raw.code).get? (FlowIndex.ofList reachable).get?
-      (FlowIndex.ofList emitted.code).get?
-      (Std.TreeSet.ofList (constrainedBranchTargets raw.code)).contains) = true
+      (FlowIndex.ofList emitted.code).get? emitted.linkAt
+      (Std.TreeSet.ofList (branchTargets raw.code)).contains) = true
 
 /-- Eligible vector-local metadata. -/
 def vector : TypeExpr := .apply
   (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
-  (.atom runtimeScope "System.UInt64")
+  (.primitive .uint64)
 
 /-- No address instructions obscure the positional local lookup cost. -/
 def locals (count : Nat) := { raw [] with locals := List.replicate count vector }
@@ -45,8 +45,7 @@ def indexedOpaque (closed : RawMethod) : List Nat :=
   (List.range closed.locals.length).filter fun index =>
     (match types.get? index with
       | some (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
-          (.atom elementScope "System.UInt64")) =>
-        scope == intrinsicsScope && elementScope == runtimeScope
+          (.primitive .uint64)) => scope == intrinsicsScope
       | _ => false) && !addressed.contains index
 
 /-- Indexed reference at 128 instructions. -/

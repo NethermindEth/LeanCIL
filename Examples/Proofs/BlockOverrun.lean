@@ -1,5 +1,8 @@
 import Extracted
 import CIL.Safety.FuelLemmas
+import CIL.Safety.StepComposition
+
+/-! The compiled unaligned fill faults on a nine-byte write to an eight-byte allocation. -/
 
 open CIL.Safety
 namespace ExampleProof
@@ -17,8 +20,13 @@ def callerReference : CIL.Safety.Value := .reference (.address ⟨0, 0⟩)
 def arguments : List Value := [callerReference, .scalar (.i32 0), .scalar (.i32 9)]
 def fault : LocatedFault := ⟨0, 3, .memory .outsideAllocation (.address ⟨0, 0⟩) 9⟩
 
+/-- The block call faults at pc 3 after loading its destination, byte and count. -/
 theorem witness : invoke Extracted.program 16 0 arguments callerMemory = .error fault := by
-  rfl
+  change run Extracted.program 13 0 3 arguments ⟨1, [], [], 0, []⟩
+    [.scalar (.i32 9), .scalar (.i32 0), callerReference] callerMemory = .error fault
+  apply run_fault Extracted.program_method0 Extracted.method0_instruction3
+  rw [step_call_model (link := Extracted.method0_link3) (found := Extracted.method0_model3)
+    (direct := rfl)] <;> rfl
 
 /-- No fuel choice can make a nine-byte fill succeed in the eight-byte allocation. -/
 theorem correctness (fuel : Nat) (result : Memory × List Value) :

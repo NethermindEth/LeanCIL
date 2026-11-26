@@ -61,8 +61,9 @@ theorem staticReference_literals {source target : Memory} {descriptor : CIL.Stat
 #print axioms staticReference_literals
 
 /-- Every checked dispatcher effect leaves the literal bindings as they were. -/
-theorem StepEffect.literals {body : CIL.Method} {operation : CIL.Op} {source target : Memory}
-    {frame final : Frame} (effect : StepEffect body operation frame source final target) :
+theorem StepEffect.literals {body : CIL.Method} {site : Nat} {operation : CIL.Instruction}
+    {source target : Memory}
+    {frame final : Frame} (effect : StepEffect body site operation frame source final target) :
     target.literals = source.literals := by
   cases effect with
   | arrayAllocation effect =>
@@ -94,6 +95,7 @@ theorem StepEffect.literals {body : CIL.Method} {operation : CIL.Op} {source tar
   | localHome allocated stored =>
     exact (storeLocal_literals stored).trans
       (allocateHome_setup _ _ _ _ _ .word32 allocated).literals
+  | resume => rfl
 #print axioms StepEffect.literals
 
 /-- Expiring a frame changes liveness, never the literal bindings. -/
@@ -106,30 +108,26 @@ theorem leaveFrame_literals (frame : Frame) (memory : Memory) :
   | cons identity owned induction => exact induction (expire memory identity)
 #print axioms leaveFrame_literals
 
-/-- Every successful run, including nested calls, ends with the literal bindings it began with. -/
+/-- Every run, through nested calls and caught faults, keeps the literal bindings it began with in
+    the memory it ends in and in both memories a fault leaves. -/
+theorem OutcomeTrace.literals {program : CIL.Program} {fuel method pc : Nat}
+    {arguments stack : List Value} {frame : Frame} {source : Memory}
+    {outcome : Except FaultState (Memory × List Value)}
+    (trace : OutcomeTrace program fuel method pc arguments frame stack source outcome) :
+    OutcomeHolds (fun after => after.literals = source.literals) outcome :=
+  trace.preserves
+    (fun _ _ stepped same => (step_effect _ _ _ _ _ _ _ _ stepped).literals.trans same)
+    (fun frame memory same => (leaveFrame_literals frame memory).trans same)
+    (fun entered same => (enterFrame_setup _ _ _ _ _ entered).literals.trans same) rfl
+#print axioms OutcomeTrace.literals
+
+/-- Every successful run, including nested calls and caught faults, ends with the literal
+    bindings it began with. -/
 theorem run_literals {program : CIL.Program} {fuel method pc : Nat}
     {arguments stack values : List Value} {frame : Frame} {source target : Memory}
     (success : run program fuel method pc arguments frame stack source = .ok (target, values)) :
-    target.literals = source.literals := by
-  have trace := run_success_trace _ _ _ _ _ _ _ _ _ _ success
-  clear success
-  induction trace with
-  | next step _ induction =>
-    obtain ⟨body, operation, _, _, stepped⟩ := step
-    exact induction.trans (step_effect _ _ _ _ _ _ _ _ stepped).literals
-  | returned step _ =>
-    obtain ⟨body, operation, _, _, stepped⟩ := step
-    exact (leaveFrame_literals _ _).trans (step_effect _ _ _ _ _ _ _ _ stepped).literals
-  | tailCall step _ _ _ _ entered _ _ induction =>
-    obtain ⟨body, operation, _, _, stepped⟩ := step
-    exact induction.trans ((enterFrame_setup _ _ _ _ _ entered).literals.trans
-      ((leaveFrame_literals _ _).trans (step_effect _ _ _ _ _ _ _ _ stepped).literals))
-  | call step _ entered _ _ _ childInduction induction
-  | construct step _ entered _ _ _ _ childInduction induction =>
-    obtain ⟨body, operation, _, _, stepped⟩ := step
-    exact induction.trans (childInduction.trans
-      ((enterFrame_setup _ _ _ _ _ entered).literals.trans
-        (step_effect _ _ _ _ _ _ _ _ stepped).literals))
+    target.literals = source.literals :=
+  (run_ok_trace success).literals
 #print axioms run_literals
 
 /-- A successful invocation ends with the caller's literal bindings, so an `ldstr` after a call

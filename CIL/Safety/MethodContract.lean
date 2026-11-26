@@ -20,7 +20,8 @@ A `MethodContract` states what a method needs (`pre`), which bytes of pre-existi
 may change (`footprint`, enforced by `Confined`) and what it returns (`post`). `Holds` means
 every checked invocation meeting `pre` returns normally within the footprint and satisfies
 `post`. Callers compose through `run_call_of_contract` instead of re-executing the callee,
-and `Refines` derives a weaker exported contract from a proved internal one.
+and `Refines` derives a weaker exported contract from a proved internal one. `Refuted` is a
+counterexample: an input meeting `pre` whose run settles outside the contract or never ends.
 
 The tactics at the end drive proofs: `cil_contract_steps` steps the checked interpreter
 (`CIL/Safety/Execution.lean`) through a body, and `cil_contract_call` / `cil_formed_call`
@@ -94,6 +95,19 @@ theorem Confined.ofMemoryBelow {footprint : List (Reference × Nat)} {before aft
     fun id bound offset => preserved.permissions id (old bound) offset true,
     fun id bound offset _ => preserved.permissions id (old bound) offset false,
     fun id bound offset _ => preserved.slots id (old bound) offset⟩
+
+/-- A method that uses only fresh storage during execution leaves every caller allocation,
+    byte, object slot and access permission unchanged when its frame retires. -/
+theorem Confined.frame_round_trip {body : CIL.Method} {args : List Value}
+    {before entered updated : Memory} {frame : Frame}
+    (setup : enterFrame body args before = .ok (frame, entered))
+    (preserved : MemoryBelow before.nextIdentity entered updated)
+    (grows : entered.nextIdentity ≤ updated.nextIdentity) :
+    Confined [] before (leaveFrame frame updated) := by
+  apply Confined.ofMemoryBelow (MemoryBelow.frame_round_trip setup preserved) (Nat.le_refl _)
+  rw [leaveFrame_nextIdentity]
+  exact Nat.le_trans (enterFrame_fresh _ _ _ _ _ setup).1.1 grows
+#print axioms Confined.frame_round_trip
 
 /-- A change confined to no storage keeps all memory that existed before it. -/
 theorem Confined.nil_memoryBelow {before after : Memory} (framed : Confined [] before after) :
@@ -362,20 +376,66 @@ def MethodContract.Holds {Input Output : Type} (c : MethodContract Input Output)
       (fun (final, values) =>
         Confined (c.footprint input) initial final ∧ c.Returns input initial final values)
 
-/-- A located semantic fault on an input meeting the precondition refutes the contract at
-    every fuel budget. Exhaustion alone does not refute termination. -/
-theorem MethodContract.not_holds_of_fault {Input Output : Type}
-    (contract : MethodContract Input Output) {program : CIL.Program} {method observed : Nat}
-    {input : Input} {initial : Memory} {fault : LocatedFault}
-    (permitted : contract.pre input initial) (semantic : fault.fault ≠ .fuelExhausted)
-    (failed : invoke program observed method (contract.args input) initial = .error fault) :
-    ¬ contract.Holds program method := by
-  intro holds
-  obtain ⟨fuel, ⟨final, values⟩, invoked, _⟩ := holds input initial permitted
-  exact invoke_fault_refutes_success program observed method (contract.args input) initial
-    fault semantic failed fuel (final, values) invoked
+/-- How a settled outcome of an invocation at `input` from `initial` fails `c`: any fault, or a
+    return outside the footprint or `post`. -/
+def MethodContract.Violates {Input Output : Type} (c : MethodContract Input Output)
+    (input : Input) (initial : Memory) : Except LocatedFault (Memory × List Value) → Prop
+  | .ok (final, values) =>
+    ¬ (Confined (c.footprint input) initial final ∧ c.Returns input initial final values)
+  | .error _ => True
 
-#print axioms MethodContract.not_holds_of_fault
+/-- A counterexample to `c`: an input and memory meeting `pre` from which the method settles
+    outside the contract (a definite fault or a wrong return) or never terminates. It is evidence
+    that the method violates the contract in the model. A run that reaches an operation the model
+    does not cover (`unsupported`), or that exhausts one fuel budget, is no evidence and gives
+    no `Refuted`, although it can make `¬ c.Holds` provable. -/
+def MethodContract.Refuted {Input Output : Type} (c : MethodContract Input Output)
+    (program : CIL.Program) (method : Nat) : Prop :=
+  ∃ input initial, c.pre input initial ∧
+    Counterexample program method (c.args input) initial (c.Violates input initial)
+
+/-- A refuted contract does not hold. -/
+theorem MethodContract.Refuted.not_holds {Input Output : Type}
+    {c : MethodContract Input Output} {program : CIL.Program} {method : Nat}
+    (refuted : c.Refuted program method) : ¬ c.Holds program method := by
+  intro holds
+  obtain ⟨input, initial, permitted, counter⟩ := refuted
+  obtain ⟨fuel, ⟨final, values⟩, ran, returned⟩ := holds input initial permitted
+  exact counter.violates (outcome := .ok (final, values)) trivial ran returned
+
+/-- A located definite fault on an input meeting the precondition refutes the contract. -/
+theorem MethodContract.Refuted.of_fault {Input Output : Type}
+    {c : MethodContract Input Output} {program : CIL.Program} {method observed : Nat}
+    {input : Input} {initial : Memory} {fault : LocatedFault}
+    (permitted : c.pre input initial) (definite : fault.fault.definite ≠ false)
+    (failed : invoke program observed method (c.args input) initial = .error fault) :
+    c.Refuted program method :=
+  ⟨input, initial, permitted, .inl ⟨observed, _, failed, definite, trivial⟩⟩
+
+/-- A return outside the footprint or the postcondition refutes the contract. -/
+theorem MethodContract.Refuted.of_return {Input Output : Type}
+    {c : MethodContract Input Output} {program : CIL.Program} {method fuel : Nat}
+    {input : Input} {initial final : Memory} {values : List Value}
+    (permitted : c.pre input initial)
+    (ran : invoke program fuel method (c.args input) initial = .ok (final, values))
+    (wrong : ¬ (Confined (c.footprint input) initial final ∧
+      c.Returns input initial final values)) :
+    c.Refuted program method :=
+  ⟨input, initial, permitted, .inl ⟨fuel, _, ran, trivial, wrong⟩⟩
+
+/-- A run that exhausts every fuel budget on an input meeting the precondition refutes the
+    contract, which promises a return. -/
+theorem MethodContract.Refuted.of_diverges {Input Output : Type}
+    {c : MethodContract Input Output} {program : CIL.Program} {method : Nat}
+    {input : Input} {initial : Memory} (permitted : c.pre input initial)
+    (diverges : Diverges program method (c.args input) initial) :
+    c.Refuted program method :=
+  ⟨input, initial, permitted, .inr diverges⟩
+
+#print axioms MethodContract.Refuted.not_holds
+#print axioms MethodContract.Refuted.of_fault
+#print axioms MethodContract.Refuted.of_return
+#print axioms MethodContract.Refuted.of_diverges
 
 /-- A contract is `Ensures` at each input, with the footprint as part of the postcondition. -/
 theorem MethodContract.Holds.ensures {Input Output : Type} {c : MethodContract Input Output}
@@ -452,7 +512,7 @@ theorem MethodContract.Holds.result {Input Output : Type} {c : MethodContract In
 /-- Compose a fetched call through the callee's contract instead of its body. The
     continuation receives the callee's final memory and typed output with their `CallResult`. -/
 theorem run_call_of_contract {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)
@@ -477,7 +537,7 @@ theorem run_call_of_contract {Input Output : Type} {c : MethodContract Input Out
 /-- A successful call from a well-formed memory returns a well-formed memory and keeps the static
     world and catalog agreement, whatever the callee's contract states. -/
 theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack arguments rest values : List Value}
     {frame : Frame} {memory updated final : Memory}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped :
@@ -500,7 +560,7 @@ theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : N
 /-- Compose an arbitrary checked helper postcondition with the frame and allocation evidence
     proved by its invocation. Cell preservation alone does not establish confinement. -/
 theorem WP.call_framed {program : CIL.Program} {method pc callee : Nat}
-    {body : CIL.Method} {operation : CIL.Op} {args stack arguments rest : List Value}
+    {body : CIL.Method} {operation : CIL.Instruction} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory}
     {helperPost post : (Memory × List Value) → Prop}
     (found : program[method]? = some body) (fetched : body.code[pc]? = some operation)
@@ -527,7 +587,7 @@ theorem WP.call_framed {program : CIL.Program} {method pc callee : Nat}
 /-- The `FrameInvariants` a call composed through a contract keeps, from its `CallResult` and
     the step that made the call. -/
 theorem CallResult.frame_invariants {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack rest : List Value} {frame : Frame} {memory updated final : Memory}
     {input : Input} {output : Output}
     (call : CallResult c program callee input updated final output)
@@ -543,7 +603,7 @@ theorem CallResult.frame_invariants {Input Output : Type} {c : MethodContract In
 /-- `run_call_of_contract` from a well-formed memory: the continuation also receives the
     `FrameInvariants` the call keeps from the caller's memory to the callee's final memory. -/
 theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)
@@ -767,14 +827,38 @@ def cilInvocationEvidence (type : Expr) : Bool :=
       | some (.lam _ _ body _) => invocation body
       | _ => false)
 
+open Lean Meta in
+/-- The memory an invocation fact starts from, when its type states it. -/
+def cilInvocationMemory? (type : Expr) : Option Expr :=
+  let type := type.consumeMData
+  if type.isAppOf `CIL.Safety.InvocationCertificate then type.getAppArgs[3]?
+  else if type.isAppOf ``CIL.Safety.CallResult then type.getAppArgs[type.getAppNumArgs - 3]?
+  else (type.find? (·.isAppOfArity ``CIL.Safety.invoke 5)).bind (·.getAppArgs[4]?)
+
+open Lean Meta in
+/-- Whether invocation evidence that starts from `start` can match a call stepped from `current`.
+    A call passes on the memory it steps from or a term built from it, never another variable. -/
+def cilStartsAt (current start : Expr) : MetaM Bool := do
+  let (.fvar current, .fvar start) := (current.consumeMData, start.consumeMData) | return true
+  if current == start then return true
+  return (← current.isLetVar) || (← start.isLetVar)
+
 open Lean Elab Tactic Meta in
-/-- Use supplied or local successful invocation evidence at the fetched call. -/
+/-- Use supplied or local successful invocation evidence at the fetched call. A local fact that
+    starts from another memory variable than the call is not tried, so the results of earlier
+    calls in scope cost no step each. -/
 def cilContractChild (methodFound instructionFound : Term) (facts : Array Term) : TacticM Unit := do
   let mut candidates := facts
+  let current := ((← getMainTarget).find? (·.isAppOfArity ``CIL.Safety.run 8)).bind
+    (·.getAppArgs[7]?)
   for declaration in ← getLCtx do
     unless declaration.isImplementationDetail do
       if cilInvocationEvidence declaration.type then
-        candidates := candidates.push (← Term.exprToSyntax declaration.toExpr)
+        let type ← instantiateMVars declaration.type
+        let starts ← match current, cilInvocationMemory? type with
+          | some current, some start => cilStartsAt current start
+          | _, _ => pure true
+        if starts then candidates := candidates.push (← Term.exprToSyntax declaration.toExpr)
   for candidate in candidates do
     let saved ← saveState
     try
@@ -832,14 +916,9 @@ open Lean Meta in
     `called`, `output` and `call`, or with the first suffix `_1`, `_2` that leaves all three
     unused, so one call's names share a suffix. -/
 def cilCallNames : MetaM (Ident × Ident × Ident) := do
-  let context ← getLCtx
-  let named (index : Nat) (base : String) : Name :=
-    Name.mkSimple (if index == 0 then base else s!"{base}_{index}")
-  let mut index := 0
-  while ["called", "output", "call"].any fun base => context.usesUserName (named index base) do
-    index := index + 1
-  return (mkIdent (named index "called"), mkIdent (named index "output"),
-    mkIdent (named index "call"))
+  let index := firstUnusedSuffix (← getLCtx) #["called", "output", "call"]
+  return (mkIdent (suffixedName index "called"), mkIdent (suffixedName index "output"),
+    mkIdent (suffixedName index "call"))
 
 open Lean Elab Tactic Meta in
 /-- Apply a matching contract and expose its `CallResult` to the caller continuation. -/
@@ -872,7 +951,7 @@ def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) 
         let siblings := (← getGoals).tail
         let tag ← (← getMainGoal).getTag
         evalTactic (← `(tactic| (
-          cil_strict refine CIL.Safety.run_call_of_contract $proofSyntax $inputSyntax
+          cil_strict cil_refine_by CIL.Safety.run_call_of_contract $proofSyntax $inputSyntax
             $methodFound $instructionFound
             (by cil_checked_step_normalized [$facts,*]) (by rfl) ?_ ?_)))
         for parameter in parameters do
@@ -916,19 +995,21 @@ elab_rules : tactic
     withMainContext <| evalTactic (← `(tactic|
       cil_contract_step_normalized [$[$prepared:term],*]))
   | `(tactic| cil_contract_step_normalized [$facts:term,*]) => withMainContext do
-    let (methodFound, instructionFound, operation) ←
+    -- The lookups read the supplied facts, so they run on the record of those facts.
+    let (methodFound, instructionFound, operation) ← withNormalNodes facts.getElems <|
       cilFetchedOp ``CIL.Safety.run_next_exists some 4 facts.getElems
     let currentFacts := facts.getElems ++ (← cilOutputFacts operation)
     let facts := currentFacts
-    if callsCallee operation then
+    withNormalNodes currentFacts do
+    if callsCallee operation && !(← unlinkedModelSite operation instructionFound facts) then
       let saved ← saveState
       try cilContractApply methodFound instructionFound facts
       catch _ =>
         saved.restore
         cilContractChild methodFound instructionFound facts
       return
-    if operation == ``CIL.Op.ret then
-      evalTactic (← `(tactic| cil_strict refine CIL.Safety.run_return_exists
+    if operation == ``CIL.Instruction.ret then
+      evalTactic (← `(tactic| cil_strict cil_refine_by CIL.Safety.run_return_exists
         $methodFound $instructionFound
         (by cil_checked_step_normalized [$[$facts:term],*])
         (by cil_checked_side [$[$facts:term],*]) ?_))
@@ -939,11 +1020,12 @@ elab_rules : tactic
       return
     let advance (facts : Array Term) := do
       evalTactic (← `(tactic| (
-        cil_strict refine CIL.Safety.run_next_exists (post := _)
+        cil_strict cil_refine_by CIL.Safety.run_next_exists (post := _)
           $methodFound $instructionFound
           (by cil_checked_step_normalized [$[$facts:term],*]) ?_
         cil_stack_cleanup)))
-    unless [``CIL.Op.store64, ``CIL.Op.storeScalar, ``CIL.Op.setFieldAt].contains operation do
+    unless [``CIL.Instruction.stind, ``CIL.Instruction.stobj,
+        ``CIL.Instruction.stfld].contains operation do
       advance facts
       return
     let saved ← saveState
@@ -961,13 +1043,8 @@ elab_rules : tactic
       if prepared.size == facts.size then throw error
       advance prepared
 
-/-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
-    composing calls with registered contracts or child evidence. Each composed call names its
-    final memory `called`, its typed output `output` and its `CallResult` `call`, all three
-    with the suffix `_1`, `_2` once a name is taken. Unmatched calls and the postcondition at
-    each return remain explicit goals, a callee's precondition tagged `precondition` and the
-    postcondition `postcondition`. With `CallingFields`, an output-word store can obtain its
-    write and current-memory argument facts from `ValidCall`, after trying supplied facts. -/
+/-- Contract stepping executes runtime models in the caller and composes managed calls with
+    contracts or child invocations. Unmatched calls and unproved conditions remain goals. -/
 syntax "cil_contract_steps" "[" term,* "]" : tactic
 /-- As `cil_contract_steps`, naming the first call it composes: its final memory, typed output
     and `CallResult` take the three names given. Fails when it composes no call. -/
@@ -1039,20 +1116,22 @@ elab_rules : tactic
     let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| (
       cil_contract_prepare [$[$prepared:term],*]
-      cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or the \
-        first step, did not close; pass the lookup hypothesis, feature facts or step facts"
-        cil_contract_step_normalized [$[$prepared:term],*])))
+      cil_normal_run
+        cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or \
+          the first step, did not close; pass the lookup hypothesis, feature facts or step facts"
+          cil_contract_step_normalized [$[$prepared:term],*])))
   | `(tactic| cil_contract_steps $count:num [$facts:term,*]) => do
     let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| cil_contract_prepare [$[$prepared:term],*]))
     let next ← `(tactic| cil_contract_step_normalized [$[$prepared:term],*])
-    for _ in [:count.getNat] do
-      let saved ← saveState
-      try
-        evalTactic next
-      catch _ =>
-        saved.restore
-        break
+    withNormalRun do
+      for _ in [:count.getNat] do
+        let saved ← saveState
+        try
+          evalTactic next
+        catch _ =>
+          saved.restore
+          break
   | `(tactic| cil_contract_steps [$facts:term,*] until $continuation) => do
     let prepared ← prepareStepFacts facts.getElems
     let (direct, finish) ← cilContractContinuation continuation
@@ -1060,9 +1139,10 @@ elab_rules : tactic
       | (cil_strict exact $direct)
       | (
         cil_contract_prepare [$[$prepared:term],*]
-        repeat first
-        | (cil_strict $finish)
-        | cil_contract_step_normalized [$[$prepared:term],*]))))
+        cil_normal_run
+          repeat first
+          | (cil_strict $finish)
+          | cil_contract_step_normalized [$[$prepared:term],*]))))
 
 /-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
     site: leaves the `precondition`, then the continuation over the callee's final memory,

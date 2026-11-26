@@ -8,9 +8,9 @@ internal static partial class Program
     sealed record ExtractionRequest(string Assembly, string? Identity, string Entry, string Output, string Profile,
         string[]? InitializedTypes, string[]? TypeArguments = null);
 
-    // Only immutable assembly bytes cross requests. Validation rewrites Cecil instruction operands,
+    // Only immutable assembly and PDB bytes cross requests. Validation rewrites Cecil instruction operands,
     // and symbols attach readers to modules, so every request owns fresh modules and symbol readers.
-    sealed class ExtractionBatch
+    internal sealed class ExtractionBatch
     {
         internal sealed record AssemblySnapshot(byte[] Bytes, string Hash)
         {
@@ -19,12 +19,13 @@ internal static partial class Program
             internal void ValidateSignatures()
             {
                 if (signaturesValidated) return;
-                VectorSignatures.Validate(Bytes);
+                PlatformSignatures.Validate(Bytes);
                 signaturesValidated = true;
             }
         }
         readonly Dictionary<string, AssemblySnapshot> assemblies = new(StringComparer.Ordinal);
         readonly Dictionary<string, string?> files = new(StringComparer.Ordinal);
+        readonly Dictionary<string, Symbols.PdbFile?> pdbFiles = new(StringComparer.Ordinal);
 
         internal string ExtractorHash { get; }
 
@@ -53,8 +54,20 @@ internal static partial class Program
             snapshot = new(bytes, Hash(bytes));
             assemblies.Add(path, snapshot);
             files.TryAdd(path, snapshot.Hash);
-            Track(Path.ChangeExtension(path, ".pdb"));
+            ReadPdb(Path.ChangeExtension(path, ".pdb"));
             return snapshot;
+        }
+
+        /// <summary>The PDB at <paramref name="path"/>, read and hashed once per batch; null when there is none.
+        /// </summary>
+        internal Symbols.PdbFile? ReadPdb(string path)
+        {
+            path = Path.GetFullPath(path);
+            if (pdbFiles.TryGetValue(path, out var pdb)) return pdb;
+            pdb = Symbols.PdbFile.Load(path);
+            pdbFiles.Add(path, pdb);
+            files.TryAdd(path, pdb?.Sha256);
+            return pdb;
         }
 
         internal void RequireUnchanged()
@@ -73,14 +86,15 @@ internal static partial class Program
         var requests = JsonSerializer.Deserialize<ExtractionRequest[]>(File.ReadAllBytes(args[1]),
             new JsonSerializerOptions(JsonSerializerDefaults.Web))
             ?? throw new InvalidDataException("Missing extraction batch requests.");
-        var outputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Outputs in another case are distinct only where the volume is known to tell case apart; a link never is.
+        var outputs = new HashSet<string>(global::Program.CollidingLocationComparer);
         foreach (var request in requests)
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Assembly) ||
                 string.IsNullOrWhiteSpace(request.Entry) || string.IsNullOrWhiteSpace(request.Output) ||
                 string.IsNullOrWhiteSpace(request.Profile))
                 throw new InvalidDataException("Incomplete extraction batch request.");
-            if (!outputs.Add(Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.Output))))
+            if (!outputs.Add(global::Program.ResolvedPath(request.Output)))
                 throw new InvalidDataException("Extraction batch outputs must be distinct.");
         }
         var batch = new ExtractionBatch();

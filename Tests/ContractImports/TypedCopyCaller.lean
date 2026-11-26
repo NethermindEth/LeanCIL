@@ -6,7 +6,7 @@ open CIL.Safety
 theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (fun linked => TypedImportInterface.copy.Holds linked 0) := by
   rintro linked links imported ⟨source, destination, value⟩ memory ⟨formed, readable, writable⟩
-  have found : linked[0]? = some Extracted.method0 := links.found Extracted.lookup0
+  have found : linked[0]? = some Extracted.method0 := links.found Extracted.program_method0
   have holds : TypedImportInterface.copy.Holds linked 1 := imported
   have sourceForm := access_reference_valid _ _ _ _ _ (read_access readable)
   have destinationForm := access_reference_valid _ _ _ _ _ writable

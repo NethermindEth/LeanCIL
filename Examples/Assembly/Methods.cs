@@ -22,6 +22,10 @@ internal static class Arithmetic
     public static ulong Add(ulong x, ulong y) => unchecked(x + y);
     public static ulong WrongAdd(ulong x, ulong y) => unchecked(x - y);
     public static ulong Choose(bool flag, ulong x, ulong y) => flag ? x : y;
+    // An argument tested against a SizeOf result, which the JIT folds to the size of its element.
+    public static int WordAdjusted(int value) => value < Unsafe.SizeOf<ulong>() ? value : unchecked(value + 1);
+    // A test of two literals once the SizeOf call steps, which an outline decides without a split.
+    public static int WordSized(int value) => Unsafe.SizeOf<ulong>() == 8 ? value : unchecked(value + 1);
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static ulong Increment(ulong x) => unchecked(x + 1);
     public static ulong Calls(ulong x)
@@ -72,4 +76,11 @@ internal static class Arithmetic
     public static ulong TypeCheck(ulong x) => ReferenceEquals(typeof(ulong), typeof(uint)) ? x : unchecked(x + 1);
     public static ulong Distance(ulong x, ulong y) => x < y ? y - x : x - y;
     public static int Larger(int x, int y) => x < y ? y : x;
+    public static int AtLeastFive(int x) => x < 5 ? 5 : x;
+    public static uint AtMostFive(uint x) => x > 5 ? 5 : x;
+    public static int FiveToOne(int x)
+    {
+        if (x == 5) return 1;
+        return x;
+    }
 }

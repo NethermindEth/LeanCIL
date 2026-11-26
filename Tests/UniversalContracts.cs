@@ -2,7 +2,12 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
-#:include ../scripts/BatchVerification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
+#:include ContractVariants.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -18,16 +23,8 @@ var contracts = new[]
     ("GenericMethods", "Identity64", "GenericMethods::Identity64(ulong)", "GenericIdentity"),
     ("Arithmetic", "Struct", "Arithmetic::Struct(ulong)", "Struct")
 };
-var positives = new GeneratedQueue(verification, assembly);
-foreach (var (_, name, selector, proofName) in contracts)
-    positives.Add(new(selector, At($"Examples/Proofs/{proofName}.lean"), Path.Combine(root, name)),
-        () => Console.WriteLine($"PASS universal {name}: arbitrary inputs and caller memory with preservation"));
-positives.Flush();
-
 foreach (var (owner, name, selector, proofName) in contracts)
 {
-    var proof = At($"Examples/Proofs/{proofName}.lean");
-
     var wrong = Path.Combine(root, "Wrong" + name);
     Directory.CreateDirectory(wrong);
     var dll = Path.Combine(wrong, "Examples.dll");
@@ -60,19 +57,61 @@ foreach (var (owner, name, selector, proofName) in contracts)
     if ((ulong)runtime.Invoke(null, inputs)! == ulong.MaxValue)
         throw new InvalidOperationException("Mutation did not change the result: " + name);
 
-    // Extraction must succeed: the unchanged contract must reject supported, incorrect CIL.
-    Run(Extract("extract", dll, "Examples", selector, wrong));
-    File.WriteAllText(Path.Combine(wrong, "verified.json"), "stale report");
-    var rejected = false;
-    try
-    {
-        verification.Verify(dll, "Examples", selector, proof, wrong, existingArtifacts: true);
-    }
-    catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-    {
-        rejected = true;
-    }
-    if (!rejected || File.Exists(Path.Combine(wrong, "verified.json")))
-        throw new InvalidOperationException("Incorrect implementation accepted: " + name);
-    Console.WriteLine($"PASS unchanged universal {name} contract rejects incorrect compiled CIL");
+    VerifyVariant(name, selector, proofName, dll, wrong);
+    Console.WriteLine($"PASS universal {name} contract refuted for incorrect compiled CIL at the runtime witness");
 }
+
+// The named contract each positive example proves as `holds`, and a refutation of it at the input on which the
+// mutant returns another value.
+static (string Contract, string Proof) Refutation(string name)
+{
+    const string maximum = "18446744073709551615";
+    var (contract, witness, arguments, violation, permitted) = name switch
+    {
+        "Choose" => ("chooseContract", $"(true, {maximum}, 0)",
+            $"[.scalar (.i32 1), .scalar (.i64 {maximum}), .scalar (.i64 0)]", "-, out, rfl, -, wrong", "trivial"),
+        "Identity64" => ("identityContract", maximum, $"[.scalar (.i64 {maximum})]", "-, out, rfl, -, wrong",
+            "trivial"),
+        _ => ("structContract", maximum, $"[.scalar (.i64 {maximum})]", "-, out, rfl, wrong, -",
+            "Memory.empty_wellFormed")
+    };
+    return (contract, $$"""
+        /-- The mutant returns a different value at the runtime witness. -/
+        theorem correctness : {{contract}}.Refuted Extracted.program 0 :=
+          .of_return (input := {{witness}}) (initial := Memory.empty) {{permitted}}
+            (rfl : invoke Extracted.program 64 0 {{arguments}} Memory.empty = .ok _)
+            (by rintro ⟨{{violation}}⟩; revert wrong; decide)
+        """);
+}
+
+void VerifyVariant(string name, string selector, string proofName, string wrongAssembly, string wrong)
+{
+    var (contract, refutation) = Refutation(name);
+    verification.VerifyExampleRefutations(assembly, "Examples", selector, At($"Examples/Proofs/{proofName}.lean"),
+        contract, Path.Combine(root, name), [new(wrongAssembly, selector, wrong, refutation)]);
+}
+
+// Narrowing Choose's contract to empty memory leaves its proof valid but changes the statement it proves, so the
+// unchanged refutation, which refutes the shipped contract, no longer matches it and is rejected.
+const string chooseSelector = "Arithmetic::Choose(bool,ulong,ulong)";
+const string everyMemory = "  pre _ _ := True\n";
+var chooseExample = At("Examples/Proofs/Choose.lean");
+var chooseSource = File.ReadAllText(chooseExample).ReplaceLineEndings("\n");
+if (chooseSource.Split(everyMemory).Length != 2)
+    throw new InvalidDataException("Ambiguous contract mutation: " + everyMemory);
+var narrowedOutput = Path.Combine(root, "NarrowedChoose");
+Directory.CreateDirectory(narrowedOutput);
+var narrowedExample = Path.Combine(narrowedOutput, "Choose.lean");
+File.WriteAllText(narrowedExample, chooseSource.Replace(everyMemory, "  pre _ memory := memory = Memory.empty\n"));
+var narrowed = verification.ExampleStatement(assembly, "Examples", chooseSelector, narrowedExample, narrowedOutput);
+var staleOutput = Path.Combine(root, "WrongChooseNarrowed");
+Directory.CreateDirectory(staleOutput);
+var (chooseContract, chooseRefutation) = Refutation("Choose");
+var stale = new Program.ContractCounterexample(Path.Combine(root, "WrongChoose", "Examples.dll"), chooseSelector,
+    staleOutput, chooseRefutation);
+var rejected = false;
+try { verification.VerifyExampleRefutation(chooseExample, chooseContract, stale, "Examples", narrowed); }
+catch (Program.StatementMismatchException) { rejected = true; }
+if (!rejected || File.Exists(Path.Combine(staleOutput, "verified.json")))
+    throw new InvalidOperationException("A refutation of the shipped Choose contract matched a narrowed contract.");
+Console.WriteLine("PASS a changed positive contract rejects the refutation of the contract it replaced");

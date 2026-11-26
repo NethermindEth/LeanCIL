@@ -1,8 +1,24 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:property AssemblyName=LeanCIL.IdentityTests
+#:project ../Extractor/Extractor.csproj
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
+#:package Mono.Cecil
 
+extern alias IdentityExtractor;
+
+using System.Diagnostics;
 using System.Text.Json;
+using Mono.Cecil;
+using Mono.Cecil.Cil;
+
+CheckContractSpineScaling();
+if (args is ["--spine-only"]) return;
 
 // One fixture project builds every case of `First` from its FixtureCase property; `Second` is a prebuilt
 // assembly from another project, so selection by project directory has something to leave out.
@@ -15,7 +31,7 @@ foreach (var path in new[] { package, fixture, second }) Directory.CreateDirecto
 File.WriteAllText(Path.Combine(fixture, "Gates.csproj"), """
     <Project Sdk="Microsoft.NET.Sdk">
       <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
+        <TargetFramework>net11.0</TargetFramework>
         <Optimize>true</Optimize>
         <DefineConstants>$(DefineConstants);$(FixtureCase)</DefineConstants>
       </PropertyGroup>
@@ -41,7 +57,7 @@ File.WriteAllText(Path.Combine(fixture, "First.cs"), """
     """);
 File.WriteAllText(Path.Combine(second, "Second.csproj"), """
     <Project Sdk="Microsoft.NET.Sdk">
-      <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+      <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
     </Project>
     """);
 File.WriteAllText(Path.Combine(second, "Second.cs"),
@@ -72,13 +88,23 @@ const string PastEnd = """
 string Correctness(string name, string support, string operation, string prefix = "", string tactic = "") => $$"""
     import Extracted
     import CIL.Safety.SymbolicExecution
+    import CIL.Safety.MethodContract
     import {{support}}Support
     open CIL.Safety
     {{prefix}}
-    /-- The extracted method computes wrapping arithmetic in arbitrary caller memory. -/
-    theorem {{name}}.correctness (left right : CIL.W64) (memory : Memory) :
-        ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 left), .scalar (.i64 right)]
-          memory = .ok (memory, [.scalar (.i64 (left {{operation}} right))]) := by
+    /-- The extracted method returns wrapping arithmetic of its arguments and keeps caller memory. -/
+    def {{name}}.contract : MethodContract (CIL.W64 × CIL.W64) where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      pre _ _ := True
+      footprint _ := []
+      post input initial final values :=
+        final = initial ∧ values = [.scalar (.i64 (input.1 {{operation}} input.2))]
+    /-- The extracted method meets its contract in arbitrary caller memory. -/
+    theorem {{name}}.correctness : {{name}}.contract.Holds Extracted.program 0 := by
+      rintro ⟨left, right⟩ memory -
+      refine MethodContract.Holds.intro (c := {{name}}.contract) (input := (left, right)) memory
+        [.scalar (.i64 (left {{operation}} right))] ?_ (Confined.refl _ memory) ⟨rfl, rfl⟩
+      dsimp only [{{name}}.contract]
       {{tactic}}cil_checked_steps []
       all_goals simp only [BitVec.add_comm]
     #print axioms {{name}}.correctness
@@ -106,29 +132,47 @@ File.WriteAllText(Path.Combine(package, "Trivial.lean"), """
     #print axioms Trivial.holds
 
     """);
-// Weaker.lean adds a premise to production's statement, so the kernel must not accept it as production's.
+// Weaker.lean strengthens production's precondition, so the kernel must not accept it as production's.
 File.WriteAllText(Path.Combine(package, "Weaker.lean"), Correctness("Weaker", "First", "+")
-    .Replace("(memory : Memory) :", "(memory : Memory) (_small : left = 0) :"));
+    .Replace("pre _ _ := True", "pre input _ := input.1 = 0"));
+// Raw.lean states the run itself, which names no contract, so no variant of its gate can be rejected.
+File.WriteAllText(Path.Combine(package, "Raw.lean"), """
+    import Extracted
+    import CIL.Safety.SymbolicExecution
+    open CIL.Safety
+    /-- The extracted method computes the wrapping sum in arbitrary caller memory. -/
+    theorem Raw.correctness (left right : CIL.W64) (memory : Memory) :
+        ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 left), .scalar (.i64 right)]
+          memory = .ok (memory, [.scalar (.i64 (left + right))]) := by
+      cil_checked_steps []
+    #print axioms Raw.correctness
+
+    """);
 // Definitional.lean names production's `0` through a definition, which the kernel unfolds.
 File.WriteAllText(Path.Combine(package, "Definitional.lean"), """
     import Extracted
     import CIL.Safety.SymbolicExecution
+    import CIL.Safety.MethodContract
     import FirstSupport
     open CIL.Safety
     /-- The entry method's index. -/
     def Definitional.entry : Nat := 0
-    /-- Production's statement, proved directly. -/
-    theorem Definitional.original (left right : CIL.W64) (memory : Memory) :
-        ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 left), .scalar (.i64 right)]
-          memory = .ok (memory, [.scalar (.i64 (left + right))]) := by
+    /-- Production's contract, declared again. -/
+    def Definitional.contract : MethodContract (CIL.W64 × CIL.W64) where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      pre _ _ := True
+      footprint _ := []
+      post input initial final values :=
+        final = initial ∧ values = [.scalar (.i64 (input.1 + input.2))]
+    /-- Production's statement with the entry index named by `Definitional.entry`. -/
+    theorem Definitional.correctness :
+        Definitional.contract.Holds Extracted.program Definitional.entry := by
+      rintro ⟨left, right⟩ memory -
+      refine MethodContract.Holds.intro (c := Definitional.contract) (input := (left, right)) memory
+        [.scalar (.i64 (left + right))] ?_ (Confined.refl _ memory) ⟨rfl, rfl⟩
+      dsimp only [Definitional.contract, Definitional.entry]
       cil_checked_steps []
       all_goals simp only [BitVec.add_comm]
-    /-- Production's statement with the entry index named by `Definitional.entry`. -/
-    theorem Definitional.correctness (left right : CIL.W64) (memory : Memory) :
-        ∃ fuel, invoke Extracted.program fuel Definitional.entry
-          [.scalar (.i64 left), .scalar (.i64 right)]
-          memory = .ok (memory, [.scalar (.i64 (left + right))]) :=
-      Definitional.original left right memory
     #print axioms Definitional.correctness
 
     """);
@@ -144,23 +188,32 @@ File.WriteAllText(Path.Combine(directory, "plain.json"), """
     """);
 // A recorded witness gives inputs whose wrong result differs from the wrapping sum.
 var template = Path.Combine(package, "Refutation.lean.in");
-File.WriteAllText(template, """
+string Witness(string name, string statement, string proof, string operation = "+") => $$"""
     import Extracted
     import CIL.Safety.MethodContract
     open CIL.Safety
-    /-- The witness inputs make the extracted method return other than their wrapping sum. -/
-    theorem FixtureWitness.refuted : ¬ ∀ (left right : CIL.W64) (memory : Memory),
-        ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 left), .scalar (.i64 right)]
-          memory = .ok (memory, [.scalar (.i64 (left + right))]) := by
-      intro holds
-      obtain ⟨fuel, ran⟩ := holds @LEFT@ @RIGHT@ Memory.empty
-      have returned := congrArg Prod.snd (invoke_ok_unique ran (rfl : invoke Extracted.program 16 0
-        [.scalar (.i64 @LEFT@), .scalar (.i64 @RIGHT@)] Memory.empty = .ok _))
-      revert returned
-      decide
-    #print axioms FixtureWitness.refuted
+    /-- Production's contract, declared again. -/
+    def {{name}}.contract : MethodContract (CIL.W64 × CIL.W64) where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      pre _ _ := True
+      footprint _ := []
+      post input initial final values :=
+        final = initial ∧ values = [.scalar (.i64 (input.1 {{operation}} input.2))]
+    /-- The witness inputs make the extracted method return other than the contract's result. -/
+    theorem {{name}}.refuted : {{statement}} :=
+      {{proof}}.of_return (input := (@LEFT@, @RIGHT@)) (initial := Memory.empty) trivial
+        (rfl : invoke Extracted.program 16 0 [.scalar (.i64 @LEFT@), .scalar (.i64 @RIGHT@)] Memory.empty = .ok _)
+        (by rintro ⟨-, out, rfl, -, wrong⟩; revert wrong; decide)
+    #print axioms {{name}}.refuted
 
-    """);
+    """;
+File.WriteAllText(template, Witness("FixtureWitness", "FixtureWitness.contract.Refuted Extracted.program 0", ""));
+// Unrelated.lean.in refutes a contract other than production's: the wrapping product, which XOR also misses.
+File.WriteAllText(Path.Combine(package, "Unrelated.lean.in"),
+    Witness("Unrelated", "Unrelated.contract.Refuted Extracted.program 0", "", "*"));
+// Negated.lean.in states the negation of production's contract, which a run the model does not cover can prove.
+File.WriteAllText(Path.Combine(package, "Negated.lean.in"), Witness("Negated",
+    "¬ Negated.contract.Holds Extracted.program 0", "MethodContract.Refuted.not_holds <| MethodContract.Refuted"));
 var witnesses = new Dictionary<string, (ulong Left, ulong Right)>
 {
     ["WrongXor"] = (1, 1), ["WrongSub"] = (0, 1), ["Agreeing"] = (0, 0)
@@ -216,7 +269,8 @@ void Manifest(bool controls, params object[] extra)
             new { name = "production-verifies", build = Build("Reordered"), profiles = scalar, expect = "rejected",
                 refutation = Trivial },
             new { name = "unrelated-refutation", build = Build("WrongXor"), profiles = scalar, expect = "rejected",
-                refutation = Trivial },
+                refutation = new { template = "Unrelated.lean.in", theorem = "Unrelated.refuted",
+                    values = new Dictionary<string, string> { ["LEFT"] = "1", ["RIGHT"] = "1" } } },
             new { name = "weaker-statement", build = Build("Baseline"), profiles = scalar, expect = "certifies",
                 proof = "Weaker.lean", theorem = "Weaker.correctness" },
             new { name = "program-differs", build = Build("WrongXor"), profiles = scalar, expect = "certifies",
@@ -235,7 +289,10 @@ void Manifest(bool controls, params object[] extra)
             new { name = "extraction-fails", build = Build("Absent"), profiles = scalar, expect = "rejected",
                 refutation = Refute("WrongXor") },
             new { name = "internal-error", build = Build("WrongXor"), profiles = scalar, expect = "rejected",
-                proof = "Panicking.lean", theorem = "Panicking.correctness", refutation = Refute("WrongXor") }
+                proof = "Panicking.lean", theorem = "Panicking.correctness", refutation = Refute("WrongXor") },
+            new { name = "negated-refutation", build = Build("WrongXor"), profiles = scalar, expect = "rejected",
+                refutation = new { template = "Negated.lean.in", theorem = "Negated.refuted",
+                    values = new Dictionary<string, string> { ["LEFT"] = "1", ["RIGHT"] = "1" } } }
         ]);
     File.WriteAllText(manifest, JsonSerializer.Serialize(new
     {
@@ -263,7 +320,16 @@ void Manifest(bool controls, params object[] extra)
             new { name = "second", assembly = "Second/output/Second.dll", method = "Methods::Second(ulong,ulong)",
                 profiles = new[] { "scalar", "x64-v3", "plain" }, proof = "Second.lean",
                 theorem = "Second.correctness" }
-        }
+        }.Concat(controls ? new object[]
+        {
+            new { name = "raw-first", build = new { project = "fixture" }, method = "Methods::First(ulong,ulong)",
+                profiles = scalar, proof = "Raw.lean", theorem = "Raw.correctness",
+                variants = new object[]
+                {
+                    new { name = "raw-rejected", build = Build("WrongXor"), expect = "rejected",
+                        program = "different", refutation = Refute("WrongXor") }
+                } }
+        } : []).ToArray()
     }));
 }
 JsonElement[] Gates(int expectedCode, params string[] options)
@@ -342,7 +408,7 @@ foreach (var (variant, profile, witness) in
 {
     var generated = File.ReadAllText(Path.Combine(package, "Generated", "first", profile, variant, "Refutation.lean"));
     Expect(!generated.Contains('@') && !generated.Contains('\r') &&
-        generated.Contains($"holds {witnesses[witness].Left} {witnesses[witness].Right} Memory.empty"),
+        generated.Contains($"(input := ({witnesses[witness].Left}, {witnesses[witness].Right}))"),
         "A template was not instantiated with its witness: " + variant);
 }
 
@@ -419,10 +485,12 @@ Failed("production-verifies", "A proof that verifies counted as a rejection", ro
     row.GetProperty("refutation").GetProperty("status").GetString() == "verified" &&
     StatementStatus(row) == "different");
 // The refutation and the rejection both hold, so only the statement comparison fails these rows.
-Failed("unrelated-refutation", "A refutation of an unrelated statement counted as a rejection", row =>
+// A genuine counterexample to another contract verifies and still fails the gate at statement identity.
+Failed("unrelated-refutation", "A refutation of another contract counted as a rejection", row =>
     Text(row, "stage") == "statement identity" && StatementStatus(row) == "different" &&
-    Text(row, "error")!.Contains("does not state the negation", StringComparison.Ordinal) &&
-    row.GetProperty("statement").GetProperty("variant").GetString()!.StartsWith("Trivial.holds : True"));
+    row.GetProperty("refutation").GetProperty("status").GetString() == "verified" &&
+    Text(row, "error")!.Contains("does not state the counterexample predicate", StringComparison.Ordinal) &&
+    row.GetProperty("statement").GetProperty("variant").GetString()!.StartsWith("Unrelated.refuted : "));
 Failed("weaker-statement", "A weaker own statement certified the variant", row =>
     Text(row, "stage") == "statement identity" && StatementStatus(row) == "different" &&
     !File.Exists(Path.Combine(Text(row, "output")!, "verified.json")));
@@ -444,6 +512,17 @@ Failed("extraction-fails", "A failed extraction counted as a rejection", row =>
     Text(row, "stage") == "extraction" && Text(row, "build") == "built" && Text(row, "extraction") == "failed");
 Failed("internal-error", "A proof that panics counted as a rejection", row =>
     Text(row, "error")!.Contains("Lean reported an internal error", StringComparison.Ordinal));
+// A negated contract follows from a run the model does not cover, so the audit refuses it as a refutation.
+Failed("negated-refutation", "A negated contract counted as a refutation", row =>
+    row.GetProperty("refutation").GetProperty("status").GetString() == "failed" &&
+    row.GetProperty("refutation").GetProperty("error").GetString()!.Contains(
+        "which a run the model does not cover can prove", StringComparison.Ordinal));
+// A statement of the run itself names no contract, so it has no counterexample predicate to refute.
+var raw = Row(controls, "raw-rejected", gate: "raw-first");
+Expect(Text(Row(controls, "production", gate: "raw-first"), "status") == "verified" &&
+    Text(raw, "status") == "failed" && Text(raw, "stage") == "statement identity" &&
+    Text(raw, "error")!.Contains("does not state a contract's Holds", StringComparison.Ordinal),
+    "A rejected variant of a gate that states no contract passed or was misreported", raw);
 NoRejectedCertificates(controls);
 
 // A profile the gate does not list is a manifest error, before anything is built.
@@ -470,3 +549,209 @@ Manifest(false);
 Edit("\"plain\":\"@plain.json\"", "\"scalar\":\"@plain.json\"");
 Invalid("A named profile shadowed a built-in profile", "Profile scalar has the name of a built-in profile.");
 Console.WriteLine("PASS build, extraction, program, template, proof and internal failures never count as rejections");
+
+var examples = At("Examples/Assembly/bin/Examples.dll");
+var secondAssembly = Path.Combine(second, "output", "Second.dll");
+void Mutate(string source, string type, string method, string name, Action<MethodDefinition> mutate)
+{
+    var variant = Path.Combine(directory, "Variants", name);
+    Directory.CreateDirectory(variant);
+    using var module = ModuleDefinition.ReadModule(source);
+    mutate(module.GetType(type).Methods.Single(candidate => candidate.Name == method));
+    module.Write(Path.Combine(variant, Path.GetFileName(source)));
+}
+// An unchanged Second certifies, and an addition in place of its subtraction is refuted at a witness.
+Mutate(secondAssembly, "Methods", "Second", "wrong-add", subtraction => subtraction.Body.Instructions
+    .Single(instruction => instruction.OpCode == OpCodes.Sub).OpCode = OpCodes.Add);
+File.WriteAllText(Path.Combine(package, "SecondRefutation.lean.in"),
+    Witness("SecondWitness", "SecondWitness.contract.Refuted Extracted.program 0", "", "-"));
+// Rent binds its exhausted throw to CoreLib rows, which program comparison and both proofs read. A changed message
+// keeps the null-pool contract; a null-pool return refutes it.
+void MutateRent(string name, Action<MethodDefinition> mutate) =>
+    Mutate(examples, "Examples.ItemPool", "Rent", name, mutate);
+MutateRent("message", rent => rent.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldstr)
+    .Operand = "Every item is rented.");
+MutateRent("null-returns", rent =>
+{
+    var code = rent.Body.GetILProcessor();
+    var first = rent.Body.Instructions[0];
+    code.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_0));
+    code.InsertBefore(first, Instruction.Create(OpCodes.Brtrue, first));
+    code.InsertBefore(first, Instruction.Create(OpCodes.Ldnull));
+    code.InsertBefore(first, Instruction.Create(OpCodes.Ret));
+});
+const string NullPoolContract = """
+    /-- Renting from a null pool raises `NullReferenceException` from any well-formed memory. -/
+    def NAME.contract : OutcomeContract Unit where
+      args _ := [.object .null]
+      pre _ memory := memory.WellFormed
+      footprint _ := []
+      post _ _ _ _ := True
+      raises _ _ := some .nullReference
+    """;
+File.WriteAllText(Path.Combine(package, "Rent.lean"), $$"""
+    import Extracted
+    import CIL.MethodIdentity
+    import CIL.Safety.SymbolicExecution
+    import CIL.Safety.HeapObjectFacts
+    import CIL.Safety.ObjectFields
+    import CIL.Safety.ClassCatalog
+    import CIL.Safety.LoopScaffold
+    import CIL.Safety.Forwarders
+    import CIL.Safety.OutcomeContract
+    /-! `ItemPool.Rent()` on a null pool, stated as an outcome contract. -/
+    open CIL.Safety
+    namespace RentGate
+    bind_method rent rentBody := "Examples.PooledItem Examples.ItemPool::Rent()"
+    bind_entry entry (memory : Memory) (pool : ManagedReference) (wellFormed : memory.WellFormed) :=
+      rentBody with [.object pool] from memory allocating wellFormed
+    end RentGate
+    {{NullPoolContract.Replace("NAME", "RentGate", StringComparison.Ordinal)}}
+    /-- The first field load faults on the null pool. -/
+    theorem RentGate.correctness : RentGate.contract.Holds Extracted.program 0 := by
+      intro _ memory wellFormed
+      obtain ⟨home, entered, enter⟩ := RentGate.entry.checked memory .null wellFormed
+      show Raises Extracted.program RentGate.rent [.object .null] memory .nullReference
+      have ran : ∃ fuel, invoke Extracted.program fuel RentGate.rent [.object .null] memory =
+          .error ⟨RentGate.rent, 1, .thrown .nullReference⟩ := by
+        cil_checked_steps [enter.setup]
+      obtain ⟨fuel, ran⟩ := ran
+      exact ⟨fuel, _, ran, rfl⟩
+    #print axioms RentGate.correctness
+
+    """);
+File.WriteAllText(Path.Combine(package, "RentWitness.lean"), $$"""
+    import Extracted
+    import CIL.Safety.OutcomeContract
+    /-! A null pool that `ItemPool.Rent()` answers with null instead of raising. -/
+    open CIL.Safety
+    {{NullPoolContract.Replace("NAME", "RentWitness", StringComparison.Ordinal)}}
+    /-- From empty memory the method returns null for a null pool instead of raising. -/
+    theorem RentWitness.refuted : RentWitness.contract.Refuted Extracted.program 0 :=
+      .of_return (input := ()) (initial := Memory.empty) Memory.empty_wellFormed
+        (rfl : invoke Extracted.program 16 0 [.object .null] Memory.empty = .ok _) trivial
+    #print axioms RentWitness.refuted
+
+    """);
+var variantManifest = Path.Combine(directory, "variants.json");
+var variantResults = Path.Combine(directory, "variants-results.json");
+File.WriteAllText(variantManifest, JsonSerializer.Serialize(new
+{
+    schema = 1, proofRoot = "Package", outputRoot = "VariantOutputs", generatedRoot = "VariantGenerated",
+    gates = new object[] { new
+    {
+        name = "rent", assembly = examples, method = "ItemPool::Rent()", profiles = scalar, proof = "Rent.lean",
+        theorem = "RentGate.correctness",
+        variants = new object[]
+        {
+            new { name = "message", assembly = "Variants/message/Examples.dll", expect = "certifies",
+                program = "different" },
+            new { name = "null-returns", assembly = "Variants/null-returns/Examples.dll", expect = "rejected",
+                program = "different",
+                refutation = new { proof = "RentWitness.lean", theorem = "RentWitness.refuted" } }
+        }
+    }, new
+    {
+        name = "second", assembly = secondAssembly, method = "Methods::Second(ulong,ulong)", profiles = scalar,
+        proof = "Second.lean", theorem = "Second.correctness",
+        variants = new object[]
+        {
+            new { name = "identical", assembly = secondAssembly, expect = "certifies", program = "same" },
+            new { name = "wrong-add", assembly = "Variants/wrong-add/Second.dll", expect = "rejected",
+                program = "different", refutation = new { template = "SecondRefutation.lean.in",
+                    theorem = "SecondWitness.refuted",
+                    values = new Dictionary<string, string> { ["LEFT"] = "0", ["RIGHT"] = "1" } } }
+        }
+    } }
+}));
+var variantRun = Execute([.. cli, "gates", variantManifest, "--results", variantResults]);
+Expect(variantRun.Code == 0, "The bound Rent or Second gate failed:\n" + variantRun.Output);
+var variantRows = JsonDocument.Parse(File.ReadAllText(variantResults)).RootElement.GetProperty("rows").EnumerateArray()
+    .ToArray();
+var (rentMessage, rentReturn) =
+    (Row(variantRows, "message", gate: "rent"), Row(variantRows, "null-returns", gate: "rent"));
+Expect(variantRows.Length == 6 && Text(Row(variantRows, "production", gate: "rent"), "status") == "verified" &&
+    Text(Row(variantRows, "production", gate: "second"), "status") == "verified",
+    "The bound Rent or Second production proof did not verify:\n" + variantRun.Output);
+var (secondSame, secondAdd) =
+    (Row(variantRows, "identical", gate: "second"), Row(variantRows, "wrong-add", gate: "second"));
+Expect(Text(secondSame, "status") == "verified" && Text(secondSame, "program") == "passed" &&
+    StatementStatus(secondSame) == "same", "An unchanged Second did not certify", secondSame);
+Expect(Text(secondAdd, "status") == "rejected" && Text(secondAdd, "program") == "passed" &&
+    secondAdd.GetProperty("refutation").GetProperty("status").GetString() == "verified" &&
+    StatementStatus(secondAdd) == "same", "An addition in place of Second's subtraction was not refuted", secondAdd);
+Expect(Text(rentMessage, "status") == "verified" && Text(rentMessage, "program") == "passed" &&
+    StatementStatus(rentMessage) == "same", "A changed message did not certify bound Rent", rentMessage);
+Expect(Text(rentReturn, "status") == "rejected" && Text(rentReturn, "program") == "passed" &&
+    rentReturn.GetProperty("refutation").GetProperty("status").GetString() == "verified" &&
+    StatementStatus(rentReturn) == "same", "A null-pool return was not refuted in the kernel", rentReturn);
+NoRejectedCertificates(variantRows);
+Console.WriteLine("PASS a bound Rent compares its CoreLib rows, certifies a new message and refutes a null return");
+Console.WriteLine("PASS an unchanged Second certifies and an addition in place of its subtraction is refuted");
+
+static void CheckContractSpineScaling()
+{
+    const int shortSpine = 2_000;
+    const int longSpine = 32_000;
+    const double maximumGrowth = 2.0 * longSpine / shortSpine;
+    var shortTerm = Statement(shortSpine);
+    var longTerm = Statement(longSpine);
+    var warmup = Stopwatch.StartNew();
+    do
+    {
+        Walk(shortTerm);
+        Walk(longTerm);
+    } while (warmup.ElapsedMilliseconds < 250);
+
+    var shorter = Measure(shortTerm);
+    var longer = Measure(longTerm);
+    var growth = longer / shorter;
+    var timing = $"""{shortSpine}: {shorter:F3} ms, {longSpine}: {longer:F3} ms, growth {growth:F1}x""";
+    if (growth >= maximumGrowth)
+        throw new InvalidOperationException($"""Contract spine walk exceeded its {maximumGrowth}x limit: {timing}""");
+    Console.WriteLine($"""PASS contract spine walk: {timing}""");
+
+    static JsonElement Statement(int applications)
+    {
+        object[][] nodes = new object[applications + 2][];
+        string[] module = ["CIL", "Safety", "MethodContract"];
+        string[] name = [.. module, "Holds"];
+        nodes[0] = ["const", module, name, Array.Empty<string>()];
+        nodes[1] = ["nat", 0];
+        int root = 0;
+        for (int index = 2; index < nodes.Length; index++)
+        {
+            nodes[index] = ["app", root, 1];
+            root = index;
+        }
+        return JsonSerializer.SerializeToElement(new { levelParams = Array.Empty<string>(), nodes, root });
+    }
+
+    static double Measure(JsonElement term)
+    {
+        const int samples = 5;
+        var minimumSampleTime = TimeSpan.FromMilliseconds(20);
+        var times = new double[samples];
+        for (int sample = 0; sample < samples; sample++)
+        {
+            long start = Stopwatch.GetTimestamp();
+            int walks = 0;
+            TimeSpan elapsed;
+            do
+            {
+                Walk(term);
+                walks++;
+                elapsed = Stopwatch.GetElapsedTime(start);
+            } while (elapsed < minimumSampleTime);
+            times[sample] = elapsed.TotalMilliseconds / walks;
+        }
+        Array.Sort(times);
+        return times[samples / 2];
+    }
+
+    static void Walk(JsonElement term)
+    {
+        if (!IdentityExtractor::Program.StatesContract(term))
+            throw new InvalidOperationException("Contract spine did not resolve to MethodContract.Holds");
+    }
+}

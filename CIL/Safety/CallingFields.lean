@@ -98,18 +98,19 @@ theorem ValidCall.store_word {memory : Memory} {inputs outputs : List ArgumentVi
     the read are checked; no input/output separation is assumed. -/
 theorem ValidCall.input_word_step {memory : Memory} {inputs outputs : List ArgumentView}
     (call : ValidCall memory inputs outputs) (input : ArgumentView) (member : input ∈ inputs)
-    (index : Fin (input.width / 8))
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.fieldAt (8 * index.val) 8 false) pc args frame
+    (index : Fin (input.width / 8)) (body : CIL.Method) (operand : Extraction.FieldRef)
+    (shape : body.fieldShape operand = .value (8 * index.val) 8 false)
+    (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.ldfld operand) pc args frame
       (.reference (.address input.reference) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i64 (input.word memory (8 * index.val))) :: rest)
         frame memory) := by
   have length : (input.bytes memory).length = input.width := by simp [ArgumentView.bytes]
   have loaded := call.input_snapshot input member
   rw [← length] at loaded
-  exact step_fieldAt_home (field := { offset := 8 * index.val, width := 8 })
+  exact step_ldfld_unsigned_home (field := { offset := 8 * index.val, width := 8 })
     call.wellFormed loaded (by have := index.isLt; simp only [length]; omega)
-    (show ScalarWidth 8 by decide) body pc args frame rest
+    (show ScalarWidth 8 by decide) body operand shape pc args frame rest
 
 #print axioms ValidCall.input_word_step
 

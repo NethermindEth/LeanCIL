@@ -34,12 +34,13 @@ def entryEvidenceFields (proof type : Expr) : MetaM (Array (Name × Expr × Expr
     let selected ← mkAppM (name ++ field) #[proof]
     return (field, selected, (← instantiateMVars (← inferType selected)).consumeMData)
 
-/-- Heads of the equations the loop tactics take from the context: checked steps, local and
-    memory loads and stores, span element, slice, validity, width and mode checks, array validity,
-    formed references and `Unsafe.Add` results. -/
+/-- Heads of the equations the loop tactics take from the context: checked steps, local, memory
+    and static field loads and stores, span element, slice, validity, width and mode checks, array
+    validity, formed references and `Unsafe.Add` results. -/
 def loopFactHeads : List Lean.Name :=
   [``CIL.Safety.step, ``CIL.Safety.instruction, ``CIL.Safety.memoryInstruction,
-    ``CIL.Safety.staticInstruction, ``CIL.Safety.loadLocal, ``CIL.Safety.storeLocal,
+    ``CIL.Safety.staticInstruction, ``CIL.Safety.staticLoad, ``CIL.Safety.staticAddress,
+    ``CIL.Safety.loadLocal, ``CIL.Safety.storeLocal,
     ``CIL.Safety.loadValue, ``CIL.Safety.loadSlot, ``CIL.Safety.storeValue,
     ``CIL.Safety.SpanView.element,
     ``CIL.Safety.SpanView.slice, ``CIL.Safety.SpanView.validate, ``CIL.Safety.SpanView.width,
@@ -221,8 +222,7 @@ def assertLoopFact (base : Name) (fact : Term) (known : Array Expr) :
       saved.restore
       return none
     let name ← mkFreshUserName base
-    let (_, goal) ← (← (← getMainGoal).assert name type proof).intro1P
-    replaceMainGoal [goal]
+    replaceMainGoal [(← addFact (← getMainGoal) name type proof).2]
     return some (mkIdent name, type)
   catch _ =>
     saved.restore
@@ -243,7 +243,7 @@ def readsArguments (program : Expr) : MetaM Bool := do
     seen := seen.insert name
     let some value := ((← getEnv).find? name).bind (·.value?) | continue
     for used in value.getUsedConstants do
-      if used == ``CIL.Op.arg then return true
+      if used == ``CIL.Instruction.ldarg then return true
       if seen.contains used then continue
       let follow := used.getRoot == root.getRoot ||
         (((← getEnv).find? used).any fun info => code info.type)
@@ -308,23 +308,31 @@ def confinedToNone (type : Lean.Expr) : Bool :=
     (argument? type 0).any (·.isAppOfArity ``List.nil 1)
 
 open Lean Meta in
-/-- The positions of the `some` entries of `list` up to reduction, reading cons cells until one is
-    not: the locals a `knownLocals` list remembers. -/
-partial def rememberedIndices (list : Lean.Expr) (index : Nat := 0) : MetaM (Array Nat) := do
-  let cell ← whnf list
-  let some #[_, head, tail] := argumentsOf? cell ``List.cons 3 | return #[]
-  let rest ← rememberedIndices tail (index + 1)
-  if (← whnf head).isAppOfArity ``Option.some 2 then return #[index] ++ rest
-  return rest
-
-open Lean Meta in
 /-- The entries of `list` up to reduction with their positions, reading cons cells until one is
     not. -/
-partial def listEntries (list : Lean.Expr) (index : Nat := 0) :
+def listEntries (list : Lean.Expr) (index : Nat := 0) :
     MetaM (Array (Nat × Lean.Expr)) := do
-  let cell ← whnf list
-  let some #[_, head, tail] := argumentsOf? cell ``List.cons 3 | return #[]
-  return #[(index, head)] ++ (← listEntries tail (index + 1))
+  let mut remaining := list
+  let mut position := index
+  let mut entries := #[]
+  repeat
+    let cell ← whnf remaining
+    let some #[_, head, tail] := argumentsOf? cell ``List.cons 3 | return entries
+    entries := entries.push (position, head)
+    remaining := tail
+    position := position + 1
+
+open Lean Meta in
+/-- The positions of the `some` entries of `list` up to reduction, reading cons cells until one is
+    not: the locals a `knownLocals` list remembers. -/
+def rememberedIndices (list : Lean.Expr) (index : Nat := 0) : MetaM (Array Nat) := do
+  let entries ← listEntries list index
+  let mut positions := #[]
+  -- Head reductions follow the complete spine traversal, from last to first.
+  for (position, head) in entries.reverse do
+    if (← whnf head).isAppOfArity ``Option.some 2 then
+      positions := positions.push position
+  return positions.reverse
 
 open Lean Elab Tactic Meta in
 /-- Checked argument facts with their source views, shared by entry gathering and write
@@ -383,7 +391,7 @@ structure LoopFacts where
   /-- Each byte home's `form` with `localAddress`, which only taking a local's address reads;
       derived facts are proof terms, asserted by `assertLoopFacts` when first read. -/
   addresses : Array Lean.Syntax.Term := #[]
-  /-- The field reads of remembered structs, which only `fieldAt` reads, as proof terms. -/
+  /-- The field reads of remembered structs, used by `ldfld`, as proof terms. -/
   fields : Array Lean.Syntax.Term := #[]
   /-- The negative sides of case splits, which only instructions testing or computing on data
       read. -/
@@ -643,7 +651,7 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
       let memory := #[frameMemory]
       let subject := variables #[slots]
       let numeral (index : Nat) : Term := ⟨Syntax.mkNumLit (toString index)⟩
-      -- Each byte home forms, so `localAddr` of it steps.
+      -- Each byte home forms, so `ldloca` of it steps.
       for (index, slot) in ← listEntries slots do
         if (← whnf slot).isAppOfArity ``LocalSlot.bytes 2 then
           candidates := candidates.push (`homeForm,
@@ -669,8 +677,8 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
             let width ← whnf (mkApp (mkConst `CIL.FieldLayout.width) fieldLayout)
             let narrow := (← getNatValue? width) matches some 1 | some 2
             let (base, read, load) := if narrow then
-                (`narrowRead, `step_fieldAt_encode_narrow, `LoopFrame.load_narrow_field)
-              else (`fieldRead, `step_fieldAt_encode, `LoopFrame.load_field)
+                (`narrowRead, `step_ldfld_encode_narrow, `LoopFrame.load_narrow_field)
+              else (`fieldRead, `step_ldfld_encode, `LoopFrame.load_field)
             candidates := candidates.push (base, applied read
               #[valid, numeral field, valuesTerm], subject, memory, #[])
             candidates := candidates.push (base, applied load

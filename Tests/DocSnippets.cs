@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/Documentation.cs
 
 using System.Diagnostics;
@@ -59,7 +64,7 @@ const string Identity = """
 
     open CIL.Safety
     open CIL (W64 Method)
-    @[cil_code] def identity : Method := { code := [.arg 0, .ret], locals := [], returnsValue := true }
+    @[cil_code] def identity : Method := { code := [.ldarg 0, .ret], locals := [], returnsValue := true }
     """;
 var document = $$"""
     # Stale

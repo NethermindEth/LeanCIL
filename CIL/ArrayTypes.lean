@@ -1,4 +1,4 @@
-import Std
+import CIL.Identity
 
 /-! # Reference-free array element types shared by extraction and checked storage -/
 
@@ -17,6 +17,11 @@ def EnumStorage.width : EnumStorage → Nat
   | .signed32 | .unsigned32 => 4
   | .signed64 | .unsigned64 => 8
 
+/-- The integer primitive an enum with this storage is encoded as. -/
+def EnumStorage.primitive : EnumStorage → PrimitiveType
+  | .signed8 => .sbyte | .unsigned8 => .byte | .signed16 => .int16 | .unsigned16 => .uint16
+  | .signed32 => .int32 | .unsigned32 => .uint32 | .signed64 => .int64 | .unsigned64 => .uint64
+
 /-- Only narrow signed enum loads need sign extension to the evaluation-stack width. -/
 def EnumStorage.signed : EnumStorage → Bool
   | .signed8 | .signed16 => true
@@ -26,7 +31,7 @@ def EnumStorage.signed : EnumStorage → Bool
 inductive ArrayElement where
   | signed8 | unsigned8 | signed16 | unsigned16 | signed32 | unsigned32
   | signed64 | unsigned64 | nativeInt | nativeUInt | boolean | character
-  | enumeration (identity : String) (storage : EnumStorage)
+  | enumeration (identity : TypeIdentity) (storage : EnumStorage)
   | aggregate (identity : String) (size : Nat)
   | vector (identity : String) (size : Nat)
   deriving DecidableEq, Repr
@@ -54,7 +59,15 @@ def ArrayElement.allocationSupported (element : ArrayElement) : Bool :=
 def ArrayElement.signed : ArrayElement → Bool
   | .signed8 | .signed16 => true
   | .enumeration _ storage => storage.signed
-  | _ => false
+  | .unsigned8 | .unsigned16 | .signed32 | .unsigned32 | .signed64 | .unsigned64 | .nativeInt
+  | .nativeUInt | .boolean | .character | .aggregate .. | .vector .. => false
+
+/-- Struct and vector elements, which typed element accesses move as checked snapshots rather
+    than as one numeric word. -/
+def ArrayElement.composite : ArrayElement → Bool
+  | .aggregate .. | .vector .. => true
+  | .signed8 | .unsigned8 | .signed16 | .unsigned16 | .signed32 | .unsigned32 | .signed64
+  | .unsigned64 | .nativeInt | .nativeUInt | .boolean | .character | .enumeration .. => false
 
 /-- Native elements keep their stack kind distinct from fixed-width int64 elements. -/
 def ArrayElement.native : ArrayElement → Bool

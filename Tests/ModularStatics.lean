@@ -2,6 +2,7 @@ import CIL.Safety.StaticLinking
 import CIL.Safety.StaticMemoryBelow
 import CIL.Safety.WordMemory
 import CIL.Safety.Execution
+import Tests.Support
 
 /-! Checked static-table linking and loaded-world premises for modular consumer contracts. -/
 
@@ -9,17 +10,24 @@ namespace Tests.ModularStatics
 
 open CIL CIL.Safety
 
+/-- The field of `owner`'s table, an eight-byte static. -/
+private def tableRef (owner : String) : Extraction.FieldRef :=
+  { owner := .atom owner (owner ++ ".Holder") .classType, index := 0,
+    type := .atom owner (owner ++ ".Table") .valueType,
+    name := name!"Table" }
+
 private def appField : StaticDescriptor :=
-  { identity := 101, assemblyIdentity := "App", fieldName := "App::Table", bytes := numberBytes 7 8 }
+  { identity := 101, field := tableRef "App", bytes := numberBytes 7 8 }
 private def libField : StaticDescriptor :=
-  { identity := 202, assemblyIdentity := "Lib", fieldName := "Lib::Table", bytes := numberBytes 17 8 }
+  { identity := 202, field := tableRef "Lib", bytes := numberBytes 17 8 }
 
 @[cil_code] def libBody : Method :=
   { returnsValue := true, locals := [], staticSites := [(0, libField)],
-    code := [.memory (.staticAddress (numberBytes 17 8)), .load64, .ret] }
+    code := [.ldsflda (tableRef "Lib"), .ldind .i8, .ret] }
 @[cil_code] def appBody : Method :=
   { returnsValue := true, locals := [], staticSites := [(0, appField)],
-    code := [.memory (.staticAddress (numberBytes 7 8)), .pop, .call 1 0, .ret] }
+    code := [.ldsflda (tableRef "App"), .pop, .call (Tests.callee 0) {},
+      .ret], links := [(2, .direct 1)] }
 def library : Library := { entry := libBody }
 def linked : CIL.Program := link [appBody] [library]
 
@@ -77,23 +85,17 @@ private theorem libBody_reads (memory : Safety.Memory) (formed : memory.WellForm
     rw [same rfl] at readable
     simpa [libField, numberBytes] using readable
   have load := load_word64_of_read loaded
-  have addressed : staticInstruction libBody 0 (.staticAddress (numberBytes 17 8)) [] memory =
-      .ok (result, [.reference (.address reference)]) := by
-    change (do
-      let (updated, address) ← staticReference libField memory
-      pure (updated, [Safety.Value.reference (.address address)]) :
-      ExecutionResult (Safety.Memory × List Safety.Value)) = _
-    rw [resolved]
-    rfl
+  have addressed : staticAddress libBody 0 memory =
+      .ok (result, .reference (.address reference)) := staticAddress_resolved rfl resolved
   let frame : Frame := { activation := memory.nextIdentity, locals := [], owned := [] }
-  have first : step libBody (.memory (.staticAddress (numberBytes 17 8))) 0 [] frame [] memory =
+  have first : step libBody (.ldsflda (tableRef "Lib")) 0 [] frame [] memory =
       .ok (.next 1 [.reference (.address reference)] frame result) := by
-    rw [step_memory_eq, addressed]
-    rfl
-  have second : step libBody .load64 1 [] frame [.reference (.address reference)] result =
+    rw [step_ldsflda_eq, addressed]
+  have second : step libBody (.ldind .i8) 1 [] frame [.reference (.address reference)] result =
       .ok (.next 2 [.scalar (.i64 17)] frame result) := by
-    rw [step_load64_eq]
-    simp only [instructionStep, instruction, load, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    rw [step_ldind_eq]
+    simp only [instructionStep, instruction, CIL.NumericKind.width, CIL.NumericKind.signed, load,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
     rfl
   have returned : step libBody .ret 2 [] frame [.scalar (.i64 17)] result =
       .ok (.returned [.scalar (.i64 17)] result) := rfl
@@ -160,8 +162,17 @@ example : ∃ fuel result values, invoke linked fuel 1 [] afterApp = .ok (result
 private def collision : Library :=
   { entry := { libBody with staticSites := [(0, { libField with identity := 101 })] } }
 
-example : linkChecked [appBody] [collision] =
-    .error "Static identity collision 101: App::App::Table and Lib::Lib::Table" := rfl
+/-- The application's table and the library's under its identity collide, in that order. -/
+theorem colliding_identity_rejected :
+    linkChecked [appBody] [collision] =
+      .error { left := appField, right := { libField with identity := 101 } } :=
+  linkChecked_of_collision (by decide +kernel)
+
+-- The report names both fields; the interpreter checks it, as the kernel does not reduce `repr`.
+#guard match linkChecked [appBody] [collision] with
+  | .error collision => collision.message == "Static identity collision 101: " ++
+    reprStr (tableRef "App") ++ " and " ++ reprStr (tableRef "Lib")
+  | .ok _ => false
 
 /-- `library` with the table's bytes changed under the same identity and field. -/
 private def changedTable : Library :=
@@ -172,15 +183,17 @@ theorem shared_table_links :
     linkChecked [appBody] [library, library] = .ok (link [appBody] [library, library]) :=
   linkChecked_of_compatible (by decide +kernel)
 
-/-- Reusing an identity with different table bytes prevents checked linking. -/
-theorem changed_shared_table_rejected : linkChecked [appBody] [library, changedTable] =
-    .error "Static identity collision 202: Lib::Lib::Table and Lib::Lib::Table" := by
-  have incompatible : ¬ StaticDescriptorsCompatible
-      (programStaticDescriptors (link [appBody] [library, changedTable])) := by decide +kernel
-  unfold linkChecked
-  rw [ite_eq_right incompatible]
-  apply congrArg Except.error
-  decide +kernel
+/-- Reusing an identity with different table bytes prevents checked linking, and the collision
+    is the library's descriptor beside the changed one. -/
+theorem changed_shared_table_rejected :
+    linkChecked [appBody] [library, changedTable] =
+      .error { left := libField, right := { libField with bytes := numberBytes 18 8 } } :=
+  linkChecked_of_collision (by decide +kernel)
+
+#guard match linkChecked [appBody] [library, changedTable] with
+  | .error collision => collision.message == "Static identity collision 202: " ++
+    reprStr (tableRef "Lib") ++ " and " ++ reprStr (tableRef "Lib")
+  | .ok _ => false
 
 /-- A loaded table with different bytes cannot satisfy a contract's static-world premise. -/
 theorem changed_loaded_table_not_valid :
@@ -196,6 +209,7 @@ theorem changed_loaded_table_not_valid :
   exact incompatible (Except.ok.inj (actual.symm.trans readable))
 
 #print axioms shared_table_links
+#print axioms colliding_identity_rejected
 #print axioms changed_shared_table_rejected
 #print axioms changed_loaded_table_not_valid
 #print axioms readTable_holds

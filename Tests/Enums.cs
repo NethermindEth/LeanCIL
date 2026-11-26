@@ -2,7 +2,13 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
+#:include ContractVariants.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -100,21 +106,39 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     });
 }
 
-// The same universally quantified contract rejects an incorrect implementation.
-var contract = At("Examples/Proofs/EnumFlags.lean");
-verification.Verify(assembly, "Examples", "Enums::SetFlag(Examples.Unsigned64)", contract, Path.Combine(root, "UniversalFlags"));
-var wrongOutput = Path.Combine(root, "WrongFlags");
-var failed = false;
-try
-{
-    verification.Verify(assembly, "Examples", "Enums::WrongSetFlag(Examples.Unsigned64)", contract, wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    failed = true;
-}
-if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect enum flag implementation accepted");
+// An unnamed high bit distinguishes preserving the flags from masking them all away.
+var setFlag = runtime.GetMethod("SetFlag")!;
+const ulong high = 1UL << 63;
+var witness = Enum.ToObject(setFlag.GetParameters()[0].ParameterType, high);
+if (Convert.ToUInt64(setFlag.Invoke(null, [witness])) != (high | 1) ||
+    Convert.ToUInt64(runtime.GetMethod("WrongSetFlag")!.Invoke(null, [witness])) != 0)
+    throw new InvalidOperationException("The compiled flag methods disagree with the high-bit witness.");
+
+verification.VerifyContractVariant(assembly, "Examples", "Enums::SetFlag(Examples.Unsigned64)",
+    Path.Combine(root, "UniversalFlags"), assembly, "Enums::WrongSetFlag(Examples.Unsigned64)",
+    Path.Combine(root, "WrongFlags"), """
+    /-- Setting the low flag preserves every other enum bit and the caller's memory. -/
+    def flags : MethodContract W64 W64 where
+      args value := [.scalar (.i64 value)]
+      results value := [.scalar (.i64 value)]
+      pre _ _ := True
+      footprint _ := []
+      post input before after value := after = before ∧ value = input ||| 1
+    """, """
+    theorem correctness : flags.Holds Extracted.program 0 := by
+      intro input memory _
+      apply MethodContract.Holds.intro (c := flags) (input := input) memory
+        (input ||| 1) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      exact ⟨8, rfl⟩
+    """, """
+    /-- Masking the high bit returns zero on a successful invocation. -/
+    theorem correctness : flags.Refuted Extracted.program 0 := by
+      apply MethodContract.Refuted.of_return (c := flags) (input := 1 <<< 63)
+        (initial := Memory.empty) (fuel := 8) (values := [.scalar (.i64 0)]) trivial rfl
+      rintro ⟨_, value, encoded, _, rfl⟩
+      exact (by decide : [Value.scalar (.i64 0)] ≠ [.scalar (.i64 ((1 <<< 63) ||| 1))]) encoded
+    """, example: At("Examples/Proofs/EnumFlags.lean"));
+Console.WriteLine("PASS setting the low flag preserves all other bits and refutes the masking variant");
 
 // Bad metadata must fail before it can produce a proof artifact.
 var mutations = new[] { "base", "underlying", "scope", "extra-field", "field-name", "special-name", "generic", "constant", "sealed", "layout", "boolean" };
@@ -153,7 +177,51 @@ foreach (var mutation in mutations)
 }
 
 queue.Flush();
+VerifyEnumParameters(verification, assembly, root);
 
 Console.WriteLine($"PASS {cases} enum runtime comparisons and {mutations.Length} malformed metadata rejections");
 Run(["dotnet", "run", "--file", "Tests/EnumBuffers.cs"], streamOutput: true, progress: "Enum buffer checks");
 Run(["dotnet", "run", "--file", "Tests/EnumMetadata.cs"], streamOutput: true, progress: "Enum metadata checks");
+
+static void VerifyEnumParameters(Program verification, string assembly, string root)
+{
+    var image = Path.Combine(root, "EnumParameters.dll");
+    using var module = ModuleDefinition.ReadModule(assembly);
+    var owner = module.GetType("Examples.Enums");
+    var enumBase = module.Types.First(type => type.IsEnum).BaseType;
+    var flags = Mono.Cecil.MethodAttributes.Public | Mono.Cecil.MethodAttributes.Static;
+    var caller = new MethodDefinition("ReadBothEnums", flags, module.TypeSystem.Int32);
+    owner.Methods.Add(caller);
+    var il = caller.Body.GetILProcessor();
+    il.Emit(OpCodes.Ldc_I4_0);
+    foreach (var digit in new[] { 1, 2 })
+    {
+        var type = new TypeDefinition(digit == 1 ? "Rows" : "", digit == 1 ? "Choice" : "Rows.Choice",
+            Mono.Cecil.TypeAttributes.Public | Mono.Cecil.TypeAttributes.Sealed, enumBase);
+        module.Types.Add(type);
+        type.Fields.Add(new FieldDefinition("value__", Mono.Cecil.FieldAttributes.Public | Mono.Cecil.FieldAttributes.SpecialName |
+            Mono.Cecil.FieldAttributes.RTSpecialName, module.TypeSystem.Int32));
+        var member = new MethodDefinition("EnumDigit", flags, module.TypeSystem.Int32);
+        member.Parameters.Add(new ParameterDefinition(type));
+        owner.Methods.Add(member);
+        var body = member.Body.GetILProcessor();
+        body.Emit(OpCodes.Ldc_I4, digit);
+        body.Emit(OpCodes.Ret);
+        il.Emit(OpCodes.Ldc_I4_S, (sbyte)10);
+        il.Emit(OpCodes.Mul);
+        il.Emit(OpCodes.Ldc_I4_0);
+        il.Emit(OpCodes.Call, member);
+        il.Emit(OpCodes.Add);
+    }
+    il.Emit(OpCodes.Ret);
+    module.Write(image);
+    var runtime = Assembly.Load(File.ReadAllBytes(image)).GetType("Examples.Enums", true)!;
+    var parameters = runtime.GetMethods().Where(method => method.Name == "EnumDigit")
+        .Select(method => method.GetParameters()[0].ParameterType).ToArray();
+    if (parameters.Length != 2 || parameters[0] == parameters[1] || parameters.Any(type => !type.IsEnum) ||
+        !Equals(runtime.GetMethod("ReadBothEnums")!.Invoke(null, null), 12))
+        throw new InvalidOperationException("CLR enum overloads must select different declarations and return 12.");
+    verification.Verify(image, "Examples", "Enums::ReadBothEnums()", At("Tests/Enums/Parameters.lean"),
+        Path.Combine(root, "EnumParameters"));
+    Console.WriteLine("PASS CLR and checked overloads for two enum declarations named Rows.Choice");
+}

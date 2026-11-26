@@ -1,4 +1,6 @@
-import CIL.Safety.WordLocals
+import CIL.Safety.WordMemory
+import CIL.Safety.HomeProgress
+import CIL.Safety.FrameMemoryBelow
 
 /-!
 # Word homes
@@ -14,10 +16,6 @@ namespace CIL.Safety
 /-- The local kinds of a recipe: `word64` for a word, `reference` for a root. -/
 def wordKinds (specs : List (Option (BitVec 64))) : List CIL.LocalKind :=
   specs.map fun spec => match spec with | none => .reference | some _ => .word64
-
-/-- The initial values of a recipe: the word itself, or a null reference for a root. -/
-def wordInitializers (specs : List (Option (BitVec 64))) : List CIL.Value :=
-  specs.map fun spec => match spec with | none => .nullRef | some word => .i64 word
 
 /-- Initialized word homes in strictly increasing allocation identities, with
     null root slots retained at their actual metadata positions. -/
@@ -41,39 +39,6 @@ theorem WordHomes.weaken {memory : Memory} {lower upper : Nat} {specs slots}
   | root _ ih => exact .root (ih bound)
   | word reference value fresh loaded writable tail _ =>
     exact .word reference value (Nat.le_trans bound fresh) loaded writable tail
-
-/-- Construct actual typed locals from supported word/root initializers. -/
-theorem make_word_locals (memory : Memory) (activation : Nat) (specs : List (Option (BitVec 64)))
-    (wellFormed : memory.WellFormed) :
-    ∃ slots owned result,
-      makeLocals activation (wordKinds specs) (wordInitializers specs) memory =
-        .ok (slots, owned, result) ∧
-      WordHomes result memory.nextIdentity specs slots := by
-  induction specs generalizing memory with
-  | nil => exact ⟨[], [], memory, rfl, .nil _⟩
-  | cons spec specs ih =>
-    cases spec with
-    | none =>
-      obtain ⟨slots, owned, result, made, homes⟩ := ih memory wellFormed
-      refine ⟨.root (some .null) :: slots, owned, result, ?_, .root homes⟩
-      simp only [wordKinds, wordInitializers] at made
-      simp only [wordKinds, wordInitializers, List.map_cons, makeLocals, makeLocal, made,
-        Bind.bind, Except.bind, Pure.pure, Except.pure, List.nil_append]
-    | some value =>
-      obtain ⟨reference, middle, made, loaded, writable, _⟩ :=
-        make_local_word64 memory activation value wellFormed
-      have middleWF := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ wellFormed made
-      obtain ⟨slots, owned, result, rest, homes⟩ := ih middle middleWF
-      have fresh := (makeLocal_fresh _ _ _ _ _ _ _ made).2 reference.allocation (by simp)
-      have retained := makeLocals_preserves_caller_memory _ _ _ _ _ _ _ rest
-      refine ⟨.bytes .word64 reference :: slots, reference.allocation :: owned, result, ?_, ?_⟩
-      · simp only [wordKinds, wordInitializers, List.map_cons, makeLocals] at rest ⊢
-        rw [made]
-        simp only [Bind.bind, Except.bind, rest, Pure.pure, Except.pure, List.singleton_append]
-      · exact .word reference value fresh.1
-          (by rw [retained.read reference fresh.2 8 1]; exact loaded)
-          (by rw [retained.access reference fresh.2 8 1 true]; exact writable)
-          (homes.weaken (Nat.succ_le_of_lt fresh.2))
 
 /-- Each word local of the recipe has a home above `lower` holding its initial value. -/
 theorem WordHomes.word_at {memory : Memory} {lower : Nat} {specs slots}
@@ -143,7 +108,6 @@ theorem WordHomes.ordered {memory : Memory} {lower : Nat} {specs slots}
       | succ i => exact ih i j (by omega) (by simpa using first) (by simpa using second)
 
 #print axioms WordHomes.weaken
-#print axioms make_word_locals
 #print axioms WordHomes.word_at
 #print axioms WordHomes.word_bound
 #print axioms WordHomes.ordered

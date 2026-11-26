@@ -1,6 +1,8 @@
 import CIL.Safety.LocalCalls
 import CIL.Safety.LoopScaffold
 import CIL.SIMD.Evaluation256Lemmas
+import Tests.Support
+import Tests.Support.IntrinsicMethods
 
 /-!
 # Vector helper output in mixed private storage
@@ -16,8 +18,8 @@ open CIL.Safety
 /-- The helper adds four pairs of lanes and writes the vector through its output argument. -/
 @[cil_code] def helper : CIL.Method :=
   { locals := [], returnsValue := false,
-    code := [.arg 2, .arg 0, .arg 1, .intrinsic (.vector (.add64 256)) 2,
-      .memory .store256, .ret] }
+    code := [.ldarg 2, .ldarg 0, .ldarg 1, .call Tests.IntrinsicMethods.portableAdd,
+      .stobj Tests.IntrinsicMethods.vector256UInt64, .ret] }
 
 /-- The helper receives two saved vector values and one writable output reference. -/
 structure Inputs where
@@ -56,7 +58,8 @@ theorem helper_holds {program : CIL.Program} {callee : Nat}
 @[cil_code] def caller : CIL.Method :=
   { locals := [.i64 42, .unmodeled], localKinds := [.word64, .vector256],
     returnsValue := true,
-    code := [.arg 0, .arg 1, .localAddr 1, .call 1 3, .local 1, .ret] }
+    code := [.ldarg 0, .ldarg 1, .ldloca 1, .call (Tests.callee 3) {}, .ldloc 1,
+      .ret], links := [(3, .direct 1)] }
 
 bind_entry entry (memory : Memory) (left right : BitVec 256)
     (formed : memory.WellFormed) := caller

@@ -10,17 +10,29 @@ partial class Program
         var assembly = At("Examples/Assembly/bin/Examples.dll");
         var root = At("artifacts/WordArrayOutlines");
         Directory.CreateDirectory(root);
-        foreach (var name in new[]
-            { "Sum", "RefillRead", "CountAfterDeposit", "CountAfterAllocation", "ReadAfterAllocation",
-                "ReadAfterEcho" })
+        foreach (var variant in new[]
+            { "Sum", "RefillRead", "RefillReadTyped", "CountAfterDeposit", "CountAfterAllocation",
+                "ReadAfterAllocation", "ReadAfterEcho" })
         {
-            var extraction = Path.Combine(root, name);
+            var name = variant == "RefillReadTyped" ? "RefillRead" : variant;
+            var extraction = Path.Combine(root, variant);
+            var input = assembly;
+            if (variant == "RefillReadTyped")
+            {
+                using var image = ModuleDefinition.ReadModule(assembly);
+                var method = image.GetType("Examples.SampleArrays").Methods.Single(method => method.Name == name);
+                var read = method.Body.Instructions.Single(site => site.OpCode.Code == Code.Ldelem_I4);
+                read.OpCode = OpCodes.Ldelem_Any;
+                read.Operand = image.TypeSystem.Int32;
+                input = Path.Combine(root, variant + ".dll");
+                image.Write(input);
+            }
             var owner = name is "CountAfterDeposit" or "ReadAfterEcho" ? "Account"
                 : name.EndsWith("AfterAllocation", StringComparison.Ordinal) ? "Node" : "Samples";
             var indexed = name is "RefillRead" or "ReadAfterEcho";
             var selector = $"SampleArrays::{name}(Examples.{owner},int[]{(indexed ? ",int" : "")})";
-            Run(Extract("extract", assembly, "Examples", selector, extraction));
-            var outline = Path.Combine(root, name + ".lean");
+            Run(Extract("extract", input, "Examples", selector, extraction));
+            var outline = Path.Combine(root, variant + ".lean");
             File.Delete(outline);
             Run(["dotnet", At("Extractor/bin/Nethermind.LeanCIL.dll"), "new-proof", extraction, outline]);
             var source = File.ReadAllText(outline);
@@ -53,9 +65,9 @@ partial class Program
                     "case invariant => simp [invariant]", StringComparison.Ordinal);
                 source = source.Replace("case invariant => sorry -- invariant again at the loop head", """
                     case invariant =>
-                      have next : (index + 1).toNat = index.toNat + 1 := by
-                        simp [BitVec.toNat_add]
-                        omega
+                      have small : values1Elements.length < 2 ^ 32 := by omega
+                      have next := toNat_succ (count := BitVec.ofNat 32 values1Elements.length)
+                        (by simpa only [BitVec.toNat_ofNat, Nat.mod_eq_of_lt small] using values1Bound)
                       dsimp only [invariant] at holds ⊢
                       refine ⟨by omega, ?_⟩
                       rw [next, List.take_add_one, List.getElem?_eq_getElem values1Bound, List.foldl_append,
@@ -64,9 +76,9 @@ partial class Program
                     """.Replace("\n", "\n    ", StringComparison.Ordinal), StringComparison.Ordinal);
                 source = source.Replace("case measure => sorry -- measure decreases over this iteration", """
                     case measure =>
-                      have next : (index + 1).toNat = index.toNat + 1 := by
-                        simp [BitVec.toNat_add]
-                        omega
+                      have small : values1Elements.length < 2 ^ 32 := by omega
+                      have next := toNat_succ (count := BitVec.ofNat 32 values1Elements.length)
+                        (by simpa only [BitVec.toNat_ofNat, Nat.mod_eq_of_lt small] using values1Bound)
                       simp only [measure]
                       omega
                     """.Replace("\n", "\n    ", StringComparison.Ordinal), StringComparison.Ordinal);
@@ -91,16 +103,17 @@ partial class Program
                         ? "simp [Postcondition, numericOfWidth, BitVec.ofNat_toNat]" : "simp [Postcondition]");
             if (Regex.IsMatch(source, @"(?<![`\w])sorry(?![`\w])"))
                 throw new InvalidOperationException($"The filled {name} proof has an unfilled obligation:\n{source}");
-            var proof = Path.Combine(root, name + "Filled.lean");
+            var proof = Path.Combine(root, variant + "Filled.lean");
             File.WriteAllText(proof, source);
             VerifyWordArrayOutline(extraction, proof, expected: true);
             if (name.StartsWith("Count", StringComparison.Ordinal)) continue;
             if (name == "RefillRead")
             {
-                var mismatched = Path.Combine(root, name + "WrongElement.lean");
+                var mismatched = Path.Combine(root, variant + "WrongElement.lean");
                 File.WriteAllText(mismatched, source.Replace("WholeArray initial .signed32",
                     "WholeArray initial .unsigned32", StringComparison.Ordinal));
                 VerifyWordArrayOutline(extraction, mismatched, expected: false);
+                if (variant == "RefillReadTyped") continue;
             }
 
             // The same theorem must reject subtraction in the sum or a changed index after the field store.

@@ -2,10 +2,18 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
+#:include EnumFixtures.cs
+#:include BulkCallEvidence.cs
 #:include RejectedEvidence.cs
 
+using System.Globalization;
 using System.Reflection;
 using Mono.Cecil;
 
@@ -75,13 +83,13 @@ foreach (var accessorsByType in accessors.GroupBy(accessor => accessor.Type))
                 theorem null_array_fault :
                     (match CIL.Safety.invoke Extracted.program 64 0
                       [.object .null, .scalar (.i32 0)] inputMemory with
-                     | .error fault => fault.fault == .thrown "System.NullReferenceException"
+                     | .error fault => fault.fault == .thrown .nullReference
                      | .ok _ => false) = true := by decide +kernel
                 #print axioms null_array_fault
                 theorem array_bounds_fault :
                     (match CIL.Safety.invoke Extracted.program 64 0
                       [.array ⟨.address ⟨0, 0⟩, 2, .signed32⟩, .scalar (.i32 2)] inputMemory with
-                     | .error fault => fault.fault == .thrown "System.IndexOutOfRangeException"
+                     | .error fault => fault.fault == .thrown .indexOutOfRange
                      | .ok _ => false) = true := by decide +kernel
                 #print axioms array_bounds_fault
                 """);
@@ -97,16 +105,10 @@ foreach (var accessorsByType in accessors.GroupBy(accessor => accessor.Type))
             }
         }
         evidence.Add(proof, "PASS runtime, certificate and checked array execution: " + name);
-        if (name != "ReadSByte") continue;
-        foreach (var (mutation, replacement) in new[]
-            { ("signedness", ".arrayLoad 1 false"), ("width", ".arrayLoad 2 true") })
-        {
-            const string target = ".arrayLoad 1 true";
-            if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing mutation target");
-            var forged = Path.Combine(root, "ForgedArray-" + mutation + ".lean");
-            File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS forged array operation: " + replacement, "ScalarFlowValid");
-        }
+        // The decoder reads each element access from the body, so no emitted kind is left to forge; the
+        // mutations of Tests/ValueDecoding.lean reject another sign or width at the opcode.
+        if (!source.Contains("cil_decoded_method method0 ", StringComparison.Ordinal))
+            throw new Exception("Element accessor is not decoded from its body: " + name);
     }
 }
 var compositions = new (string Name, string Signature, string Arguments, string Expected)[]
@@ -174,7 +176,7 @@ foreach (var (type, storage, width) in new[]
     ("AllocationTag", "unsigned8", 1)
 })
 {
-    var identity = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples." + type);
+    var identity = ExampleEnumIdentity(type);
     allocations.Add((type == "AllocationTag" ? "AllocateUnnamedZero" : "Allocate" + type,
         $"enumeration {identity} .{storage}", width));
 }
@@ -224,10 +226,24 @@ foreach (var (name, element, width) in allocations)
             #print axioms empty_array_is_live
             theorem negative_array_overflows :
                 (match CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i32 (-1))] inputMemory with
-                 | .error fault => fault.fault == .thrown "System.OverflowException"
+                 | .error fault => fault.fault == .thrown .overflow
                  | .ok _ => false) = true := by decide +kernel
             #print axioms negative_array_overflows
+
+            /-- CoreCLR rejects this representable count before allocating the array. -/
+            theorem excessive_array_length :
+                (match CIL.Safety.invoke Extracted.program 32 0
+                    [.scalar (.i32 0x7fffffc8)] inputMemory with
+                 | .error fault => fault.fault == .thrown .outOfMemory
+                 | .ok _ => false) = true := by decide +kernel
+            #print axioms excessive_array_length
             """);
+        try
+        {
+            runtime.GetMethod(name)!.Invoke(null, [checked(Array.MaxLength + 1)]);
+            throw new Exception("Expected OutOfMemoryException for excessive array length");
+        }
+        catch (TargetInvocationException error) when (error.InnerException is OutOfMemoryException) { }
         try
         {
             runtime.GetMethod(name)!.Invoke(null, [-1]);
@@ -235,12 +251,17 @@ foreach (var (name, element, width) in allocations)
         }
         catch (TargetInvocationException fault) when (fault.InnerException is OverflowException) { }
     }
+    // The decoder reads each allocation from the body, so a forgery names another element type at its raw token,
+    // which the certified stack states bind.
+    if (name is "Allocate" or "AllocateSigned8" or "AllocatePacked" &&
+        !source.Contains("cil_decoded_method method0 ", StringComparison.Ordinal))
+        throw new Exception("Allocation is not decoded from its body: " + name);
     if (name == "Allocate")
     {
         foreach (var (mutation, replacement) in new[]
-            { ("element", ".newArray .unsigned32"), ("operation", ".nop") })
+            { ("element", ".type (.primitive .uint32)") })
         {
-            const string target = ".newArray .signed32";
+            const string target = ".type (.primitive .int32)";
             if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing newarr mutation");
             var forged = Path.Combine(root, "ForgedAllocation-" + mutation + ".lean");
             File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
@@ -249,16 +270,19 @@ foreach (var (name, element, width) in allocations)
     }
     if (name == "AllocateSigned8")
     {
-        var target = $".newArray (.{element})";
+        // The token names the enum and its integer storage.
+        var identity = ExampleEnumIdentity("Signed8");
+        var target = $".type (.enum {identity} .signed8)";
         foreach (var (mutation, replacement) in new[]
         {
-            ("identity", target.Replace("Examples.Signed8", "Examples.Unsigned8", StringComparison.Ordinal)),
-            ("storage", target.Replace(".signed8)", ".unsigned8)", StringComparison.Ordinal)),
-            ("width", target.Replace(".signed8)", ".signed16)", StringComparison.Ordinal)),
-            ("primitive", ".newArray .signed8")
+            ("identity", target.Replace(identity, ExampleEnumIdentity("Unsigned8"), StringComparison.Ordinal)),
+            ("underlying", target.Replace(".signed8", ".unsigned8", StringComparison.Ordinal)),
+            ("width", target.Replace(".signed8", ".signed16", StringComparison.Ordinal)),
+            ("primitive", ".type (.primitive .sbyte)")
         })
         {
             if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing enum newarr target");
+            if (replacement == target) throw new Exception("Enum allocation mutation changes nothing: " + mutation);
             var forged = Path.Combine(root, "ForgedEnumAllocation-" + mutation + ".lean");
             File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
             rejected.Add(forged, "PASS forged enum allocation: " + mutation, "ScalarFlowValid");
@@ -266,26 +290,26 @@ foreach (var (name, element, width) in allocations)
     }
     if (name == "AllocatePacked")
     {
-        var target = $".newArray (.{element})";
         var identity = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples.PackedLeaf");
         var otherIdentity = identity.Replace("PackedLeaf", "Leaf", StringComparison.Ordinal);
+        // The token names the struct by identity and layout index; its stride is the checked layout's.
+        var prefix = $".type (.aggregate {identity} ";
+        var start = source.IndexOf(prefix, StringComparison.Ordinal);
+        if (start < 0) throw new Exception("Missing composite newarr token");
+        var index = int.Parse(source.AsSpan(start + prefix.Length,
+            source.IndexOf(')', start) - start - prefix.Length), CultureInfo.InvariantCulture);
+        var target = $"{prefix}{index})";
         var controls = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (mutation, before, after, obligation, diagnostic) in new[]
         {
-            ("width", target, target.Replace(" 5)", " 6)", StringComparison.Ordinal),
-                "method0_layouts_validated", "MethodLayoutsValid"),
             ("identity", target, target.Replace("PackedLeaf", "Leaf", StringComparison.Ordinal),
                 "method0_scalars_validated", "ScalarFlowValid"),
+            ("index", target, $"{prefix}{index + 1})", "method0_coverage_validated", "LayoutUsesComplete"),
             ("layout-identity", $".aggregate {identity}", $".aggregate {otherIdentity}",
-                "method0_coverage_validated", "LayoutUsesComplete"),
-            ("byref-like", $"identity := {identity},", $"identity := {identity}, byRefLike := true,",
-                "method0_layouts_validated", "MethodLayoutsValid"),
-            ("zero-width", target, target.Replace(" 5)", " 0)", StringComparison.Ordinal),
-                "method0_scalars_validated", "ScalarFlowValid"),
-            ("oversized", target, target.Replace(" 5)", " 65536)", StringComparison.Ordinal),
-                "method0_scalars_validated", "ScalarFlowValid")
+                "method0_coverage_validated", "LayoutUsesComplete")
         })
         {
+            if (before == after) throw new Exception("Composite allocation mutation changes nothing: " + mutation);
             var narrowed = NarrowEvidence(source, obligation);
             if (controls.Add(obligation))
                 File.AppendAllText(proof,
@@ -303,7 +327,7 @@ foreach (var (name, element, width) in allocations)
         throw new Exception("Runtime allocation mismatch: " + name);
     evidence.Add(proof, "PASS runtime, certificate and heap array return: " + name);
 }
-var fillEnum = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples.AllocationTag");
+var fillEnum = ExampleEnumIdentity("AllocationTag");
 var fills = new (string Name, string Signature, string Element, int Width, bool Counted)[]
 {
     ("FillIntegers", "System.Int32[],System.Int32", "signed32", 4, false),
@@ -320,7 +344,9 @@ foreach (var (name, _, element, width, counted) in fills)
     var output = Path.Combine(root, name);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     var proof = Path.Combine(root, name + ".lean");
-    File.WriteAllText(proof, source + $$"""
+    File.WriteAllText(proof, $$"""
+        import CIL.Safety.StepComposition
+        {{source}}
 
         private def fillMemory : CIL.Safety.Memory := {
           allocations := fun identity => if identity == 0 then
@@ -356,12 +382,12 @@ foreach (var (name, _, element, width, counted) in fills)
                   match CIL.Safety.invoke Extracted.program 128 0
                     [.array ⟨.address ⟨0, 4⟩, 4, .signed32⟩, .scalar (.i32 7),
                       .scalar (.i32 start), .scalar (.i32 count)] fillMemory with
-                  | .error fault => fault.fault == .thrown "System.ArgumentOutOfRangeException"
+                  | .error fault => fault.fault == .thrown .argumentOutOfRange
                   | .ok _ => false) = true ∧
                 ([.object .null, .array ⟨.null, 0, .signed32⟩].all fun input =>
                   match CIL.Safety.invoke Extracted.program 128 0
                     [input, .scalar (.i32 7), .scalar (.i32 (-1)), .scalar (.i32 (-1))] fillMemory with
-                  | .error fault => fault.fault == .thrown "System.ArgumentNullException"
+                  | .error fault => fault.fault == .thrown .argumentNull
                   | .ok _ => false) = true ∧
                 (match CIL.Safety.invoke Extracted.program 128 0
                   [.array ⟨.address ⟨0, 4⟩, 4, .signed32⟩, .scalar (.i32 7),
@@ -390,24 +416,6 @@ foreach (var (name, _, element, width, counted) in fills)
               constructor <;> decide +kernel
             #print axioms malformed_fill_states
             """);
-        var obligation = "method1_scalars_validated";
-        var narrowed = NarrowEvidence(source, obligation);
-        File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, [obligation], 0));
-        foreach (var (label, before, after) in new[]
-        {
-            ("range", ".arrayFill .signed32 true", ".arrayFill .signed32 false"),
-            ("index-type", ".atom Extraction.runtimeScope \"System.Int32\", " +
-                ".atom Extraction.runtimeScope \"System.Int32\"]",
-                ".atom Extraction.runtimeScope \"System.UInt32\", " +
-                ".atom Extraction.runtimeScope \"System.Int32\"]")
-        })
-        {
-            if (!narrowed.Contains(before, StringComparison.Ordinal))
-                throw new Exception("Missing range fill mutation: " + label);
-            var forged = Path.Combine(root, "ForgedFillRange-" + label + ".lean");
-            File.WriteAllText(forged, narrowed.Replace(before, after, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS forged array fill range: " + label, "ScalarFlowValid");
-        }
         foreach (var (start, count) in new[]
             { (1, 2), (0, 0), (4, 0), (-1, 0), (0, -1), (5, 0), (3, 2), (1, int.MaxValue) })
         {
@@ -441,7 +449,7 @@ foreach (var (name, _, element, width, counted) in fills)
                  | .ok result => result.2 == [] | .error _ => false) = true ∧
                 ([.object .null, .array ⟨.null, 0, .signed32⟩].all fun input =>
                   match CIL.Safety.invoke Extracted.program 128 0 [input, .scalar (.i32 7)] fillMemory with
-                  | .error fault => fault.fault == .thrown "System.ArgumentNullException"
+                  | .error fault => fault.fault == .thrown .argumentNull
                   | .ok _ => false) = true ∧
                 (match CIL.Safety.invoke Extracted.program 128 0
                   [.array ⟨.address ⟨0, 8⟩, 2, .signed32⟩, .scalar (.i32 7)]
@@ -451,25 +459,6 @@ foreach (var (name, _, element, width, counted) in fills)
               all_goals decide +kernel
             #print axioms empty_and_null_fill
             """);
-        var obligation = "method1_scalars_validated";
-        var narrowed = NarrowEvidence(source, obligation);
-        File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, [obligation], 0));
-        foreach (var (label, before, after) in new[]
-        {
-            ("element", ".arrayFill .signed32 false", ".arrayFill .unsigned32 false"),
-            ("width", ".arrayFill .signed32 false", ".arrayFill .signed64 false"),
-            ("operation", ".arrayFill .signed32 false", ".spanFill 4 false"),
-            ("arity", "parameterCount := 2, hasThis := false, returnsValue := false",
-                "parameterCount := 4, hasThis := false, returnsValue := false"),
-            ("scope", ".atom Extraction.runtimeScope \"System.Array\"", ".atom \"Wrong.Scope\" \"System.Array\"")
-        })
-        {
-            if (!narrowed.Contains(before, StringComparison.Ordinal))
-                throw new Exception("Missing array fill mutation: " + label);
-            var forged = Path.Combine(root, "ForgedFill-" + label + ".lean");
-            File.WriteAllText(forged, narrowed.Replace(before, after, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS forged array fill: " + label, "ScalarFlowValid");
-        }
         var values = new[] { 1, 2 };
         runtime.GetMethod(name)!.Invoke(null, [values, 7]);
         if (!values.SequenceEqual([7, 7])) throw new Exception("Runtime array fill mismatch");
@@ -489,29 +478,10 @@ foreach (var (name, _, element, width, counted) in fills)
         runtime.GetMethod(name)!.Invoke(null, counted ? [values, value, 0, 2] : [values, value]);
         if (!Equals(values.GetValue(0), value) || !Equals(values.GetValue(1), value))
             throw new Exception("Runtime enum array fill mismatch");
-        if (counted)
-        {
-            evidence.Add(proof, "PASS generic array fill: " + name);
-            continue;
-        }
-        var obligation = "method1_scalars_validated";
-        var narrowed = NarrowEvidence(source, obligation);
-        File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, [obligation], 0));
-        var mode = counted ? "true" : "false";
-        var target = $".arrayFill (.enumeration {fillEnum} .unsigned8) {mode}";
-        if (!narrowed.Contains(target, StringComparison.Ordinal))
-            throw new Exception("Missing enum array fill descriptor");
-        foreach (var (label, replacement) in new[]
-        {
-            ("identity", $".arrayFill (.enumeration \"Wrong.Enum\" .unsigned8) {mode}"),
-            ("backing", $".arrayFill (.enumeration {fillEnum} .signed8) {mode}")
-        })
-        {
-            var forged = Path.Combine(root, "Forged" + name + "-" + label + ".lean");
-            File.WriteAllText(forged, narrowed.Replace(target, replacement, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS forged enum array fill: " + label, "ScalarFlowValid");
-        }
     }
+    var shape = element.StartsWith("enumeration", StringComparison.Ordinal) ? $"(.{element})" : $".{element}";
+    var mode = counted ? "true" : "false";
+    File.AppendAllText(proof, BulkCallEvidence(1, counted ? 4 : 2, $".arrayFill {shape} {mode}"));
     evidence.Add(proof, "PASS generic array fill: " + name);
 }
 evidence.Check();

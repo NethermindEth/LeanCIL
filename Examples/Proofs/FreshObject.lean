@@ -32,7 +32,7 @@ bind_method fresh freshBody := "System.UInt64 Examples.Objects::Fresh(System.UIn
 /-- With 16 bytes of heap budget, `Fresh(step)` returns `5 + step` for every `step`, and every
     allocation, byte and authority the caller held is unchanged. -/
 theorem correctness (memory : Memory) (formed : memory.WellFormed)
-    (budget : tallySize ≤ memory.heapBudget) (step : W32) :
+    (budget : tallySize ≤ memory.heapBudget.getD tallySize) (step : W32) :
     ∃ fuel final, invoke Extracted.program fuel fresh [.scalar (.i32 step)] memory =
         .ok (final, [.scalar (.i64 (5 + step.zeroExtend 64))]) ∧
       MemoryBelow memory.nextIdentity memory final := by
@@ -92,10 +92,10 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed)
 
 /-- With less than 16 bytes of heap budget, `Fresh` fails at its `newobj` with the model's
     resource fault, which is not a CLR exception, and its constructor never runs. -/
-theorem insufficient_budget (memory : Memory) (short : memory.heapBudget < tallySize)
+theorem insufficient_budget (memory : Memory) (short : memory.heapBudget.getD tallySize < tallySize)
     (step : W32) :
     ∃ fuel, invoke Extracted.program fuel fresh [.scalar (.i32 step)] memory =
-      .error ⟨fresh, 1, .allocationFailure tallySize memory.heapBudget⟩ := by
+      .error ⟨fresh, 1, .allocationFailure tallySize (memory.heapBudget.getD tallySize)⟩ := by
   have failed := allocateObject_insufficient tally short
   cil_checked_steps [failed, tally, tallyType, tallySize]
 

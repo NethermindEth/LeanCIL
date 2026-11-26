@@ -7,8 +7,8 @@ Memory a caller passes may record any runtime type, so a proof that tells instan
 classes apart (`CIL/Safety/ClassCatalog.lean`) needs every object's lineage to agree with the
 class chains the extraction declares: `Memory.ClassesConsistent catalog memory`. The caller
 establishes it once, at entry. The program keeps it when each of its `newobj` and class `newarr`
-sites records a type that agrees with the catalog (`ObjectSitesConsistent`), a property of the
-program text alone that `decide` checks once per extraction. Under that premise,
+sites creates a type that agrees with the catalog (`ObjectSitesConsistent`), a property of the
+program text and link tables alone that `decide` checks once per extraction. Under that premise,
 `step_preserves_classes` up to `invoke_preserves_classes` carry the agreement through every step,
 nested call and frame exit, following `StepEffect`: no other instruction creates an instance.
 -/
@@ -30,24 +30,27 @@ def Memory.ClassesConsistent (catalog : List RuntimeType) (memory : Memory) : Pr
   ∀ id allocation type, memory.allocations id = some allocation →
     allocation.kind = .object type → type.ConsistentWith catalog
 
-/-- An instruction creates no instance, or creates one whose type agrees with the catalog. -/
-def SiteConsistent (catalog : List RuntimeType) (operation : CIL.Op) : Prop :=
-  match objectSiteType operation with
+/-- An instruction at `pc` of `body` creates no instance, or creates one whose type agrees with
+    the catalog. -/
+def SiteConsistent (catalog : List RuntimeType) (body : CIL.Method) (pc : Nat)
+    (operation : CIL.Instruction) : Prop :=
+  match objectSiteType body pc operation with
   | some type => type.ConsistentWith catalog
   | none => True
 
-instance (catalog : List RuntimeType) (operation : CIL.Op) :
-    Decidable (SiteConsistent catalog operation) := by
+instance (catalog : List RuntimeType) (body : CIL.Method) (pc : Nat)
+    (operation : CIL.Instruction) : Decidable (SiteConsistent catalog body pc operation) := by
   unfold SiteConsistent
   split <;> infer_instance
 
-/-- Every allocating site of `program` records a runtime type that agrees with the catalog. -/
+/-- Every allocating site of `program` creates a runtime type that agrees with the catalog. -/
 def ObjectSitesConsistent (catalog : List RuntimeType) (program : CIL.Program) : Prop :=
-  ∀ body ∈ program, ∀ operation ∈ body.code, SiteConsistent catalog operation
+  ∀ body ∈ program, ∀ pc (inside : pc < body.code.length),
+    SiteConsistent catalog body pc body.code[pc]
 
 instance (catalog : List RuntimeType) (program : CIL.Program) :
     Decidable (ObjectSitesConsistent catalog program) :=
-  inferInstanceAs (Decidable (∀ body ∈ program, ∀ operation ∈ body.code, _))
+  inferInstanceAs (Decidable (∀ body ∈ program, ∀ pc (_ : pc < body.code.length), _))
 
 /-- A step that creates no instance keeps the catalog's agreement. -/
 theorem Memory.ClassesConsistent.kept {catalog : List RuntimeType} {before after : Memory}
@@ -138,9 +141,10 @@ theorem ObjectAllocationEffect.classesConsistent {catalog : List RuntimeType}
 /-- Every checked dispatcher effect keeps the catalog's agreement when the executed instruction's
     object site does. -/
 theorem StepEffect.classesConsistent {catalog : List RuntimeType} {body : CIL.Method}
-    {operation : CIL.Op} {frame final : Frame} {before after : Memory}
-    (effect : StepEffect body operation frame before final after)
-    (site : SiteConsistent catalog operation) (consistent : before.ClassesConsistent catalog) :
+    {pc : Nat} {operation : CIL.Instruction} {frame final : Frame} {before after : Memory}
+    (effect : StepEffect body pc operation frame before final after)
+    (site : SiteConsistent catalog body pc operation)
+    (consistent : before.ClassesConsistent catalog) :
     after.ClassesConsistent catalog := by
   cases effect with
   | arrayAllocation effect => exact consistent.kept effect.objectsKept
@@ -157,12 +161,14 @@ theorem StepEffect.classesConsistent {catalog : List RuntimeType} {body : CIL.Me
   | localHome allocated stored =>
     exact consistent.kept ((allocateHome_objectsKept allocated).trans
       (storeLocal_objectsKept stored))
+  | resume => exact consistent
 
 #print axioms StepEffect.classesConsistent
 
 theorem step_preserves_classes {catalog : List RuntimeType} (body : CIL.Method)
-    (operation : CIL.Op) (pc : Nat) (args : List Value) (frame : Frame) (stack : List Value)
-    (m : Memory) (action : FrameAction) (site : SiteConsistent catalog operation)
+    (operation : CIL.Instruction) (pc : Nat) (args : List Value) (frame : Frame)
+    (stack : List Value)
+    (m : Memory) (action : FrameAction) (site : SiteConsistent catalog body pc operation)
     (consistent : m.ClassesConsistent catalog)
     (h : step body operation pc args frame stack m = .ok action) :
     action.memory.ClassesConsistent catalog :=
@@ -177,9 +183,9 @@ theorem programStep_preserves_classes {catalog : List RuntimeType} {program : CI
     (hs : ProgramStep program method pc args frame stack m action) :
     action.memory.ClassesConsistent catalog := by
   obtain ⟨body, operation, found, fetched, stepped⟩ := hs
+  obtain ⟨inside, rfl⟩ := List.getElem?_eq_some_iff.mp fetched
   exact step_preserves_classes _ _ _ _ _ _ _ _
-    (sites body (List.mem_of_getElem? found) operation (List.mem_of_getElem? fetched))
-    consistent stepped
+    (sites body (List.mem_of_getElem? found) pc inside) consistent stepped
 
 /-- A frame exit only expires storage, so it keeps the catalog's agreement. -/
 theorem leaveFrame_preserves_classes {catalog : List RuntimeType} (frame : Frame) {m : Memory}
@@ -187,27 +193,32 @@ theorem leaveFrame_preserves_classes {catalog : List RuntimeType} (frame : Frame
     (leaveFrame frame m).ClassesConsistent catalog :=
   consistent.kept (expireAll_objectsKept frame.owned m)
 
+/-- Every run of a program whose object sites agree with the catalog, through caught faults,
+    nested calls and frame exits, keeps agreement in the memory it ends in and in both memories
+    a fault leaves. -/
+theorem OutcomeTrace.classes {catalog : List RuntimeType} {program : CIL.Program}
+    {fuel method pc : Nat} {args : List Value} {frame : Frame} {stack : List Value}
+    {memory : Memory} {outcome : Except FaultState (Memory × List Value)}
+    (sites : ObjectSitesConsistent catalog program)
+    (trace : OutcomeTrace program fuel method pc args frame stack memory outcome)
+    (consistent : memory.ClassesConsistent catalog) :
+    OutcomeHolds (fun after => after.ClassesConsistent catalog) outcome :=
+  trace.preserves (fun found fetched stepped consistent =>
+    programStep_preserves_classes sites consistent ⟨_, _, found, fetched, stepped⟩)
+    (fun frame _ consistent => leaveFrame_preserves_classes frame consistent)
+    (fun enter consistent => consistent.kept (enterFrame_objectsKept enter)) consistent
+
+#print axioms OutcomeTrace.classes
+
 /-- A successful run of a program whose object sites agree with the catalog, including every
-    nested call and frame exit, keeps agreement from its starting memory. -/
+    nested call, caught fault and frame exit, keeps agreement from its starting memory. -/
 theorem run_preserves_classes {catalog : List RuntimeType} {program : CIL.Program}
     {fuel method pc : Nat} {args : List Value} {frame : Frame} {stack : List Value}
     {m final : Memory} {values : List Value} (sites : ObjectSitesConsistent catalog program)
     (consistent : m.ClassesConsistent catalog)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     final.ClassesConsistent catalog := by
-  have trace := run_success_trace program fuel method pc args frame stack m final values h
-  clear h
-  induction trace with
-  | next step _ ih => exact ih (programStep_preserves_classes sites consistent step)
-  | returned step _ =>
-    exact leaveFrame_preserves_classes _ (programStep_preserves_classes sites consistent step)
-  | tailCall step _ _ _ _ enter _ _ ih =>
-    exact ih ((leaveFrame_preserves_classes _
-      (programStep_preserves_classes sites consistent step)).kept (enterFrame_objectsKept enter))
-  | call step _ enter _ _ _ childIH ih
-  | construct step _ enter _ _ _ _ childIH ih =>
-    exact ih (childIH ((programStep_preserves_classes sites consistent step).kept
-      (enterFrame_objectsKept enter)))
+  exact (run_ok_trace h).classes sites consistent
 
 #print axioms run_preserves_classes
 

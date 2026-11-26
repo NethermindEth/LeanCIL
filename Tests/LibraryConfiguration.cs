@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // The certified library is bound to the lakefile it is built from, so editing a test library must
 // not rebuild CIL, while every setting that can change the CIL build or its auditor must.
@@ -8,13 +13,14 @@ var checkout = File.ReadAllText(At("lakefile.toml")).ReplaceLineEndings("\n");
 var library = LibraryLakefile(checkout);
 const string cilLibrary = "[[lean_lib]]\nname = \"CIL\"\n";
 Require(library.Contains(cilLibrary, StringComparison.Ordinal) &&
+    library.Contains("[[lean_lib]]\nname = \"StrictBinding\"\n", StringComparison.Ordinal) &&
     library.Contains("[[lean_exe]]\nname = \"leancil-audit\"\nroot = \"CIL.OleanAudit\"\n",
         StringComparison.Ordinal) &&
     library.StartsWith("name = \"leancil\"\n", StringComparison.Ordinal) &&
     library.Contains("defaultTargets = [\"CIL\"]\n", StringComparison.Ordinal),
-    "Library lakefile lost the package, CIL or auditor configuration:\n" + library);
+    "Library lakefile lost the package, CIL, StrictBinding or auditor configuration:\n" + library);
 Require(!library.Contains("Tests.", StringComparison.Ordinal), "Library lakefile declares a test library");
-Console.WriteLine("PASS library lakefile keeps the package, CIL and auditor and omits test libraries");
+Console.WriteLine("PASS library lakefile keeps the package, CIL, StrictBinding and auditor and omits test libraries");
 
 const string added = "\n[[lean_lib]]\nname = \"Tests.Added\"\n";
 const string firstTest = "[[lean_lib]]\nname = \"Tests.Support\"\n\n";

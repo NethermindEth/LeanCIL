@@ -1,21 +1,41 @@
-using System.Text.Json;
 using System.Runtime.CompilerServices;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
+/// <summary>A callable stack slot compares by its pinned metadata and carries its Lean rendering for emission.</summary>
+internal sealed class CallableSignature(IMethodSignature signature) : IEquatable<CallableSignature>
+{
+    readonly StructuralSignatures.Signature key = StructuralSignatures.Current.Callable(signature);
+    internal string Lean { get; } = ManagedPointers.SignatureEvidence(signature);
+    public bool Equals(CallableSignature? other) => other is not null && key == other.key;
+    public override bool Equals(object? other) => other is CallableSignature signature && Equals(signature);
+    public override int GetHashCode() => key.GetHashCode();
+}
+
+/// <summary>
+/// A managed method a callable pointer may name: its identity as a Lean term and its index in the extraction.
+/// </summary>
+internal sealed record ManagedTarget(string Identity, int Method)
+{
+    /// <summary>The Lean target term, with the method index written as <paramref name="calleeName"/> of it.</summary>
+    internal string Lean(Func<int, string> calleeName) =>
+        $"{{ identity := {Identity}, method := {calleeName(Method)} }}";
+}
+
 // Callable identities retain exact metadata; no numerical address is admitted as a target.
 internal static class ManagedPointers
 {
     sealed class CatalogCache(IReadOnlyDictionary<MethodDefinition, int> methods)
     {
-        internal readonly Dictionary<string, KeyValuePair<MethodDefinition, int>[]> Targets = methods
+        internal readonly Dictionary<StructuralSignatures.Signature, KeyValuePair<MethodDefinition, int>[]> Targets = methods
             .Where(pair => !pair.Key.HasThis && !pair.Key.ExplicitThis &&
                 pair.Key.CallingConvention == MethodCallingConvention.Default)
-            .GroupBy(pair => SignatureEvidence(pair.Key), StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
-        internal readonly Dictionary<string, string> Expressions = new(StringComparer.Ordinal);
+            .GroupBy(pair => StructuralSignatures.Current.Callable(pair.Key))
+            .ToDictionary(group => group.Key, group => group.ToArray());
+        internal readonly Dictionary<(StructuralSignatures.Signature Signature, int Caller), ValueList<ManagedTarget>>
+            Catalogs = [];
     }
 
     static readonly ConditionalWeakTable<IReadOnlyDictionary<MethodDefinition, int>, CatalogCache> Catalogs = new();
@@ -56,40 +76,45 @@ internal static class ManagedPointers
         MetadataValidation.Type(type, module, returns: result, architecture: architecture);
     }
 
-    internal static string TypeEvidence(TypeReference type)
+    static string TypeEvidence(TypeReference type)
     {
         if (type is ByReferenceType reference) return $".byref ({TypeEvidence(reference.ElementType)})";
         if (type.MetadataType == MetadataType.Void) return ".void";
         // Callable identity is independent of the extraction's checked layout-table ordering.
         if (MetadataValidation.IsAggregate(type, type.Module))
-            return $".aggregate {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} 0";
+            return $".aggregate {IdentityText.Quote(LayoutEvidence.Identity(type))} 0";
         if (type is GenericInstanceType generic && MetadataValidation.IntegerVectorWidth(type) is not null)
-            return $".apply (.constructor {JsonSerializer.Serialize(LayoutEvidence.Scope(generic.ElementType))} " +
-                $"{JsonSerializer.Serialize(generic.ElementType.FullName)}) " +
-                $"({TypeEvidence(generic.GenericArguments[0])})";
+        {
+            var name = GenericEvidence.ClassName(generic.ElementType);
+            var element = TypeEvidence(generic.GenericArguments[0]);
+            return $".apply (.constructor {GenericEvidence.Scope(generic.ElementType)} {name}) ({element})";
+        }
         if (EnumTypes.IsEnum(type))
-            return $".enum {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} " +
-                $"({TypeEvidence(EnumTypes.Storage(type))})";
-        return $".atom {JsonSerializer.Serialize(LayoutEvidence.Scope(type))} " +
-            JsonSerializer.Serialize(type.FullName);
+        {
+            var identity = EnumTypes.Identity(type).ToLean();
+            return $".enum {identity} {EnumTypes.StorageLean(type)}";
+        }
+        return GenericEvidence.RuntimePrimitive(type) ?? GenericEvidence.Atom(type);
     }
 
     internal static string SignatureEvidence(IMethodSignature signature) =>
         $"{{ result := {TypeEvidence(signature.ReturnType)}, parameters := " +
         $"[{string.Join(", ", signature.Parameters.Select(parameter => TypeEvidence(parameter.ParameterType)))}] }}";
 
-    internal static string IdentityEvidence(MethodDefinition method) =>
-        $"{{ owner := {JsonSerializer.Serialize(LayoutEvidence.Identity(method.DeclaringType))}, " +
-        $"token := {method.MetadataToken.ToUInt32()}, arguments := " +
-        $"[{string.Join(", ", MethodSpecialization.Arguments(method).Select(TypeEvidence))}] }}";
+    internal static string IdentityEvidence(MethodDefinition method)
+    {
+        var owner = IdentityText.Quote(LayoutEvidence.Identity(method.DeclaringType));
+        var arguments = string.Join(", ",
+            MethodSpecialization.Arguments(method).Select(GenericEvidence.CallableArgument));
+        var token = method.MetadataToken.ToUInt32();
+        return $$"""{ owner := {{owner}}, token := {{token}}, arguments := [{{arguments}}] }""";
+    }
 
     internal static bool SameSignature(IMethodSignature left, IMethodSignature right) =>
         !left.HasThis && !right.HasThis && !left.ExplicitThis && !right.ExplicitThis &&
         left.CallingConvention == MethodCallingConvention.Default &&
         right.CallingConvention == MethodCallingConvention.Default &&
-        TypeEvidence(left.ReturnType) == TypeEvidence(right.ReturnType) &&
-        left.Parameters.Select(parameter => TypeEvidence(parameter.ParameterType))
-            .SequenceEqual(right.Parameters.Select(parameter => TypeEvidence(parameter.ParameterType)));
+        StructuralSignatures.Current.Callable(left) == StructuralSignatures.Current.Callable(right);
 
     // Inspect a closed address signature before attempting to admit its body or constraints.
     internal static IMethodSignature ReferenceSignature(MethodReference target)
@@ -106,21 +131,21 @@ internal static class ManagedPointers
         return signature;
     }
 
-    internal static string TargetEvidence(MethodDefinition method, int index) =>
-        $"{{ identity := {IdentityEvidence(method)}, method := {index} }}";
+    internal static ManagedTarget Target(MethodDefinition method, int index) =>
+        new(IdentityEvidence(method), index);
 
-    internal static string Catalog(IMethodSignature signature,
+    internal static ValueList<ManagedTarget> Catalog(IMethodSignature signature,
         IReadOnlyDictionary<MethodDefinition, int> methods, int caller, bool tail)
     {
-        var signatureKey = SignatureEvidence(signature);
-        var key = signatureKey + ":" + (tail ? -1 : caller);
+        var signatureKey = StructuralSignatures.Current.Callable(signature);
+        var key = (signatureKey, tail ? -1 : caller);
         var cache = Catalogs.GetValue(methods, static values => new(values));
-        if (cache.Expressions.TryGetValue(key, out var catalog)) return catalog;
+        if (cache.Catalogs.TryGetValue(key, out var catalog)) return catalog;
         var targets = cache.Targets.GetValueOrDefault(signatureKey, [])
             .Where(pair => tail || pair.Value > caller).ToArray();
         if (targets.Length == 0) throw new InvalidDataException("Empty managed pointer target catalog");
-        catalog = "[" + string.Join(", ", targets.Select(pair => TargetEvidence(pair.Key, pair.Value))) + "]";
-        cache.Expressions.Add(key, catalog);
+        catalog = [.. targets.Select(pair => Target(pair.Key, pair.Value))];
+        cache.Catalogs.Add(key, catalog);
         return catalog;
     }
 

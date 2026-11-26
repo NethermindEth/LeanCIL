@@ -1,6 +1,13 @@
 import CIL.Extraction.Constrained
+import CIL.Extraction.ValueDecoding
+import Tests.Support
+import Tests.Support.FixtureAssembly
 
-/-! # Independently tampered constrained-call metadata and translations -/
+/-! # Constrained-call evidence
+
+These fixtures check receiver and interface dispatch, including the owner kind of a closed
+generic struct, and the emitted calls and type tests against their metadata.
+-/
 namespace Tests.ConstrainedEvidence
 open CIL CIL.Extraction
 
@@ -9,18 +16,18 @@ theorem named_metadata_decoding :
     namedType (.aggregate "Fixture::Counter" 0) =
       some ("Fixture".toList, "Counter".toList) ∧
     namedType (.aggregate "Σcope::Counter" 0) = some ("Σcope".toList, "Counter".toList) ∧
-    namedType (.atom "Fixturé" "Counter") = some ("Fixturé".toList, "Counter".toList) ∧
-    namedType (.atom "Fixture" "Countér") = none ∧
+    namedType (.atom "Fixturé" "Counter" .classType) = some ("Fixturé".toList, "Counter".toList) ∧
+    namedType (.atom "Fixture" "Countér" .classType) = none ∧
     namedType (.aggregate "Fixture:Counter" 0) = none ∧
     namedType (.aggregate "Fixture::Counter[]" 0) = none ∧
-    namedType (.atom "" "Counter") = none := by decide +kernel
+    namedType (.atom "" "Counter" .classType) = none := by decide +kernel
 #print axioms named_metadata_decoding
 
 /-- The assembly every fixture type is declared in. -/
-private def fixturePin : AssemblyPin := { identity := "Fixture" }
-private def integer : TypeExpr := .atom runtimeScope "System.Int32"
-private def receiver : TypeExpr := .aggregate "Fixture::Counter" 0
-private def interface : TypeExpr := .atom "Fixture" "IValue"
+private def fixturePin : AssemblyPin := ⟨fixtureAssembly⟩
+private def integer : TypeExpr := .primitive .int32
+private def receiver : TypeExpr := .aggregate (fixtureScope ++ "::Counter") 0
+private def interface : TypeExpr := .atom fixtureScope "IValue" .interfaceType
 private def slot : DispatchMethod := {
   token := 5, name := "Read", hasThis := true, isPublic := true, isAbstract := true,
   isVirtual := true, hasBody := false, genericArity := 0, explicitThis := false,
@@ -36,35 +43,69 @@ private def declared : DispatchType := {
   interfaces := [], methods := [slot], assembly := fixturePin }
 private def types := [concrete, declared]
 private def site : CallSite := {
-  declaringType := interface, name := "Read", target := .managed 5, typeArguments := [],
-  parameterCount := 0, hasThis := true, returnsValue := true,
-  returnType := integer, parameterTypes := [] }
+  declared := { convention := 0x20, returnType := integer },
+  method := {
+    owner := interface, name := name!"Read", hasThis := true, genericArity := 0,
+    returnType := integer, parameters := [] },
+  name := "Read", target := .managed 5, typeArguments := [], parameterCount := 0,
+  returnsValue := true }
 private def raw : RawMethod := {
-  token := 1, owner := "Fixture::Caller", hasThis := false, explicitThis := false,
+  token := 1, owner := (fixtureScope ++ "::Caller"), hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
   returnType := integer, parameters := [.byref receiver], locals := [], initLocals := false,
   maxStack := 1, genericParameters := [], code :=
     [⟨0, 2, .none⟩, ⟨1, 65046, .type receiver⟩, ⟨7, 111, .call site⟩, ⟨12, 42, .none⟩] }
 private def target : SpecializedMethod := ⟨[], { raw with
-  token := 21, owner := "Fixture::Counter", hasThis := true, parameters := [],
-  code := [⟨0, 23, .none⟩, ⟨1, 42, .none⟩] }⟩
-private def methods := [⟨[], raw⟩, target]
-private def emitted : Method := {
-  locals := [], returnsValue := true, code := [.arg 0, .nop, .call 1 1, .ret] }
+  token := 21, owner := (fixtureScope ++ "::Counter"), hasThis := true, parameters := [],
+  code := [⟨0, 23, .none⟩, ⟨1, 42, .none⟩] }, fixturePin⟩
+private def methods := [⟨[], raw, fixturePin⟩, target]
+/-- The receiver load, the dropped prefix and `call` with its prefix, linked to the target. -/
+private def constrainedEmitted (receiver : TypeExpr) (site : CallSite) : Method := {
+  locals := [], returnsValue := true,
+  code := [.ldarg 0, .nop, .call site.method { constrained := some receiver }, .ret],
+  links := [(2, .direct 1)] }
+private def emitted : Method := constrainedEmitted receiver site
+/-- `emitted` with `op` in place of its call. -/
+private def callAs (op : Instruction) : Method := { emitted with code := emitted.code.set 2 op }
 
 theorem concrete_call_valid :
     ConstrainedCallsValid types methods raw [true, true, true, true] emitted := by decide +kernel
 #print axioms concrete_call_valid
 
+/-- A decoded call must link to the resolved body and name its dispatch receiver. -/
+theorem forged_decoded_call_rejected :
+    let valid := fun (source : RawMethod) (link : Nat) =>
+      ConstrainedCallsValid types methods source [true, true, true, true]
+        { emitted with
+          code := Instruction.ofRawCode none source.code, links := [(2, .direct link)] }
+    let other := raw.code.set 1 ⟨1, 0xFE16, .type (.aggregate (fixtureScope ++ "::Other") 1)⟩
+    valid raw 1 ∧ ¬ valid raw 0 ∧ ¬ valid { raw with code := other } 1 := by
+  decide +kernel
+#print axioms forged_decoded_call_rejected
+
+/-- A link to any body but the resolved implementation, or no direct link, is rejected. -/
 theorem changed_target_rejected :
     ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
-      { emitted with code := emitted.code.set 2 (.call 0 1) } := by decide +kernel
+      { emitted with links := [(2, .direct 0)] } ∧
+    ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
+      { emitted with links := [] } ∧
+    ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
+      { emitted with links := [(2, .virtual [(receiver, 1)])] } := by decide +kernel
 #print axioms changed_target_rejected
 
-theorem changed_arity_rejected :
+/-- The emitted call names the site's method, carries the site's receiver as its prefix and is
+    no tail call. -/
+theorem changed_call_rejected :
     ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
-      { emitted with code := emitted.code.set 2 (.call 1 0) } := by decide +kernel
-#print axioms changed_arity_rejected
+      (callAs (.call { site.method with hasThis := false } { constrained := some receiver })) ∧
+    ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
+      (callAs (.call site.method)) ∧
+    ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
+      (callAs (.call site.method { constrained := some interface })) ∧
+    ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
+      (callAs (.call site.method { tail := true, constrained := some receiver })) := by
+  decide +kernel
+#print axioms changed_call_rejected
 
 theorem prefix_bypass_rejected :
     ¬ ConstrainedCallsValid types methods
@@ -80,7 +121,7 @@ theorem missing_prefix_rejected :
 
 theorem changed_signature_rejected :
     ¬ ConstrainedCallsValid types
-      [⟨[], raw⟩, { target with closed := { target.closed with returnType := .void } }]
+      [⟨[], raw, fixturePin⟩, { target with closed := { target.closed with returnType := .void } }]
       raw [true, true, true, true] emitted := by decide +kernel
 #print axioms changed_signature_rejected
 
@@ -103,15 +144,22 @@ private def staticImplementation : DispatchMethod := {
   staticSlot with token := 31, isAbstract := false, isVirtual := false, hasBody := true }
 private def staticTypes : List DispatchType :=
   [{ concrete with methods := [staticImplementation] }, { declared with methods := [staticSlot] }]
-private def staticSite : CallSite := { site with target := .managed 6, hasThis := false }
+private def staticSite : CallSite := { site with target := .managed 6, method.hasThis := false }
 private def staticRaw : RawMethod := { raw with
   parameters := [], code := [⟨0, 65046, .type receiver⟩, ⟨6, 40, .call staticSite⟩, ⟨11, 42, .none⟩] }
 private def staticTarget : SpecializedMethod := ⟨[], { raw with
-  token := 31, owner := "Fixture::Counter", parameters := [],
-  code := [⟨0, 22, .none⟩, ⟨1, 42, .none⟩] }⟩
-private def staticMethods := [⟨[], staticRaw⟩, staticTarget]
-private def staticEmitted : Method := {
-  locals := [], returnsValue := true, code := [.nop, .call 1 0, .ret] }
+  token := 31, owner := (fixtureScope ++ "::Counter"), parameters := [],
+  code := [⟨0, 22, .none⟩, ⟨1, 42, .none⟩] }, fixturePin⟩
+private def staticMethods := [⟨[], staticRaw, fixturePin⟩, staticTarget]
+/-- The dropped prefix and the prefixed static `call` of `site` on `receiver`. -/
+private def staticCall (receiver : TypeExpr) (site : CallSite) : Method := {
+  locals := [], returnsValue := true,
+  code := [.nop, .call site.method { constrained := some receiver }, .ret],
+  links := [(1, .direct 1)] }
+private def staticEmitted : Method := staticCall receiver staticSite
+/-- The static slot's call with a receiver argument added. -/
+private def receiverCall : Instruction :=
+  .call { staticSite.method with hasThis := true } { constrained := some receiver }
 
 /-- A static interface slot (`constrained. T; call`) resolves to the receiver's static
     implementation, called without a receiver argument. -/
@@ -122,7 +170,7 @@ theorem static_call_valid :
 
 theorem static_call_with_receiver_rejected :
     ¬ ConstrainedCallsValid staticTypes staticMethods staticRaw [true, true, true]
-      { staticEmitted with code := staticEmitted.code.set 1 (.call 1 1) } := by decide +kernel
+      { staticEmitted with code := staticEmitted.code.set 1 receiverCall } := by decide +kernel
 #print axioms static_call_with_receiver_rejected
 
 /-- `callvirt` never dispatches a static slot, and `call` never dispatches an instance slot. -/
@@ -140,7 +188,7 @@ theorem static_slot_mismatches_rejected :
     resolveConstrained [concrete, { declared with methods := [staticSlot] }]
       receiver staticSite = none ∧
     resolveConstrained [{ concrete with methods := [{ staticImplementation with token := 6 }] }]
-      receiver { staticSite with declaringType := receiver } = none := by decide +kernel
+      receiver { staticSite with method.owner := receiver } = none := by decide +kernel
 #print axioms static_slot_mismatches_rejected
 
 /-- An instance default interface method slot is rejected even when the struct implements it:
@@ -151,10 +199,10 @@ theorem default_interface_slot_rejected :
       receiver site = none := by decide +kernel
 #print axioms default_interface_slot_rejected
 
-private def boolean : TypeExpr := .atom runtimeScope "System.Boolean"
-private def allowance : TypeExpr := .aggregate "Fixture::Allowance" 0
-private def price : TypeExpr := .aggregate "Fixture::Price" 1
-private def allowanceOwner : TypeExpr := .constructor "Fixture" "IAllowance`1"
+private def boolean : TypeExpr := .primitive .boolean
+private def allowance : TypeExpr := .aggregate (fixtureScope ++ "::Allowance") 0
+private def price : TypeExpr := .aggregate (fixtureScope ++ "::Price") 1
+private def allowanceOwner : TypeExpr := .objectConstructor fixtureScope "IAllowance`1"
 private def allowanceInterface : TypeExpr := .apply allowanceOwner allowance
 /-- `static virtual bool Spend<TPrice>(ref TSelf self)` with a body, on `IAllowance<Allowance>`. -/
 private def defaultSlot : DispatchMethod := {
@@ -179,42 +227,43 @@ private def overrideTypes :=
   [{ defaultConcrete with methods := [genericOverride] }, defaultDeclared]
 /-- `constrained. Allowance; call bool IAllowance<Allowance>::Spend<Price>(TSelf&)`. -/
 private def defaultSite : CallSite := {
-  declaringType := allowanceInterface, name := "Spend", target := .managed 40,
-  typeArguments := [price, allowance], ownerArgumentCount := 1, parameterCount := 1,
-  hasThis := false, returnsValue := true, returnType := boolean,
-  parameterTypes := [.byref allowance] }
+  declared := { convention := 0x10, returnType := boolean, parameters := [.byref (.parameter 0)] },
+  method := {
+    owner := allowanceInterface, name := name!"Spend", hasThis := false, genericArity := 1,
+    returnType := boolean, parameters := [.byref allowance], methodArguments := [price] },
+  name := "Spend", target := .managed 40, typeArguments := [price, allowance],
+  ownerArgumentCount := 1, parameterCount := 1, returnsValue := true }
 private def defaultRaw : RawMethod := { raw with
   parameters := [.byref allowance],
   code := [⟨0, 2, .none⟩, ⟨1, 65046, .type allowance⟩, ⟨7, 40, .call defaultSite⟩,
     ⟨12, 42, .none⟩] }
 /-- The default body instantiated at `TPrice := Price` and `TSelf := Allowance`. -/
 private def defaultTarget : SpecializedMethod := ⟨[price, allowance], { raw with
-  token := 40, owner := "Fixture::IAllowance`1", ownerArgumentCount := 1,
+  token := 40, owner := (fixtureScope ++ "::IAllowance`1"), ownerArgumentCount := 1,
   returnType := boolean, parameters := [.byref allowance],
-  code := [⟨0, 2, .none⟩, ⟨1, 42, .none⟩] }⟩
+  code := [⟨0, 2, .none⟩, ⟨1, 42, .none⟩] }, fixturePin⟩
 /-- The recorded override instantiated at `TPrice := Price`. -/
 private def overrideTarget : SpecializedMethod := ⟨[price], { defaultTarget.closed with
-  token := 41, owner := "Fixture::Allowance", ownerArgumentCount := 0 }⟩
-private def defaultEmitted : Method := {
-  locals := [], returnsValue := true, code := [.arg 0, .nop, .call 1 1, .ret] }
+  token := 41, owner := (fixtureScope ++ "::Allowance"), ownerArgumentCount := 0 }, fixturePin⟩
+private def defaultEmitted : Method := constrainedEmitted allowance defaultSite
 
 /-- Without an implementation on the receiver, a generic static virtual slot runs its own body,
     instantiated at the site's method and interface arguments. -/
 theorem static_default_valid :
     resolveConstrained defaultTypes allowance defaultSite =
       some (.interfaceBody allowanceInterface defaultSlot) ∧
-    ConstrainedCallsValid defaultTypes [⟨[], defaultRaw⟩, defaultTarget] defaultRaw
+    ConstrainedCallsValid defaultTypes [⟨[], defaultRaw, fixturePin⟩, defaultTarget] defaultRaw
       [true, true, true, true] defaultEmitted := by decide +kernel
 #print axioms static_default_valid
 
 /-- A recorded generic override wins over the default body, and only it may be emitted. -/
 theorem static_override_precedes_default :
     (resolveConstrained overrideTypes allowance defaultSite).map (·.method.token) = some 41 ∧
-    ConstrainedCallsValid overrideTypes [⟨[], defaultRaw⟩, overrideTarget] defaultRaw
+    ConstrainedCallsValid overrideTypes [⟨[], defaultRaw, fixturePin⟩, overrideTarget] defaultRaw
       [true, true, true, true] defaultEmitted ∧
-    ¬ ConstrainedCallsValid overrideTypes [⟨[], defaultRaw⟩, defaultTarget] defaultRaw
+    ¬ ConstrainedCallsValid overrideTypes [⟨[], defaultRaw, fixturePin⟩, defaultTarget] defaultRaw
       [true, true, true, true] defaultEmitted ∧
-    ¬ ConstrainedCallsValid defaultTypes [⟨[], defaultRaw⟩, overrideTarget] defaultRaw
+    ¬ ConstrainedCallsValid defaultTypes [⟨[], defaultRaw, fixturePin⟩, overrideTarget] defaultRaw
       [true, true, true, true] defaultEmitted := by decide +kernel
 #print axioms static_override_precedes_default
 
@@ -233,7 +282,7 @@ theorem static_default_ambiguity_rejected :
     exactly the slot's method arity, closed, and instance slots take no method arguments. -/
 theorem static_default_arguments_rejected :
     ¬ ConstrainedCallsValid defaultTypes
-      [⟨[], defaultRaw⟩, { defaultTarget with arguments := [allowance, allowance] }]
+      [⟨[], defaultRaw, fixturePin⟩, { defaultTarget with arguments := [allowance, allowance] }]
       defaultRaw [true, true, true, true] defaultEmitted ∧
     resolveConstrained defaultTypes allowance
       { defaultSite with typeArguments := [allowance] } = none ∧
@@ -257,14 +306,16 @@ theorem static_default_owner_rejected :
     resolveConstrained [defaultConcrete, { defaultDeclared with methods :=
         [{ defaultSlot with ownerArguments := [price] }] }] allowance defaultSite = none ∧
     resolveConstrained [defaultConcrete, { defaultDeclared with methods :=
-        [{ defaultSlot with owner := .constructor "Other" "IAllowance`1" }] }]
+        [{ defaultSlot with owner := .objectConstructor "Other" "IAllowance`1" }] }]
       allowance defaultSite = none := by decide +kernel
 #print axioms static_default_owner_rejected
 
-private def derivedInterface : TypeExpr := .apply (.constructor "Fixture" "IRefund`1") allowance
+private def derivedInterface : TypeExpr :=
+  .apply (.objectConstructor fixtureScope "IRefund`1") allowance
 /-- `IRefund<TSelf>`'s `MethodImpl` of `IAllowance<TSelf>.Spend<TPrice>`, closed at `Allowance`. -/
 private def derivedBody : DispatchMethod := { genericOverride with
-  token := 50, owner := .constructor "Fixture" "IRefund`1", ownerArguments := [allowance] }
+  token := 50, owner := .objectConstructor fixtureScope "IRefund`1",
+  ownerArguments := [allowance] }
 /-- `IRefund<TSelf> : IAllowance<TSelf>` re-implementing `IAllowance<TSelf>.Spend<TPrice>`. -/
 private def derivedDeclared : DispatchType := {
   identity := derivedInterface, valueType := false, interfaceType := true,
@@ -274,7 +325,7 @@ private def derivedConcrete : DispatchType :=
 private def derivedTypes := [derivedConcrete, defaultDeclared, derivedDeclared]
 /-- The derived interface's body instantiated at `TPrice := Price` and `TSelf := Allowance`. -/
 private def derivedTarget : SpecializedMethod := ⟨[price, allowance], { defaultTarget.closed with
-  token := 50, owner := "Fixture::IRefund`1" }⟩
+  token := 50, owner := (fixtureScope ++ "::IRefund`1") }, fixturePin⟩
 
 /-- A derived interface of the receiver that re-implements the generic slot is more specific than
     the default body, so it runs, specialized at its own closed interface; emitting the less
@@ -282,9 +333,9 @@ private def derivedTarget : SpecializedMethod := ⟨[price, allowance], { defaul
 theorem static_derived_body_valid :
     resolveConstrained derivedTypes allowance defaultSite =
       some (.interfaceBody derivedInterface derivedBody) ∧
-    ConstrainedCallsValid derivedTypes [⟨[], defaultRaw⟩, derivedTarget] defaultRaw
+    ConstrainedCallsValid derivedTypes [⟨[], defaultRaw, fixturePin⟩, derivedTarget] defaultRaw
       [true, true, true, true] defaultEmitted ∧
-    ¬ ConstrainedCallsValid derivedTypes [⟨[], defaultRaw⟩, defaultTarget] defaultRaw
+    ¬ ConstrainedCallsValid derivedTypes [⟨[], defaultRaw, fixturePin⟩, defaultTarget] defaultRaw
       [true, true, true, true] defaultEmitted ∧
     resolveConstrained [derivedConcrete, defaultDeclared, { derivedDeclared with methods := [] }]
       allowance defaultSite = some (.interfaceBody allowanceInterface defaultSlot) := by
@@ -299,11 +350,11 @@ theorem static_interface_closure_rejected :
       allowance defaultSite = none := by decide +kernel
 #print axioms static_interface_closure_rejected
 
-private def scaleInterface : TypeExpr := .atom "Fixture" "IScale"
-private def moreInterface : TypeExpr := .atom "Fixture" "IScaleMore"
-private def mostInterface : TypeExpr := .atom "Fixture" "IScaleMost"
-private def sideInterface : TypeExpr := .atom "Fixture" "IScaleSide"
-private def scaled : TypeExpr := .aggregate "Fixture::Scaled" 2
+private def scaleInterface : TypeExpr := .atom fixtureScope "IScale" .interfaceType
+private def moreInterface : TypeExpr := .atom fixtureScope "IScaleMore" .interfaceType
+private def mostInterface : TypeExpr := .atom fixtureScope "IScaleMost" .interfaceType
+private def sideInterface : TypeExpr := .atom fixtureScope "IScaleSide" .interfaceType
+private def scaled : TypeExpr := .aggregate (fixtureScope ++ "::Scaled") 2
 /-- `static virtual int Scale()` with a body, declared on `IScale`. -/
 private def scaleSlot : DispatchMethod := {
   staticSlot with token := 60, name := "Scale", isAbstract := false, hasBody := true }
@@ -329,13 +380,14 @@ private def scaledEntry (interfaces : List TypeExpr) : DispatchType := {
   identity := scaled, valueType := true, interfaceType := false, interfaces, methods := [],
   assembly := fixturePin }
 private def scaleSite : CallSite := {
-  staticSite with declaringType := scaleInterface, name := "Scale", target := .managed 60 }
+  staticSite with method.owner := scaleInterface, name := "Scale", target := .managed 60 }
 private def scaleRaw : RawMethod := { staticRaw with
   code := [⟨0, 65046, .type scaled⟩, ⟨6, 40, .call scaleSite⟩, ⟨11, 42, .none⟩] }
 /-- The program body of the interface-level method `token` declared by `owner`. -/
 private def scaleProgram (token : Nat) (owner : String) : SpecializedMethod :=
-  ⟨[], { staticTarget.closed with token, owner }⟩
+  ⟨[], { staticTarget.closed with token, owner }, fixturePin⟩
 private def scaleChain := [scaledEntry [moreInterface, scaleInterface], scaleEntry, moreEntry]
+private def scaleEmitted : Method := staticCall scaled scaleSite
 
 /-- A derived interface's override of a static virtual slot runs instead of the default, and
     only its own program body may be emitted for the call. -/
@@ -343,14 +395,17 @@ theorem derived_override_valid :
     resolveConstrained scaleChain scaled scaleSite =
       some (.interfaceBody moreInterface (scaleBody 61)) ∧
     ConstrainedCallsValid scaleChain
-      [⟨[], scaleRaw⟩, scaleProgram 61 "Fixture::IScaleMore"] scaleRaw [true, true, true]
-      staticEmitted ∧
+      [⟨[], scaleRaw, fixturePin⟩, scaleProgram 61 (fixtureScope ++ "::IScaleMore")] scaleRaw
+      [true, true, true]
+      scaleEmitted ∧
     ¬ ConstrainedCallsValid scaleChain
-      [⟨[], scaleRaw⟩, scaleProgram 60 "Fixture::IScale"] scaleRaw [true, true, true]
-      staticEmitted ∧
+      [⟨[], scaleRaw, fixturePin⟩, scaleProgram 60 (fixtureScope ++ "::IScale")] scaleRaw
+      [true, true, true]
+      scaleEmitted ∧
     ¬ ConstrainedCallsValid scaleChain
-      [⟨[], scaleRaw⟩, scaleProgram 61 "Fixture::IScale"] scaleRaw [true, true, true]
-      staticEmitted := by decide +kernel
+      [⟨[], scaleRaw, fixturePin⟩, scaleProgram 61 (fixtureScope ++ "::IScale")] scaleRaw
+      [true, true, true]
+      scaleEmitted := by decide +kernel
 #print axioms derived_override_valid
 
 /-- A derived interface supplies the body of a base `static abstract` slot. -/
@@ -370,8 +425,9 @@ theorem most_derived_body_valid :
     ¬ ConstrainedCallsValid
       [scaledEntry [mostInterface, moreInterface, scaleInterface], scaleEntry, moreEntry,
         mostEntry]
-      [⟨[], scaleRaw⟩, scaleProgram 61 "Fixture::IScaleMore"] scaleRaw [true, true, true]
-      staticEmitted := by decide +kernel
+      [⟨[], scaleRaw, fixturePin⟩, scaleProgram 61 (fixtureScope ++ "::IScaleMore")] scaleRaw
+      [true, true, true]
+      scaleEmitted := by decide +kernel
 #print axioms most_derived_body_valid
 
 /-- Two unrelated interfaces overriding the slot leave no most specific body, so the call is
@@ -383,8 +439,9 @@ theorem diamond_rejected :
     ¬ ConstrainedCallsValid
       [scaledEntry [moreInterface, sideInterface, scaleInterface], scaleEntry, moreEntry,
         sideEntry]
-      [⟨[], scaleRaw⟩, scaleProgram 60 "Fixture::IScale"] scaleRaw [true, true, true]
-      staticEmitted ∧
+      [⟨[], scaleRaw, fixturePin⟩, scaleProgram 60 (fixtureScope ++ "::IScale")] scaleRaw
+      [true, true, true]
+      scaleEmitted ∧
     resolveConstrained [scaledEntry [moreInterface, scaleInterface], scaleEntry,
         { moreEntry with methods := [scaleBody 61, scaleBody 64] }] scaled scaleSite = none := by
   decide +kernel
@@ -413,8 +470,9 @@ theorem struct_override_precedes_interfaces :
   decide +kernel
 #print axioms struct_override_precedes_interfaces
 
-private def appPin : AssemblyPin := { identity := "App" }
-private def appReceiver : TypeExpr := .aggregate "App::Mine" 3
+private def appPin : AssemblyPin := ⟨unsignedAssembly name!"App"⟩
+private def appScope : String := "App, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+private def appReceiver : TypeExpr := .aggregate (appScope ++ "::Mine") 3
 private def appConcrete : DispatchType :=
   { concrete with identity := appReceiver, methods := [staticImplementation], assembly := appPin }
 private def appDeclared : DispatchType := { declared with methods := [staticSlot] }
@@ -422,27 +480,27 @@ private def appTypes : List DispatchType := [appConcrete, appDeclared]
 private def appRaw : RawMethod := { staticRaw with
   code := [⟨0, 65046, .type appReceiver⟩, ⟨6, 40, .call staticSite⟩, ⟨11, 42, .none⟩] }
 private def appTarget : SpecializedMethod :=
-  ⟨[], { staticTarget.closed with owner := "App::Mine" }⟩
+  ⟨[], { staticTarget.closed with owner := (appScope ++ "::Mine") }, appPin⟩
+private def appEmitted : Method := staticCall appReceiver staticSite
 
 /-- A struct of one pinned assembly implements a slot of another pinned assembly's interface, and
     the emitted body must carry the struct's own scope. -/
 theorem cross_pin_implementation_valid :
-    ConstrainedCallsValid appTypes [⟨[], appRaw⟩, appTarget] appRaw [true, true, true]
-      staticEmitted ∧
-    ¬ ConstrainedCallsValid appTypes [⟨[], appRaw⟩, staticTarget] appRaw [true, true, true]
-      staticEmitted := by decide +kernel
+    ConstrainedCallsValid appTypes [⟨[], appRaw, fixturePin⟩, appTarget] appRaw [true, true, true]
+      appEmitted ∧
+    ¬ ConstrainedCallsValid appTypes [⟨[], appRaw, fixturePin⟩, staticTarget] appRaw [true, true, true]
+      appEmitted := by decide +kernel
 #print axioms cross_pin_implementation_valid
 
 /-- Every catalog entry dispatch reads must name a valid pin scoping its type: a receiver, slot
-    interface or inherited interface moved to another scope, or with no pin, fails closed. -/
+    interface or inherited interface moved to another scope fails closed. -/
 theorem unpinned_catalog_rejected :
     resolveConstrained [{ appConcrete with assembly := fixturePin }, appDeclared]
       appReceiver staticSite = none ∧
     resolveConstrained [appConcrete, { appDeclared with assembly := appPin }]
       appReceiver staticSite = none ∧
-    resolveConstrained [appConcrete, { appDeclared with assembly := {} }]
-      appReceiver staticSite = none ∧
-    resolveConstrained [appConcrete, { appDeclared with assembly := { identity := "A:B" } }]
+    resolveConstrained [appConcrete,
+        { appDeclared with assembly := ⟨unsignedAssembly name!"A:B"⟩ }]
       appReceiver staticSite = none ∧
     resolveConstrained [scaledEntry [moreInterface, scaleInterface], scaleEntry,
         { moreEntry with assembly := appPin }] scaled scaleSite = none := by decide +kernel
@@ -455,7 +513,7 @@ theorem lowered_default_exact :
       some ⟨7, 40, .call defaultSite⟩ ∧
     (lowerConstrainedRaw overrideTypes defaultRaw).code[2]? =
       some ⟨7, 40, .call { defaultSite with
-        target := .managed 41, declaringType := allowance, typeArguments := [price],
+        target := .managed 41, method.owner := allowance, typeArguments := [price],
         ownerArgumentCount := 0 }⟩ := by decide +kernel
 #print axioms lowered_default_exact
 
@@ -491,7 +549,7 @@ theorem prefix_target_valid :
 theorem lowered_call_exact :
     (lowerConstrainedRaw types raw).code =
       [⟨0, 2, .none⟩, ⟨1, 0, .none⟩,
-        ⟨7, 40, .call { site with target := .managed 21, declaringType := receiver }⟩,
+        ⟨7, 40, .call { site with target := .managed 21, method.owner := receiver }⟩,
         ⟨12, 42, .none⟩] := by decide +kernel
 #print axioms lowered_call_exact
 
@@ -520,9 +578,10 @@ theorem extra_emitted_rejected :
 theorem indexed_type_identity :
     (DispatchIndex.ofTypes [concrete, concrete, declared]).resolve receiver site = none ∧
     (DispatchIndex.ofTypes [concrete, declared]).resolve
-      (.aggregate "Fixture::Counter" 1) site = none ∧
+      (.aggregate (fixtureScope ++ "::Counter") 1) site = none ∧
     (DispatchIndex.ofTypes [concrete, declared]).resolve receiver
-      { site with declaringType := .atom "Other" "IValue" } = none := by decide +kernel
+      { site with method.owner := .atom "Other" "IValue" .interfaceType } = none := by
+  decide +kernel
 #print axioms indexed_type_identity
 
 /-- Repeated override tokens do not duplicate one implementation; explicit still wins. -/
@@ -545,9 +604,9 @@ theorem indexed_method_ambiguity :
       { implementation with token := 22, overrides := [(5, interface)] }] }, declared]).resolve
       receiver site = none := by decide +kernel
 #print axioms indexed_method_ambiguity
-private def genericOwner : TypeExpr := .constructor "Fixture" "Counter`1"
+private def genericOwner : TypeExpr := .constructor fixtureScope "Counter`1"
 private def genericReceiver : TypeExpr :=
-  .aggregate ("Fixture::Counter`1<" ++ runtimeScope ++ "::System.Int32>") 0
+  .aggregate ((fixtureScope ++ "::Counter`1<") ++ runtimeScope ++ "::System.Int32>") 0
 private def genericImplementation : DispatchMethod := {
   implementation with owner := genericOwner, ownerArguments := [integer] }
 private def genericTypes : List DispatchType := [
@@ -556,26 +615,28 @@ private def genericRaw : RawMethod := { raw with
   parameters := [.byref genericReceiver],
   code := raw.code.set 1 ⟨1, 65046, .type genericReceiver⟩ }
 private def genericTarget : SpecializedMethod := ⟨[integer], {
-  target.closed with owner := "Fixture::Counter`1", ownerArgumentCount := 1 }⟩
+  target.closed with owner := (fixtureScope ++ "::Counter`1"), ownerArgumentCount := 1 },
+  fixturePin⟩
+private def genericEmitted : Method := constrainedEmitted genericReceiver site
 
 /-- Closed owner specialization composes with the existing exact constrained-call rule. -/
 theorem generic_call_valid :
-    ConstrainedCallsValid genericTypes [⟨[], genericRaw⟩, genericTarget]
-      genericRaw [true, true, true, true] emitted := by decide +kernel
+    ConstrainedCallsValid genericTypes [⟨[], genericRaw, fixturePin⟩, genericTarget]
+      genericRaw [true, true, true, true] genericEmitted := by decide +kernel
 #print axioms generic_call_valid
 
 /-- A different specialization of the same method token cannot satisfy the receiver. -/
 theorem changed_owner_arguments_rejected :
-    ¬ ConstrainedCallsValid genericTypes [⟨[], genericRaw⟩,
-      { genericTarget with arguments := [.atom runtimeScope "System.Int64"] }]
-      genericRaw [true, true, true, true] emitted := by decide +kernel
+    ¬ ConstrainedCallsValid genericTypes [⟨[], genericRaw, fixturePin⟩,
+      { genericTarget with arguments := [.primitive .int64] }]
+      genericRaw [true, true, true, true] genericEmitted := by decide +kernel
 #print axioms changed_owner_arguments_rejected
 
 /-- The owner arity cannot be dropped while retaining a selected generic method body. -/
 theorem changed_owner_arity_rejected :
-    ¬ ConstrainedCallsValid genericTypes [⟨[], genericRaw⟩,
+    ¬ ConstrainedCallsValid genericTypes [⟨[], genericRaw, fixturePin⟩,
       { genericTarget with closed := { genericTarget.closed with ownerArgumentCount := 0 } }]
-      genericRaw [true, true, true, true] emitted := by decide +kernel
+      genericRaw [true, true, true, true] genericEmitted := by decide +kernel
 #print axioms changed_owner_arity_rejected
 
 /-- Dispatch metadata cannot substitute a same-named owner from another assembly. -/
@@ -586,8 +647,75 @@ theorem changed_owner_scope_rejected :
       genericReceiver site = none := by decide +kernel
 #print axioms changed_owner_scope_rejected
 
+/-- The class head with the same scope and name as the generic struct. -/
+private def classOwner : TypeExpr := .objectConstructor fixtureScope "Counter`1"
+
+/-- A method with a class owner cannot implement an interface slot on the struct. -/
+theorem class_implementation_owner_rejected :
+    Not (ConstrainedCallsValid
+      [{ concrete with identity := genericReceiver, methods := [
+        { genericImplementation with owner := classOwner }] }, declared]
+      [SpecializedMethod.mk [] genericRaw fixturePin, genericTarget] genericRaw
+      [true, true, true, true] genericEmitted) := by decide +kernel
+#print axioms class_implementation_owner_rejected
+
+/-- A slot declared on the same-named class has no target on the struct receiver. -/
+theorem class_declaring_owner_rejected :
+    resolveConstrained genericTypes genericReceiver
+      { site with
+        method.owner := .apply classOwner integer, target := .managed 21,
+        typeArguments := [integer], ownerArgumentCount := 1 } = none := by decide +kernel
+#print axioms class_declaring_owner_rejected
+
+/-- The struct lists the closed interface on which slot 5 is declared. -/
+private def genericSlotTypes (owner : TypeExpr) : List DispatchType :=
+  [{ concrete with
+      identity := genericReceiver, interfaces := [.apply owner integer],
+      methods := [genericImplementation] },
+    { declared with identity := .apply owner integer }]
+
+/-- An instance call of slot 5 on the supplied generic interface at Int32. -/
+private def genericSlotSite (owner : TypeExpr) : CallSite :=
+  { site with
+    method.owner := .apply owner integer, typeArguments := [integer], ownerArgumentCount := 1 }
+
+/-- The caller and its direct link to token 21 must agree with resolution of slot 5. -/
+private def genericSlotCallValid (owner : TypeExpr) : Prop :=
+  let callSite := genericSlotSite owner
+  let caller := { genericRaw with code := genericRaw.code.set 2 (.mk 7 111 (.call callSite)) }
+  ConstrainedCallsValid (genericSlotTypes owner) [.mk [] caller fixturePin, genericTarget] caller
+    [true, true, true, true] (constrainedEmitted genericReceiver callSite)
+
+/-- The receiver's own scoped type cannot also declare interface slot 5. -/
+theorem conflicting_interface_slot_rejected :
+    resolveConstrained (genericSlotTypes classOwner) genericReceiver
+      (genericSlotSite classOwner) = none := by decide +kernel
+#print axioms conflicting_interface_slot_rejected
+
+/-- A link to token 21 cannot certify slot 5 on the conflicting interface. -/
+theorem conflicting_interface_call_rejected : Not (genericSlotCallValid classOwner) := by
+  unfold genericSlotCallValid
+  decide +kernel
+#print axioms conflicting_interface_call_rejected
+
+/-- The same receiver implements slot 5 of a distinct closed generic interface with token 21. -/
+theorem distinct_generic_interface_call_valid :
+    genericSlotCallValid (.objectConstructor fixtureScope "IValue`1") := by
+  unfold genericSlotCallValid
+  decide +kernel
+#print axioms distinct_generic_interface_call_valid
+
+/-- A bare Counter constructor cannot select token 21 from the Counter<> aggregate. -/
+theorem bare_constructor_slot_rejected :
+    let counter : TypeExpr := .aggregate (fixtureScope ++ "::Counter<>") 0
+    resolveConstrained [{ concrete with identity := counter, interfaces := [] }] counter
+      { site with
+        method.owner := .constructor fixtureScope "Counter", target := .managed 21,
+        typeArguments := [], ownerArgumentCount := 0 } = none := by decide +kernel
+#print axioms bare_constructor_slot_rejected
+
 /-- A class of the fixture assembly that type tests name. -/
-private def dogClass : TypeExpr := .object "Fixture" "Fixture.Dog"
+private def dogClass : TypeExpr := .object fixtureScope "Fixture.Dog"
 private def dogEntry : DispatchType := {
   identity := dogClass, valueType := false, interfaceType := false, interfaces := [],
   methods := [], assembly := fixturePin }
@@ -596,41 +724,64 @@ private def castRaw : RawMethod := { raw with
   parameters := [dogClass], returnType := dogClass,
   code := [⟨0, 2, .none⟩, ⟨1, 116, .type dogClass⟩, ⟨6, 42, .none⟩] }
 private def castEmitted : Method := {
-  locals := [], returnsValue := true, code := [.arg 0, .objectTest dogClass true, .ret] }
+  locals := [], returnsValue := true, code := [.ldarg 0, .castclass dogClass, .ret] }
 
 /-- A cast to a pinned catalog class is a type test of that class. -/
 theorem class_cast_valid :
-    ConstrainedCallsValid [dogEntry] [⟨[], castRaw⟩] castRaw [true, true, true] castEmitted := by
+    ConstrainedCallsValid [dogEntry] [⟨[], castRaw, fixturePin⟩] castRaw [true, true, true] castEmitted := by
   decide +kernel
 #print axioms class_cast_valid
 
 /-- An instance's lineage omits its interfaces, so a test against an interface is rejected. -/
 theorem interface_cast_rejected :
-    ¬ ConstrainedCallsValid [{ dogEntry with interfaceType := true }] [⟨[], castRaw⟩] castRaw
+    ¬ ConstrainedCallsValid [{ dogEntry with interfaceType := true }] [⟨[], castRaw, fixturePin⟩] castRaw
       [true, true, true] castEmitted := by decide +kernel
 #print axioms interface_cast_rejected
 
 /-- A class missing from the catalog is not known to be a pinned class. -/
 theorem uncataloged_cast_rejected :
-    ¬ ConstrainedCallsValid [] [⟨[], castRaw⟩] castRaw [true, true, true] castEmitted := by
+    ¬ ConstrainedCallsValid [] [⟨[], castRaw, fixturePin⟩] castRaw [true, true, true] castEmitted := by
   decide +kernel
 #print axioms uncataloged_cast_rejected
 
 /-- An instance's lineage omits `System.Object`, so a test against it is rejected. -/
 theorem root_cast_rejected :
-    let root : TypeExpr := .object "Fixture" "System.Object"
+    let root : TypeExpr := .object fixtureScope "System.Object"
     ¬ ConstrainedCallsValid [{ dogEntry with identity := root }]
-      [⟨[], { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 116, .type root⟩, ⟨6, 42, .none⟩] }⟩]
+      [⟨[], { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 116, .type root⟩, ⟨6, 42, .none⟩] }, fixturePin⟩]
       { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 116, .type root⟩, ⟨6, 42, .none⟩] }
       [true, true, true]
-      { castEmitted with code := [.arg 0, .objectTest root true, .ret] } := by decide +kernel
+      { castEmitted with code := [.ldarg 0, .castclass root, .ret] } := by decide +kernel
 #print axioms root_cast_rejected
 
 /-- A type test emitted for an instruction that is no cast is rejected. -/
 theorem misplaced_test_rejected :
-    ¬ ConstrainedCallsValid [dogEntry] [⟨[], castRaw⟩]
+    ¬ ConstrainedCallsValid [dogEntry] [⟨[], castRaw, fixturePin⟩]
       { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 0, .none⟩, ⟨2, 42, .none⟩] }
       [true, true, true] castEmitted := by decide +kernel
 #print axioms misplaced_test_rejected
+
+/-- A cast emitted for a raw `isinst` is rejected: a type test stays in the opcode it lowers. -/
+theorem isinst_emitted_as_cast_rejected :
+    ¬ ConstrainedCallsValid [dogEntry] [⟨[], castRaw, fixturePin⟩]
+      { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 117, .type dogClass⟩, ⟨6, 42, .none⟩] }
+      [true, true, true] castEmitted := by decide +kernel
+#print axioms isinst_emitted_as_cast_rejected
+
+/-- `isinst Dog` of the argument, returned. -/
+private def isinstRaw : RawMethod :=
+  { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 117, .type dogClass⟩, ⟨6, 42, .none⟩] }
+
+/-- A raw `isinst` of a pinned catalog class emitted as `isinst` is valid. -/
+theorem class_isinst_valid :
+    ConstrainedCallsValid [dogEntry] [⟨[], isinstRaw, fixturePin⟩] isinstRaw [true, true, true]
+      { castEmitted with code := [.ldarg 0, .isinst dogClass, .ret] } := by decide +kernel
+#print axioms class_isinst_valid
+
+/-- An `isinst` emitted for a raw `castclass` is rejected: the two differ on a failed test. -/
+theorem cast_emitted_as_isinst_rejected :
+    ¬ ConstrainedCallsValid [dogEntry] [⟨[], castRaw, fixturePin⟩] castRaw [true, true, true]
+      { castEmitted with code := [.ldarg 0, .isinst dogClass, .ret] } := by decide +kernel
+#print axioms cast_emitted_as_isinst_rejected
 
 end Tests.ConstrainedEvidence

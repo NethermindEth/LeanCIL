@@ -2,6 +2,8 @@ import Extracted
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.WideMultiply
 
+/-! The checked unsigned product writes its low word and returns its high word. -/
+
 namespace ExampleProof
 open CIL.Safety
 
@@ -13,7 +15,8 @@ theorem correctness (memory result : Memory) (reference : Reference) (left right
     invoke Extracted.program 8 0
         [.scalar (.i64 left), .scalar (.i64 right), .reference (.address reference)] memory =
       .ok (result, [.scalar (.i64 (CIL.WideMultiply.high64 left right))]) := by
-  cil_checked_steps [formed, step_bigMul64_of_write stored]
+  cil_checked_steps [formed,
+    step_bigMul64_of_write Extracted.method0_link3 Extracted.method0_model3 stored]
 
 #print axioms correctness
 end ExampleProof

@@ -13,27 +13,33 @@ opcode/operand combination has its own regression test, or that the model is equ
   Unsupported operand shapes can fail during checked execution even when translation succeeds.
 - Extraction rejects every opcode the table does not list.
 
-Every row is subject to the common target restrictions: Release IL-only .NET 10 assemblies,
-64-bit little-endian execution, admitted types, no exception handlers and validated reachable
-control flow. Ordinary managed calls must have an acyclic extraction order; checked tail
-transfers may form cycles. A translated method still requires a proof of the desired property;
-exhausted fuel, invalid states and unsupported operations are failures, never implicit successes.
+Every row is subject to the common target restrictions: Release IL-only .NET 11 assemblies,
+64-bit little-endian execution, admitted types, exception clauses limited to typed catch and
+finally, and validated reachable control flow. Ordinary managed calls must have an acyclic
+extraction order; checked tail transfers may form cycles. A translated method still requires a
+proof of the desired property; exhausted fuel, invalid states and unsupported operations are
+failures, never implicit successes.
 Release configuration does not guarantee that a compiler emits only supported instructions:
-reachable exception handling, for example, is rejected.
+a filter or fault clause, for example, is rejected. A runtime-async method, which carries
+the `Async` implementation flag, is rejected as an entry and as a callee: its body returns the
+awaited result and the runtime builds the declared task.
 
 ## Translated opcodes
 
 Ranges include every numbered form between the endpoints, and `.s` is the short encoding of the
-same operation. Native `nint`/`nuint` values use `i64` on the validated 64-bit target. For mixed
-native/int32 arithmetic and comparisons, extraction tracks stack types and emits an explicit
-widening wrapper that sign-extends the int32 operand, except that unsigned checked arithmetic
-zero-extends it; scalar `clt.un`/`cgt.un` sign-extend it too, matching the admitted runtime. The
-wrapper preserves arithmetic faults and branch targets and cannot dispatch memory or calls.
-Invalid native/int64 mixtures are rejected. Mixed native/int32 unsigned branches (`bne.un`,
-`blt.un`, `bgt.un`, `ble.un`, `bge.un`, including short forms) are rejected because CoreCLR
-widening depends on operand provenance; insert an explicit `conv.i` or `conv.u` to select
-same-width semantics. The rows below describe scalar operands after this widening; other mixed
-widths are unsupported.
+same operation. Native `nint`/`nuint` values use `i64` on the validated 64-bit target. Extraction
+tracks stack types and emits mixed native/int32 operations unchanged. For mixed wrapping
+arithmetic, bitwise operations, comparisons and signed compare-and-branch, `CIL.step`
+sign-extends the int32 operand before it evaluates the instruction (`CIL.widenMixed`), and the
+checked interpreter reaches that widening only through `CIL.step`; scalar `clt.un`/`cgt.un`
+sign-extend it too, matching the admitted runtime. Division and remainder sign-extend the int32
+operand; overflow-checked arithmetic sign-extends it for the signed forms and zero-extends it for
+the unsigned forms. Memory operations and calls never widen their operands, and arithmetic faults
+and branch targets are those of the same-width instruction. Invalid native/int64 mixtures are
+rejected. Mixed native/int32 unsigned branches (`bne.un`, `blt.un`, `bgt.un`, `ble.un`, `bge.un`,
+including short forms) are rejected because CoreCLR widening depends on operand provenance; insert
+an explicit `conv.i` or `conv.u` to select same-width semantics. The rows below describe scalar
+operands after this widening; other mixed widths are unsupported.
 
 `i32` and `i64` refer to the model's 32- and 64-bit integer stack values; managed references are
 separate values and are not integer addresses.
@@ -46,32 +52,32 @@ external enum dependencies are not supported.
 
 | Opcodes | Status | Implemented behaviour and restrictions |
 | --- | --- | --- |
-| `newarr` | Partial | Fresh zero-initialized primitive integer, same-assembly enum, validated reference-free aggregate and integer-vector arrays, including native integers, `bool` and `char`. Composite element sizes must be positive and fit the CoreCLR 16-bit component-size field; byref-like elements are rejected. Int32/native lengths must be nonnegative and at most the .NET 10 CoreCLR ceiling `0x7fffffc7`; negative lengths raise `System.OverflowException`. Identity and resource premises are in [arrays, views and bulk memory](SOUNDNESS-RUNTIME.md#arrays-views-and-bulk-memory). `newarr` of an admitted class, or of a non-generic class outside the model other than `object`, such as `string`, allocates an [array of class references](SOUNDNESS-RUNTIME.md#arrays-of-class-references) charged to the heap budget; a short budget is the model's `allocationFailure`. |
+| `newarr` | Partial | Fresh zero-initialized primitive integer, same-assembly enum, validated reference-free aggregate and integer-vector arrays, including native integers, `bool` and `char`. Composite element sizes must be positive and fit the CoreCLR 16-bit component-size field; byref-like elements are rejected. Int32/native lengths must be nonnegative and at most the .NET 10 CoreCLR ceiling `0x7fffffc7`; negative lengths and native counts above `0x7fffffff` raise `System.OverflowException`. Counts between `0x7fffffc8` and `0x7fffffff` inclusive raise `System.OutOfMemoryException` before allocation. Identity and resource premises are in [arrays, views and bulk memory](SOUNDNESS-RUNTIME.md#arrays-views-and-bulk-memory). `newarr` of an admitted class or of `string` allocates an [array of class references](SOUNDNESS-RUNTIME.md#arrays-of-class-references) charged to any explicit heap budget. A short budget is the model's `allocationFailure`. |
 | `ldlen` | Partial | Length of a supplied integer, enum, reference-free aggregate or integer-vector array, including one loaded from a [value-array field](SOUNDNESS-RUNTIME.md#value-array-fields), or typed handler table, returned as a native integer. Null raises `System.NullReferenceException`. Also the length of an [array of class references](SOUNDNESS-RUNTIME.md#arrays-of-class-references). |
-| `ldelema` | Partial | Checked element reference into a supplied integer, enum, reference-free aggregate or integer-vector array. The type token must match the array element type; null and bounds checks precede address formation. Grants no read/write authority and does not make uninitialized contents readable. References retain allocation lifetime across locals, calls and returns. Rejected by name on an array of class references, whose element slots hold references. |
-| `readonly.` | Partial | Immediately precedes an admitted `ldelema`; branches into the following address instruction are rejected. Produces a restricted reference that remains readonly through byref locals, arguments and returns. Scalar and field reads are allowed and field addresses and element or byte offsets keep the restriction, while stores, field stores and adapters that would discard the restriction fail. Other authorized aliases can still update the backing bytes. |
+| `ldelema` | Partial | Checked element reference into a supplied integer, enum, reference-free aggregate or integer-vector array, decoded from the body with its type token as the element type; the method's checked layouts give the element's width. The type token must match the array element type; null and bounds checks precede address formation. Grants no read/write authority and does not make uninitialized contents readable. References retain allocation lifetime across locals, calls and returns. Rejected by name on an array of class references, whose element slots hold references. |
+| `readonly.` | Partial | Immediately precedes an admitted `ldelema`, which records it; it decodes to `nop`, no other instruction decodes or is admitted after it, a body ending in it is rejected, and branches into the following address instruction are rejected. Produces a restricted reference that remains readonly through byref locals, arguments and returns. Scalar and field reads are allowed and field addresses and element or byte offsets keep the restriction, while stores, field stores and adapters that would discard the restriction fail. Other authorized aliases can still update the backing bytes. |
 | `ldelem.i1`, `ldelem.u1`, `ldelem.i2`, `ldelem.u2`, `ldelem.i4`, `ldelem.u4`, `ldelem.i8`, `ldelem.i`, `ldelem` | Partial | Checked integer array reads; narrow loads extend according to the opcode. Typed `ldelem` also supports validated aggregate and integer-vector tokens, matching the exact array element identity and width; it is rejected by name on an array of class references. Scalar reads require initialized bytes; aggregate/vector snapshot reads retain initialization masks. All reads require read authority. `ldelem.i` and typed `ldelem` also select typed entries from supplied handler tables. |
-| `ldelem.ref`, `stelem.ref` | Partial | Element loads and stores of an [array of class references](SOUNDNESS-RUNTIME.md#arrays-of-class-references). Null raises `System.NullReferenceException`, then an index read unsigned at or past the length `System.IndexOutOfRangeException`; a store then raises `System.ArrayTypeMismatchException` when the stored instance's class does not derive from the element class, and null is always storable. Elements of an array of a class outside the model are opaque references. Storing a value whose runtime type is not a class, such as an array, is unsupported. |
+| `ldelem.ref`, `stelem.ref` | Partial | Element loads and stores of an [array of class references](SOUNDNESS-RUNTIME.md#arrays-of-class-references). Null raises `System.NullReferenceException`, then an index read unsigned at or past the length `System.IndexOutOfRangeException`; a store then raises `System.ArrayTypeMismatchException` when the stored instance's class does not derive from the element class, and null is always storable. Elements of a `string` array are opaque references. Storing a value whose runtime type is not a class, such as an array, is unsupported. |
 | `stelem.i1`, `stelem.i2`, `stelem.i4`, `stelem.i8`, `stelem.i`, `stelem` | Partial | Checked integer array stores; narrow stores truncate. Typed `stelem` requires a matching integer, enum, aggregate or integer-vector token and is rejected by name on an array of class references. Stores require write authority; scalar stores initialize the selected element, while aggregate/vector stores preserve snapshot initialization masks. |
 | `ldc.i4`, `ldc.i4.s`, `ldc.i4.m1`, `ldc.i4.0` to `ldc.i4.8` | Complete within the admitted model | Push the encoded 32-bit integer constant. |
 | `ldc.i8` | Complete within the admitted model | Push the encoded 64-bit integer constant. |
 | `ldnull` | Partial | Push the one object null for truth tests, identity comparison with class instance references, stack shuffles/discard, or a supplied supported array, typed handler-table or [class instance](SOUNDNESS-RUNTIME.md#class-instances) slot/call/return. Other object-typed values and object-null/managed-pointer mixtures are unsupported. |
-| `ldstr` | Partial | Push the object the caller bound to the literal's text in `Memory.literals`; an unbound text stops as unsupported. Memory is unchanged. The value is an opaque [string](SOUNDNESS-RUNTIME.md#string-literals): passed, stored, compared for identity and tested against null, never read. Inside a folded `throw new E(...)` it emits `nop`. A text containing a surrogate, backspace or form feed is rejected. |
+| `ldstr` | Partial | Push the object the caller bound to the literal's text in `Memory.literals`; an unbound text stops as unsupported. Memory is unchanged. The value is an opaque [string](SOUNDNESS-RUNTIME.md#string-literals): passed, stored, compared for identity and tested against null, never read. Inside a folded `throw new E(...)` it emits `nop`; a construction bound to its CoreLib constructor ([bound constructors](SOUNDNESS-EVIDENCE.md#folded-instruction-patterns)) keeps the load. The extractor accepts well-formed UTF-16 and rejects an unpaired surrogate. |
 | `nop` | Complete within the admitted model | Advance without changing the stack or memory. |
 | `dup`, `pop` | Complete within the admitted model | Duplicate or discard a supported stack value; stack underflow fails. |
-| `ldarg`, `ldarg.s`, `ldarg.0` to `ldarg.3` | Partial | Load admitted argument values; struct instance methods have a managed-reference `this` at index zero, and instance methods of admitted classes an object-reference `this`; a `string` argument is an opaque object reference (see [class instances](SOUNDNESS-RUNTIME.md#class-instances)); narrow integers are truncated and sign- or zero-extended to `i32`. Reference values undergo validity checks. |
+| `ldarg`, `ldarg.s`, `ldarg.0` to `ldarg.3` | Partial | Load admitted argument values; struct instance methods have a managed-reference `this` at index zero, and instance methods of admitted classes an object-reference `this`; a `string` argument is an opaque object reference (see [class instances](SOUNDNESS-RUNTIME.md#class-instances)); the step truncates a parameter declared as a narrow integer, or as an enum over one, to that width and sign- or zero-extends it to `i32`, reading the width from the method's signature. Reference values undergo validity checks. |
 | `starg`, `starg.s` | Partial | Assign a private parameter home using its declared storage type. Narrow stores truncate; byref assignment changes the private reference slot. Does not overwrite the caller's by-value source. |
-| `ldarga`, `ldarga.s` | Partial | Address the same private parameter home read by `ldarg` and written by `starg`. Addresses expire when the frame returns. Taking the address of a byref parameter is rejected; nested-reference storage is unsupported. |
+| `ldarga`, `ldarga.s` | Partial | Address the same private parameter home read by `ldarg` and written by `starg`; for a span parameter, push a home that names the parameter's slot, whose view each consumer reads when it runs. Addresses expire when the frame returns. Taking the address of a byref parameter is rejected; nested-reference storage is unsupported. |
 | `ldloc`, `ldloc.s`, `ldloc.0` to `ldloc.3` | Partial | Load admitted scalar, vector, aggregate or managed-reference locals. Narrow integers are sign- or zero-extended to `i32`; initialization and lifetime rules apply. |
 | `stloc`, `stloc.s`, `stloc.0` to `stloc.3` | Partial | Store values compatible with the declared local storage kind; narrow integer locals truncate an `i32` to their physical width. No general object or reference-bearing aggregate storage. |
-| `ldloca`, `ldloca.s` | Partial | Form a checked reference to byte-backed local storage. Taking the address of a managed-reference local is explicitly unsupported. |
+| `ldloca`, `ldloca.s` | Partial | Form a checked reference to byte-backed local storage; for a span local, push a home that names the slot, whose view each consumer reads when it runs, so a later store to the local is visible through the address. Taking the address of a managed-reference local is explicitly unsupported. |
 | `neg` | Partial | Wrapping negation of an `i32` or `i64`; the signed minimum maps to itself. No floating-point or reference operands. |
 | `add` | Partial | Wrapping arithmetic on two `i32` values or two `i64` values, plus the mixed native/int32 cases described above. Also accepts a checked reference and an int32 or native integer byte offset in either operand order, preserving allocation identity and its readonly restriction and checking lifetime and bounds when forming the result. Supplied immutable native handler tables also admit checked byte-offset addition. No floating-point operands or arbitrary numeric address fabrication. |
 | `sub` | Partial | Wrapping scalar subtraction; also subtract an int32/native byte offset from a checked reference, preserving its readonly restriction, or compute the native byte difference of two live references within one allocation. Null, cross-allocation differences and invalid resulting positions fail. |
 | `mul` | Partial | Wrapping arithmetic on two `i32` values or two `i64` values, plus the mixed native/int32 cases described above. No floating-point or reference/pointer operands. |
-| `div`, `div.un`, `rem`, `rem.un` | Partial | Same-width `i32`/`i64` quotient or remainder. Signed quotient truncates toward zero; signed remainder follows the dividend sign. Zero divisors fault. Signed minimum with divisor -1 faults for both signed operations under the admitted runtime assumption. No floating-point, mixed-width operands or exception handlers. |
-| `add.ovf`, `sub.ovf`, `mul.ovf`, `add.ovf.un`, `sub.ovf.un`, `mul.ovf.un` | Partial | Checked signed/unsigned arithmetic on same-width `i32`/`i64`. Compute the mathematical integer result, then reject values outside the destination range with a located overflow fault. No floating-point, reference arithmetic or exception handlers. |
-| `and`, `or`, `xor`, `not` | Partial | Bitwise operations on `i32`/`i64`; binary operands must have the same width. |
+| `div`, `div.un`, `rem`, `rem.un` | Partial | Same-width `i32`/`i64` quotient or remainder. Signed quotient truncates toward zero; signed remainder follows the dividend sign. Zero divisors fault. Signed minimum with divisor -1 faults for both signed operations under the admitted runtime assumption. Also the mixed native/int32 cases described above. No floating-point operands or other mixed widths. The faults carry no exception object, so a typed catch they reach makes the outcome unsupported. |
+| `add.ovf`, `sub.ovf`, `mul.ovf`, `add.ovf.un`, `sub.ovf.un`, `mul.ovf.un` | Partial | Checked signed/unsigned arithmetic on same-width `i32`/`i64`, plus the mixed native/int32 cases described above. Compute the mathematical integer result, then reject values outside the destination range with a located overflow fault, which carries no exception object for a typed catch. No floating-point or reference arithmetic. |
+| `and`, `or`, `xor`, `not` | Partial | Bitwise operations on `i32`/`i64`. `and`, `or` and `xor` also take the mixed native/int32 cases described above, sign-extending the int32 operand; `not` has one operand. No other mixed widths. |
 | `shl`, `shr`, `shr.un` | Partial | Shift an `i32`, `i64` or native integer by an `i32` or native integer count, masked modulo the value width under the admitted runtime. `shr` is arithmetic; `shr.un` is logical. Native counts normalize to their low 32 bits; ordinary `int64` counts and reference operands are rejected by extraction and its certificate. |
 | `conv.ovf.i1`, `conv.ovf.u1`, `conv.ovf.i2`, `conv.ovf.u2`, `conv.ovf.i4`, `conv.ovf.u4`, `conv.ovf.i8`, `conv.ovf.u8`, `conv.ovf.i`, `conv.ovf.u`, and each corresponding `.un` form | Partial | Checked conversion from `i32`/`i64`, preserving the mathematical value or producing a located overflow fault. `.un` interprets the input as unsigned; the destination controls the accepted range. Narrow results occupy `i32`; native destinations use the validated 64-bit profile. No floating-point or reference conversions. |
 | `conv.i4`, `conv.u4` | Partial | `i64` to low 32 bits; `i32` identity. No floating-point or reference conversions. |
@@ -82,44 +88,52 @@ external enum dependencies are not supported.
 | `conv.i8` | Partial | Sign-extend `i32` to `i64`, or preserve an `i64`. No floating-point or reference conversions. |
 | `conv.i` | Partial | Sign-extend an integer `i32` to the admitted 64-bit native width, or preserve an `i64`. No pointer/reference or floating-point conversion. |
 | `conv.u` | Partial | Model native unsigned integers as 64-bit: zero-extend `i32`, or preserve `i64`. Does not convert a managed reference to an integer address. |
-| `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. `ceq` additionally supports checked reference equality, identity of class instance references and exact closed `typeof` reference results as described below; `cgt.un` tests a class instance reference against null; `clt.un` and `cgt.un` additionally order live references within one allocation. Signed reference ordering is unsupported. No floating-point/unordered comparisons. |
+| `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one, plus the mixed native/int32 cases described above, which sign-extend the int32 operand for all five instructions including `clt.un` and `cgt.un`. `clt` and `cgt` are signed; `.un` comparisons are unsigned. `ceq` additionally supports checked reference equality, identity of class instance references and exact closed `typeof` reference results as described below; `cgt.un` tests a class instance reference against null; `clt.un` and `cgt.un` additionally order live references within one allocation. Signed reference ordering is unsupported. No floating-point/unordered comparisons. |
 | `br`, `br.s` | Partial | Unconditional branch to an admitted instruction boundary, including backward edges and self-loops. |
+| `leave`, `leave.s` | Partial | Empty the evaluation stack and exit protected ranges and catch handlers. Each finally whose protected range holds the `leave` but not its target runs first, innermost first, and its `endfinally` resumes the transfer. The target may not lie inside a handler other than the current one or after the first instruction of a protected range the `leave` is outside, and a `leave` may not exit a finally handler. |
+| `endfinally` | Partial | End the innermost finally handler that holds it and resume the pending `leave`, or raise again the exception that entered the handler. Rejected outside a finally handler. |
 | `switch` | Partial | Pop an `i32` unsigned table index; branch to its target or fall through when outside the table. Empty and duplicate-target tables are supported. Every encoded target must be a valid instruction boundary and fold entry. Known int32 selectors prune untaken arms; otherwise every arm and the fallthrough participate in dependency and stack analysis. |
 | `sizeof` | Partial | Push the validated storage width as `i32` for admitted integer types (including Boolean/char), same-assembly explicit- or sequential-layout reference-free aggregates, or the integer vectors listed below. Native integers use eight bytes under the validated profile. Closed same-assembly generic structs require validated sequential layouts. No reference types, floating-point or unsupported generic layouts. |
 | `brfalse`, `brfalse.s`, `brtrue`, `brtrue.s` | Partial | Zero/nonzero tests of `i32` or `i64`. Also accepts checked references, including readonly references and null. Admitted forward and backward successors. |
-| `blt`, `blt.s`, `bge`, `bge.s`, `bgt`, `bgt.s`, `ble`, `ble.s` | Partial | Signed comparison of same-width `i32`/`i64`, branching to admitted forward or backward targets. |
+| `blt`, `blt.s`, `bge`, `bge.s`, `bgt`, `bgt.s`, `ble`, `ble.s` | Partial | Signed comparison of same-width `i32`/`i64`, plus the mixed native/int32 cases described above, which sign-extend the int32 operand, branching to admitted forward or backward targets. |
 | `blt.un`, `blt.un.s`, `bge.un`, `bge.un.s`, `bgt.un`, `bgt.un.s`, `ble.un`, `ble.un.s` | Partial | Unsigned comparison of same-width `i32`/`i64` or two live references within one allocation, branching to admitted forward or backward targets. Cross-allocation reference ordering is unsupported. |
-| `beq`, `beq.s`, `bne.un`, `bne.un.s` | Partial | Equality/inequality of same-width `i32`/`i64`, branching to admitted forward or backward targets. Also supports checked reference equality and exact closed `typeof` reference comparisons as described below. No floating-point comparison. |
+| `beq`, `beq.s`, `bne.un`, `bne.un.s` | Partial | Equality/inequality of same-width `i32`/`i64`, branching to admitted forward or backward targets. `beq` and `beq.s` also take the mixed native/int32 cases described above, sign-extending the int32 operand; `bne.un` and `bne.un.s` reject a mixed pair. Also supports checked reference equality and exact closed `typeof` reference comparisons as described below. No floating-point comparison. |
 | `ldind.i`, `stind.i` | Partial | Native-width integer load/store through checked managed references; eight bytes on the admitted target, with the same allocation, permission and lifetime checks. A native handler-table cursor also supports authenticated pointer loads through `ldind.i`; stores to these immutable tables are unsupported. |
 | `ldind.i8`, `stind.i8` | Partial | Eight-byte integer load/store through a checked reference. Allocation bounds, permissions, initialization and lifetime rules apply; arbitrary numeric addresses are not accepted. |
 | `ldind.i1`, `ldind.u1`, `ldind.i2`, `ldind.u2`, `ldind.i4`, `ldind.u4` | Partial | One-, two- or four-byte integer loads through a checked reference. Signed narrow loads sign-extend and unsigned loads zero-extend to `i32`; both four-byte forms return the same `i32` bits. Aggregate snapshots and numeric addresses are rejected. |
 | `stind.i1`, `stind.i2`, `stind.i4` | Partial | Store the low one, two or four bytes of an `i32` through a checked reference. Allocation bounds, write permissions and lifetime apply; adjacent bytes remain unchanged. |
-| `ldfld`, `ldflda`, `stfld` | Partial | Fields in same-assembly, validated explicit- or sequential-layout, reference-free value types, and `Item1`/`Item2` of an equal-width primitive `ValueTuple<T1, T2>` (see [value tuples](SOUNDNESS-RUNTIME.md#value-tuples)). Supported field storage is `sbyte`, byte/Boolean, `short`, `ushort`/`char`, 32-bit integer, 64-bit integer, native integer, integer-backed enum or nested reference-free aggregate. Nested snapshots and assignments copy all field bytes, including padding. Narrow stores truncate; narrow loads sign- or zero-extend to `i32` according to field metadata. `ldfld` accepts an aggregate byte snapshot or reference, including a readonly reference; `ldflda` of a readonly reference yields a readonly field reference, and `stfld` through one faults as unwritable. On an admitted [class instance](SOUNDNESS-RUNTIME.md#class-instances), `ldfld` and `stfld` access integer, Boolean, Char and enum fields of its class or any base, fields typed as a class or an array of a class (opaque when the class is outside the model), and [value-array fields](SOUNDNESS-RUNTIME.md#value-array-fields) typed as a single-dimensional array of integers, Booleans, chars, enums, reference-free structs or integer vectors; a null receiver throws `NullReferenceException`. `ldflda` on a class and other class field types are rejected. No other managed objects, auto-layout structs or static fields through these opcodes. |
-| `ldobj`, `stobj` | Partial | Load/store admitted integer types through checked references, with narrow truncation/extension derived from the validated type token. Also copy validated aggregates of 1 to 65,536 bytes or admitted Vector128/256/512 integer values, retaining initialization masks. No general objects, reference-bearing storage or floating-point tokens. Native-integer tokens use eight-byte storage. `ldobj` of an admitted span type copies the view addressed by the immediately preceding argument, parameter-address or local-address load; span `stobj` is rejected. |
+| `ldfld`, `ldflda`, `stfld` | Partial | Fields in same-assembly, validated explicit- or sequential-layout, reference-free value types, and `Item1`/`Item2` of an equal-width primitive `ValueTuple<T1, T2>` (see [value tuples](SOUNDNESS-RUNTIME.md#value-tuples)). Supported field storage is `sbyte`, byte/Boolean, `short`, `ushort`/`char`, 32-bit integer, 64-bit integer, native integer, integer-backed enum or nested reference-free aggregate. Nested snapshots and assignments copy all field bytes, including padding, and a nested struct loaded through a reference keeps uninitialized bytes such as padding as a snapshot with their flags. A scalar field of a snapshot loads when its own bytes are initialized and is `unsupported` otherwise. Narrow stores truncate; narrow loads sign- or zero-extend to `i32` according to field metadata. `ldfld` accepts an aggregate byte snapshot or reference, including a readonly reference; `ldflda` of a readonly reference yields a readonly field reference, and `stfld` through one faults as unwritable. On an admitted [class instance](SOUNDNESS-RUNTIME.md#class-instances), `ldfld` and `stfld` access integer, Boolean, Char and enum fields of its class or any base, fields typed as a class (opaque when the class is outside the model) or as an array of an admitted class or `string`, and [value-array fields](SOUNDNESS-RUNTIME.md#value-array-fields) typed as a single-dimensional array of integers, Booleans, chars, enums, reference-free structs or integer vectors; a null receiver throws `NullReferenceException`. `ldflda` on a class, and a class field of any other type, are refused at admission and fault as `unsupported` when stepped. No other managed objects, auto-layout structs or static fields through these opcodes. |
+| `ldobj`, `stobj` | Partial | Load/store admitted integer types through checked references, with narrow truncation/extension derived from the validated type token. Also copy validated aggregates of 1 to 65,536 bytes or admitted Vector128/256/512 integer values, retaining initialization masks. No general objects, reference-bearing storage or floating-point tokens. Native-integer tokens use eight-byte storage. `ldobj` of an admitted span type copies the view addressed by the immediately preceding argument, parameter-address or local-address load, reading a local or parameter home when the load runs; it faults on any operand other than a span view, a null reference with `nullDereference`; span `stobj` is rejected. |
 | `cpobj` | Partial | Copy validated integer, aggregate or admitted Vector128/256/512 integer storage through checked references. Requires initialized readable source and writable destination; self-copy is supported, partial overlap is rejected. No reference-bearing or floating-point tokens. |
 | `initobj` | Partial | Zero the validated width of an admitted integer type, same-assembly explicit- or sequential-layout aggregate, or admitted Vector128/256/512 integer value. A checked `ldloca; initobj` pair resets an admitted span local to its empty view. Byte initialization leaves neighboring storage unchanged. No managed-object initialization. |
 | `ldsfld` | Partial | Value of a same-assembly `static readonly` integer, enum or reference-free struct field that its static constructor fixes, with the declaring type named by `--assume-initialized` (see [static readonly values](#static-readonly-values)). An integer or enum field whose stored value extraction cannot compute is read from the caller's static binding instead (see [unknown readonly values](#unknown-readonly-values)). System.Runtime's `BitConverter.IsLittleEndian` is the profile constant `true`. Other static fields are rejected. |
 | `ldsflda` | Partial | Address of validated same-assembly static readonly RVA data, or a constructor-initialized readonly value under the initialization assumption. Uses identity-keyed immutable storage with checked write denial. See [static span tables](#static-span-tables) and [static readonly values](#static-readonly-values). Not arbitrary static fields or mutable global state. |
 | `call` | Partial | Acyclic calls to supported static methods, reference-free struct instance methods (including direct constructor calls) or instance methods and constructors of admitted classes, which run the named body on an object-reference `this` ([class instances](SOUNDNESS-RUNTIME.md#class-instances)), in the same assembly or a pinned `--reference` assembly ([CLI](CLI.md#extract-from-referenced-assemblies)), concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist, including integer BinaryPrimitives byte-span transfers and no-read span/array accessors. Closed generic declaring types are admitted for static calls, including nested owners; validated closed sequential structs also admit direct instance methods and constructors. No arbitrary external calls, instance methods of classes that are not admitted or virtual dispatch through `call`. |
-| `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also admitted `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage for supported integer, enum, aggregate and integer-vector elements, from a single reference, `(void*, int)`, an array, or `(array, start, length)`. Also constructors of admitted non-abstract classes, which allocate a fresh [class instance](SOUNDNESS-RUNTIME.md#class-instances) charged to `Memory.heapBudget` (`allocationFailure` when short) and push it once the constructor returns; the constructor's `System.Object::.ctor()` call only pops its receiver. Unsupported generic constructors and cyclic dependencies are rejected. |
-| `ldtoken` | Partial | A type token as an operand of a decided closed type test, which emits a no-op, or a static data field token for `RuntimeHelpers.CreateSpan<T>`, which emits the field's address (see below). Other tokens are rejected. |
-| `throw` | Partial | Exact `throw new E(...)` with `ldstr`/`ldnull` arguments raises a located `thrown "E"` fault. Adjacent `ldnull; throw` raises `System.NullReferenceException`. Other throws are rejected. |
+| `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. An unlinked `newobj` runs the exact external constructor model and pushes its result. This covers `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage for supported integer, enum, aggregate and integer-vector elements, from a single reference, `(void*, int)`, an array, or `(array, start, length)`. Also constructors of admitted non-abstract classes, which allocate a fresh [class instance](SOUNDNESS-RUNTIME.md#class-instances) charged to any explicit `Memory.heapBudget` (`allocationFailure` when short) and push it once the constructor returns; the constructor's `System.Object::.ctor()` call runs a runtime model that only consumes its receiver. Unsupported generic constructors and cyclic dependencies are rejected. |
+| `ldtoken` | Partial | A type token pushes its scoped runtime handle in a decided closed type test. A static data field token supplies the field address for `RuntimeHelpers.CreateSpan<T>` (see below). Other tokens are rejected. |
+| `throw` | Partial | Exact `throw new E(...)` with `ldstr`/`ldnull` arguments raises a located `.thrown raised` fault, where `raised` is the `CIL.ExceptionType` member for `E`. An operand-free `throw` reads the top object reference. Null raises `.nullReference`. A live supported exception raises its runtime type. A folded `throw new E(...)` inside a protected range is rejected, since its fault carries no object for a catch to test. A literal-message construction bound to its CoreLib constructor ([bound constructors](SOUNDNESS-EVIDENCE.md#folded-instruction-patterns)) is not folded: `newobj` runs the CoreLib constructor bodies and `throw` raises the object they build. |
 | `constrained.`, `callvirt` | Partial | Adjacent prefix and `callvirt` (instance slot) or `call` (static interface slot) resolving to a concrete struct implementation or, for a static slot, the most specific interface-level body, within the extracted and pinned assemblies; see [constrained struct calls](#constrained-struct-calls). No boxing. Without the prefix, `callvirt` of a non-virtual method of an admitted class calls it after a receiver null check that throws `System.NullReferenceException` ([class instances](SOUNDNESS-RUNTIME.md#class-instances)); `callvirt` of a virtual method of an admitted class dispatches on the receiver's runtime type through a table Lean rechecks ([virtual dispatch](SOUNDNESS-EXECUTION.md#virtual-dispatch)). Interface calls and slots declared outside the extracted assemblies are rejected by name. |
-| `castclass`, `isinst` | Partial | Test an object reference against an admitted class other than `System.Object`: null passes, and an instance whose lineage lacks the class gives null (`isinst`) or throws `System.InvalidCastException` (`castclass`); see [class instances](SOUNDNESS-RUNTIME.md#class-instances). Interfaces, `System.Object`, value types and classes that are not admitted are rejected by name. |
+| `castclass`, `isinst` | Partial | Test an object reference, or an opaque reference a field typed `object` or as a generic class instance held, against an admitted class other than `System.Object`: null passes, and an instance whose lineage lacks the class gives null (`isinst`) or throws `System.InvalidCastException` (`castclass`); see [class instances](SOUNDNESS-RUNTIME.md#class-instances). Interfaces, `System.Object`, value types and classes that are not admitted are rejected by name. |
 | `ldftn` | Partial | Exact static same-assembly managed method addresses, retaining scoped identity and closed signature. Callable values have no numeric address representation. See typed indirect dispatch below. |
 | `calli` | Partial | Static default-managed signatures over admitted integer/enum, reference-free aggregate and integer-vector values, and managed references to these types. The pointer must identify an authenticated catalog entry with the exact signature. Ordinary indirect calls select a forward target; tail calls permit cycles. Supplied immutable native tables also admit checked byte offsets and `ldind.i` with authenticated target provenance. No unmanaged conventions or arbitrary numeric targets. |
-| `tail.` | Partial | Adjacent `tail. call ret` or `tail. calli ret` with exactly its arguments and optional function pointer on the stack and the same return type. Retires caller storage before entering the callee and revalidates argument lifetimes. Admitted same-assembly transfers may form cycles; virtual, imported and intrinsic tail calls are unsupported. |
-| `ret` | Partial | Return from an admitted method with exactly zero or one result according to its signature. Narrow integer results are truncated and sign- or zero-extended to `i32`. The checked model validates returned references and rejects references that escape expired local storage. |
-| `initblk`, `cpblk` | Partial | Managed references and unsigned 32-bit counts; checked block alignment and access rules. Nonempty overlapping copies are rejected. |
-| `unaligned.` | Partial | Values 1, 2 and 4 before supported ordinary or block memory accesses; malformed prefix sequences and interior branch targets are rejected. |
+| `tail.` | Partial | Every tail call must return the enclosing method's result type and immediately precede `ret`. Reachable `call` and `calli` transfers take exactly their arguments and optional function pointer, retire caller storage and revalidate argument lifetimes. Admitted same-assembly transfers may form cycles. A reachable virtual, imported or intrinsic tail call is unsupported. An unreachable `tail. callvirt ret` with an instance target is admitted with a hole at each dead instruction. |
+| `ret` | Partial | Return from an admitted method with exactly zero or one result according to its signature. Narrow integer results are truncated and sign- or zero-extended to `i32`. The checked model validates returned references and rejects references that escape expired local storage. Rejected inside a protected range or handler. |
+| `initblk`, `cpblk` | Partial | The decoded `initblk` and `cpblk` instructions carry the alignment of an immediately preceding `unaligned.` prefix, or eight without one. Execution checks managed references, the unsigned 32-bit count, alignment and access. Nonempty overlapping copies are rejected. |
+| `unaligned.` | Partial | Values 1, 2 and 4 before supported ordinary or block memory accesses, where it decodes to `nop`; any other value, an instruction it does not modify, a body ending in it, malformed prefix sequences and interior branch targets are rejected. |
 | `localloc` | Partial | Frame-owned storage within an explicit per-activation quota; checked initialization, alignment and expiry. See [dynamic stack allocation](#dynamic-stack-allocation). |
 
 ## Typed indirect dispatch
 
 Managed function pointers can be held in typed locals or supplied as parameters. Supplied
-immutable single-dimensional handler tables support `ldlen` and `ldelem.i`; each entry has one
+immutable single-dimensional handler tables support `ldlen`, `ldelem.i` and `ldelem` of the table's
+own pointer type; each entry has one
 exact signature and must name a non-null catalog target. A null table raises
 `NullReferenceException`, and an invalid index raises `IndexOutOfRangeException`.
+
+An `ldftn` instruction carries the metadata identity and signature. Its address link records
+where the extractor checked that identity. Taking an address adds no callee to program closure.
+A `calli` instruction carries its signature and tail flag. Its indirect link supplies the catalog.
+Relocation updates the indices of callable targets and preserves the address link's extraction index.
 
 The catalog holds closed same-assembly `ldftn` targets and already extracted methods with
 matching signatures. An open address such as `&Algo<TGas>.Run` in a generic body is catalogued
@@ -128,8 +142,9 @@ only if some extracted body takes that closed address. Each entry binds the scop
 identity, generic arguments and program index to an extracted body, and pointer identities
 survive linking. Supported signatures have primitive integer, enum, reference-free aggregate or
 integer-vector parameters and results, managed references to those types, and void results.
-Closed generic structs keep their exact scoped identity, and calling conventions are checked
-exactly.
+The extractor matches catalog entries and stack slots by the calling convention, receiver flags,
+result and ordered parameter types in pinned metadata. Named types retain their assembly,
+namespace and nesting. Closed generic structs retain their type arguments.
 
 Supplied immutable `nint*` tables admit byte-offset addition in either operand order, `ldind.i`
 and native target locals. Offsets are int32 or native integers; other scalar types are rejected.
@@ -153,8 +168,8 @@ fresh allocation-relative storage owned by the current activation. The caller su
 request charges its size rounded to 16 bytes. Insufficient quota produces a distinct
 `stackAllocationFailure`; a zero request returns null and consumes no quota.
 
-The raw method's `localsinit` flag controls zero initialization. Otherwise bytes remain unreadable
-until written. Checked pointer offsets, typed loads and stores, and admitted span construction
+The method's `localsinit` flag, which the extracted body records as `DeclaredSignature.initLocals`,
+controls zero initialization. Otherwise bytes remain unreadable until written. Checked pointer offsets, typed loads and stores, and admitted span construction
 retain allocation bounds and authority. Returning a reference or span into expired stack storage
 fails. Numeric address fabrication and general pointer casts are unsupported.
 
@@ -176,10 +191,14 @@ as a managed pointer. `Unsafe.NullRef<T>` values are managed references and can 
 reference comparisons. Numeric zero never becomes a reference.
 
 The managed-reference overloads of `Unsafe.AreSame`, `IsAddressLessThan` and
-`IsAddressGreaterThan` use these checked comparisons. Ordering and
-`Unsafe.ByteOffset(origin, target)` require two live references in the same allocation;
-`Unsafe.ByteOffset` returns the native-width byte displacement from origin to target.
-`Unsafe.AddByteOffset` and `SubtractByteOffset` accept `nint` or `nuint` offsets.
+`IsAddressGreaterThan` use these checked comparisons; a call keeps its `call`, which runs the
+comparison the runtime model table gives its exact closed reference. Ordering and
+`Unsafe.ByteOffset(origin, target)` require two live references in the same allocation.
+The retained `Unsafe.ByteOffset` call runs the runtime model for its exact generic declaration
+and returns the native-width byte displacement from origin to target.
+The retained `Unsafe.AddByteOffset` and `SubtractByteOffset` calls move a reference by a
+`nint` or `nuint` byte count. The retained `Unsafe.Add` and `Subtract` calls use the checked
+element size as their stride. Each overload binds its own open declaration and external target.
 `Unsafe.Subtract<T>` accepts `int`, `nint` or `nuint` element offsets for admitted scalar,
 aggregate and vector storage. Scaling and subtraction wrap at the native 64-bit width, and the
 resulting reference must still be live and in bounds. These operations grant no read or write
@@ -203,18 +222,21 @@ memory and permit null references. The lifetime, bounds and authority checks are
 Unprefixed block operations require eight-byte alignment. Model-owned 32-bit and 64-bit scalar
 local and parameter homes have four- and eight-byte alignment, so aligned block access can
 succeed on a 64-bit scalar home; aggregate, vector and narrow homes have byte alignment. An
-immediately preceding `unaligned. 1`, `2` or `4` selects that requirement. A branch cannot enter
-between a prefix and its instruction, and prefix combinations with unsupported modifiers are
-rejected.
+immediately preceding `unaligned. 1`, `2` or `4` selects that requirement, and the decoder reads
+it from the raw instruction before the block opcode. A branch cannot enter between a prefix and
+its instruction, and prefix combinations with unsupported modifiers are rejected.
 
 `unaligned.` is also accepted before supported integer `ldind.*`/`stind.*`, `ldobj`/`stobj` and
-`ldfld`/`stfld`. These accesses already use byte alignment, so the prefix lowers to a no-op and
-bypasses no safety check.
+`ldfld`/`stfld`. These accesses already use byte alignment, so the prefix decodes to a no-op and
+bypasses no safety check: `ldfld` and `stfld` after it decode to the same field instruction as
+without it. `ldflda` after `unaligned.`, and any field instruction after `volatile.`, are
+rejected.
 
-The exact managed-reference and pointer overloads of `Unsafe.InitBlock`, `InitBlockUnaligned`,
-`CopyBlock` and `CopyBlockUnaligned` use these same operations. Pointer arguments must come from
-admitted allocation-relative references; arbitrary integer addresses are unsupported. The
-certificate binds each helper's exact signature, operation and alignment.
+Calls to `Unsafe.InitBlock`, `InitBlockUnaligned`, `CopyBlock` and `CopyBlockUnaligned` retain
+their call instruction. The runtime model accepts two static overloads per name, one taking byte
+references and one taking void pointers. Both use the checked block operation with alignment
+eight for the aligned helpers and one for the unaligned helpers. Pointer arguments must come
+from admitted allocation-relative references.
 
 ## Pointer subtraction and ordering
 
@@ -244,25 +266,25 @@ examples of rejected opcodes and forms.
 
 | Area | Examples rejected by extraction |
 | --- | --- |
-| Debugger and prefixes | `break`, `volatile.`; `tail.` outside admitted same-assembly calls; `readonly.` outside the checked array-element subset; `constrained.` outside the checked struct-call subset |
+| Debugger and prefixes | `break`, `volatile.`, and every `no.` flag combination. Every prefix requires a valid operand and an immediate taker, including in unreachable code. Repeated, combined and trailing prefixes are rejected. |
 | Other conversions | Floating-point conversions |
 | Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*` |
-| Objects, arrays and metadata | `ldstr` of a text containing a surrogate, backspace or form feed, `box`, `unbox`, `unbox.any`, `castclass` and `isinst` of interfaces, `System.Object`, value types or classes that are not admitted, byref-like, floating-point and non-class reference `newarr`, floating-point `ldelem.*`/`stelem.*` and `ldelem.ref`/`stelem.ref` outside arrays of classes, interface and `object` arrays, `ldtoken` of a method or of a type outside a decided type test |
+| Objects, arrays and metadata | `ldstr` of text containing an unpaired UTF-16 surrogate, `box`, `unbox`, `unbox.any`, `castclass` and `isinst` of interfaces, `System.Object`, value types or classes that are not admitted, byref-like, floating-point and non-class reference `newarr`, floating-point `ldelem.*`/`stelem.*` and `ldelem.ref`/`stelem.ref` outside arrays of classes, arrays of interfaces, `object` or other classes outside the model, `ldtoken` of a method or of a type outside a decided type test |
 | Static field values | `stsfld`, `ldsfld` and `ldsflda` of fields outside the admitted readonly subset |
-| Dispatch and exceptions | Unconstrained `callvirt` of interface methods, of methods declared outside the extracted assemblies, or of virtual methods whose hierarchy the table cannot close, `jmp`, `ldvirtftn`, `throw` outside a folded throw, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
+| Dispatch and exceptions | Unconstrained `callvirt` of interface methods, of methods declared outside the extracted assemblies, or of virtual methods whose hierarchy the table cannot close, `jmp`, `ldvirtftn`, `rethrow`, `endfilter`, filter and fault clauses |
 | Floating-point constants | `ldc.r4`, `ldc.r8` |
 
 ### Type tests
 
 Closed `typeof(A) == typeof(B)` and `!=` tests use two adjacent
 `ldtoken; call Type::GetTypeFromHandle` pairs followed by `Type::op_Equality` or
-`op_Inequality`, with exact `System.Runtime` signatures. The four operands emit `nop`
-and the comparison emits its decided Boolean. `ReferenceEquals(typeof(A), typeof(B))`
-used as a Boolean value ends in operandless `ceq`, which emits the same decided Boolean.
-Its negation uses the ordinary integer comparison of that result with zero. Reference-equality
-branches use the same operands followed by short or long `beq` or `bne.un`; they emit
-an unconditional branch to the original target or a fallthrough `nop`. No instruction
-slots are inserted. Feature and scalar certificates share the selected successor.
+`op_Inequality`. The extractor checks a static, nongeneric default calling convention and the
+`System.Runtime` identities of `Type` and `RuntimeTypeHandle` in the signatures. Each `ldtoken` pushes the handle of its closed type. Each `GetTypeFromHandle` call consumes
+that handle and pushes the corresponding runtime type. The operator compares both runtime types
+and returns an `i32` Boolean. `ReferenceEquals(typeof(A), typeof(B))` uses operandless `ceq`
+for a Boolean result, or short or long `beq` or `bne.un` to branch directly. Execution retains
+the instruction positions and branch targets. The feature and scalar certificates use the known
+comparison result to prune the unreachable successor.
 
 Types are equal when their metadata is identical, and different when their full names
 differ; one full name in two scopes, decorated names and `void` stay undecided. Every
@@ -274,26 +296,46 @@ outside this subset.
 ### Throws
 
 `throw new E(...)` compiles to one `ldstr` or `ldnull` per constructor argument, `newobj` of
-`E`'s constructor and `throw`. For an exact allowlisted `System.Runtime` constructor, the loads
-and `newobj` emit `nop` and `throw` emits `.throw "E"`, which ends execution with a fault located
-at the `throw`. A `[DoesNotReturn]` helper containing only this pattern is an ordinary call.
-Other arguments, any instruction between the parts, a branch past the first part, rethrowing a
-stored exception and exception handlers are rejected.
+`E`'s constructor and `throw`. For an exact allowlisted `System.Runtime` constructor, each
+`ldnull` pushes the null object reference. The string loads and `newobj` emit `nop`. The
+`throw` raises the `CIL.ExceptionType` for `E` at the original instruction position. A `[DoesNotReturn]`
+helper containing only this pattern is an ordinary call.
+The constructor fold checks every argument and requires the constructor and throw to be contiguous.
+Each branch into the folded sequence must target its first instruction.
 
-The adjacent `ldnull; throw` form emits `nop` followed by the same named-fault operation for
-`System.NullReferenceException`, located at the raw `throw`. A branch may target the null load,
-but cannot enter at the throw. Nulls passed through locals, arguments or intervening instructions
-do not satisfy this exact fold.
+An operand-free `throw` reads the object reference on top of the evaluation stack. Null raises
+`.nullReference` at the throw's original position, including when a branch carries the reference
+to the throw. For a live exception object, the model checks the runtime class and its assembly
+scope. An unknown class produces an unsupported outcome. An empty stack, a scalar operand or an
+interior object address produces an invalid-state fault.
+
+A fault inside a protected range runs the enclosing clauses innermost first. A typed catch takes
+a thrown object whose class or a base in its lineage is the catch class, and its handler starts
+with that object on the stack; a finally handler starts with an empty stack and raises the
+fault again at its `endfinally`. A fault without an object, such as an arithmetic fault, passes
+through finally handlers, and reaching a typed catch makes the outcome unsupported. Clauses must
+be disjoint or nested with the inner clause listed first. Control enters a protected range only
+at its first instruction with an empty stack, leaves a region only by `leave`, and never falls
+out of a protected range or handler.
+
+In hand-written Lean, `.throw` reads the stack. The constructor fold emits
+`.throw (some raised)` for its checked exception type. Contracts express either raised outcome
+as `.thrown raised`.
 
 In addition to the admitted string constructors, `Exception`, `InvalidOperationException`,
 `ArgumentException` and `ArgumentOutOfRangeException` admit a message with a null inner exception.
 `ArgumentException` also admits message, parameter name and null inner exception;
 `ArgumentOutOfRangeException` admits parameter name, null actual value and message.
-Only the thrown type is observed. Constructor signatures and null operands are checked
-independently; expressions with effects or faults are not discarded. Prefix recognition inspects
-at most four loads.
+The thrown type is independent of the message text, the parameter name and the current UI culture.
+Lean checks the declared instance calling convention, return
+type and parameter types against the nongeneric constructor. A separate check requires null for
+inner exceptions and actual values. Prefix recognition inspects at most four loads.
 
 ### Constrained struct calls
+
+The decoder represents `constrained. T` as a no-op at the prefix pc. The adjacent call names the
+slot and carries the closed receiver type `T`. Lean checks the link at the call pc against the
+implementation selected for that receiver. An unprefixed `callvirt` still requires literal emission.
 
 An adjacent `constrained. T; callvirt` pair supports a concrete, reference-free struct `T` and a
 method declared on that struct or a directly implemented interface. `T`, the slot's interface and,
@@ -302,7 +344,10 @@ for an interface-level body, every interface of `T` must be declared in the extr
 struct may implement a slot of a referenced interface. An interface of any other assembly is never
 read for dispatch, so a body that needs it is rejected.
 Closed sequential generic structs admit direct slots and directly implemented interface slots,
-including closed generic interfaces. The slot's closed declaring owner must match exactly.
+including closed generic interfaces. For a direct slot or an implementation on the struct, the
+generic owner must have a value-type head and match the receiver's closed layout identity.
+An interface slot uses its full declaring type, including its generic arguments. Dispatch rejects
+a slot whose class or interface head gives the same closed identity as the struct receiver.
 Implicit implementations must uniquely match the public name and signature; explicit `MethodImpl`
 overrides take precedence and retain the closed interface owner as well as the method token.
 Slots with [`in` parameters](#in-parameters-of-virtual-members) match only implementations
@@ -369,6 +414,10 @@ checks signed input ranges and permits an empty view at the allocation end. Gene
 are outside this support; see [span reference parameters](#span-reference-parameters) for `in`
 and `ref readonly` spans.
 
+Indexing, length, both `Slice` overloads, `IsEmpty`, `GetPinnableReference` and `Empty` keep their
+direct call. The same rule applies to conversions from an array to either span type and from
+a writable span to a readonly span. Each overload executes its corresponding memory operation.
+
 Aggregate span widths come from the validated target-specific layout, including vector-field
 alignment; vectors use their exact storage width. Indexing yields a checked element reference
 for typed loads and stores. Single-reference constructors form one-element views over live
@@ -378,12 +427,19 @@ references.
 
 `Span<T>.Empty` and `ReadOnlySpan<T>.Empty` return a null, zero-length view with the element
 width and readonly capability of the span type. Explicit `default` initialization or
-reassignment of a span local accepts the exact `ldloca; initobj` pair, including resetting a
-nonempty local; the initialized type must match the local, and branches cannot enter at
-`initobj`.
+reassignment of a span local or homed span parameter decodes `ldloca; initobj` or
+`ldarga; initobj` to `initobj` through the home, including resetting a nonempty local. The
+initialized type must match the local or parameter, `initobj` must directly follow the address,
+and no branch may target it. The reset stores the empty view of the slot's checked element width.
+A span local whose aggregate element layout is unresolved has no checked width, so its method
+does not decode.
 
 Span `IsEmpty` and `GetPinnableReference` do not read the view's bytes. An empty span's
 pinnable reference is null, and readonly views return readonly references.
+The decoder keeps supported `MemoryMarshal` calls. The runtime model checks the generic
+declaration and closed element types, then derives the memory operation from the method's
+layouts. Vector elements must have integer lanes, including the target of a cast.
+
 `MemoryMarshal.GetReference<T>(Span<T>)` returns a writable span's start reference, including
 for an empty span. The `ReadOnlySpan<T>` overload returns a reference restricted as `readonly.`
 results are, although .NET types it `ref T`: reads and field reads through it succeed and stores
@@ -395,14 +451,20 @@ keeps its data reference, and a null array raises `NullReferenceException`.
 Array constructors, implicit array conversions and the array overloads of
 `MemoryExtensions.AsSpan` form views over supplied integer, enum, aggregate and integer-vector
 arrays. Enum views keep their exact enum identity through locals, slices, calls and returns;
-equal-width enums are not interchangeable. `AsSpan` accepts a whole array, a start index, or a
+equal-width enums are not interchangeable. The decoder keeps `AsSpan` as a call. Its runtime
+model accepts a whole array, a start index, or a
 start and length. A null array produces an empty span only for a zero range; an invalid range
 raises `ArgumentOutOfRangeException`. Non-array `AsSpan` overloads are unsupported.
 
-In-place construction of a span local accepts `ldloca`, up to three simple argument loads or
-integer constants, and its exact constructor call. The address cannot escape or be duplicated,
-and control flow cannot enter the sequence after its first instruction. The local may be
-reused or reinitialized; construction faults remain at the call instruction.
+In-place construction of a span local or homed span parameter is a call on its home: `ldloca` or
+`ldarga` of a local or parameter of the constructed type, one local or argument load, `ldnull`
+or int32 constant per constructor parameter (at most three), and the exact constructor call,
+with no branch to an argument or the call. The call's runtime model builds the view as the
+overload's `newobj` model does and stores it in the slot the home names, except that
+`ReadOnlySpan<byte>(void*, int)` views any readable bytes the pointer names, where `newobj`
+requires extracted static data. The step faults unless the constructor builds spans of the
+slot's width and access. The local may be reused or reinitialized; construction faults remain
+at the call instruction.
 
 `Array.Fill<T>(T[], T)` and its `(T[], T, int startIndex, int count)` overload support primitive
 integers, Boolean, character and integer-backed enums. A null array throws
@@ -410,9 +472,10 @@ integers, Boolean, character and integer-backed enums. A null array throws
 array, throws `ArgumentOutOfRangeException`. Empty ranges, including at the array end, need no
 write authority. Reference-bearing, aggregate and vector elements are not supported.
 
-`Span<T>.Clear` initializes the whole view, including aggregate and vector elements. `Fill`
-repeats a captured primitive, enum, aggregate or integer-vector value; unspecified
-low-lane-only vector values are rejected. A filled aggregate or vector snapshot keeps its
+The decoder retains span and array bulk calls. The runtime model uses the closed element type
+when executing the call. `Span<T>.Clear` initializes the whole view, including aggregate and
+vector elements. `Fill` repeats a captured primitive, enum, aggregate or integer-vector value.
+A fill rejects unspecified low-lane-only vector values. A filled aggregate or vector snapshot keeps its
 initialization mask, so unknown bytes stay uninitialized. Both need write authority but not initialized or
 readable destination bytes, access no bytes for an empty span and preserve neighbouring bytes,
 including other slices of the same allocation. Readonly views do not admit these members.
@@ -434,28 +497,32 @@ aggregate or integer-vector values through byte spans. Short `Read`/`Write` call
 reference and returns false; a short `TryWrite` returns false without reading the input value
 or modifying memory. Successful transfers preserve snapshot initialization masks and retain
 the checked model's bounds, lifetime and authority requirements. `Vector128.Create<byte>` and
-`Vector256.Create<byte>` over a `ReadOnlySpan<byte>` are the same checked `Read` of the vector.
+`Vector256.Create<byte>` over a `ReadOnlySpan<byte>` retain the call and run the same checked
+`Read` of the vector. The table also resolves scalar vector construction, whole-vector
+equality and the byte-reference overloads of `Vector128.LoadUnsafe` and `Vector128.StoreUnsafe`.
 
 A collection-expression property such as `static ReadOnlySpan<uint> Table => [...]` compiles to
 `ldtoken <field>; call RuntimeHelpers::CreateSpan<uint>` over a static data field (`ldsflda`
 rules, packing 1, 2, 4 or 8, with an RVA that is a multiple of the packing, inside one section's
 raw data, in a section whose virtual address and file offset agree modulo 8 so that flat and
-mapped loads keep the alignment). The span covers the whole field and has `size / sizeof(T)`
+mapped loads keep the alignment). The method decoder preserves the RVA field token or address.
+The runtime model binds the open field-handle declaration and the closed element type of
+`RuntimeHelpers.CreateSpan<T>`. The span covers the whole field and has `size / sizeof(T)`
 elements, for any primitive integer `T`. As in CoreCLR, which throws `ArgumentException` for data
 misaligned for `T`, `sizeof(T)` must divide the field's packing; otherwise the call is an
 `unsupported` fault. Roslyn emits each such field with packing `sizeof(T)` at an 8-byte-aligned
 RVA, in a section whose virtual address and file offset are multiples of 512. A caller reads it
-as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: the store
-and address emit `nop`, so the span stays on the stack as the receiver. `get_Item` faults with
+as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: `stloc`
+stores the typed span view, `ldloca` pushes a home for the local, and the call reads the view
+from the slot as its receiver. `get_Item` faults with
 `System.IndexOutOfRangeException` at the call when the index, compared unsigned as in .NET, is
-out of range. `MemoryMarshal.GetReference` also accepts these spans. The fold is used only for a
-single-use receiver with a single-load or constant index; other supported uses keep typed span
-storage. Branches into a folded receiver are rejected.
+out of range. `MemoryMarshal.GetReference` also accepts these spans. Receiver locals retain typed
+span storage for repeated reads and computed indexes.
 
 ### Span reference parameters
 
 `in` and `ref readonly` parameters of an admitted `Span<T>` or `ReadOnlySpan<T>` type receive
-the referenced view, as `ldloca` and `ldarga` of a span local or parameter do. Callers pass a
+the referenced view, which the call reads from the caller's span local or parameter when it runs. Callers pass a
 span local, span parameter or temporary by address, and callees read the length, index, slice,
 copy or forward the reference to another readonly span parameter. The view keeps its element
 width, write capability and allocation, so element writes through `in Span<T>` still need write
@@ -475,8 +542,9 @@ span parameters are rejected.
 
 C# encodes an `in` parameter of a virtual, abstract or interface member, and of its explicit
 implementations, as `T& modreq(System.Runtime.InteropServices.InAttribute)`. The modifier is
-admitted only directly on a by-reference parameter and only with the exact `System.Runtime`
-scope, and the parameter then behaves as a non-virtual `in` parameter of the same type: an
+admitted only directly on a by-reference parameter, with a top-level metadata reference whose
+namespace is `System.Runtime.InteropServices`, name is `InAttribute` and raw assembly scope is
+exactly `System.Runtime`. The parameter behaves as a non-virtual `in` parameter of the same type: an
 ordinary reference, or the referenced view for an admitted span type (see
 [span reference parameters](#span-reference-parameters)). Selectors, recorded signatures,
 specialization keys and constrained-slot matching keep the modifier. A method whose declaring
@@ -491,8 +559,9 @@ signatures admit no modifier.
 C# marks an `init` accessor by returning
 `System.Void modreq(System.Runtime.CompilerServices.IsExternalInit)`, and the accessor runs as
 the void method it is, as an entry or behind a call. The modifier is admitted only directly on
-`System.Void`. Like C#, the extractor recognizes the marker by its full name from any assembly,
-so a library that declares its own `IsExternalInit` for an older framework is admitted too.
+`System.Void`. The extractor requires a top-level metadata type whose namespace is
+`System.Runtime.CompilerServices` and name is `IsExternalInit`, from any assembly. A library
+that declares its own marker for an older framework is admitted too.
 Selectors, recorded entries and the Lean signature string keep the modifier; a method whose
 declaring type also has a modifier-only twin is rejected
 ([arrays, views and bulk memory](SOUNDNESS-RUNTIME.md#arrays-views-and-bulk-memory)).
@@ -508,9 +577,10 @@ initializers are a checked helper call, a copy of an earlier field, a direct int
 a direct struct construction, described in that order below.
 
 `public static readonly Word256 One = 1ul;` compiles to
-`ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. A reachable
-`ldsfld` of such a field emits `.staticValue bytes`, which pushes the field's value as an
-aggregate and touches no memory. The static constructor must store the field exactly once,
+`ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. For a reachable
+`ldsfld`, the method decoder matches the typed descriptor at the instruction index against the
+static field operand. The resulting `.ldsfld field` pushes the aggregate bytes recorded for that
+field. The static constructor must store the field exactly once,
 unconditionally (no control flow before the store and no branch back to it). A helper-call
 initializer uses a same-assembly static call whose arguments are integer constants (`ldc.i4*`,
 `ldc.i8` with `conv.i4`/`conv.u4`/`conv.i8`/`conv.u8`/`conv.i`/`conv.u`). A field may instead
@@ -518,7 +588,7 @@ copy (`ldsfld G; stsfld F`) such a field stored earlier, as in `MinValue = Zero`
 method and its callees become part of the extracted program and must not access static fields.
 The static site records the call, and the extraction certificate reruns it in the checked
 interpreter;
-`Extracted.translation_valid` fails unless the result is exactly the emitted bytes.
+`Extracted.translation_valid` fails unless the result is exactly the descriptor's bytes.
 
 Primitive integer fields (including Boolean, Char and 64-bit native integers) and same-assembly
 integer enums also admit a direct integer literal, optionally widened with the supported integer
@@ -534,14 +604,16 @@ Closed constructors use the ordinary checked generic specialization. How Lean ch
 value, and what the initialization assumption covers, is in
 [static storage](SOUNDNESS-RUNTIME.md#static-storage).
 
-`ldsflda` of an admitted readonly field uses the same identity-keyed immutable storage as RVA
-data. Repeated accesses share one allocation; distinct fields remain distinct even when their
-bytes agree. The reference can be passed to supported helpers and instance methods. Checked
-writes through it fail, including writes through `Unsafe.AsRef`.
+For an admitted readonly field, the decoder binds `ldsflda` to the field and its descriptor.
+Repeated accesses share one immutable allocation, as they do for RVA data. Distinct fields have
+separate storage even when their bytes agree. Supported helpers and instance methods can use the
+reference. Checked writes through it fail, including writes through `Unsafe.AsRef`.
 
-Extraction rejects a declaring type without the assumption; aggregate values built by other code
-shapes; a second store, a store outside the static constructor, or `ldsflda` of the field during
-initialization; and `stsfld` in an extracted method.
+Extraction requires the declaring type's initialization assumption and one of the supported
+aggregate initializer forms. A second store, a store outside the static constructor, or taking
+the field's address during initialization prevents extraction. Extraction rejects a reachable
+store, the method decoder refuses a method that has one, and the interpreter reports an
+unsupported store if one occurs in a hand-built method.
 
 #### Unknown readonly values
 
@@ -564,8 +636,9 @@ aggregate fields whose value cannot be computed. Each such field is listed in
 
 ## Runtime calls and SIMD
 
-SIMD and hardware features enter compiled CIL mostly through `call`, rather than dedicated SIMD
-CIL opcodes. [SIMD](SIMD.md) lists the admitted vector and hardware-intrinsic overloads with
+Hardware intrinsics keep their CIL `call`. The runtime model table selects the operation and
+argument count from the closed method reference. The decoder checks the open declaration,
+external target and feature profile before admitting the call. [SIMD](SIMD.md) lists the admitted vector and hardware-intrinsic overloads with
 their element types and profile requirements, and links the extractor sources that define them.
 The portable bitwise and equality forms admit no floating-point equality and no observation of
 [unspecified lanes](SOUNDNESS-RUNTIME.md#unspecified-vector-lanes).
@@ -614,22 +687,23 @@ by that size and wrap at the validated native width. Forming the resulting refer
 allocation identity, lifetime and bounds, including admitted one-past positions, and grants no
 read or write permission; an offset from a readonly reference stays readonly, so stores through
 it fault ([pointer element offsets](SOUNDNESS-RUNTIME.md#pointer-element-offsets)). Classes,
-pointer/byref type arguments and unsupported layouts fail extraction.
+pointer/byref type arguments and unsupported layouts fail extraction. A call of `Unsafe.SizeOf<T>()`
+keeps its `call`, which pushes the size the runtime model table reads from the element's checked
+shape, as `sizeof` does.
 
 `Unsafe.SkipInit<T>(out T)` admits the same storage types. It validates the managed reference
 and leaves memory, initialization flags and access permissions unchanged, so reads of the output
-still require initialized bytes. Extraction evidence checks the exact runtime call identity and
-its translation to `skipInit`.
+still require initialized bytes. A call keeps its `call`, which runs the model the runtime model
+table gives its exact closed reference.
 
-`Unsafe.NullRef<T>()` and `Unsafe.IsNullRef<T>(ref readonly T)` admit the same
-storage types. `NullRef` pushes the model's null managed reference, which a
+`Unsafe.NullRef<T>()` and `Unsafe.IsNullRef<T>(ref readonly T)` keep their calls. Their models
+require recognized storage for `T` and exclude byref storage. `NullRef` pushes the model's null managed reference, which a
 byref local or argument can hold like any other reference. `IsNullRef` returns
 1 for it and 0 for every other reference, live or not, without accessing memory.
-Every load, store, copy, initialization, field or lane access of one or more
+Every load, store, copy, initialization or field access of one or more
 bytes through null faults with `nullDereference`, the model's
 `NullReferenceException`, and no address is formed from it; zero-length block
-operations access nothing. Extraction evidence binds each call to its operation in both
-directions, as for `SkipInit`.
+operations access nothing. The model table binds the open declaration and external target of each call.
 
 Reference `add` admits either operand order, matching the
 [.NET 10 importer](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/importer.cpp#L5093-L5106);
@@ -642,7 +716,7 @@ translations into reference, memory or vector operations; they do not make those
 supported as a whole.
 
 Managed byte-reference and pointer `Unsafe.ReadUnaligned<T>` and `WriteUnaligned<T>` support
-admitted integer, aggregate and integer-vector storage. They are the typed loads and stores
+admitted integer, aggregate and integer-vector storage. The calls run typed load and store models
 with byte alignment, keeping bounds, lifetime, access authority and snapshot initialization
 masks. Readonly source references are accepted; writes require writable references and byte
 authority. Pointer overloads require allocation-relative references, not numeric addresses.
@@ -651,12 +725,20 @@ check. Primitive integers require their storage width; aggregates require their 
 alignment, including packing. Integer vectors conservatively require alignment to their full byte
 width. This subset can reject vector addresses that a particular runtime accepts; the unaligned
 overloads remain available. Alignment checks do not repeat the per-byte authority scan.
-`Unsafe.AsRef<T>(void*)` preserves that provenance and forms a live reference without reading or
-initializing bytes or granting access authority. Reference-bearing value types are unsupported.
+Each transfer keeps its call. The decoder emits an opcode-tagged hole when the closed signature,
+open declaration, external target or element layout fails to resolve.
+The checked interpreter runs `Unsafe.As<TFrom,TTo>(ref TFrom)` and both `Unsafe.AsRef<T>`
+overloads as reference formation. They preserve the address, lifetime and access authority.
+`As` requires field or vector storage for both type arguments. The extractor rejects a span,
+array, class, byref, pointer or type variable as a type argument of `As` or `AsRef`, and the
+decoder emits the call hole for an `As` site whose arguments lack that storage.
+Both `AsRef` overloads keep their call. Each checks its own external target and open declaration
+and accepts field or vector storage for its element.
 
 `Unsafe.BitCast<TFrom,TTo>` is admitted between equal-size validated unmanaged aggregates and
 `Vector128`/`Vector256`/`Vector512` values with `byte`, `int`, `uint`, `long` or `ulong`
-elements, in both directions and under the scalar profile. Byte snapshots keep their
+elements, including struct/struct and vector/vector pairs of equal size under any profile.
+The Byte-to-Boolean overload accepts 0 and 1 and rejects other representations. Snapshots keep their
 initialization flags through the cast
 ([arrays, views and bulk memory](SOUNDNESS-RUNTIME.md#arrays-views-and-bulk-memory)), so numeric
 reads and vector arithmetic cannot consume unknown bytes of a partially initialized result.
@@ -671,17 +753,20 @@ emitted as unsupported placeholders
 ([feature getters and profiles](SIMD.md#feature-getters-profiles-and-execution-restrictions)).
 Execution that reaches a placeholder fails.
 
-Exact `IntPtr.Size`, `UIntPtr.Size` and `Environment.Is64BitProcess` getters produce `8`, `8`
-and `true` ([runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions)).
-`ldsfld BitConverter.IsLittleEndian` produces `true`, since every valid profile is
+Hardware feature getters keep their call and read the selected profile through a runtime model.
+The calls to `IntPtr.Size`, `UIntPtr.Size` and `System.Environment.Is64BitProcess` run constant
+models returning `8`, `8` and `true` ([runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions)).
+The decoder emits the word 1 for the exact System.Runtime Boolean field
+`BitConverter.IsLittleEndian` when the profile is little-endian. Every valid profile is
 little-endian. The extractor checks the exact System.Runtime field and that it is
 `static readonly`, and rejects same-named types and fields from other assemblies and other
-`BitConverter` fields. The certificate binds the raw call signature, or the raw field owner, type
-and static load, and the emitted value. Raw field operands carry no member name, so the
-certificate relies on
-`IsLittleEndian` being the only static Boolean field of System.Runtime's `BitConverter`.
+`BitConverter` fields. A getter binds its open declaration, closed signature and external target.
+The field certificate binds the raw owner, name, type and static load to the emitted value. The
+body check compares the operand's name with the name of the field row its token identifies.
 
-These constants feed the feature-flow analysis. Known int32 words propagate through bitwise
+The reference-content query keeps its call. Its model returns zero for checked reference-free
+elements, including an aggregate whose identity matches its layout index. These constants
+feed the feature-flow analysis. Known int32 words propagate through bitwise
 operations and `ceq`, `cgt`, `cgt.un`, `clt` and `clt.un`.
 Single-condition branches and all short/long signed or unsigned comparison branches select an
 edge when their operands are known. Unknown operands, including native and int64 values, keep
@@ -689,6 +774,8 @@ both edges; joins and backedges discard conflicting constants. A known int32 swi
 chooses its indexed arm, or falls through when its unsigned value is out of range. Unknown
 selectors retain every successor. Every encoded branch or switch target remains bounds-checked
 and must enter a folded sequence or tail transfer at its start, even when unselected.
+The raw decoder checks all encoded targets before applying a fold. An edge into a folded
+throw after its head leaves the raw `throw` as an opcode-tagged hole.
 
 `RuntimeHelpers.IsReferenceOrContainsReferences<T>()` produces `false` for supported primitive
 integer, Boolean, character, integer-enum and integer-vector types and for reference-free
@@ -697,17 +784,15 @@ A validated byref-like aggregate without reference or byref fields is admitted; 
 spans, byref/pointer arguments and unsupported storage are rejected. What the query does and
 does not establish is in [runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions).
 
-## Lean-only operations and implementation sources
-
-The Lean `CIL.Op` type and memory/SIMD modules contain operations that the extractor does not
-emit, including vector argument homes, fixed vector-lane helpers, `newVector256` and additional
-memory helpers. Their existence is not evidence that the corresponding arbitrary CIL or .NET API
-is extractable. The checked memory interpreter implements generic aggregate operations.
+## Implementation sources
 
 The implementation this inventory describes is:
 
-- [InstructionTranslation.cs](../Extractor/InstructionTranslation.cs): opcode translation and
-  default rejection.
+- The extractor checks each reachable CIL instruction against its operands and rejects unsupported
+  opcodes before emission. [Instruction admission](../Extractor/InstructionAdmission.cs) and
+  [operand checks](../Extractor/InstructionOperands.cs).
+- Proof outlines read original CIL instructions, branch targets and bound call operands.
+  [Outline instruction checks](../Extractor/OutlineInstructions.cs).
 - [MetadataValidation.cs](../Extractor/MetadataValidation.cs),
   [Reachability.cs](../Extractor/Reachability.cs) and [StaticData.cs](../Extractor/StaticData.cs):
   type, call, control-flow and static-data restrictions.
@@ -740,20 +825,28 @@ every admitted hardware profile.
 | `System.UInt32`, `System.UInt64`, `System.UIntPtr` | Static `Log2` | Floor base-two logarithm in the input's integer type; zero input returns zero. |
 | `System.Numerics.BitOperations` | `RoundUpToPowerOf2` on `uint`, `ulong` or `nuint` | Least power of two at least the input; zero for zero input or overflow |
 | `System.Buffers.Binary.BinaryPrimitives` | `ReverseEndianness` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | Reverse bytes within the value; preserve signed return conventions; byte/sbyte are identity operations |
-| `System.ArgumentNullException` | `ThrowIfNull(object, string)` | Raises `ArgumentNullException` for a null argument and otherwise pops both operands; the parameter name is never read |
-| `System.ArgumentOutOfRangeException` | `ThrowIfZero`, `ThrowIfNegative`, `ThrowIfNegativeOrZero`, `ThrowIfEqual`, `ThrowIfNotEqual`, `ThrowIfGreaterThan`, `ThrowIfGreaterThanOrEqual`, `ThrowIfLessThan`, `ThrowIfLessThanOrEqual` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | Raises `ArgumentOutOfRangeException` exactly when the integer test holds, comparing unsigned types as unsigned, and otherwise pops its operands; see [argument guards](SOUNDNESS-RUNTIME.md#argument-guards) |
+| `System.ArgumentNullException` | `ThrowIfNull(object, string)` | The call runs a checked guard that raises `ArgumentNullException` for a null argument and otherwise pops both operands; the parameter name is never read |
+| `System.ArgumentOutOfRangeException` | `ThrowIfZero`, `ThrowIfNegative`, `ThrowIfNegativeOrZero`, `ThrowIfEqual`, `ThrowIfNotEqual`, `ThrowIfGreaterThan`, `ThrowIfGreaterThanOrEqual`, `ThrowIfLessThan`, `ThrowIfLessThanOrEqual` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | The call runs a checked guard that raises `ArgumentOutOfRangeException` exactly when the integer test holds, comparing unsigned types as unsigned, and otherwise pops its operands; see [argument guards](SOUNDNESS-RUNTIME.md#argument-guards) |
 
-Signed 8/16-bit rotations and primitive signed `Log2` are unsupported.
+Signed 8/16-bit rotations and primitive signed `Log2` are unsupported. A call of a `BitOperations`
+helper, of the same helper on an integer type or of `ReverseEndianness` keeps its `call`, which runs
+the scalar intrinsic the runtime model table gives its method reference.
 
 `System.Math.Min`, `Max` and `Clamp` support signed and unsigned 8-, 16-, 32-, 64-bit and native
 integers. `Abs` and `Sign` support the signed types; `Sign` returns an `int`. `Abs` of the
 signed minimum produces an arithmetic overflow fault. `Clamp` with a lower bound greater than
-its upper bound produces an invalid-bounds fault. These failures terminate checked execution;
-exception handlers are not modelled.
+its upper bound produces an invalid-bounds fault. These faults carry no exception object, so a
+typed catch they reach makes the outcome unsupported.
 
 The corresponding static `Min`, `Max` and `Clamp` methods on `sbyte`, `byte`, `short`,
 `ushort`, `int`, `uint`, `long`, `ulong`, `nint` and `nuint` use the same operations.
 Signed types also admit `Abs` and `Sign`, with the same overflow behavior and `int` sign result.
+A call of any of these helpers keeps its `call`, which runs the scalar intrinsic the runtime model
+table gives its method reference.
+
+The decoder keeps the calls to `System.Math.BigMul` and `System.Math.DivRem` on each profile.
+The runtime table selects the overload using the closed signature and binds the raw MemberRef
+name, declaration and external target. An unmatched overload at a reachable call prevents admission.
 
 `System.Math.BigMul(ulong, ulong, out ulong)` returns the high 64 bits of the unsigned product
 and writes the low 64 bits through the checked output reference. The destination must be live,
@@ -783,13 +876,13 @@ and `divRemBits_zero` and `divRemBits_overflow` the faults.
 
 Native-width overloads use the validated 64-bit target. The 128-bit (`Int128` and `UInt128`
 `BigMul`), generic-math and other unlisted helper overloads are unsupported. The extractor
-validates the exact .NET 10 runtime assembly identity, declaring type, static calling convention
+validates the exact .NET 11 runtime assembly identity, declaring type, static calling convention
 and signature. Correspondence to the runtime's implementation is an assumption; see
 [portable bit helpers](SOUNDNESS-RUNTIME.md#portable-bit-helpers).
 
 `BinaryPrimitives.Read{Int,UInt}{16,32,64}{Little,Big}Endian`, their `TryRead` forms,
 native-width `IntPtr`/`UIntPtr` counterparts, `Write` forms and `TryWrite` forms, 64 exact
-signatures in all, operate on checked byte spans. Reads sign- or zero-extend according to the
+signatures in all, keep the call and run its memory model on a checked byte span. Reads sign- or zero-extend according to the
 named integer type after applying byte order, and writes store exactly that width. Short
 ordinary transfers raise `ArgumentOutOfRangeException`; short try-reads write zero to the output
 and return false, and short try-writes return false without modifying memory

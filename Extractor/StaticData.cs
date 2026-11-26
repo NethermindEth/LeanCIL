@@ -16,15 +16,41 @@ internal static class StaticData
     /// Reads a module from its image and records the image's section headers, which <see cref="Validate"/>
     /// requires to admit any static data of that module.
     /// </summary>
-    internal static ModuleDefinition ReadModule(byte[] assembly, IAssemblyResolver? resolver = null)
+    internal static ModuleDefinition ReadModule(byte[] assembly, IAssemblyResolver? resolver = null,
+        Action<MemoryStream>? retainStream = null)
     {
         SectionHeader[] headers;
         using (PEReader image = new(new MemoryStream(assembly, writable: false)))
             headers = [.. image.PEHeaders.SectionHeaders];
-        ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly, writable: false),
-            resolver is null ? new ReaderParameters() : new ReaderParameters { AssemblyResolver = resolver });
-        sections.AddOrUpdate(module, headers);
-        return module;
+        var stream = new MemoryStream(assembly, writable: false);
+        ModuleDefinition? module = null;
+        try
+        {
+            module = ModuleDefinition.ReadModule(stream, new ReaderParameters
+            {
+                AssemblyResolver = resolver,
+                ReadingMode = ReadingMode.Deferred,
+                ReadSymbols = false
+            });
+            sections.AddOrUpdate(module, headers);
+            retainStream?.Invoke(stream);
+            return module;
+        }
+        catch
+        {
+            module?.Dispose();
+            stream.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Each static site binds a validated readonly field or an immutable RVA block.</summary>
+    internal static FieldDefinition FieldOf(Mono.Cecil.Cil.Instruction instruction, ModuleDefinition module,
+        string architecture)
+    {
+        var field = (FieldReference)instruction.Operand;
+        return StaticValues.IsLoad(instruction) ? StaticValues.Resolve(field, module, architecture).Field :
+            Validate(field, module);
     }
 
     internal static FieldDefinition Validate(FieldReference reference, ModuleDefinition module)
@@ -96,8 +122,6 @@ internal static class StaticData
     /// <summary>The guaranteed alignment of validated static data: its declared packing.</summary>
     internal static int Alignment(FieldDefinition field) => field.FieldType.Resolve().PackingSize;
 
-    internal static string LeanBytes(FieldDefinition field) => LeanBytes(field.InitialValue);
-
-    internal static string LeanBytes(byte[] bytes) =>
+    internal static string LeanBytes(IEnumerable<byte> bytes) =>
         "[" + string.Join(", ", bytes.Select(b => $"(BitVec.ofNat 8 {b})")) + "]";
 }

@@ -24,7 +24,8 @@ theorem memoryInstruction_emptySpan (memory : Memory) (stack : List Value)
   rfl
 #print axioms memoryInstruction_emptySpan
 
-theorem instructions_append (first second : List CIL.Op) (stack : List Value) (m : Memory) :
+theorem instructions_append (first second : List CIL.Instruction) (stack : List Value)
+    (m : Memory) :
     instructions (first ++ second) stack m =
       (instructions first stack m).bind
         (fun (memory, values) => instructions second values memory) := by
@@ -38,28 +39,10 @@ theorem instructions_append (first second : List CIL.Op) (stack : List Value) (m
       rcases result with ⟨memory, values⟩
       exact ih values memory
 
-/-- A fault in a prefix of straight-line code is the fault of the whole sequence. -/
-theorem instruction_fault_cannot_be_erased (first second : List CIL.Op) (stack : List Value)
-    (m : Memory) (fault : ExecutionFault) (h : instructions first stack m = .error fault) :
-    instructions (first ++ second) stack m = .error fault := by
-  rw [instructions_append, h]
-  rfl
-
-theorem successful_instruction_prefix (first second : List CIL.Op) (stack : List Value)
-    (m final : Memory) (values : List Value)
-    (h : instructions (first ++ second) stack m = .ok (final, values)) :
-    ∃ intermediate stack', instructions first stack m = .ok (intermediate, stack') := by
-  rw [instructions_append] at h
-  cases hi : instructions first stack m with
-  | error fault => simp [hi, Except.bind] at h
-  | ok result =>
-    rcases result with ⟨memory, stack'⟩
-    exact ⟨memory, stack', rfl⟩
-
 /-- Reference validity is independent of readable initialization and access
     width. A span's accessible bytes are checked by the memory operation. -/
 def Value.Valid (m : Memory) : Value → Prop
-  | .methodPointer _ | .methodTable _ | .object .null => True
+  | .typeHandle _ | .runtimeType _ | .methodPointer _ | .methodTable _ | .object .null => True
   | .object (.address r) => formObject m (.address r) = .ok (.object (.address r))
   | .scalar value => numericValue value = true
   | .bufferSpan view => view.validate m = .ok ()
@@ -68,6 +51,8 @@ def Value.Valid (m : Memory) : Value → Prop
   | .readOnlyReference (.address r) => form m r = .ok r
   | .reference .null | .span .null _ => True
   | .reference (.address r) | .span (.address r) _ => form m r = .ok r
+  -- A home names a frame slot and addresses no memory; a call checks the view it reads.
+  | .spanHome _ => True
 
 /-- Every value in the list is valid in `m`. -/
 def ValuesValid (m : Memory) (values : List Value) : Prop :=
@@ -350,7 +335,8 @@ theorem formValue_readOnly_valid (m : Memory) (reference : ManagedReference) (va
 theorem checkedValue_valid (m : Memory) (value result : Value)
     (h : checkedValue m value = .ok result) : result = value ∧ result.Valid m := by
   cases value with
-  | methodPointer _ | methodTable _ => cases h; exact ⟨rfl, trivial⟩
+  | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ => cases h; exact ⟨rfl, trivial⟩
+  | spanHome _ => cases h
   | object r =>
     exact ⟨formObject_returns_input h, formObject_result_valid h⟩
   | scalar value =>
@@ -390,10 +376,11 @@ theorem checkedValue_valid (m : Memory) (value result : Value)
       rw [same] at valid
       cases r <;> exact ⟨rfl, valid⟩
 
-theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid m) :
-    checkedValue m value = .ok value := by
+theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid m)
+    (free : value.isHome = false) : checkedValue m value = .ok value := by
   cases value with
-  | methodPointer _ | methodTable _ => rfl
+  | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ => rfl
+  | spanHome _ => cases free
   | object r =>
     cases r with
     | null => rfl
@@ -420,7 +407,7 @@ theorem ValuesValid.preserve {m result : Memory} {values : List Value}
   intro value member
   have hv := valid value member
   cases value with
-  | scalar value | methodPointer _ | methodTable _ => exact hv
+  | typeHandle _ | runtimeType _ | scalar value | methodPointer _ | methodTable _ | spanHome _ => exact hv
   | object r =>
     cases r with
     | null => exact True.intro
@@ -467,17 +454,174 @@ theorem checkedValues_valid (m : Memory) (values result : List Value)
 #print axioms ValuesValid.preserve
 #print axioms checkedValues_valid
 
-/-- Values valid in `memory` pass the argument and result checks unchanged. -/
+/-- Values valid in `memory`, none of them a home, pass the argument and result checks
+    unchanged. -/
 theorem checkedValues_of_valid {memory : Memory} {values : List Value}
-    (valid : ValuesValid memory values) : values.mapM (checkedValue memory) = .ok values := by
+    (valid : ValuesValid memory values) (free : ∀ value ∈ values, value.isHome = false) :
+    values.mapM (checkedValue memory) = .ok values := by
   induction values with
   | nil => rfl
   | cons value rest restChecked =>
     have head := checkedValue_of_valid memory value (valid value (List.mem_cons_self ..))
-    have tail := restChecked fun other member => valid other (List.mem_cons_of_mem _ member)
+      (free value (List.mem_cons_self ..))
+    have tail := restChecked (fun other member => valid other (List.mem_cons_of_mem _ member))
+      (fun other member => free other (List.mem_cons_of_mem _ member))
     simp only [List.mapM_cons, head, tail, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms checkedValues_of_valid
+
+/-- Valid values pass the argument and result checks unchanged, or one of them is a home and
+    the check faults with `.invalidState`. -/
+theorem checkedValues_of_valid_or_home {memory : Memory} :
+    ∀ {values : List Value}, ValuesValid memory values →
+      values.mapM (checkedValue memory) = .ok values ∨
+        values.mapM (checkedValue memory) = .error .invalidState
+  | [], _ => .inl rfl
+  | value :: rest, valid => by
+    have restValid : ValuesValid memory rest :=
+      fun other member => valid other (List.mem_cons_of_mem _ member)
+    cases value with
+    | spanHome _ =>
+      exact .inr (by simp [List.mapM_cons, checkedValue, Bind.bind, Except.bind])
+    | _ =>
+      have head := checkedValue_of_valid memory _ (valid _ (List.mem_cons_self ..)) rfl
+      rcases checkedValues_of_valid_or_home restValid with tail | tail <;>
+        simp [List.mapM_cons, head, tail, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms checkedValues_of_valid_or_home
+
+/-- A value `checkedValue` accepts is never a home, so no checked value names a frame slot. -/
+theorem checkedValue_not_spanHome {m : Memory} {value result : Value}
+    (checked : checkedValue m value = .ok result) : result.isHome = false := by
+  obtain ⟨same, _⟩ := checkedValue_valid m value result checked
+  subst same
+  cases result <;> first | rfl | cases checked
+
+#print axioms checkedValue_not_spanHome
+
+/-- A formed managed pointer is a reference, never a home. -/
+theorem formValue_not_spanHome {memory : Memory} {reference : ManagedReference} {result : Value}
+    (formed : formValue memory reference = .ok result) : result.isHome = false := by
+  unfold formValue at formed
+  repeat' first
+    | (cases formed <;> rfl)
+    | split at formed
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at formed
+
+#print axioms formValue_not_spanHome
+
+/-- A formed object reference is an object, never a home. -/
+theorem formObject_not_spanHome {memory : Memory} {reference : ManagedReference} {result : Value}
+    (formed : formObject memory reference = .ok result) : result.isHome = false := by
+  unfold formObject at formed
+  repeat' first
+    | (cases formed <;> rfl)
+    | split at formed
+    | simp only [Bind.bind, Except.bind] at formed
+
+#print axioms formObject_not_spanHome
+
+/-- A reference loaded from an object field is an object, never a home. -/
+theorem loadSlot_not_spanHome {memory : Memory} {field : Reference} {result : Value}
+    (loaded : loadSlot memory field = .ok result) : result.isHome = false := by
+  unfold loadSlot at loaded
+  simp only [Bind.bind, Except.bind] at loaded
+  split at loaded
+  · cases loaded
+  · exact formObject_not_spanHome loaded
+
+#print axioms loadSlot_not_spanHome
+
+/-- A value array loaded from an object field is an array view, never a home. -/
+theorem loadArraySlot_not_spanHome {memory : Memory} {field : Reference}
+    {element : CIL.ArrayElement} {result : Value}
+    (loaded : loadArraySlot memory field element = .ok result) : result.isHome = false := by
+  unfold loadArraySlot arrayOfSlot at loaded
+  repeat' first
+    | (cases loaded <;> rfl)
+    | split at loaded
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at loaded
+
+#print axioms loadArraySlot_not_spanHome
+
+/-- A loaded local is a scalar, reference, view or callable, never a home. -/
+theorem loadLocal_not_spanHome {memory : Memory} {slot : LocalSlot} {result : Value}
+    (loaded : loadLocal memory slot = .ok result) : result.isHome = false := by
+  unfold loadLocal at loaded
+  split at loaded <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at loaded
+  all_goals
+    repeat' first
+      | (cases loaded <;> rfl)
+      | exact formValue_not_spanHome loaded
+      | exact formObject_not_spanHome loaded
+      | split at loaded
+
+#print axioms loadLocal_not_spanHome
+
+/-- The view a home stands for, and every other value passed through, is never a home. -/
+theorem spanView_not_spanHome {frame : Frame} {memory : Memory} {value result : Value}
+    (viewed : spanView frame memory value = .ok result) : result.isHome = false := by
+  cases value with
+  | spanHome slot =>
+    simp only [spanView] at viewed
+    split at viewed
+    · exact loadLocal_not_spanHome viewed
+    · cases viewed
+  | _ =>
+    simp only [spanView, Pure.pure, Except.pure, Except.ok.injEq] at viewed
+    subst viewed
+    rfl
+
+#print axioms spanView_not_spanHome
+
+/-- A loaded argument is a checked value or a loaded local, never a home. -/
+theorem loadArgument_not_spanHome {body : CIL.Method} {index : Nat} {args : List Value}
+    {frame : Frame} {memory : Memory} {result : Value}
+    (loaded : loadArgument body index args frame memory = .ok result) : result.isHome = false := by
+  unfold loadArgument at loaded
+  repeat' first
+    | exact loadLocal_not_spanHome loaded
+    | exact checkedValue_not_spanHome loaded
+    | (cases loaded; done)
+    | split at loaded
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at loaded
+
+#print axioms loadArgument_not_spanHome
+
+/-- Every result of a successful `mapM` has a property each successful application gives. -/
+theorem mapM_ok_forall {α β ε : Type} {apply : α → Except ε β} {property : β → Prop}
+    (each : ∀ input output, apply input = .ok output → property output) :
+    ∀ {inputs : List α} {outputs : List β}, inputs.mapM apply = .ok outputs →
+      ∀ output ∈ outputs, property output
+  | [], outputs, mapped => by
+    cases mapped
+    intro _ member
+    cases member
+  | input :: rest, outputs, mapped => by
+    simp only [List.mapM_cons, Bind.bind, Except.bind, Pure.pure, Except.pure] at mapped
+    cases head : apply input with
+    | error _ => simp [head] at mapped
+    | ok produced =>
+      cases tail : rest.mapM apply with
+      | error _ => simp [head, tail] at mapped
+      | ok others =>
+        simp only [head, tail, Except.ok.injEq] at mapped
+        subst mapped
+        intro output member
+        rcases List.mem_cons.mp member with same | inner
+        · subst same
+          exact each input _ head
+        · exact mapM_ok_forall each tail output inner
+
+#print axioms mapM_ok_forall
+
+/-- Values `checkedValue` accepts one by one contain no home. -/
+theorem checkedValues_not_spanHome {m : Memory} {values results : List Value}
+    (checked : values.mapM (checkedValue m) = .ok results) :
+    ∀ result ∈ results, result.isHome = false :=
+  mapM_ok_forall (fun _ _ accepted => checkedValue_not_spanHome accepted) checked
+
+#print axioms checkedValues_not_spanHome
 
 theorem loadValue_scalar_valid (m : Memory) (r : ManagedReference) (width : Nat)
     {signed : Bool} (value : CIL.Value) (h : loadValue m r width signed = .ok value) :
@@ -719,6 +863,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | exact True.intro
             | exact bitcastValue_numeric (by assumption)
             | exact loadSnapshot_numeric (by assumption)
+            | exact numericValue_snapshotSlice (by assumption)
             | exact loadTransfer_numeric _ _ _ _ (by assumption)
             | exact endianValue_numeric _ _ _ _ _ (by assumption)
             | exact retained.head
@@ -839,18 +984,61 @@ theorem wideArithmeticInstruction_contract (operation : CIL.MemoryOp)
     | split at executed
 #print axioms wideArithmeticInstruction_contract
 
-/-- Object field loads and stores preserve checked effects and stack validity. -/
-theorem objectFieldInstruction_contract (operation : CIL.MemoryOp)
+/-- The length a method table answers is a well-formed native integer. -/
+theorem methodTableLength_numeric {table : CIL.MethodTable} {length : CIL.Value}
+    (counted : methodTableLength table = .ok length) : numericValue length = true := by
+  unfold methodTableLength at counted
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at counted
+  repeat' first
+    | (cases counted <;> rfl)
+    | split at counted
+#print axioms methodTableLength_numeric
+
+set_option maxHeartbeats 800000 in
+/-- Array lengths, element loads and stores, and the two reads of a handler table preserve
+    checked effects and stack validity. -/
+theorem elementInstruction_contract (op : CIL.Instruction)
     (stack values : List Value) (memory result : Memory)
-    (executed : objectFieldInstruction operation stack memory = .ok (result, values)) :
+    (executed : elementInstruction op stack memory = .ok (result, values)) :
     InstructionContract memory result stack values := by
-  unfold objectFieldInstruction at executed
+  unfold elementInstruction at executed
+  split at executed <;> try simp only [arrayLoad, arrayStore, Bind.bind, Except.bind, Pure.pure,
+    Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | solve
+      | cases executed
+        exact InstructionContract.of_effect (.unchanged _) (fun retained =>
+          ValuesValid.cons (methodTableLength_numeric (by assumption)) retained.tail)
+    | cases executed
+    | split at executed
+#print axioms elementInstruction_contract
+
+/-- Class instance field loads preserve checked effects and stack validity. -/
+theorem classFieldLoad_contract (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+    (slot : CIL.ClassSlot) (stack values : List Value) (memory result : Memory)
+    (executed : classFieldLoad owner offset slot stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold classFieldLoad at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve | cases executed; instruction_contract_close
     | cases executed
     | split at executed
-#print axioms objectFieldInstruction_contract
+#print axioms classFieldLoad_contract
+
+/-- Class instance field stores preserve checked effects and stack validity. -/
+theorem classFieldStore_contract (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+    (slot : CIL.ClassSlot) (stack values : List Value) (memory result : Memory)
+    (executed : classFieldStore owner offset slot stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold classFieldStore at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms classFieldStore_contract
 
 /-- A string literal leaves memory unchanged and pushes a formed object reference. -/
 theorem stringLiteralInstruction_contract (text : String)
@@ -906,12 +1094,12 @@ theorem comparisonGuardInstruction_contract (guard : ComparisonGuard) (width : N
 
 set_option maxHeartbeats 800000 in
 /-- The remaining memory operations preserve their checked effects and stack validity. -/
-private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
+theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
     (stack values : List Value) (memory result : Memory)
     (executed : otherMemoryInstruction operation stack memory = .ok (result, values)) :
     InstructionContract memory result stack values := by
   unfold otherMemoryInstruction at executed
-  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  simp only [copyBlockBytes, initBlockBytes, Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve | cases executed; instruction_contract_close
     | cases executed
@@ -969,6 +1157,40 @@ theorem arrayTransferInstruction_contract (element : CIL.ArrayElement) (store : 
     | cases transferred
     | split at transferred
 #print axioms arrayTransferInstruction_contract
+
+set_option maxHeartbeats 800000 in
+/-- Typed element loads and stores, and the typed read of a handler table, preserve checked
+    effects and stack validity. -/
+theorem typedElementInstruction_contract (shape : CIL.ElementShape) (store : Bool)
+    (stack values : List Value) (memory result : Memory)
+    (executed : typedElementInstruction shape store stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold typedElementInstruction at executed
+  split at executed
+  any_goals split at executed
+  any_goals exact arrayTransferInstruction_contract _ _ _ _ _ _ executed
+  all_goals try simp only [arrayLoad, arrayStore, Bind.bind, Except.bind, Pure.pure,
+    Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms typedElementInstruction_contract
+
+/-- An element address writes nothing and returns only a valid reference. -/
+theorem elementAddressInstruction_contract (shape : CIL.ElementShape) (readOnly : Bool)
+    (stack values : List Value) (memory result : Memory)
+    (executed : elementAddressInstruction shape readOnly stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold elementAddressInstruction at executed
+  split at executed
+  all_goals try unfold arrayAddress at executed
+  all_goals try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms elementAddressInstruction_contract
 
 /-- Aligned transfers preserve the existing typed write effect and return only valid scalars. -/
 theorem pointerTransferInstruction_contract (kind : CIL.TransferKind) (alignment : Nat)
@@ -1061,6 +1283,37 @@ theorem vector128StoreAt_eq_add_store128 (offset : CIL.W64) (bits : BitVec 128)
       Except.bind, Pure.pure, Except.pure]
 #print axioms vector128StoreAt_eq_add_store128
 
+/-- A reference that forms is a valid stack value in that memory. -/
+theorem formValue_reference_valid (m : Memory) (r : ManagedReference) (value : Value)
+    (h : formValue m r = .ok value) : (Value.reference r).Valid m := by
+  have valid := formValue_result_valid _ _ _ h
+  rw [formValue_returns_input _ _ _ h] at valid
+  exact valid
+
+/-- A static span leaves memory unchanged and pushes a span whose base is valid. -/
+theorem staticSpanInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)
+    (memory result : Memory)
+    (constructed : staticSpanInstruction operation stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold staticSpanInstruction at constructed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at constructed
+  repeat' first
+    | solve |
+        cases constructed
+        refine InstructionContract.of_effect (.unchanged _) ?_
+        intro retained
+        apply ValuesValid.cons
+        · first
+          | exact True.intro
+          | rfl
+          | exact retained.tail.head
+          | exact retained.head
+          | apply formValue_reference_valid; assumption
+        · first | exact retained | exact retained.tail | exact retained.tail.tail
+    | cases constructed
+    | split at constructed
+#print axioms staticSpanInstruction_contract
+
 /-- Checked memory dispatch preserves the effects and stack validity of its selected family. -/
 theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)
     (m result : Memory) (h : memoryInstruction operation stack m = .ok (result, values)) :
@@ -1072,7 +1325,6 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact referenceAddInstruction_contract _ _ _ _ _ _ h
     · exact pointerTransferInstruction_contract _ _ _ _ _ _ _ h
     · exact vector128UnsafeInstruction_contract _ _ _ _ _ _ h
-    · exact arrayTransferInstruction_contract _ _ _ _ _ _ h
     · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h
     · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h
     · exact singleSpanInstruction_contract _ _ _ _ _ _ h
@@ -1082,47 +1334,167 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact arrayFillInstruction_contract _ _ _ _ _ _ h
     · exact wideArithmeticInstruction_contract _ _ _ _ _ h
     · exact wideArithmeticInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact stringLiteralInstruction_contract _ _ _ _ _ h
+    · exact staticSpanInstruction_contract _ _ _ _ _ h
+    · exact staticSpanInstruction_contract _ _ _ _ _ h
     · exact throwIfNullInstruction_contract _ _ _ _ h
     · exact zeroGuardInstruction_contract _ _ _ _ _ _ _ h
     · exact comparisonGuardInstruction_contract _ _ _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
-set_option maxHeartbeats 800000 in
-theorem instruction_contract (operation : CIL.Op) (stack values : List Value) (m result : Memory)
-    (h : instruction operation stack m = .ok (result, values)) :
+/-- A successful nested struct read preserves memory and returns a valid field value. -/
+theorem loadAggregateField_contract (offset size : Nat) (stack values : List Value)
+    (memory result : Memory)
+    (executed : loadAggregateField offset size stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold loadAggregateField at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms loadAggregateField_contract
+
+/-- A nested struct write preserves checked memory effects and stack validity. -/
+theorem storeAggregateField_contract (offset size : Nat) (stack values : List Value)
+    (memory result : Memory)
+    (executed : storeAggregateField offset size stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold storeAggregateField at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms storeAggregateField_contract
+
+/-- A successful field displacement preserves memory and returns a valid reference. -/
+theorem structFieldAddress_contract (offset : Nat) (stack values : List Value) (m result : Memory)
+    (h : structFieldAddress offset stack m = .ok (result, values)) :
     InstructionContract m result stack values := by
-  unfold instruction at h
+  unfold structFieldAddress at h
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  repeat' first
+    | solve | cases h; instruction_contract_close
+    | cases h
+    | split at h
+#print axioms structFieldAddress_contract
+
+/-- Scalar, aggregate and vector transfers preserve memory authority and the validity of stack values. -/
+theorem transferValues_contract (kind : CIL.TransferKind) (store : Bool) (stack values : List Value)
+    (m result : Memory) (h : transferValues kind store stack m = .ok (result, values)) :
+    InstructionContract m result stack values := by
+  unfold transferValues at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | apply memoryInstruction_contract; assumption
     | solve | cases h; instruction_contract_close
     | cases h
     | split at h
+#print axioms transferValues_contract
+
+/-- Observing the transfer operands preserves the same contract on every successful result. -/
+theorem observedTransfer_contract (kind : CIL.TransferKind) (store : Bool) (stack values : List Value)
+    (m result : Memory) (h : observedTransfer kind store stack m = .ok (result, values)) :
+    InstructionContract m result stack values := by
+  by_cases observed : unspecifiedOperands (if store then 2 else 1) stack = true
+  · simp [observedTransfer, observed] at h
+  · exact transferValues_contract _ _ _ _ _ _ (by simpa [observedTransfer, observed] using h)
+#print axioms observedTransfer_contract
+
+/-- Reading a primitive or vector field preserves memory and the validity of the stack. -/
+theorem loadValueField_contract (offset width : Nat) (signed : Bool) (stack values : List Value)
+    (memory result : Memory)
+    (executed : loadValueField offset width signed stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold loadValueField at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms loadValueField_contract
+
+/-- Writing a primitive or vector field preserves memory authority and the validity of the stack. -/
+theorem storeValueField_contract (offset width : Nat) (stack values : List Value)
+    (memory result : Memory)
+    (executed : storeValueField offset width stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold storeValueField at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms storeValueField_contract
+
+set_option maxHeartbeats 800000 in
+theorem instruction_contract (operation : CIL.Instruction) (stack values : List Value)
+    (m result : Memory)
+    (h : instruction operation stack m = .ok (result, values)) :
+    InstructionContract m result stack values := by
+  unfold instruction at h
+  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  all_goals repeat' first
+    | solve | apply transferValues_contract; assumption
+    | solve | apply memoryInstruction_contract; assumption
+    | solve | apply elementInstruction_contract; assumption
+    | solve | cases h; instruction_contract_close
+    | cases h
+    | split at h
+
+/-- A successful typed copy preserves the checked memory and stack invariants. -/
+theorem copyInitializedBytes_contract (size : Nat) (stack values : List Value)
+    (memory result : Memory)
+    (executed : copyInitializedBytes size stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold copyInitializedBytes at executed
+  split at executed <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  all_goals repeat' first
+    | solve | apply instruction_contract; assumption
+    | solve | apply memoryInstruction_contract; assumption
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms copyInitializedBytes_contract
+
+/-- A successful initialization preserves the checked memory and stack invariants. -/
+theorem initializeBytes_contract (size : Nat) (stack values : List Value)
+    (memory result : Memory)
+    (executed : initializeBytes size stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold initializeBytes at executed
+  split at executed <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  all_goals repeat' first
+    | solve | apply instruction_contract; assumption
+    | solve | apply memoryInstruction_contract; assumption
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms initializeBytes_contract
+
+/-- A successful object transfer preserves the checked memory and stack invariants. -/
+theorem transferObject_contract (shape : ValueShape) (store : Bool) (stack values : List Value)
+    (memory result : Memory)
+    (executed : transferObject shape store stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold transferObject at executed
+  split at executed <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  all_goals repeat' first
+    | solve | apply observedTransfer_contract; assumption
+    | solve | apply memoryInstruction_contract; assumption
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms transferObject_contract
 
 theorem memoryInstruction_effect (operation : CIL.MemoryOp) (stack values : List Value)
     (m result : Memory) (h : memoryInstruction operation stack m = .ok (result, values)) :
     InstructionEffect m result := (memoryInstruction_contract _ _ _ _ _ h).effect
 
-theorem instruction_effect (operation : CIL.Op) (stack values : List Value) (m result : Memory)
+theorem instruction_effect (operation : CIL.Instruction) (stack values : List Value)
+    (m result : Memory)
     (h : instruction operation stack m = .ok (result, values)) : InstructionEffect m result :=
   (instruction_contract _ _ _ _ _ h).effect
-
-theorem checked_write_preserves_wellFormed (m result : Memory) (r : Reference)
-    (bytes : List (BitVec 8)) (alignment : Nat) (reference : ManagedReference) (width : Nat)
-    (hm : m.WellFormed)
-    (h : checkedAt reference width (write m r bytes alignment) = .ok result) :
-    result.WellFormed := by
-  exact write_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok h)
 
 theorem storeValue_preserves_wellFormed (m result : Memory) (reference : ManagedReference)
     (value : CIL.Value) (hm : m.WellFormed)
@@ -1141,7 +1513,7 @@ theorem memoryInstruction_preserves_wellFormed (operation : CIL.MemoryOp)
 #print axioms memoryInstruction_preserves_wellFormed
 
 set_option maxHeartbeats 800000 in
-theorem instruction_preserves_wellFormed (operation : CIL.Op) (stack values : List Value)
+theorem instruction_preserves_wellFormed (operation : CIL.Instruction) (stack values : List Value)
     (m result : Memory) (hm : m.WellFormed)
     (h : instruction operation stack m = .ok (result, values)) : result.WellFormed := by
   exact (instruction_effect _ _ _ _ _ h).wellFormed hm

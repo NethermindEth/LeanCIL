@@ -1,5 +1,6 @@
 import CIL.Embedding.Tactic
 import CIL.Safety.Embedding.Outcomes
+import Tests.Support
 
 /-!
 # Retaining dead numeric declarations during embedding
@@ -24,22 +25,23 @@ def expected : Method := {
   locals := [.unmodeled, .nullRef, .unmodeled]
   localKinds := [.word32, .reference, .word64]
   returnsValue := true
-  code := [.branch 3, .unsupported "dead", .unsupported "dead",
-    .local 1, .pop, .call 1 0, .ret] }
+  code := [.br 3, .unadmitted 0, .unadmitted 0,
+    .ldloc 1, .pop, .call (Tests.callee 0) {}, .ret], links := [(5, .direct 1)] }
 
 /-- A separately specified body moves the live block past extra unreachable instructions. -/
 def actual : Method := {
   locals := [.unmodeled, .nullRef, .unmodeled]
   localKinds := [.word32, .reference, .word64]
   returnsValue := true
-  code := [.branch 4, .const32 9, .pop, .nop, .local 1, .pop, .call 1 0, .ret] }
+  code := [.br 4, .ldc_i4 9, .pop, .nop, .ldloc 1, .pop, .call (Tests.callee 0) {},
+    .ret], links := [(6, .direct 1)] }
 
 /-- The child allocates its own numeric home after the parent's retained dead homes. -/
 def child : Method := {
   locals := [.i64 7]
   localKinds := [.word64]
   returnsValue := true
-  code := [.local 0, .ret] }
+  code := [.ldloc 0, .ret] }
 
 /-- Retained numeric declarations need ordinary method embedding, even when interspersed. -/
 theorem embeds : MethodEmbeds [actual, child] 0 expected := by cil_embed
@@ -71,8 +73,8 @@ def removed : Method := {
   locals := [.nullRef, .unmodeled]
   localKinds := [.reference, .word64]
   returnsValue := true
-  code := [.branch 3, .unsupported "dead", .unsupported "dead",
-    .local 0, .pop, .call 1 0, .ret] }
+  code := [.br 3, .unadmitted 0, .unadmitted 0,
+    .ldloc 0, .pop, .call (Tests.callee 0) {}, .ret], links := [(5, .direct 1)] }
 
 /-- Deleting a dead numeric local changes later allocation identities despite equal scalars. -/
 theorem removed_allocations :
@@ -93,7 +95,7 @@ def thrower : Method := {
   locals := [.unmodeled]
   localKinds := [.word64]
   returnsValue := true
-  code := [.throw "System.InvalidOperationException"] }
+  code := [.throw (some .invalidOperation)] }
 
 /-- The same parent embedding also transports calls to a throwing child. -/
 theorem throwing_embeds : MethodEmbeds [actual, thrower] 0 expected := by cil_embed
@@ -101,13 +103,13 @@ theorem throwing_embeds : MethodEmbeds [actual, thrower] 0 expected := by cil_em
 
 /-- The expected invocation raises from the allocated child frame. -/
 theorem expected_raises :
-    Safety.Raises [expected, thrower] 0 [] empty "System.InvalidOperationException" :=
-  ⟨10, ⟨1, 0, .thrown "System.InvalidOperationException"⟩, rfl, rfl⟩
+    Safety.Raises [expected, thrower] 0 [] empty .invalidOperation :=
+  ⟨10, ⟨1, 0, .thrown .invalidOperation⟩, rfl, rfl⟩
 #print axioms expected_raises
 
 /-- Named exceptions transfer with the retained numeric allocation layout. -/
 theorem actual_raises :
-    Safety.Raises [actual, thrower] 0 [] empty "System.InvalidOperationException" :=
+    Safety.Raises [actual, thrower] 0 [] empty .invalidOperation :=
   throwing_embeds.raises expected_raises
 #print axioms actual_raises
 

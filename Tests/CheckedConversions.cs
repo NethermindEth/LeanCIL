@@ -1,7 +1,13 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:package Mono.Cecil
+#:include ContractVariants.cs
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Numerics;
@@ -14,9 +20,6 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/CheckedConversions");
 Directory.CreateDirectory(root);
 var cases = 0;
-
-verification.Verify(assembly, "Examples", "CheckedConversions::Narrow(ulong)",
-    At("Examples/Proofs/CheckedNarrow.lean"), Path.Combine(root, "Narrow"));
 
 // Every integer checked-conversion encoding, including native destinations.
 var operations = new (OpCode Op, int Width, bool Signed, bool UnsignedInput, bool Native)[]
@@ -115,17 +118,34 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     method.Body.Instructions.Single(i => i.OpCode == OpCodes.Conv_Ovf_U4_Un).OpCode = OpCodes.Conv_U1;
     module.Write(wrongDll);
 }
-var rejected = false;
-try
-{
-    verification.Verify(wrongDll, "Examples", "CheckedConversions::Narrow(ulong)",
-        At("Examples/Proofs/CheckedNarrow.lean"), wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    rejected = true;
-}
-if (!rejected || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect conversion accepted");
+uint Evaluate(string dll) => (uint)Assembly.Load(File.ReadAllBytes(dll)).GetType("Examples.CheckedConversions")!
+    .GetMethod("Narrow")!.Invoke(null, [256UL])!;
+if (Evaluate(assembly) != 256 || Evaluate(wrongDll) != 0)
+    throw new InvalidOperationException("The compiled conversions disagree with the counterexample.");
 
-Console.WriteLine($"Checked conversions passed: {cases} cases; universal contract passed and incorrect conversion rejected.");
+const string contractSelector = "CheckedConversions::Narrow(ulong)";
+verification.VerifyContractVariant(assembly, "Examples", contractSelector, Path.Combine(root, "Narrow"),
+    wrongDll, contractSelector, wrongOutput,
+    """
+    /-- An unsigned value in UInt32 range survives narrowing and preserves caller memory. -/
+    def narrow : MethodContract W64 where
+      args input := [.scalar (.i64 input)]
+      pre input _ := input.toNat < 2^32
+      footprint _ := []
+      post input before after values := after = before ∧
+        values = [.scalar (.i32 (BitVec.ofNat 32 input.toNat))]
+    """, """
+    theorem correctness : narrow.Holds Extracted.program 0 := by
+      intro input memory fits
+      apply MethodContract.Holds.intro (c := narrow) (input := input) memory
+        [.scalar (.i32 (BitVec.ofNat 32 input.toNat))] ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      exact ⟨3, ExampleProof.correctness_framed memory input fits⟩
+    """, """
+    /-- The eight-bit truncation returns zero for the representable UInt32 value 256. -/
+    theorem correctness : narrow.Refuted Extracted.program 0 :=
+      .of_return (input := 256) (initial := Memory.empty) (by dsimp [narrow]; decide)
+        (rfl : invoke Extracted.program 3 0 (narrow.args 256) Memory.empty = .ok _)
+        (by rintro ⟨-, _, rfl, -, wrong⟩; revert wrong; decide)
+    """, example: At("Examples/Proofs/CheckedNarrow.lean"));
+
+Console.WriteLine($"PASS {cases} conversion comparisons, universal narrowing and the truncation refutation");

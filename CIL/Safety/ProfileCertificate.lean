@@ -35,8 +35,8 @@ theorem invocationCertificate_reprofile (program : CIL.Program) (p q : CIL.Featu
     subst actual
     have state : LiveState (CIL.reprofile program q) args frame [] entered :=
       { live with statics := by simpa only [programStaticDescriptors_reprofile] using live.statics }
-    apply certify_invocation (CIL.reprofile program q) method { body with profile := q }
-      args initial frame entered fuel final values
+    refine certify_invocation (CIL.reprofile program q) method { body with profile := q }
+      args initial frame entered fuel final values ?_ ?_ ?_ ?_ ?_
     · simp [hb]
     · exact checked
     · simpa only [enterFrame_profile] using setup
@@ -52,7 +52,8 @@ theorem invocationCertificate_uniform_reprofile (program : CIL.Program) (p q : C
     (final : Memory) (values : List Value)
     (certificate : InvocationCertificate program method args initial fuel final values) :
     InvocationCertificate (CIL.reprofile program q) method args initial fuel final values := by
-  apply invocationCertificate_reprofile program p q agreement method args initial fuel final values
+  refine invocationCertificate_reprofile program p q agreement method args initial fuel final
+    values ?_
   simpa only [CIL.reprofile_eq_of_uniform program p uniform] using certificate
 
 #print axioms invocationCertificate_uniform_reprofile

@@ -7,7 +7,7 @@ extractor admits, and how to review and record a change to either. Read it when 
 baselines fails.
 
 The `dispatch` suite checks a pinned source corpus against Roslyn 4.14.0, 5.0.0 and 5.9.0,
-using the same .NET 10.0.0 reference pack and optimized compilation. Each compiler runs at its
+using the same .NET 11.0.0 reference pack and optimized compilation. Each compiler runs at its
 default language version and at `latest`; compilers supporting C# 14 also run explicitly at `14`.
 The default column omits `/langversion`, so it tests the compiler default, not an SDK-selected
 language version. Compiler binaries
@@ -82,7 +82,8 @@ The `blockers` suite also runs `leancil blockers` under the scalar profile over 
 the extractor's own `Nethermind.LeanCIL.dll`, a realistic program that changes with every PR.
 [SelfAdmission.cs](../Tests/SelfAdmission.cs) generates the manifest from the built assembly's
 metadata and compares the report with the checked-in
-[baseline](../Tests/SelfAdmissionBaseline.txt), the list of admitted methods. It needs no Lean.
+[baseline](../Tests/SelfAdmissionBaseline.txt), the list of admitted methods. It needs no Lean; its
+opt-in Lean check of every admitted method is described in [validation](VALIDATION.md).
 
 The gate checks admission and ignores blocker totals: it requires the admitted set to match the
 baseline exactly. A method the baseline admits that is no longer admitted, an admission the
@@ -96,3 +97,17 @@ method it was generated for, one line per admitted method, since the compiler nu
 positions that unrelated edits shift. Gaining or losing one still changes its source method's
 count and fails the gate. Any change to a source compiled into the extractor, or to the baseline,
 selects the suite.
+
+The suite also requires the methods the report extracts for admitted entries, its
+`decodedMethods`, to be exactly the admitted methods: each admitted method is extracted, and
+every method extracted for an admitted entry is itself admitted.
+
+[ExampleAdmission.cs](../Tests/ExampleAdmission.cs) runs `leancil blockers` over every method
+`leancil list` prints for the examples assembly, under the `scalar`, `x64-sse42`, `x64-v3`,
+`x64-v4` and `arm64-advsimd` profiles at once, and compares the methods each extracts for its
+admitted entries, as `<profile> <name>` lines named as the baseline names methods, with the
+checked-in [baseline](../Tests/ExampleAdmissionBaseline.txt). A closed generic instantiation an
+admitted entry calls is listed with it. A method that leaves the baseline fails the scan; a method
+that joins it fails until `dotnet run --file Tests/ExampleAdmission.cs -- --update` records it,
+so the baseline only grows. The runs only read the built extractor, and the check fails if its
+hash changes while they run.

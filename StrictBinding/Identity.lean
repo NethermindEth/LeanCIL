@@ -1,0 +1,141 @@
+import StrictBinding.Tables
+import CIL.Crypto.Sha1
+import CIL.Extraction.MetadataBytes
+
+/-!
+# Heaps and assembly identity
+
+Reads entries of the `#Strings` and `#Blob` heaps and spells the identity of the assembly an
+image defines from its Assembly row, in the form the extractor records:
+`Name, Version=a.b.c.d, Culture=neutral, PublicKeyToken=0123456789abcdef`. The token is the
+strong-name token computed from the full key of a definition, or `null` for an unsigned assembly.
+An AssemblyRef may instead store an eight-byte token.
+-/
+
+namespace StrictBinding
+
+/-- The bytes of the NUL-terminated string at `key` in the `#Strings` heap. -/
+def MetadataLayout.stringAt (layout : MetadataLayout) (view : ImageView) (key : Nat) :
+    Except AuditError (List Nat) := do
+  let heap := layout.pe.strings
+  if key >= heap.size then throw (.tables (.outsideHeap key))
+  readName view (heap.start + key) (.tables (.outsideHeap key)) (heap.size - key)
+
+/-- The length prefix of a blob (II.24.2.4): one byte below `0x80`, two bytes below `0xC0` and
+    four bytes below `0xE0`. The result is the bytes of the prefix and the length it states. -/
+def blobPrefix (view : ImageView) (offset : Nat) : Except AuditError (Nat × Nat) := do
+  let first ← view.u offset 1
+  if first < 0x80 then pure (1, first)
+  else if first < 0xC0 then pure (2, (first - 0x80) * 2 ^ 8 + (← view.slice (offset + 1) 1))
+  else if first < 0xE0 then pure (4, (first - 0xC0) * 2 ^ 24 + (← view.slice (offset + 1) 3))
+  else throw (.tables (.outsideHeap offset))
+
+/-- The bytes of the blob at `key` in the `#Blob` heap, which must lie inside the heap. -/
+def MetadataLayout.blobAt (layout : MetadataLayout) (view : ImageView) (key : Nat) :
+    Except AuditError (List Nat) := do
+  let heap := layout.pe.blobs
+  if key >= heap.size then throw (.tables (.outsideHeap key))
+  let (prefixBytes, length) ← blobPrefix view (heap.start + key)
+  if key + prefixBytes + length > heap.size then throw (.tables (.outsideHeap key))
+  view.bytes (heap.start + key + prefixBytes) length
+
+/-- The code points of well-formed UTF-8 bytes: shortest forms only, no surrogates. -/
+def utf8CodePoints : Nat → List Nat → Option (List Nat)
+  | 0, bytes => if bytes.isEmpty then some [] else none
+  | _ + 1, [] => some []
+  | fuel + 1, first :: rest =>
+    let continuation (byte : Nat) : Bool := byte / 64 == 2
+    let more (point : Nat) (remaining : List Nat) : Option (List Nat) :=
+      (utf8CodePoints fuel remaining).map (point :: ·)
+    if first < 0x80 then more first rest
+    else if first / 32 == 6 then
+      match rest with
+      | second :: remaining =>
+        let point := first % 32 * 64 + second % 64
+        if continuation second && 0x80 <= point then more point remaining else none
+      | [] => none
+    else if first / 16 == 14 then
+      match rest with
+      | second :: third :: remaining =>
+        let point := (first % 16 * 64 + second % 64) * 64 + third % 64
+        if continuation second && continuation third && 0x800 <= point &&
+            (point < 0xD800 || 0xDFFF < point) then more point remaining
+        else none
+      | _ => none
+    else if first / 8 == 30 then
+      match rest with
+      | second :: third :: fourth :: remaining =>
+        let point := ((first % 8 * 64 + second % 64) * 64 + third % 64) * 64 + fourth % 64
+        if continuation second && continuation third && continuation fourth &&
+            0x10000 <= point && point < 0x110000 then more point remaining
+        else none
+      | _ => none
+    else none
+
+/-- The code points of a string heap entry. -/
+def MetadataLayout.stringText (layout : MetadataLayout) (view : ImageView) (key : Nat) :
+    Except AuditError (List Nat) := do
+  let bytes ← layout.stringAt view key
+  let some points := utf8CodePoints bytes.length bytes | throw (.tables .invalidUtf8)
+  pure points
+
+/-- The code points of a text, which are ASCII for the identities audited here. -/
+def asciiOf (text : String) : List Nat := text.toList.map Char.toNat
+
+/-- `count` lowercase hexadecimal digits of a number, as ASCII. -/
+def hexDigits (count value : Nat) : List Nat :=
+  (List.range count).map fun place =>
+    let digit := value / 16 ^ (count - 1 - place) % 16
+    if digit < 10 then 48 + digit else 87 + digit
+
+/-- A definition has its full public key in Assembly.PublicKey, or no publisher key. -/
+def publisherToken (key : List Nat) : Option Nat :=
+  if key.isEmpty then none else some (CIL.Crypto.Sha1.keyToken key)
+
+/-- AssemblyRef.PublicKeyOrToken contains a full key, an eight-byte token, or no key. -/
+def assemblyKeyToken (flags : Nat) (key : List Nat) : Except AuditError (Option Nat) := do
+  if key.isEmpty then return none
+  if flags % 2 == 1 then return some (CIL.Crypto.Sha1.keyToken key)
+  let width := key.length
+  if width != 8 then throw (.tables (.invalidPublicKeyToken width))
+  pure (some (CIL.Crypto.bytesValue key))
+
+/-- The key column of an Assembly row holds a full key. AssemblyRef flags select its encoding. -/
+def rowKeyToken (row flags : Nat) (key : List Nat) : Except AuditError (Option Nat) :=
+  if row == tokenOf 0x20 1 then .ok (publisherToken key) else assemblyKeyToken flags key
+
+/-- The identity columns shared by Assembly and AssemblyRef, starting at the major version. -/
+def assemblyColumnsAt (view : ImageView) (layout : MetadataLayout) (row first : Nat) :
+    Except AuditError CIL.AssemblyName := do
+  let cell := fun column => layout.cell view row (first + column)
+  let major ← cell 0
+  let minor ← cell 1
+  let build ← cell 2
+  let revision ← cell 3
+  let flags ← cell 4
+  let key ← layout.blobAt view (← cell 5)
+  let name ← layout.stringAt view (← cell 6)
+  let culture ← layout.stringAt view (← cell 7)
+  let token ← rowKeyToken row flags key
+  let some name := CIL.MetadataName.ofBytes? name | throw (.tables .invalidUtf8)
+  let some culture := CIL.MetadataName.ofBytes? culture | throw (.tables .invalidUtf8)
+  return ⟨name, ⟨major, minor, build, revision⟩, culture, token⟩
+
+/-- Read the independent identity columns and their Unicode display name from one physical row. -/
+def namedAssemblyAt (view : ImageView) (layout : MetadataLayout) (row first : Nat) :
+    Except AuditError (CIL.AssemblyName × List Nat) := do
+  let columns ← assemblyColumnsAt view layout row first
+  let bytes := columns.spelling
+  let some points := utf8CodePoints bytes.length bytes | throw (.tables .invalidUtf8)
+  return (columns, points)
+
+/-- The Unicode display name of a physical Assembly or AssemblyRef with valid UTF-8 fields. -/
+def assemblyIdentityAt (view : ImageView) (layout : MetadataLayout) (row first : Nat) :
+    Except AuditError (List Nat) :=
+  Prod.snd <$> namedAssemblyAt view layout row first
+
+/-- The code points of the identity the Assembly row spells. -/
+def assemblyIdentity (view : ImageView) (layout : MetadataLayout) : Except AuditError (List Nat) :=
+  assemblyIdentityAt view layout (tokenOf 0x20 1) 1
+
+end StrictBinding

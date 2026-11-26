@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // A library proves exact internal contracts against its actual extraction and exports weaker public
 // contracts derived only by Holds.weaken; separately compiled callers verify from the sidecar alone.
@@ -16,7 +21,7 @@ string callerPackage = Path.Combine(root, "CallerProofs");
 foreach (string directory in new[] { libRoot, appRoot, package, callerPackage }) Directory.CreateDirectory(directory);
 string[] cli = ["dotnet", ExtractorPath];
 string Project(string assembly, string references) =>
-    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>" +
+    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net11.0</TargetFramework><AssemblyName>" +
     assembly + "</AssemblyName><Optimize>true</Optimize></PropertyGroup>" + references + "</Project>";
 File.WriteAllText(Path.Combine(libRoot, "Lib.csproj"), Project("DerivedFixture.Lib", ""));
 File.WriteAllText(Path.Combine(appRoot, "App.csproj"), Project("DerivedFixture.App",
@@ -138,8 +143,8 @@ Console.WriteLine("PASS exact internal contracts derive the published MethodCont
 // stands for all four kinds; each proof module's Rejected section refutes every kind on the actual extraction.
 string certified = Sha(sidecar);
 string publicText = File.ReadAllText(interfaceSource);
-string renamed = publicText.Replace("else some \"System.ArgumentOutOfRangeException\"",
-    "else some \"System.ArgumentException\"", StringComparison.Ordinal);
+string renamed = publicText.Replace("else some .argumentOutOfRange",
+    "else some .argument", StringComparison.Ordinal);
 if (renamed == publicText)
     throw new InvalidOperationException("Precondition: the public contract must name its exception.");
 File.WriteAllText(interfaceSource, renamed);

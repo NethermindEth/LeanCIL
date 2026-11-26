@@ -5,15 +5,16 @@ namespace Nethermind.LeanCIL;
 
 internal static class Reachability
 {
-    internal static HashSet<Instruction> Analyze(MethodDefinition method, FeatureProfile? selectedProfile = null)
-        => Certify(method, selectedProfile).Keys.ToHashSet();
+    internal static HashSet<Instruction> Analyze(MethodDefinition method, FeatureProfile? selectedProfile = null,
+        IReadOnlySet<Instruction>? boundConstructors = null)
+        => Certify(method, selectedProfile, boundConstructors).Keys.ToHashSet();
 
-    internal static Dictionary<Instruction, FeatureConstants> Certify(MethodDefinition method, FeatureProfile? selectedProfile = null)
+    internal static Dictionary<Instruction, FeatureConstants> Certify(MethodDefinition method, FeatureProfile? selectedProfile = null,
+        IReadOnlySet<Instruction>? boundConstructors = null)
     {
         FeatureProfile profile = selectedProfile ?? FeatureProfile.Scalar;
         profile.Validate();
-        MemoryPrefixes.Validate(method);
-        TailCalls.ValidateStructure(method);
+        InstructionPrefixes.Validate(method);
         var instructions = method.Body.Instructions;
         var boundaries = instructions.ToHashSet();
         foreach (Instruction instruction in instructions)
@@ -30,19 +31,31 @@ internal static class Reachability
         // Never use them as constant facts, even before their address escapes.
         HashSet<int> addressed = instructions.Where(i => i.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
             .Select(FeatureConstants.Local).ToHashSet();
+        // A handler or the target of a leave can follow any instruction of its try, so no local keeps a fact.
+        if (method.Body.HasExceptionHandlers) addressed.UnionWith(Enumerable.Range(0, method.Body.Variables.Count));
         Dictionary<Instruction, FeatureConstants> incoming = new()
         {
             [instructions[0]] = new(method.Body.Variables.Count)
         };
-        // Revisit successors when a backedge or join weakens a constant fact.
-        // Facts only move from a constant to unknown, so this reaches a fixed point.
-        var typeTests = TypeTests.Analyze(method);
-        var throws = Throws.Analyze(method);
-        var spans = Spans.Analyze(method, profile);
-        InstructionIndex? positions = null;
         Queue<Instruction> pending = new();
         HashSet<Instruction> queued = [instructions[0]];
         pending.Enqueue(instructions[0]);
+        foreach (var handler in method.Body.ExceptionHandlers)
+        {
+            incoming[handler.HandlerStart] = FeatureConstants.HandlerEntry(method.Body.Variables.Count,
+                handler.HandlerType == ExceptionHandlerType.Catch);
+            if (queued.Add(handler.HandlerStart)) pending.Enqueue(handler.HandlerStart);
+        }
+        // Revisit successors when a backedge or join weakens a constant fact.
+        // Facts only move from a constant to unknown, so this reaches a fixed point.
+        var typeTests = TypeTests.Analyze(method);
+        var throws = Throws.Analyze(method, boundConstructors);
+        foreach (var handler in method.Body.ExceptionHandlers)
+            if (typeTests.Interior.Contains(handler.HandlerStart) || throws.Interior.Contains(handler.HandlerStart) ||
+                TailCalls.IsInterior(handler.HandlerStart))
+                throw new InvalidDataException(
+                    $"Exception handler starts inside a folded sequence: {handler.HandlerStart}");
+        InstructionIndex? positions = null;
         while (pending.TryDequeue(out Instruction? i))
         {
             queued.Remove(i);
@@ -69,7 +82,7 @@ internal static class Reachability
                 if (queued.Add(target)) pending.Enqueue(target);
             }
 
-            // Folded operands push nothing, so a fold must be entered at its start.
+            // A jump must not bypass the operands used to establish a folded result.
             void ValidateJump(Instruction target)
             {
                 if (TailCalls.IsInterior(target))
@@ -78,8 +91,6 @@ internal static class Reachability
                     throw new InvalidDataException($"Branch into a folded type comparison: {i}");
                 if (throws.Interior.Contains(target))
                     throw new InvalidDataException($"Branch into a folded throw: {i}");
-                if (spans.Interior.Contains(target))
-                    throw new InvalidDataException($"Branch into a folded span receiver: {i}");
             }
 
             if (i.Operand is Instruction target)

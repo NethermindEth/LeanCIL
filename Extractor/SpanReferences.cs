@@ -17,7 +17,7 @@ internal static class SpanReferences
     static bool ReadOnly(ParameterDefinition parameter) =>
         parameter.IsIn && !parameter.IsOut && parameter.CustomAttributes.Count(attribute =>
             attribute.AttributeType.FullName is IsReadOnly or RequiresLocation &&
-            RuntimeModels.ExactScope(attribute.AttributeType.Scope, "System.Runtime")) == 1;
+            RuntimeModels.ExactScope(attribute.AttributeType, PlatformAssemblies.SystemRuntime)) == 1;
 
     internal static void ValidateParameter(MethodDefinition method, ParameterDefinition parameter,
         ModuleDefinition module, string architecture)
@@ -43,9 +43,8 @@ internal static class SpanReferences
         var type = (TypeReference)copy.Operand;
         var source = copy.Previous switch
         {
-            { OpCode.Code: Code.Ldarg or Code.Ldarg_S or Code.Ldarg_0 or Code.Ldarg_1 or Code.Ldarg_2 or
-                Code.Ldarg_3 } load =>
-                MethodArguments.Type(method, ArgumentIndex(method, load)),
+            { } load when MethodArguments.LoadIndex(method, load) is int argument =>
+                MethodArguments.Type(method, argument),
             { OpCode.Code: Code.Ldarga or Code.Ldarga_S, Operand: ParameterDefinition parameter } =>
                 new ByReferenceType(parameter.ParameterType),
             { OpCode.Code: Code.Ldloca or Code.Ldloca_S, Operand: VariableDefinition local } =>
@@ -53,15 +52,25 @@ internal static class SpanReferences
             _ => null
         };
         if (source is not ByReferenceType { ElementType: var element } || !Spans.Is(element) ||
-            MethodSpecialization.SignatureType(element) != MethodSpecialization.SignatureType(type) ||
+            StructuralSignatures.Current.Type(element) != StructuralSignatures.Current.Type(type) ||
             instructions.IsTarget(copy))
             throw new InvalidDataException("Unsupported span copy source: " + copy +
                 "\n  The span must be loaded directly from its own argument, parameter or local address.");
     }
 
-    static int ArgumentIndex(MethodDefinition method, Instruction load) => load.OpCode.Code switch
+    /// <summary>
+    /// Requires a span reset to follow the address of its own local or parameter directly, so its home names the
+    /// slot it empties.
+    /// </summary>
+    internal static void ValidateReset(Instruction reset, InstructionIndex instructions)
     {
-        Code.Ldarg_0 => 0, Code.Ldarg_1 => 1, Code.Ldarg_2 => 2, Code.Ldarg_3 => 3,
-        _ => MethodArguments.Index(method, (ParameterDefinition)load.Operand)
-    };
+        var type = (TypeReference)reset.Operand;
+        if (Spans.AddressedType(reset.Previous) is not { } addressed ||
+            StructuralSignatures.Current.Type(addressed) != StructuralSignatures.Current.Type(type) ||
+            instructions.IsTarget(reset))
+            throw new InvalidDataException($"""
+                Unsupported span reset: {reset}
+                  The span must be reset directly through its own local or parameter address.
+                """);
+    }
 }

@@ -39,7 +39,7 @@ bind_method describe describeBody :=
 /-- With 16 bytes of heap budget, `Describe(id, radius)` returns `id + radius`, and every
     allocation, byte and authority the caller held is unchanged. -/
 theorem correctness (memory : Memory) (formed : memory.WellFormed)
-    (budget : circleSize ≤ memory.heapBudget) (id radius : W64) :
+    (budget : circleSize ≤ memory.heapBudget.getD circleSize) (id radius : W64) :
     ∃ fuel final, invoke Extracted.program fuel describe
         [.scalar (.i64 id), .scalar (.i64 radius)] memory =
         .ok (final, [.scalar (.i64 (id + radius))]) ∧

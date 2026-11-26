@@ -53,6 +53,146 @@ theorem programStep_ownedAbove {program : CIL.Program} {method pc : Nat}
   obtain ⟨body, op, _, _, h⟩ := h
   exact step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound h
 
+
+/-- Leaving a frame that owns only allocations at or above `watermark` keeps every allocation
+    below it. -/
+theorem AllocationsBelow.leaveFrame {frame : Frame} {memory : Memory} {watermark : Nat}
+    (owned : frame.OwnedAbove watermark) :
+    AllocationsBelow memory (CIL.Safety.leaveFrame frame memory) watermark :=
+  ⟨by rw [leaveFrame_nextIdentity]; exact Nat.le_refl _,
+    fun id old => leaveFrame_preserves_older_allocations _ _ _ owned id old⟩
+
+/-- A run whose frame owns only allocations at or above `watermark`, through caught faults and
+    calls, keeps every allocation below it in the memory it ends in or a fault leaves. -/
+theorem OutcomeTrace.callerAllocations {program : CIL.Program} {fuel method pc : Nat}
+    {args : List Value} {frame : Frame} {stack : List Value} {memory : Memory}
+    {outcome : Except FaultState (Memory × List Value)}
+    (trace : OutcomeTrace program fuel method pc args frame stack memory outcome)
+    (watermark : Nat) (bound : watermark ≤ memory.nextIdentity)
+    (owned : frame.OwnedAbove watermark) :
+    OutcomeHolds (fun after => AllocationsBelow memory after watermark) outcome := by
+  induction trace with
+  | exhausted | missing =>
+    exact ⟨(AllocationExtension.refl _).below watermark bound, .leaveFrame owned⟩
+  | faulted _ _ _ recovered =>
+    have here := (AllocationExtension.refl _).below watermark bound
+    rcases recover_error_state recovered with rfl | ⟨same, unwound⟩
+    · exact ⟨here, .leaveFrame owned⟩
+    · exact ⟨same ▸ here, unwound ▸ .leaveFrame owned⟩
+  | caught _ _ _ recovered _ ih =>
+    have kept := recover_ok_frame recovered
+    exact ih bound (by simpa [Frame.OwnedAbove, kept.2.2.1] using owned)
+  | next _ _ stepped _ ih =>
+    have first := step_extends_allocations _ _ _ _ _ _ _ _ stepped
+    have later := ih (Nat.le_trans bound first.next)
+      (step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound stepped)
+    exact OutcomeHolds.mono (fun _ below => (first.below watermark bound).trans below) later
+  | raised _ _ stepped recovered =>
+    have first := (step_extends_allocations _ _ _ _ _ _ _ _ stepped).below watermark bound
+    have raisedOwned := step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound stepped
+    rcases recover_error_state recovered with rfl | ⟨same, unwound⟩
+    · exact ⟨first, first.trans (.leaveFrame raisedOwned)⟩
+    · exact ⟨same ▸ first, unwound ▸ first.trans (.leaveFrame raisedOwned)⟩
+  | raiseCaught _ _ stepped recovered _ ih =>
+    have first := step_extends_allocations _ _ _ _ _ _ _ _ stepped
+    have raisedOwned := step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound stepped
+    have kept := recover_ok_frame recovered
+    exact OutcomeHolds.mono (fun _ below => (first.below watermark bound).trans below)
+      (ih (Nat.le_trans bound first.next)
+        (by simpa [FrameAction.OwnedAbove, Frame.OwnedAbove, kept.2.2.1] using raisedOwned))
+  | callMissing _ _ stepped | callUnentered _ _ stepped | tailMissing _ _ stepped
+  | tailMismatched _ _ stepped =>
+    have first := (step_extends_allocations _ _ _ _ _ _ _ _ stepped).below watermark bound
+    exact ⟨first, first.trans (.leaveFrame owned)⟩
+  | constructMissing _ _ stepped | constructUnentered _ _ stepped =>
+    have first := (step_extends_allocations _ _ _ _ _ _ _ _ stepped).below watermark bound
+    have nextOwned := step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound stepped
+    exact ⟨first, first.trans (.leaveFrame nextOwned)⟩
+  | tailUnchecked _ _ stepped | tailUnentered _ _ stepped | returnUnchecked _ _ stepped =>
+    have retired := ((step_extends_allocations _ _ _ _ _ _ _ _ stepped).below watermark
+      bound).trans (.leaveFrame owned)
+    exact ⟨retired, retired⟩
+  | returned _ _ stepped =>
+    exact ((step_extends_allocations _ _ _ _ _ _ _ _ stepped).below watermark bound).trans
+      (.leaveFrame owned)
+  | tailed _ _ stepped _ _ _ enter _ ih =>
+    have retired := ((step_extends_allocations _ _ _ _ _ _ _ _ stepped).below watermark
+      bound).trans (.leaveFrame owned)
+    have fresh := enterFrame_fresh _ _ _ _ _ enter
+    have retiredBound := Nat.le_trans bound retired.next
+    exact OutcomeHolds.mono
+      (fun _ below => (retired.trans (fresh.1.below watermark retiredBound)).trans below)
+      (ih (Nat.le_trans retiredBound fresh.1.next)
+        (fun id member => Nat.le_trans retiredBound (fresh.2 id member).1))
+  | called _ _ stepped _ enter _ _ childIH ih
+  | constructed _ _ stepped _ enter _ _ _ childIH ih =>
+    have first := step_extends_allocations _ _ _ _ _ _ _ _ stepped
+    have fresh := enterFrame_fresh _ _ _ _ _ enter
+    have setup := first.trans fresh.1
+    have child := childIH (Nat.le_trans bound setup.next)
+      (fun id member => Nat.le_trans (Nat.le_trans bound first.next) (fresh.2 id member).1)
+    have prior := (setup.below watermark bound).trans child
+    exact OutcomeHolds.mono (fun _ below => prior.trans below)
+      (ih (Nat.le_trans bound prior.next)
+        (by first | exact owned | exact step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound stepped))
+  | constructValued _ _ stepped _ enter _ _ childIH
+  | constructUnloaded _ _ stepped _ enter _ _ childIH =>
+    have first := step_extends_allocations _ _ _ _ _ _ _ _ stepped
+    have fresh := enterFrame_fresh _ _ _ _ _ enter
+    have setup := first.trans fresh.1
+    have child := childIH (Nat.le_trans bound setup.next)
+      (fun id member => Nat.le_trans (Nat.le_trans bound first.next) (fresh.2 id member).1)
+    have prior := (setup.below watermark bound).trans child
+    exact ⟨prior, prior.trans
+      (.leaveFrame (step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound stepped))⟩
+  | callFaulted _ _ stepped _ enter _ recovered childIH =>
+    have first := step_extends_allocations _ _ _ _ _ _ _ _ stepped
+    have fresh := enterFrame_fresh _ _ _ _ _ enter
+    have setup := first.trans fresh.1
+    have child := childIH (Nat.le_trans bound setup.next)
+      (fun id member => Nat.le_trans (Nat.le_trans bound first.next) (fresh.2 id member).1)
+    have unwound := ((setup.below watermark bound).trans child.2).trans
+      (.leaveFrame owned)
+    rcases recover_error_state recovered with rfl | ⟨same, after⟩
+    · exact ⟨(setup.below watermark bound).trans child.1, unwound⟩
+    · exact ⟨same ▸ (setup.below watermark bound).trans child.2, after ▸ unwound⟩
+  | constructFaulted _ _ stepped _ enter _ recovered childIH =>
+    have first := step_extends_allocations _ _ _ _ _ _ _ _ stepped
+    have fresh := enterFrame_fresh _ _ _ _ _ enter
+    have setup := first.trans fresh.1
+    have child := childIH (Nat.le_trans bound setup.next)
+      (fun id member => Nat.le_trans (Nat.le_trans bound first.next) (fresh.2 id member).1)
+    have unwound := ((setup.below watermark bound).trans child.2).trans
+      (.leaveFrame (step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound stepped))
+    rcases recover_error_state recovered with rfl | ⟨same, after⟩
+    · exact ⟨(setup.below watermark bound).trans child.1, unwound⟩
+    · exact ⟨same ▸ (setup.below watermark bound).trans child.2, after ▸ unwound⟩
+  | callCaught _ _ stepped _ enter _ recovered _ childIH ih =>
+    have first := step_extends_allocations _ _ _ _ _ _ _ _ stepped
+    have fresh := enterFrame_fresh _ _ _ _ _ enter
+    have setup := first.trans fresh.1
+    have child := childIH (Nat.le_trans bound setup.next)
+      (fun id member => Nat.le_trans (Nat.le_trans bound first.next) (fresh.2 id member).1)
+    have prior := (setup.below watermark bound).trans child.2
+    have kept := recover_ok_frame recovered
+    exact OutcomeHolds.mono (fun _ below => prior.trans below)
+      (ih (Nat.le_trans bound prior.next)
+        (by simpa [FrameAction.OwnedAbove, Frame.OwnedAbove, kept.2.2.1] using owned))
+  | constructCaught _ _ stepped _ enter _ recovered _ childIH ih =>
+    have first := step_extends_allocations _ _ _ _ _ _ _ _ stepped
+    have fresh := enterFrame_fresh _ _ _ _ _ enter
+    have setup := first.trans fresh.1
+    have child := childIH (Nat.le_trans bound setup.next)
+      (fun id member => Nat.le_trans (Nat.le_trans bound first.next) (fresh.2 id member).1)
+    have prior := (setup.below watermark bound).trans child.2
+    have kept := recover_ok_frame recovered
+    exact OutcomeHolds.mono (fun _ below => prior.trans below)
+      (ih (Nat.le_trans bound prior.next)
+        (by
+          simpa [FrameAction.OwnedAbove, Frame.OwnedAbove, kept.2.2.1] using
+            (step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound stepped)))
+#print axioms OutcomeTrace.callerAllocations
+
 /-- A successful run whose frame owns only allocations at or above `watermark` leaves every
     allocation below it unchanged. -/
 theorem run_preserves_caller_allocations (program : CIL.Program) (fuel method pc : Nat)
@@ -61,44 +201,23 @@ theorem run_preserves_caller_allocations (program : CIL.Program) (fuel method pc
     (owned : frame.OwnedAbove watermark)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     AllocationsBelow m final watermark := by
-  have trace := run_success_trace program fuel method pc args frame stack m final values h
-  clear h
-  induction trace with
-  | next step _ ih =>
-    have first := programStep_extends_allocations step
-    exact (first.below watermark bound).trans
-      (ih (Nat.le_trans bound first.next) (programStep_ownedAbove step bound owned))
-  | returned step _ =>
-    have first := (programStep_extends_allocations step).below watermark bound
-    exact first.trans ⟨by rw [leaveFrame_nextIdentity]; exact Nat.le_refl _,
-      fun id old => leaveFrame_preserves_older_allocations _ _ _ owned id old⟩
-  | tailCall step _ _ _ _ enter _ _ ih =>
-    have first := (programStep_extends_allocations step).below watermark bound
-    have retired := first.trans
-      (show AllocationsBelow _ _ watermark from
-        ⟨by rw [leaveFrame_nextIdentity]; exact Nat.le_refl _,
-          fun id old => leaveFrame_preserves_older_allocations _ _ _ owned id old⟩)
-    have fresh := enterFrame_fresh _ _ _ _ _ enter
-    have retiredBound := Nat.le_trans bound retired.next
-    exact (retired.trans (fresh.1.below watermark retiredBound)).trans
-      (ih (Nat.le_trans retiredBound fresh.1.next)
-        (fun id member => Nat.le_trans retiredBound (fresh.2 id member).1))
-  | call step _ enter _ _ _ childIH ih =>
-    have first := programStep_extends_allocations step
-    have fresh := enterFrame_fresh _ _ _ _ _ enter
-    have setup := first.trans fresh.1
-    have child := childIH (Nat.le_trans bound setup.next)
-      (fun id member => Nat.le_trans (Nat.le_trans bound first.next) (fresh.2 id member).1)
-    have prior := (setup.below watermark bound).trans child
-    exact prior.trans (ih (Nat.le_trans bound prior.next) owned)
-  | construct step _ enter _ _ _ _ childIH ih =>
-    have first := programStep_extends_allocations step
-    have fresh := enterFrame_fresh _ _ _ _ _ enter
-    have setup := first.trans fresh.1
-    have child := childIH (Nat.le_trans bound setup.next)
-      (fun id member => Nat.le_trans (Nat.le_trans bound first.next) (fresh.2 id member).1)
-    have prior := (setup.below watermark bound).trans child
-    exact prior.trans (ih (Nat.le_trans bound prior.next) (programStep_ownedAbove step bound owned))
+  exact (run_ok_trace h).callerAllocations watermark bound owned
+
+/-- A run entered from `memory` keeps every allocation `memory` had, in the memory it ends in and
+    in both memories a fault leaves. -/
+theorem OutcomeTrace.enteredExtends {program : CIL.Program} {fuel method : Nat}
+    {body : CIL.Method} {args : List Value} {frame : Frame} {memory entered : Memory}
+    {outcome : Except FaultState (Memory × List Value)}
+    (trace : OutcomeTrace program fuel method 0 args frame [] entered outcome)
+    (setup : enterFrame body args memory = .ok (frame, entered)) :
+    OutcomeHolds (AllocationExtension memory) outcome := by
+  have fresh := enterFrame_fresh _ _ _ _ _ setup
+  exact (trace.callerAllocations memory.nextIdentity fresh.1.next
+    (fun id member => (fresh.2 id member).1)).mono fun _ preserved =>
+      ⟨Nat.le_trans fresh.1.next preserved.next,
+        fun id old => (preserved.lookup id old).trans (fresh.1.lookup id old)⟩
+
+#print axioms OutcomeTrace.enteredExtends
 
 /-- A child may mutate caller bytes, but cannot expire or replace caller storage. -/
 theorem entered_run_preserves_caller_allocations (program : CIL.Program) (fuel method : Nat)
@@ -106,11 +225,7 @@ theorem entered_run_preserves_caller_allocations (program : CIL.Program) (fuel m
     (setup : enterFrame body args m = .ok (frame, entered))
     (finish : run program fuel method 0 args frame [] entered = .ok (final, values)) :
     AllocationExtension m final := by
-  have fresh := enterFrame_fresh _ _ _ _ _ setup
-  have preserved := run_preserves_caller_allocations _ _ _ _ _ _ _ _ _ _ m.nextIdentity
-    fresh.1.next (fun id member => (fresh.2 id member).1) finish
-  exact ⟨Nat.le_trans fresh.1.next preserved.next,
-    fun id old => (preserved.lookup id old).trans (fresh.1.lookup id old)⟩
+  exact (run_ok_trace finish).enteredExtends setup
 
 theorem invoke_preserves_caller_allocations (program : CIL.Program) (fuel method : Nat)
     (args values : List Value) (m final : Memory)

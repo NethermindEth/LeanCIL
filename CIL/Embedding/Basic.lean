@@ -1,14 +1,15 @@
 import CIL.Instructions
+import CIL.Extraction.LinkIndex
 
 /-!
 # Method embeddings
 
 An expected method body embeds into an actual one when every live expected
 instruction appears in the actual body at a mapped pc, with every code target
-mapped the same way. Instructions the expected body marks `.unsupported` impose
+mapped the same way. Holes (`.unadmitted`) in the expected body impose
 nothing, so dead code may be inserted, removed or renumbered. Every condition is a
 list equality or Boolean test the kernel decides by evaluation; no equality
-instance on `Op` is involved.
+instance on `Instruction` is involved.
 
 `CIL.Safety.Embedding` proves that a successful run of the expected body is one of the
 actual body, so a proof about a hand-written body transfers to the extracted method.
@@ -19,47 +20,43 @@ creates without allocating.
 namespace CIL
 
 /-- Replaces every code target of an instruction by its image under `r`. -/
-def Op.relabel (r : Nat → Nat) : Op → Op
-  | .nativeBinary op => .nativeBinary (op.relabel r)
-  | .bgt t => .bgt (r t) | .ble t => .ble (r t) | .bleu t => .bleu (r t)
-  | .branch t => .branch (r t) | .switch ts => .switch (ts.map r)
-  | .brzero t => .brzero (r t) | .brnonzero t => .brnonzero (r t)
-  | .bltu t => .bltu (r t) | .bgeu t => .bgeu (r t) | .bgtu t => .bgtu (r t)
-  | .bge t => .bge (r t) | .blt t => .blt (r t) | .beq t => .beq (r t) | .bne t => .bne (r t)
+def Instruction.relabel (r : Nat → Nat) : Instruction → Instruction
+  | .bgt t => .bgt (r t) | .ble t => .ble (r t) | .ble_un t => .ble_un (r t)
+  | .br t => .br (r t) | .switch ts => .switch (ts.map r)
+  | .brfalse t => .brfalse (r t) | .brtrue t => .brtrue (r t)
+  | .blt_un t => .blt_un (r t) | .bge_un t => .bge_un (r t) | .bgt_un t => .bgt_un (r t)
+  | .bge t => .bge (r t) | .blt t => .blt (r t) | .beq t => .beq (r t)
+  | .bne_un t => .bne_un (r t) | .leave t => .leave (r t)
   | op => op
 
 /-- Every code target of an instruction, in operand order. -/
-def Op.targets : Op → List Nat
-  | .nativeBinary op => op.targets
-  | .bgt t | .ble t | .bleu t | .branch t | .brzero t | .brnonzero t
-  | .bltu t | .bgeu t | .bgtu t | .bge t | .blt t | .beq t | .bne t => [t]
+def Instruction.targets : Instruction → List Nat
+  | .bgt t | .ble t | .ble_un t | .br t | .brfalse t | .brtrue t
+  | .blt_un t | .bge_un t | .bgt_un t | .bge t | .blt t | .beq t | .bne_un t | .leave t => [t]
   | .switch ts => ts
   | _ => []
 
 -- Together these fail if a branch constructor is added to one of `relabel` and `targets` only.
-theorem Op.targets_relabel (r : Nat → Nat) (op : Op) :
+theorem Instruction.targets_relabel (r : Nat → Nat) (op : Instruction) :
     (op.relabel r).targets = op.targets.map r := by
-  induction op <;> simp_all [Op.relabel, Op.targets]
+  induction op <;> simp_all [Instruction.relabel, Instruction.targets]
 
-theorem Op.relabel_eq_self (r : Nat → Nat) (op : Op)
+theorem Instruction.relabel_eq_self (r : Nat → Nat) (op : Instruction)
     (fixed : ∀ target ∈ op.targets, r target = target) :
     op.relabel r = op := by
-  induction op <;> simp_all [Op.relabel, Op.targets]
+  induction op <;> simp_all [Instruction.relabel, Instruction.targets]
   exact (List.map_congr_left fixed).trans (List.map_id _)
 
-theorem Op.relabel_of_targets_nil (r : Nat → Nat) (op : Op) (none : op.targets = []) :
-    op.relabel r = op :=
-  op.relabel_eq_self r (by simp [none])
-
 /-- False only for instructions that never resume at the next pc, including after a call. -/
-def Op.continues : Op → Bool
-  | .managed (.call _ _ true) => false
-  | .branch _ | .tailCall .. | .ret _ | .throw _ | .unsupported _ => false
+def Instruction.continues : Instruction → Bool
+  | .calli _ true => false
+  | .call _ prefixes => !prefixes.tail
+  | .br _ | .ret | .throw _ | .leave _ | .endfinally | .unadmitted _ => false
   | _ => true
 
-/-- `.unsupported` faults whenever it executes, so it constrains nothing. -/
-def Op.live : Op → Bool
-  | .unsupported _ => false
+/-- A hole (`.unadmitted`) faults whenever it executes, so it constrains nothing. -/
+def Instruction.live : Instruction → Bool
+  | .unadmitted _ => false
   | _ => true
 
 namespace Embedding
@@ -76,45 +73,43 @@ structure Site where
   pc : Nat
   image : Nat
   next : Nat
-  op : Op
+  op : Instruction
 
 /-- Live sites of `code` numbered from `pc`, reading `map` in step; one pass over both lists. -/
-def sites (limit : Nat) : Nat → List Op → List Nat → List Site
+def sites (limit : Nat) : Nat → List Instruction → List Nat → List Site
   | _, [], _ => []
   | pc, op :: rest, map =>
     if op.live then
       ⟨pc, map.headD limit, map.tail.headD limit, op⟩ :: sites limit (pc + 1) rest map.tail
     else sites limit (pc + 1) rest map.tail
 
-/-- `code[q]?` for each `q`, walking `code` once while the pcs increase; `rest` is
-    `code.drop start`. -/
-def pick (code : List Op) : List Op → Nat → List Nat → List (Option Op)
+/-- `code[q]?` for each `q`, walking `code` while the pcs do not decrease and starting again from
+    its head at a pc below the one before; `rest` is `code.drop start`. The pcs cost one step each
+    and the code's length once per descent. -/
+def pick (code : List Instruction) : List Instruction → Nat → List Nat → List (Option Instruction)
   | _, _, [] => []
   | rest, start, q :: qs =>
-    if start ≤ q then
-      let tail := rest.drop (q - start)
-      tail.head? :: pick code tail q qs
-    else code[q]? :: pick code rest start qs
-
-/-- The static descriptor a `staticAddress` or `staticValue` at `pc` resolves to. -/
-def staticAt (body : Method) (pc : Nat) : Option StaticDescriptor :=
-  (body.staticSites.find? (fun site => site.1 == pc)).map Prod.snd
+    let tail := if start ≤ q then rest.drop (q - start) else code.drop q
+    tail.head? :: pick code tail q qs
 
 end Embedding
 
 open Embedding in
 /-- `expected` embeds into `actual` under the pc map `map`. Non-code fields agree,
     except that static sites may move as long as each live instruction resolves the
-    same descriptor and the program-wide descriptor list is unchanged. -/
+    same descriptor and the program-wide descriptor list is unchanged. Link tables
+    move the same way: each live instruction has the link its image has. The reads walk a table
+    whose keys ascend, starting again from its head at each queried pc below the one before; a
+    table whose keys do not ascend is scanned once per query. -/
 structure Embeds (expected actual : Method) (map : List Nat) : Prop where
   profile : actual.profile = expected.profile
   returnsValue : actual.returnsValue = expected.returnsValue
   locals : actual.locals = expected.locals
   localKinds : actual.localKinds = expected.localKinds
-  vectorLocals : actual.vectorLocals = expected.vectorLocals
   opaqueVectorLocals : actual.opaqueVectorLocals = expected.opaqueVectorLocals
-  vectorArgs : actual.vectorArgs = expected.vectorArgs
   parameterHomes : actual.parameterHomes = expected.parameterHomes
+  declared : actual.declared = expected.declared
+  environment : actual.environment = expected.environment
   descriptors : actual.staticSites.map Prod.snd = expected.staticSites.map Prod.snd
   entry : rename map actual.code.length 0 = 0
   code : pick actual.code actual.code 0
@@ -122,10 +117,18 @@ structure Embeds (expected actual : Method) (map : List Nat) : Prop where
     (sites actual.code.length 0 expected.code map).map
       fun site => some (site.op.relabel (rename map actual.code.length))
   statics :
-    (sites actual.code.length 0 expected.code map).map (fun site => staticAt actual site.image) =
-      (sites actual.code.length 0 expected.code map).map (fun site => staticAt expected site.pc)
+    (sites actual.code.length 0 expected.code map).map (fun site => actual.staticAt site.image) =
+      (sites actual.code.length 0 expected.code map).map (fun site => expected.staticAt site.pc)
+  links :
+    Extraction.linkReads actual.links
+        ((sites actual.code.length 0 expected.code map).map Site.image) =
+      Extraction.linkReads expected.links
+        ((sites actual.code.length 0 expected.code map).map Site.pc)
   flow : (sites actual.code.length 0 expected.code map).all
     (fun site => !site.op.continues || site.next == site.image + 1) = true
+  /-- Exception clauses name pcs, so only bodies without them are related. -/
+  expectedHandlers : expected.handlers = []
+  actualHandlers : actual.handlers = []
 
 /-- Method `index` of `program` has a body that `expected` embeds into. -/
 def MethodEmbeds (program : Program) (index : Nat) (expected : Method) : Prop :=

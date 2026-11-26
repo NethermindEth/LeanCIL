@@ -55,9 +55,11 @@ statement, inputs and library identity; their prose is not an independent specif
 | `leancil check` | Extraction artifact integrity | No user-theorem verification. |
 | `leancil list` | Metadata method discovery | Listing does not imply admission or correctness. |
 | `audit-library` | Kernel-replayed compiled declarations and namespace theorem audit | Not proof that a package build directory was compiled from its current sources. |
+| `verify --deep-checks` | Kernel-checked binding of the extraction's method bodies and carried metadata rows to assembly files with stated digests | Covers only the items it reports as reconfirmed; every fact it does not check stays trusted and is reported as not covered, and all pinned images require consumer-stated digests. The meaning of the audited statements rests on the `StrictBinding` sources and the Lean toolchain, whose hash and version the report prints. |
 
-`Extracted.signatures` selects method indices and is hash-bound; it is not part of
-`TranslationValid`.
+`Extracted.signatures` selects method indices and is hash-bound. It lists the `signature` of each
+`methodEvidence` record, which `TranslationValid` equates with the full name the method's
+`MethodDef` row spells.
 Bindings are kernel-checked against the actual program. PDB names and locations are similarly
 untrusted selection aids: they cannot change `Extracted.lean` or its translation evidence.
 Proofs importing `Symbols.lean` compile/replay it and bind its hash; forged names cannot make the
@@ -74,8 +76,32 @@ to replace them, the driver or the checker is outside the model.
 Consumer support reuse requires authenticated receipts, matching source and compiled-import
 closures, file hashes and unchanged artifacts after building. Imports of `Extracted` and
 `ExtractedSymbols` do not gain extraction-independent reuse authority. Restored
-extraction-dependent modules and closed generated certificates still undergo required kernel replay
-when proof checking. Certificate/theorem audits and extraction regeneration remain mandatory.
+extraction-dependent support modules and closed generated certificates still undergo required
+kernel replay when proof checking. Certificate/theorem audits and extraction regeneration remain
+mandatory.
+
+The deep checks state their theorems with the `StrictBinding` modules of the certified library,
+which builds and kernel-replays them with `CIL` and whose key binds their sources. Before a deep
+run uses them, it rehashes the library's compiled modules against the library manifest, and it fails
+if a session module takes the place of one of them or if any of them, or their sources, change.
+
+A deep result is published only after its whole request succeeds. Its key binds the certified
+environment and extraction key, the certified StrictBinding sources and the toolchain, the generated
+sources with the image bytes they hold, the pins and requests, and the content hash of every part of
+every compiled module the generated modules import, transitively, outside the Lean toolchain. The
+closure is read from compiled import headers and resolved in search-path order, as Lean resolves it;
+it holds the extraction, StrictBinding and `CIL` modules and no contract interface,
+`ExtractedImports` or proof module. A restored result skips build and kernel replay of the generated
+modules, since its publisher replayed those bytes against the same imported bytes; their theorem
+audit runs on every request. Under `--proof-root` the environment is the verifier and the certified
+library. A process hashes each certified library part and reads its header once; its later requests
+check the library's file lengths and write times instead.
+
+The single-file verifier's support audit key binds the audit schema, verification policy,
+certified library identity, extraction identity digest, ordered support imports and support
+source hashes. The digest comes from the extraction identity already read for verification.
+Support results are reusable only for the same extraction identity. A changed extraction
+misses entries certified for a different extraction.
 
 Canonical fingerprints deserialize every available olean part with the pinned Lean toolchain,
 remove only the diagnostic `Lean.Linter.lintLogExt`, and reserialize. Constants, private

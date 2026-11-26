@@ -1,6 +1,12 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 
@@ -66,26 +72,47 @@ foreach (var (name, signature, arguments, budget, predicate) in new[]
 
     if (name == "fill")
     {
-        const string span = ".spanFromReference 4 true";
-        if (!source.Contains(span, StringComparison.Ordinal)) throw new Exception("Missing span constructor");
-        foreach (var replacement in new[] { ".spanFromReference 8 true", ".spanFromReference 4 false" })
+        using var module = Mono.Cecil.ModuleDefinition.ReadModule(runtimeFixture.Assembly.Location);
+        var method = module.GetType("Examples.StackAllocation").Methods.Single(item => item.Name == "FillAndRead");
+        var instructions = method.Body.Instructions;
+        var constructorPc = instructions.IndexOf(instructions.Single(instruction =>
+            instruction.OpCode.Code == Mono.Cecil.Cil.Code.Newobj));
+        // The generated model fact names the constructor's width and capability, and each forgery changes one.
+        foreach (var (operation, accepted) in new[]
         {
-            var forgedSpan = Path.Combine(root, "forged-span.lean");
-            File.WriteAllText(forgedSpan, source.Replace(span, replacement, StringComparison.Ordinal));
-            var rejectedSpan = Execute(["lake", "env", "lean", forgedSpan], cwd: FixturePackage());
-            if (rejectedSpan.Code == 0 || !rejectedSpan.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
-                throw new Exception("Forged span constructor was not rejected: " + rejectedSpan.Output);
-            Console.WriteLine("PASS forged stack span rejected: " + replacement);
+            (".spanFromReference 4 true", true), (".spanFromReference 8 true", false),
+            (".spanFromReference 4 false", false)
+        })
+        {
+            var stated = Path.Combine(root, "stated-span.lean");
+            File.WriteAllText(stated, ForgeModelFact(source, constructorPc, $".memory ({operation})"));
+            var checkedFact = Execute(["lake", "env", "lean", stated], cwd: FixturePackage());
+            var passed = accepted
+                ? checkedFact.Code == 0 && !checkedFact.Output.Contains("sorryAx", StringComparison.Ordinal)
+                : checkedFact.Code != 0 && ModelFactMismatch(constructorPc)(checkedFact.Output);
+            if (!passed) throw new Exception($"Stack span model fact {operation}: {checkedFact.Output}");
+            Console.WriteLine($"PASS stack span model fact {(accepted ? "accepted" : "refused")}: {operation}");
         }
+        // The stack span constructor must retain its original opcode.
+        var forgedSpan = Path.Combine(root, "forged-span.lean");
+        File.WriteAllText(forgedSpan,
+            ForgeConstructorOpcode(source, constructorPc));
+        var rejectedSpan = Execute(["lake", "env", "lean", forgedSpan], cwd: FixturePackage());
+        if (rejectedSpan.Code == 0 || !rejectedSpan.Output.Contains("RuntimeModelsAgree", StringComparison.Ordinal))
+            throw new Exception($"Substituted stack span instruction was not refused: {rejectedSpan.Output}");
+        Console.WriteLine("PASS substituted stack span instruction refused");
     }
 
     if (name != "uninitialized") continue;
-    const string operation = ".stackAlloc false";
-    if (!source.Contains(operation, StringComparison.Ordinal)) throw new Exception("Missing uninitialized allocation");
+    // The method is defined from its decoder, so a method that claims localsinit is a forged decoder's value, which
+    // no longer matches the closed definition's declared signature.
+    if (!DecodedOriginal(source, 0).Contains("initLocals := false,", StringComparison.Ordinal))
+        throw new Exception("Missing uninitialized allocation");
     var forged = Path.Combine(root, "forged-initialization.lean");
-    File.WriteAllText(forged, source.Replace(operation, ".stackAlloc true", StringComparison.Ordinal));
+    File.WriteAllText(forged,
+        ForgeDecodedMethod(source, 0, "declared := { method.declared with initLocals := true }"));
     var rejected = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
-    if (rejected.Code == 0 || !rejected.Output.Contains("FeatureFlowValid", StringComparison.Ordinal))
+    if (rejected.Code == 0 || !rejected.Output.Contains("DeclaredValid", StringComparison.Ordinal))
         throw new Exception("Forged localsinit was not rejected by the Lean certificate: " + rejected.Output);
     Console.WriteLine("PASS forged stack initialization rejected");
 }

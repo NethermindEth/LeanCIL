@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -10,9 +9,11 @@ namespace Nethermind.LeanCIL;
 internal sealed class LayoutEvidence
 {
     readonly TypeReference[] rawTypes;
+    readonly string[] identityTerms;
+    readonly Dictionary<string, string> namedOperandTypes = new(StringComparer.Ordinal);
     // Raw metadata is topological; emitted layout constants retain the caller supplied order.
-    readonly Dictionary<string, int> emittedIndices = new(StringComparer.Ordinal);
-    readonly Dictionary<string, int> typeIndices = new(StringComparer.Ordinal);
+    readonly Dictionary<StructuralSignatures.Signature, int> emittedIndices = [];
+    readonly Dictionary<StructuralSignatures.Signature, int> typeIndices = [];
     readonly MetadataValidation.LayoutContext layouts;
     string Architecture => layouts.Architecture;
 
@@ -20,19 +21,26 @@ internal sealed class LayoutEvidence
     {
         this.layouts = layouts;
         for (var index = 0; index < types.Length; index++)
-            emittedIndices.TryAdd(Identity(types[index]), index);
+            emittedIndices.TryAdd(layouts.Signature(types[index]), index);
         rawTypes = Topological(types);
+        identityTerms = new string[rawTypes.Length];
         for (var index = 0; index < rawTypes.Length; index++)
-            typeIndices.TryAdd(Identity(rawTypes[index]), index);
+        {
+            var type = rawTypes[index];
+            var identity = Identity(type);
+            typeIndices.Add(layouts.Signature(type), index);
+            identityTerms[index] = rawTypes.Length == 1 ? IdentityText.Quote(identity) :
+                ScopedIdentityTerm(identity, Scope(type).Length + "::".Length);
+        }
     }
 
     TypeReference[] Topological(TypeReference[] entries)
     {
         var ordered = new List<TypeReference>();
-        var seen = new HashSet<string>();
+        var seen = new HashSet<StructuralSignatures.Signature>();
         void Include(TypeReference type)
         {
-            if (!seen.Add(Identity(type))) return;
+            if (!seen.Add(layouts.Signature(type))) return;
             foreach (var field in layouts.Fields(type))
                 if (MetadataValidation.IsAggregate(field.Type, type.Module)) Include(field.Type);
             ordered.Add(type);
@@ -41,12 +49,40 @@ internal sealed class LayoutEvidence
         return [.. ordered];
     }
 
-    internal static string Scope(TypeReference type) => type.Scope is AssemblyNameReference assembly
-        ? assembly.FullName : type.Module.Assembly.Name.FullName;
+    /// <summary>The original TypeRef and its declaring types, with the outermost type on top.</summary>
+    internal static Stack<TypeReference> ForwardingPath(TypeReference type)
+    {
+        var path = new Stack<TypeReference>();
+        var seen = new HashSet<TypeReference>(ReferenceEqualityComparer.Instance);
+        for (var level = type; level is not null; level = level.DeclaringType)
+        {
+            if (!seen.Add(level))
+                throw new InvalidDataException("Cyclic forwarding scope at " + level.MetadataToken);
+            path.Push(level);
+        }
+        return path;
+    }
+
+    internal static string Scope(TypeReference type)
+    {
+        if (type.Scope is not AssemblyNameReference assembly) return type.Module.Assembly.Name.FullName;
+        // Primitive signature elements carry their module's core AssemblyRef directly.
+        var pins = PinnedAssemblies.Active;
+        if (pins?.Signatures.IsPrimitiveElement(type) == true) return assembly.FullName;
+        var module = pins?.ModuleOf(type);
+        if (module is not { HasExportedTypes: true }) return assembly.FullName;
+        var element = type.GetElementType();
+        var outer = element.DeclaringType is null ? element : ForwardingPath(element).Peek();
+        if (!module.ExportedTypes.Any(export => export.IsForwarder && export.FullName == outer.FullName))
+            return assembly.FullName;
+        return element.Resolve()?.Module.Assembly.Name.FullName ??
+            throw new InvalidDataException("Unresolved forwarded type: " + element.FullName);
+    }
 
     internal static string Identity(TypeReference type)
     {
-        if (type is GenericInstanceType generic && GenericStructs.Is(type)) return ScopedArguments(generic);
+        if (type is GenericInstanceType generic && (ValueTuples.Is(type) || GenericStructs.Is(type)))
+            return ScopedArguments(generic);
         return Scope(type) + "::" + type.FullName;
     }
 
@@ -58,13 +94,67 @@ internal sealed class LayoutEvidence
     static string ScopedArguments(GenericInstanceType generic) =>
         Identity(generic.ElementType) + "<" + string.Join(",", generic.GenericArguments.Select(argument =>
             MetadataValidation.IsAggregate(argument, generic.Module)
-                ? Identity(argument) : MethodSpecialization.SignatureType(argument))) + ">";
+                ? Identity(argument) : ArgumentText(argument))) + ">";
+
+    static string ArgumentText(TypeReference type) => type switch
+    {
+        GenericParameter parameter => $"{parameter.Type}:{parameter.Position}",
+        ByReferenceType reference => ArgumentText(reference.ElementType) + "&",
+        RequiredModifierType modifier when InReferences.Is(modifier) => ArgumentText(modifier.ElementType) + " in",
+        RequiredModifierType modifier when InitAccessors.Is(modifier) => ArgumentText(modifier.ElementType) + " init",
+        PointerType pointer => ArgumentText(pointer.ElementType) + "*",
+        ArrayType { IsVector: true } array => ArgumentText(array.ElementType) + "[]",
+        GenericInstanceType instance => Identity(instance.ElementType) + "<" +
+            string.Join(",", instance.GenericArguments.Select(ArgumentText)) + ">",
+        FunctionPointerType pointer => $"fn:{pointer.CallingConvention}:{pointer.HasThis}:{pointer.ExplicitThis}:" +
+            ArgumentText(pointer.ReturnType) + "(" +
+            string.Join(",", pointer.Parameters.Select(parameter => ArgumentText(parameter.ParameterType))) + ")",
+        _ => Identity(type)
+    };
 
     internal MetadataValidation.LayoutContext Metadata => layouts;
 
     internal string[] Identities => rawTypes.Select(Identity).ToArray();
 
-    internal int Index(TypeReference type) => typeIndices.GetValueOrDefault(Identity(type), -1);
+    internal int Index(TypeReference type) => typeIndices.Count != 0 && type.GetElementType().MetadataToken.RID != 0
+        ? typeIndices.GetValueOrDefault(layouts.Signature(type), -1) : -1;
+
+    static string Declaration(TypeReference head)
+    {
+        var image = PinnedAssemblies.Active!.IdentityMetadata(head.Module);
+        return "[" + string.Join(", ", TypeLevel.Levels(head, image).Select(level => level.ToLean())) + "]";
+    }
+
+    // Named signature occurrences and primitive element codes have distinct storage identities.
+    static string LayoutArgument(TypeReference type)
+    {
+        if (StructuralSignatures.Current.IsPrimitiveElement(type)) return $".primitive {(int)type.MetadataType}";
+        var head = type is GenericInstanceType generic ? generic.ElementType : type;
+        var name = $"{IdentityText.Quote(Scope(head))} {Declaration(head)}";
+        return type is GenericInstanceType instance
+            ? $".instanceType {name} {LayoutArguments(instance)}" : $".named {name}";
+    }
+
+    static string LayoutArguments(GenericInstanceType instance)
+    {
+        var chain = new StringBuilder();
+        foreach (var argument in instance.GenericArguments)
+            chain.Append($"(.cons ({LayoutArgument(argument)}) ");
+        return chain.Append(".nil").Append(')', instance.GenericArguments.Count).ToString();
+    }
+
+    // Layouts in one assembly share the UTF-8 encoding of its scope during kernel reduction.
+    static string ScopedIdentityTerm(string identity, int boundary)
+    {
+        var scope = IdentityText.Quote(identity[..boundary]);
+        var name = IdentityText.Quote(identity[boundary..]);
+        return $"({scope} ++ {name})";
+    }
+
+    internal string IdentityTerm(int index) => identityTerms[index];
+
+    /// <summary>The same operand type with a shared byte-backed name for a closed generic layout.</summary>
+    internal string NamedOperandType(string term) => namedOperandTypes.GetValueOrDefault(term, term);
 
     internal string RawFieldType(TypeReference type, ModuleDefinition module)
     {
@@ -74,7 +164,7 @@ internal sealed class LayoutEvidence
             if (index < 0) throw new InvalidDataException("Missing raw aggregate metadata: " + type.FullName);
             return $".aggregate {index}";
         }
-        if (MetadataValidation.VectorFieldWidth(type) is int width) return width == 16 ? ".vector128" : ".vector256";
+        if (MetadataValidation.VectorFieldWidth(type) is int width) return $"(.vector{width * 8} {VectorLane(type)})";
         return EnumTypes.Storage(type).FullName switch
         {
             "System.SByte" => ".signed8", "System.Byte" => ".unsigned8", "System.Boolean" => ".boolean",
@@ -86,48 +176,92 @@ internal sealed class LayoutEvidence
         };
     }
 
-    internal void EmitLayouts(StringBuilder lean)
+    // A vector field's lane is its element's field kind; VectorFieldWidth admits only these elements.
+    static string VectorLane(TypeReference vector) => ((GenericInstanceType)vector).GenericArguments[0].FullName switch
     {
-        lean.AppendLine("def rawLayouts : List Extraction.RawLayout := [");
-        lean.AppendLine(string.Join(",\n", rawTypes.Select(type =>
+        "System.Byte" => ".unsigned8", "System.Int32" => ".signed32", "System.UInt32" => ".unsigned32",
+        "System.Int64" => ".signed64", "System.UInt64" => ".unsigned64",
+        _ => throw new InvalidDataException($"Unsupported vector field lane: {vector.FullName}")
+    };
+
+    internal void EmitLayouts(StringBuilder lean, StringBuilder? decoderInputs = null)
+    {
+        var start = lean.Length;
+        var rowIdentities = (string[])identityTerms.Clone();
+        for (var index = 0; index < rawTypes.Length; index++)
         {
-            var metadata = ValueTuples.Is(type) ? ((GenericInstanceType)type).ElementType.Resolve() : type.Resolve();
-            var genericEvidence = "";
-            if (GenericStructs.Is(type) && type is GenericInstanceType closed)
-            {
-                var serializer = new GenericEvidence(null, this);
-                genericEvidence = $"generic := some {{ owner := .constructor " +
-                    $"{JsonSerializer.Serialize(Scope(type))} {JsonSerializer.Serialize(metadata.FullName)}, " +
-                    $"arity := {metadata.GenericParameters.Count}, arguments := " +
-                    $"[{string.Join(", ", closed.GenericArguments.Select(serializer.Type))}], fields := " +
-                    $"[{string.Join(", ", metadata.Fields.Where(field => !field.IsStatic)
-                        .Select(field => serializer.Type(field.FieldType)))}], constraints := " +
-                    $"[{string.Join(", ", metadata.GenericParameters.Select(parameter =>
-                        $"({(uint)parameter.Attributes}, [{string.Join(", ", parameter.Constraints.Select(constraint =>
-                            JsonSerializer.Serialize(GenericEvidence.ConstraintType(constraint.ConstraintType))))}])"))}] }}, ";
-            }
-            var fields = layouts.Fields(type).Select(field =>
-                $"{{ type := {RawFieldType(field.Type, type.Module)}, offset := {(field.Definition.Offset < 0 ? "none" : $"some {field.Definition.Offset}")} }}");
-            return $"  {{ identity := {JsonSerializer.Serialize(Identity(type))}, {genericEvidence}" +
-                $"explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, " +
-                (metadata.IsAutoLayout ? "auto := true, " : "") +
-                (MetadataValidation.IsByRefLike(type) ? "byRefLike := true, " : "") +
-                // An imported entry repeats its published layout, which carries no interfaces.
-                (layouts.IsImported(type) ? "" : $"interfaces := [{string.Join(", ", metadata.Interfaces.Select(
-                    implementation => JsonSerializer.Serialize(InterfaceIdentity(GenericStructs.Substitute(
-                        implementation.InterfaceType, type as GenericInstanceType)))))}], ") +
-                $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}, fields := [{string.Join(", ", fields)}] }}";
-        })));
-        lean.AppendLine("]");
+            if (rawTypes[index] is not GenericInstanceType) continue;
+            var identity = Identity(rawTypes[index]);
+            var name = $"layoutIdentity{index}";
+            var bytes = ByteLiterals.Of(IdentityText.Utf8(identity));
+            var spelling = IdentityText.Quote(identity);
+            lean.AppendLine($"def {name} : String := Extraction.byteString {bytes} {spelling} (by cil_kernel_rfl)");
+            rowIdentities[index] = name;
+            // Field resolution compares the owner's and held type's bytes with the bytes in the layout row.
+            namedOperandTypes[$".aggregate {identityTerms[index]} {index}"] = $".aggregate {name} {index}";
+        }
+        // One definition per row keeps the compiler's recursion depth independent of the table size.
+        for (var index = 0; index < rawTypes.Length; index++)
+        {
+            var row = RawRow(rawTypes[index], rowIdentities[index]);
+            lean.AppendLine($"def rawLayout{index} : Extraction.RawLayout := {row}");
+        }
+        var rowNames = string.Join(", ", Enumerable.Range(0, rawTypes.Length).Select(index => $"rawLayout{index}"));
+        lean.AppendLine($"def rawLayouts : List Extraction.RawLayout := [{rowNames}]");
         lean.AppendLine("def computedLayouts : Array Extraction.ComputedLayout := #[" +
             string.Join(", ", rawTypes.Select(type =>
             {
-                var index = emittedIndices.GetValueOrDefault(Identity(type), -1);
+                var index = emittedIndices[layouts.Signature(type)];
                 var alignment = layouts.AggregateLayout(type).Alignment;
                 return $"⟨layout{index}, {alignment}⟩";
             })) + "]");
+        decoderInputs?.Append(lean, start, lean.Length - start);
         lean.AppendLine("theorem layouts_validated : Extraction.LayoutsValid rawLayouts computedLayouts " +
             $".{Architecture} := " + LeanEmitter.Decide);
+    }
+
+    /// <summary>The raw metadata row of a layout type, naming its identity by `identity`.</summary>
+    string RawRow(TypeReference type, string identity)
+    {
+        var metadata = ValueTuples.Is(type) ? ((GenericInstanceType)type).ElementType.Resolve() : type.Resolve();
+        var genericEvidence = "";
+        if (GenericStructs.Is(type) && type is GenericInstanceType closed)
+        {
+            var serializer = new GenericEvidence(null, this);
+            var owner = $".constructor {IdentityText.Quote(Scope(type))} {GenericEvidence.ClassName(metadata)}";
+            var arguments = string.Join(", ", closed.GenericArguments.Select(serializer.Type));
+            var parameters = $"arity := {metadata.GenericParameters.Count}, arguments := [{arguments}]";
+            var openFields = string.Join(", ", metadata.Fields.Where(field => !field.IsStatic)
+                .Select(field => serializer.Type(field.FieldType)));
+            var constraints = metadata.GenericParameters.Select(parameter =>
+            {
+                var names = parameter.Constraints.Select(constraint =>
+                    IdentityText.Quote(GenericEvidence.ConstraintType(constraint.ConstraintType)));
+                return $"({(uint)parameter.Attributes}, [{string.Join(", ", names)}])";
+            });
+            var members = $"fields := [{openFields}], constraints := [{string.Join(", ", constraints)}]";
+            genericEvidence = $$"""generic := some { owner := {{owner}}, {{parameters}}, {{members}} }, """;
+        }
+        var fields = layouts.Fields(type).Select(field =>
+        {
+            var offset = field.Definition.Offset < 0 ? "none" : $"some {field.Definition.Offset}";
+            return $"{{ type := {RawFieldType(field.Type, type.Module)}, offset := {offset} }}";
+        });
+        var kind = $"explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, ";
+        var auto = metadata.IsAutoLayout ? "auto := true, " : "";
+        var marker = MetadataValidation.IsByRefLike(type) ? "byRefLike := true, " : "";
+        // An imported entry repeats its published layout, which carries no interfaces.
+        var interfaces = layouts.IsImported(type) ? "" : $"interfaces := [{string.Join(", ",
+            metadata.Interfaces.Select(implementation => IdentityText.Quote(InterfaceIdentity(
+                GenericStructs.Substitute(implementation.InterfaceType, type as GenericInstanceType)))))}], ";
+        var head = type is GenericInstanceType constructed ? constructed.ElementType : metadata;
+        var declaration = $"declaration := {Declaration(head)}, ";
+        if (type is GenericInstanceType instance)
+            declaration += $"genericArguments := some {LayoutArguments(instance)}, ";
+        var attributes = $"{declaration}{genericEvidence}{kind}{auto}{marker}{interfaces}";
+        var size = $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}";
+        var fieldList = string.Join(", ", fields);
+        return $$"""{ identity := {{identity}}, {{attributes}}{{size}}, fields := [{{fieldList}}] }""";
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number, HashSet<Instruction> reachable,
@@ -138,87 +272,10 @@ internal sealed class LayoutEvidence
         {
             var instruction = method.Body.Instructions[pc];
             if (!reachable.Contains(instruction)) continue;
-            if (instruction.OpCode.Code is Code.Call or Code.Newobj &&
-                instruction.Operand is MethodReference arrayCall &&
-                arrayCall.Parameters.FirstOrDefault()?.ParameterType is ArrayType)
-            {
-                var element = arrayCall.DeclaringType is GenericInstanceType arraySpan && Spans.Is(arraySpan)
-                    ? arraySpan.GenericArguments[0]
-                    : arrayCall is GenericInstanceMethod extension &&
-                        extension.DeclaringType.FullName == "System.MemoryExtensions" && extension.Name == "AsSpan"
-                        ? extension.GenericArguments[0] : null;
-                if (element is not null && MetadataValidation.IsAggregate(element, method.Module))
-                    uses.Add($".size {pc} {Index(element)} .arrayElement");
-            }
-            if (instruction.OpCode.Code is Code.Call or Code.Newobj &&
-                instruction.Operand is MethodReference spanCall)
-            {
-                if (spanCall is GenericInstanceMethod reinterpret &&
-                    spanCall.DeclaringType.FullName == "System.Runtime.InteropServices.MemoryMarshal" &&
-                    spanCall.Name is "AsBytes" or "Cast")
-                {
-                    for (var argument = 0; argument < reinterpret.GenericArguments.Count; argument++)
-                        if (MetadataValidation.IsAggregate(reinterpret.GenericArguments[argument], method.Module))
-                            uses.Add($".size {pc} {Index(reinterpret.GenericArguments[argument])} " +
-                                (argument == 0 ? ".spanSource" : ".spanTarget"));
-                }
-                else if (spanCall.DeclaringType is GenericInstanceType spanOwner &&
-                    Spans.Is(spanOwner) &&
-                    spanCall.Parameters.FirstOrDefault()?.ParameterType is not ArrayType &&
-                    MetadataValidation.IsAggregate(spanOwner.GenericArguments[0], method.Module) &&
-                    spanCall.Name is ("get_Item" or "CopyTo" or "TryCopyTo" or "Clear" or "Fill" or
-                        ".ctor" or "get_Empty"))
-                    uses.Add($".size {pc} {Index(spanOwner.GenericArguments[0])} .spanElement");
-            }
-            // Class fields sit at model offsets that Lean rechecks without a layout table.
-            if (instruction.OpCode.Code is Code.Ldfld or Code.Stfld or Code.Ldflda &&
-                !ObjectTypes.Candidate(((FieldReference)instruction.Operand).DeclaringType))
-            {
-                var reference = (FieldReference)instruction.Operand;
-                var field = reference.Resolve();
-                var owner = reference.DeclaringType;
-                var fieldIndex = layouts.FieldIndex(owner, field);
-                var access = instruction.OpCode.Code switch { Code.Ldfld => "load", Code.Stfld => "store", _ => "address" };
-                uses.Add($".field {pc} {Index(owner)} {fieldIndex} .{access}");
-            }
-            // A class field holding an array of structs takes its element width from the struct's layout.
-            else if (instruction.OpCode.Code is Code.Ldfld or Code.Stfld &&
-                instruction.Operand is FieldReference { FieldType: ArrayType { IsVector: true } fieldArray } &&
-                MetadataValidation.IsAggregate(fieldArray.ElementType, method.Module))
-                uses.Add($".size {pc} {Index(fieldArray.ElementType)} .arrayElement");
-            else if (instruction.OpCode.Code == Code.Initobj &&
-                instruction.Operand is GenericInstanceType span && Spans.Is(span) &&
-                MetadataValidation.IsAggregate(span.GenericArguments[0], method.Module))
-                uses.Add($".size {pc} {Index(span.GenericArguments[0])} .spanElement");
-            else if (instruction.Operand is TypeReference type && MetadataValidation.IsAggregate(type, method.Module))
-            {
-                var access = instruction.OpCode.Code switch
-                {
-                    Code.Ldobj => "load", Code.Stobj => "store", Code.Initobj => "initialize",
-                    Code.Cpobj => "copy", Code.Sizeof => "sizeOf",
-                    Code.Newarr or Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any => "arrayElement", _ => null
-                };
-                if (access is not null) uses.Add($".size {pc} {Index(type)} .{access}");
-            }
-            else if (instruction.OpCode.Code == Code.Newobj && instruction.Operand is MethodReference constructor &&
+            if (instruction.OpCode.Code == Code.Newobj && instruction.Operand is MethodReference constructor &&
                 MetadataValidation.IsAggregate(constructor.DeclaringType, method.Module))
                 uses.Add($".size {pc} {Index(constructor is MethodDefinition closedConstructor
-                    ? MethodSpecialization.DeclaringType(closedConstructor) : constructor.DeclaringType)} .construct");
-            else if (instruction.OpCode.Code == Code.Call && instruction.Operand is GenericInstanceMethod generic &&
-                generic.DeclaringType.FullName is "System.Runtime.CompilerServices.Unsafe" or
-                    "System.Runtime.InteropServices.MemoryMarshal" && generic.GenericArguments.Count == 1 &&
-                MetadataValidation.IsAggregate(generic.GenericArguments[0], method.Module))
-            {
-                var access = generic.Name switch
-                {
-                    "SizeOf" => "sizeOf", "Add" => "referenceAdd", "Subtract" => "referenceSubtract",
-                    "ReadUnaligned" or "Read" or "TryRead" => "load",
-                    "WriteUnaligned" or "Write" or "TryWrite" => "store",
-                    "CreateSpan" or "CreateReadOnlySpan" => "spanElement", _ => null
-                };
-                if (access is not null)
-                    uses.Add($".size {pc} {Index(generic.GenericArguments[0])} .{access}");
-            }
+                    ? MethodSpecialization.DeclaringType(closedConstructor) : constructor.DeclaringType)}");
         }
         foreach (var local in method.Body.Variables)
             if (layouts.IsLayout(local.VariableType))
@@ -229,6 +286,5 @@ internal sealed class LayoutEvidence
             if (MetadataValidation.IsAggregate(type, method.Module)) uses.Add($".parameter {home} {Index(type)}");
         }
         lean.AppendLine($"def method{number}LayoutUses : List Extraction.LayoutUse := [{string.Join(", ", uses)}]");
-        lean.AppendLine($"theorem method{number}_layouts_validated : Extraction.MethodLayoutsValid rawLayouts computedLayouts method{number} method{number}LayoutUses := {LeanEmitter.Decide}");
     }
 }

@@ -2,9 +2,15 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include MarshalModelEvidence.cs
 
 using Mono.Cecil;
 
@@ -27,7 +33,7 @@ foreach (var method in metadata.GetType("Examples.ViewAccessors").Methods.Where(
                 $"[.array ⟨.address ⟨0, 0⟩, {length}, .signed32⟩] memory).map Prod.snd = " +
                 ".ok [.reference (.address ⟨0, 0⟩)]");
         claims.Add("(match CIL.Safety.invoke Extracted.program 32 0 [.object .null] memory with " +
-            "| .error ⟨_, _, .thrown \"System.NullReferenceException\"⟩ => true | _ => false) = true");
+            "| .error ⟨_, _, .thrown .nullReference⟩ => true | _ => false) = true");
     }
     else
     {
@@ -40,37 +46,30 @@ foreach (var method in metadata.GetType("Examples.ViewAccessors").Methods.Where(
                 $"[.bufferSpan ⟨{address}, {length}, 4, {writable}⟩] memory).map Prod.snd = " +
                 $".ok [.scalar (.i32 {(length == 0 && (!nullOnlyWhenNull || address == ".null") ? 1 : 0)})]");
     }
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
-        /-- Successful observations identify the checked execution result. -/
-        private theorem result_of_toOption {error value : Type} {result : Except error value}
-            {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
-          cases result <;> simp_all [Except.toOption]
-        #print axioms result_of_toOption
-        /-- Existing storage has no readable bytes or access authority; observations need neither. -/
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
+        /-- The caller owns an allocation with no readable bytes or access authority. -/
         def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
             some ⟨.callerStack, ⟨16, 1, []⟩, true, [16]⟩ else none
           nextIdentity := 1 }
         /-- Empty views, readonly receivers and zero-length arrays retain their distinct results. -/
-        """ + "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  repeat constructor\n  all_goals first | (apply result_of_toOption; decide +kernel) | decide +kernel\n" +
-        "#print axioms correctness\nend ExampleProof\n");
+        theorem correctness :
+            {{string.Join(" ∧\n", claims)}} := by
+          exact ⟨{{string.Join(", ", claims.Select(_ => "by rfl"))}}⟩
+        #print axioms correctness
+        end ExampleProof
+
+        """);
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS view accessor: " + method.Name));
 }
 queue.Flush();
-var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
-foreach (var (name, before, after) in new[]
-{
-    ("Empty", ".observeView .spanEmpty", ".observeView .spanPinnable"),
-    ("PinnableNull", ".observeView .spanPinnable", ".spanReference"),
-    ("ReferenceNull", ".memory .spanReference", ".memory (.observeView .spanPinnable)"),
-    ("ArrayData", ".observeView .arrayData", ".observeView .spanPinnable")
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_unsafe_validated");
-    if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing accessor mutation");
-    var path = Path.Combine(root, name + "Rejected.lean");
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS exact accessor evidence rejection: " + name, "UnsafeCallsValid");
-}
-rejected.Check();
+CheckMarshalModels(root,
+[
+    ("Empty", 1, ".observeView .spanEmpty", null),
+    ("PinnableNull", 1, ".observeView .spanPinnable", null),
+    ("ReferenceNull", 1, ".spanReference", null),
+    ("ArrayData", 1, ".observeView .arrayData", null)
+]);

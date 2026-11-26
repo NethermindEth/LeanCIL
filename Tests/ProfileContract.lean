@@ -1,4 +1,6 @@
 import CIL.Safety.ProfileContract
+import Tests.Support
+import Tests.Support.IntrinsicMethods
 
 /-! A contract proved once under one feature profile and carried to other profiles by
     `MethodContract.Holds.reprofile` and its outcome forms, with the profile agreement decided
@@ -22,9 +24,10 @@ def avx512Profile : FeatureProfile :=
 /-- x86-64-v3 with 256-bit vectors disabled: agrees on AVX2, differs in acceleration. -/
 def narrowProfile : FeatureProfile := { avx2Profile with vector256Accelerated := false }
 
-/-- The x86-64 baseline: AVX2 is off, so the feature test answers differently. -/
+/-- The x86-64-v2 baseline: AVX2 is off, so the feature test answers differently. -/
 def baselineProfile : FeatureProfile :=
-  { architecture := .x64, x86Base64 := true, sse2 := true, vector128Accelerated := true }
+  { architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true,
+    sse42 := true, vector128Accelerated := true }
 
 /-- Every profile the contract is carried between is a supported runtime configuration. -/
 theorem profiles_valid : avx2Profile.Valid ∧ avx512Profile.Valid ∧ narrowProfile.Valid ∧
@@ -33,9 +36,9 @@ theorem profiles_valid : avx2Profile.Valid ∧ avx512Profile.Valid ∧ narrowPro
 /-- Method 0 is `IsSupported(Avx2) ? 1 : 0`; method 1 always throws. Both use `avx2Profile`. -/
 @[cil_code] def program : Program :=
   [{ profile := avx2Profile, returnsValue := true, locals := [],
-     code := [.feature .avx2, .ret] },
+     code := [.call (Tests.supportedGetter "X86.Avx2"), .ret] },
    { profile := avx2Profile, returnsValue := false, locals := [],
-     code := [.throw "System.PlatformNotSupportedException"] }]
+     code := [.throw (some .notSupported)] }]
 
 /-- Calling with no arguments returns `1` and changes no memory. -/
 def avx2Contract : MethodContract Unit where
@@ -65,9 +68,9 @@ theorem narrow_holds : avx2Contract.Holds (reprofile program narrowProfile) 0 :=
 /-- The same bodies written with their own profile, as a per-profile extraction would be. -/
 @[cil_code] def avx512Program : Program :=
   [{ profile := avx512Profile, returnsValue := true, locals := [],
-     code := [.feature .avx2, .ret] },
+     code := [.call (Tests.supportedGetter "X86.Avx2"), .ret] },
    { profile := avx512Profile, returnsValue := false, locals := [],
-     code := [.throw "System.PlatformNotSupportedException"] }]
+     code := [.throw (some .notSupported)] }]
 
 /-- A per-profile program is certified once it is shown to be the reprofiling. -/
 theorem extraction_holds : avx2Contract.Holds avx512Program 0 := by
@@ -78,8 +81,8 @@ theorem extraction_holds : avx2Contract.Holds avx512Program 0 := by
 theorem avx2_family_holds (target : FeatureProfile) (wide : target.avx2 = true) :
     avx2Contract.Holds (reprofile program target) 0 :=
   avx2_holds.reprofile avx2Profile uniform (Program.ProfileAgreement.of_flags _ _ _ (by
-    simp [Program.profileReads, Op.profileReads, program, avx2Profile, FeatureProfile.evaluate,
-      wide]))
+    change ∀ f ∈ [Feature.avx2], avx2Profile.evaluate f = target.evaluate f
+    simpa [avx2Profile, FeatureProfile.evaluate] using wide.symm))
 
 /-- The normal-return outcome form carries over: method 0 never raises. -/
 theorem outcome_holds :
@@ -94,7 +97,7 @@ def throwContract : OutcomeContract Unit where
   pre _ _ := True
   footprint _ := []
   post _ _ _ _ := False
-  raises _ _ := some "System.PlatformNotSupportedException"
+  raises _ _ := some .notSupported
 
 /-- Under `avx2Profile` method 1 raises the named exception. -/
 theorem throw_holds : throwContract.Holds program 1 := by
@@ -139,23 +142,21 @@ def emptyMemory : CIL.Safety.Memory :=
   { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩, views := [], nextIdentity := 0 }
 
 /-- The contract really depends on AVX2: on the baseline the method returns `0`. -/
-theorem baseline_rejected : ¬ avx2Contract.Holds (reprofile program baselineProfile) 0 := by
-  intro holds
-  obtain ⟨fuel, ⟨final, values⟩, invoked, -, out, encoded, returned⟩ :=
-    holds () emptyMemory trivial
+theorem baseline_rejected : avx2Contract.Refuted (reprofile program baselineProfile) 0 := by
   have baselineRun :
       CIL.Safety.invoke (reprofile program baselineProfile) 10 0 [] emptyMemory =
         Except.ok (emptyMemory, [.scalar (.i32 0)]) := by
     cil_checked_steps [reprofile, program, baselineProfile]
-  have same := invoke_ok_unique invoked baselineRun
+  refine .of_return (input := ()) (initial := emptyMemory) trivial baselineRun ?_
+  rintro ⟨-, out, encoded, returned⟩
   simp only [avx2Contract] at encoded returned
-  subst encoded returned
-  simp at same
+  subst returned
+  simp at encoded
 
 /-- An AVX-512 DQ multiply needs four flags, all of which the agreement check reads. -/
 def intrinsicProgram : Program :=
   [{ profile := avx512Profile, returnsValue := true, locals := [],
-     code := [.arg 0, .arg 1, .intrinsic (.avx512DQ .mul64) 2, .ret] }]
+     code := [.ldarg 0, .ldarg 1, .call Tests.IntrinsicMethods.multiplyLow, .ret] }]
 
 /-- Profiles that agree on the four flags agree on the multiply. -/
 theorem intrinsic_agrees : intrinsicProgram.ProfileAgreement avx512Profile
@@ -173,11 +174,13 @@ theorem intrinsic_check_rejects : ¬ ∀ featureId ∈ intrinsicProgram.profileR
 theorem intrinsic_disagrees : ¬ intrinsicProgram.ProfileAgreement avx512Profile
     { avx512Profile with avx512DQVL := false } := by
   intro agreement
-  have available := agreement _ (List.mem_singleton_self _) (.intrinsic (.avx512DQ .mul64) 2)
+  have available := agreement _ (List.mem_singleton_self _) (.call Tests.IntrinsicMethods.multiplyLow)
     (by simp)
-  simp [Op.ProfileAgreement, Intrinsic.available, avx512Profile, avx2Profile] at available
+  have enabled := available _ (Tests.IntrinsicMethods.multiplyLow_model _)
+  change true = false at enabled
+  contradiction
 
-/-- info: 'Tests.ProfileContract.uniform' does not depend on any axioms -/
+/-- info: 'Tests.ProfileContract.uniform' depends on axioms: [propext] -/
 #guard_msgs in #print axioms uniform
 /-- info: 'Tests.ProfileContract.avx2_holds' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms avx2_holds

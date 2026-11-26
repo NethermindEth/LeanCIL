@@ -92,18 +92,33 @@ index below `elements.length` is in bounds of a non-null array.
 [`SpanContents.array_load`](../CIL/Safety/ArrayContents.lean), applied as
 contents.array_load valid scalar bound, gives the element's address
 `arrayElement memory values index width = .ok item` and its load, the element's value.
-`step_arrayLoad_of_element` steps `ldelem` from those two facts and `step_arrayAddress_of_element`
-steps `ldelema` from the address; `arrayElement_formed` forms that address, so a helper may return
-it. An index outside the array throws, which a precondition bounding the index rules out.
+`step_ldelem_of_element` steps an integer `ldelem.*` from those two facts. A typed `ldelem` of
+an integer, enum, `bool` or `char` element steps to `arrayLoad` at the width its element type's
+shape gives, which `arrayLoad_of_element` rewrites from the same two facts.
+`step_ldelem_any_of_element` steps that typed `ldelem` from the two facts and the shape fact
+`cil_resolution_facts` declares for its type, and `step_ldelem_any_of_transfer` steps one of a
+struct or vector element from the shape fact and its `arrayTransferInstruction` fact. An outline
+of a generic read specialized to a word uses `cil_element_shape% Extracted.method0 2` for a
+typed load at pc 2. Lean reads the element type from that instruction's checked equation.
+`step_ldelema_of_element` steps an `ldelema` whose type the method's layouts give that element
+shape from the address, writable or read-only as a `readonly.` prefix records, and
+`arrayAddress_of_element` gives the same reference once it steps to `arrayAddress`;
+`arrayElement_formed` forms that address, so a helper may return it. An index outside the array throws, which a
+precondition bounding the index rules out.
 
 A loop indexing the array reads it the way a span loop does, through the storage span: the caller's
 `CheckedSpan initial values.storage width true elements` carries into each iteration's frame by
 `CheckedSpan.within`, and `array_load` of its contents names the element. A loop storing into the
 array holds `SpanWritable` authority over `values.storage` instead; with the array addressed at
 `base`, `arrayElement_of_access` turns write authority over `base.element width index` and the
-bound into the element `arrayElement` returns, and `step_arrayStore_of_write` steps `stelem` to the
-written memory. The bound test compares the index with `values.Length` as signed words;
-`SpanView.length_bounded` of the storage span keeps the length below `2 ^ 31`, and
+bound into the element `arrayElement` returns. `step_stelem_narrow_of_write` steps a one-, two- or
+four-byte `stelem.*` to the written memory, `step_stelem_wide_of_write` steps `stelem.i8` and
+`stelem.i`, and a typed `stelem` steps to `arrayStore`, which `arrayStore_of_write` and
+`arrayStore_i64_of_write` rewrite. `step_stelem_any_of_write` steps a one-, two- or four-byte
+typed `stelem` from the shape fact and the write, `step_stelem_any_of_wide_write` an
+eight-byte one, and `step_stelem_any_of_transfer` one of a struct or vector element from the
+shape fact and its transfer. The bound test compares the index
+with `values.Length` as signed words; `SpanView.length_bounded` of the storage span keeps the length below `2 ^ 31`, and
 `toInt_ofNat_of_lt`, which `cil_loop_obligation` applies, reads that comparison as unsigned.
 
 Converting the whole array to a span, as `ReadOnlySpan<T> rest = values` does, pushes
@@ -168,17 +183,21 @@ sequence-content lemmas above. Vector loads and stores preserve initialization m
 copies require readable, initialized source bytes. View creation and reinterpretation alone
 establish neither initialization nor read/write authority.
 
-Single-reference and pointer span constructors, empty getters and in-place local resets use the
-same views.
+After a successful `writeSnapshot`, rewrite the stored memory's cell function with
+`writeSnapshot_cells_eq`. Inside the destination it returns the source byte and its
+initialization flag. Other offsets and allocations retain their previous cells.
+
+Single-reference and pointer span constructors, empty getters and span resets use the same views.
 `memoryInstruction_emptySpan` proves that every supported element width and capability produces
-a null, zero-length view without changing memory. `SpanConstructor.empty` uses that same operation
-when `initializeSpanLocal` replaces a local's previous view.
-An `in` or `ref readonly` span parameter is passed as the referenced `.bufferSpan` view, so a
-contract states the same view argument as a by-value span and reuses `SpanView.validate`,
+a null, zero-length view without changing memory. `initializeSpanHome` stores that view in the
+slot a span `initobj` addresses, and `spanInPlaceCall` stores the view a constructor builds in
+the slot its receiver home names once `SpanConstructor.shape` matches the slot's width and access.
+An `in` or `ref readonly` span parameter is passed as the `.bufferSpan` view the caller's home
+holds when the call runs, so a contract states the same view argument as a by-value span and reuses `SpanView.validate`,
 `Contents` and the span element lemmas, whether the caller passes a span local or a temporary.
-`MemoryMarshal.GetReference` of a readonly view steps by `step_memory_spanReference_readOnlyView_eq`
-to a `.readOnlyReference`; loads, field loads and `ldflda` accept it, so the first-element load
-is proved with the same lemmas.
+`MemoryMarshal.GetReference` of a readonly view keeps its call. `step_call_model` exposes its bound memory
+operation, and `step_memory_spanReference_readOnlyView_eq` gives its `.readOnlyReference`.
+Loads, field loads and `ldflda` accept that reference.
 Element and byte offsets of a readonly reference step by the `step_memory_add_readOnly_*`
 equations to a `.readOnlyReference` with the writable form's address, so `add_element` applies
 unchanged, including for `Unsafe.Add(..., 1)`. Integer byte-order transfers and view observations
@@ -195,9 +214,13 @@ introduced. Constrained interface calls on these closed owners, with implicit or
 implementations, use the same direct-call proof interface after the certificate resolves and
 binds the exact implementation.
 
-For supplied native dispatch tables, provide an immutable allocation binding and exact catalog
-target identities in `MethodTable.backing`. Checked byte offsets and `ldind.i` preserve
-authenticated callable provenance; numeric address bytes alone are insufficient. These tables
+For supplied native dispatch tables, provide an immutable allocation binding in
+`MethodTable.backing`, the exact catalog target identities in `MethodTable.targets` and their
+number in `MethodTable.entryCount`. The default proof of `MethodTable.counted` checks that number
+once where the table is built, so a table step, and the bound check of an `ldind.i` load, read
+the count without walking the entries.
+Checked byte offsets and `ldind.i` preserve authenticated callable provenance; numeric address
+bytes alone are insufficient. These tables
 require a unique supported managed indirect-call signature in each body; handler
 signatures cannot carry native table pointers. Ordinary call and tail-call lifetime and fuel
 obligations still apply.
@@ -219,7 +242,10 @@ check, so these laws do not apply to it and its proofs stay at the byte level.
 
 A struct local is tracked in the same `LocalSnapshots` set as numeric locals, remembered as its
 bytes. `LocalSnapshots.zero_aggregate` returns the step equation for `initobj` through the local's
-address. `store_field` and `load_field` cover int, word and 16- or 32-byte vector fields,
+address. Pass that equation to `cil_checked_steps` or `cil_contract_steps`. The stepper uses the
+generated operand shape to prove that the byte width of `initobj` equals the size of the home.
+The loop frame stepper uses the same fact. `store_field` and `load_field` cover int, word and
+16- or 32-byte vector fields,
 `load_signed_field` sign extends a 1- or 2-byte field as `signedOfWidth`, and
 `store_aggregate_field` and `load_aggregate_field` cover a nested struct field, whose value is the
 number of its bytes. Zeroing and stores also return the updated snapshots, well-formedness,
@@ -386,9 +412,10 @@ theorem Filled.extend {xs : List (BitVec (8 * width))} {room index : Nat}
     Filled m base width (xs ++ [x]) room := by
 ```
 
-`Writable.write_one` with `step_storeScalar_of_write` (1-, 2- or 4-byte `int` stores) or
-`step_storeScalar_i64_of_write` ([LoopFrames](../CIL/Safety/LoopFrames.lean)) proves a one-word
-store helper's contract, as `Stamp`'s in CopyUntilZero.
+`Writable.write_one` with `step_stind_narrow_of_write` (1-, 2- or 4-byte `stind` of an `int`),
+`step_stind_i8_of_write` or `step_stind_i_of_write`
+([CheckedMemoryFacts](../CIL/Safety/CheckedMemoryFacts.lean)) proves a one-word store helper's
+contract, as `Stamp`'s in CopyUntilZero.
 
 ## Track a struct local by its fields in a loop
 
@@ -407,9 +434,16 @@ valid fieldIndex value` steps `stfld` to a frame remembering `fields.set fieldIn
 equation, the frame after it and `MemoryBelow`; the slot, the field and its width are checked by
 `rfl` and `decide`, so a field outside the layout or a value of another width does not elaborate.
 A by-value read, `ldloc` then `ldfld`, loads the struct and reads the field with
-`step_fieldAt_encode`. A 1- or 2-byte field holds an `.i32` and reads back truncated to its width
-and zero or sign extended, as `narrowLoad width signed bits`: `step_fieldAt_encode_narrow` reads
+`step_ldfld_encode`. A 1- or 2-byte field holds an `.i32` and reads back truncated to its width
+and zero or sign extended, as `narrowLoad width signed bits`: `step_ldfld_encode_narrow` reads
 it by value and `load_narrow_field` through the address.
+
+For a nested struct, `ldfld` uses the offset and size in the method's checked field shape.
+`step_ldfld_aggregate_value_eq` reads initialized bytes from a struct on the stack.
+`step_ldfld_aggregate_snapshot_eq` also preserves the initialization state of padding.
+`step_ldfld_aggregate_reference_eq` reads the field through a reference to the containing struct.
+`step_stfld_aggregate_reference_eq` and `step_stfld_aggregate_snapshot_eq` write initialized bytes
+and snapshots through a writable reference. Both require the stored width to match the field.
 
 The loop tactics gather the field reads and the home's `form` from each frame in scope and take
 the zeroing, field stores and numeric local stores themselves (see [loop

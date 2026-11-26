@@ -1,5 +1,6 @@
 import CIL.MethodIdentity
 import CIL.StructuralLabels
+import Tests.Support
 
 /-! A synthetic extraction: `Root` calls two helpers with the same arity, `Right` first. -/
 namespace Extracted
@@ -11,8 +12,13 @@ def method1Signature : String := "System.UInt64 Examples.Identity::Left(System.U
 def method2Signature : String := "System.UInt64 Examples.Identity::Right(System.UInt64,System.UInt64)"
 def method3Signature : String := "System.UInt64 Examples.Overloads::Pick(System.UInt64)"
 def method4Signature : String := "System.UInt32 Examples.Overloads::Pick(System.UInt32)"
-def helper (marker : Nat) : Method := { code := [.arg 0, .arg 1, .const64 (BitVec.ofNat 64 marker), .ret], locals := [], returnsValue := true }
-def method0 : Method := { code := [.arg 0, .arg 0, .call 2 2, .arg 0, .call 1 2, .ret], locals := [], returnsValue := true }
+def helper (marker : Nat) : Method :=
+  { code := [.ldarg 0, .ldarg 1, .ldc_i8 (BitVec.ofNat 64 marker), .ret], locals := [],
+    returnsValue := true }
+def method0 : Method :=
+  { code := [.ldarg 0, .ldarg 0, .call (Tests.callee 2) {}, .ldarg 0, .call (Tests.callee 2) {},
+    .ret], links := [(2, .direct 2), (4, .direct 1)], locals := [],
+    returnsValue := true }
 def method1 : Method := helper 1
 def method2 : Method := helper 2
 def method3 : Method := helper 3
@@ -39,13 +45,14 @@ bind_callee right rightBody := "System.UInt64 Examples.Identity::Right(System.UI
 -- Same arity, called in the other order: each name still reaches its own method and site.
 example : left = 1 ∧ right = 2 := ⟨rfl, rfl⟩
 example : leftBody = Extracted.helper 1 ∧ rightBody = Extracted.helper 2 := ⟨rfl, rfl⟩
-example : rootBody.code[4]? = some (.call left 2) := left.call
-example : rootBody.code[2]? = some (.call right 2) := right.call
+example : rootBody.code[4]? = some (.call (Tests.callee 2)) := left.call
+example : rootBody.code[2]? = some (.call (Tests.callee 2)) := right.call
+example : rootBody.linkAt 4 = some (.direct left) := left.link
 example : Extracted.signatures[right]? = some "System.UInt64 Examples.Identity::Right(System.UInt64,System.UInt64)" := right.signature
 
 -- Generated bindings are kernel-checked `rfl`, never elaborator-only evidence.
 run_cmd do
-  for name in [``left.signature, ``left.found, ``left.call] do
+  for name in [``left.signature, ``left.found, ``left.call, ``left.link] do
     let some (.thmInfo info) := (← Lean.getEnv).find? name | throwError "missing {name}"
     unless info.value.isAppOf ``Eq.refl || info.value.isAppOf ``rfl do throwError "{name} is not rfl: {info.value}"
 
@@ -87,7 +94,7 @@ bind_callee pick pickBody := "System.UInt64 Examples.Overloads::Pick(System.UInt
 /-- The second two-argument callee. -/
 bind_callee second secondBody := call 2 from rootBody [1]
 example : second = left ∧ secondBody = leftBody := ⟨rfl, rfl⟩
-example : rootBody.code[4]? = some (.call second 2) := second.call
+example : rootBody.code[4]? = some (.call (Tests.callee 2)) := second.call
 example : Extracted.signatures[second]? = some "System.UInt64 Examples.Identity::Left(System.UInt64,System.UInt64)" := second.signature
 
 run_cmd do
@@ -244,7 +251,9 @@ end BatchCase0
 namespace ImportCase.Extracted
 
 def method0Signature : String := "System.Void Examples.Imports::Root(System.UInt64&,System.UInt64&)"
-def method0 : CIL.Method := { code := [.arg 0, .arg 1, .arg 0, .call 1 3, .ret], locals := [], returnsValue := false }
+def method0 : CIL.Method :=
+  { code := [.ldarg 0, .ldarg 1, .ldarg 0, .call (Tests.callee 3) {}, .ret],
+    links := [(3, .direct 1)], locals := [], returnsValue := false }
 def program : CIL.Program := [method0]
 def signatures : List String := [method0Signature]
 def importSignatures : List String := ["System.Void Library.Adder::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)"]
@@ -257,6 +266,6 @@ bind_method root rootBody := "System.Void Examples.Imports::Root(System.UInt64&,
 bind_import addTo := "System.Void Library.Adder::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)"
 bind_call addSite := addTo from rootBody
 example : addTo = 1 ∧ addSite = 3 := ⟨rfl, rfl⟩
-example : rootBody.code[addSite]? = some (.call addTo 3) := addSite.call
+example : rootBody.code[addSite]? = some (.call (Tests.callee 3)) := addSite.call
 
 end ImportCase

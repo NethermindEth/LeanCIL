@@ -33,27 +33,363 @@ instruction of the longest method when that is more, because Lean compiles and c
 list one nested cell per instruction. At a fixed 4096, a method of 2,002 instructions fails to
 compile.
 
+The kernel decides a method's instruction checks once per site. A body of 4,006 arithmetic
+instructions spends 60 heartbeats per instruction in the unit of `maxHeartbeats`, and a body of
+802 instructions with a linked call at every second one spends 168, of which the model agreement
+check takes 104, so a call site adds 216. `Extracted.lean` therefore states
+`set_option maxHeartbeats` on those checks when 120 per instruction plus 432 per call, newobj,
+callvirt or calli exceeds Lean's default of 200,000; any other method keeps the default. At the
+default, the checks of the 4,006-instruction body run out.
+
 ## The `lookups` suite
 
 ```sh
 dotnet run --file scripts/Test.cs -- --suite lookups
 ```
 
+The suite runs the model table, closure and opcode decoding checks, which time Lean, alone first,
+then every other check at once, as [running suites](../VALIDATION.md#running-suites) describes.
+
 The suite (`Tests/LookupScaling.cs`) extracts one method, `word = word * y + x;` repeated, at
 about 500 and about 2,000 instructions, and compiles three files at each length: the
 extraction, its code as a body with a parameter under `cil_instruction_equations`, and its
-generated template. Heartbeats are read by `IO.getNumHeartbeats` at the end of each file, less
-the heartbeats of a file that holds the imports alone. Each file prints one line:
+generated template. The suite reads `IO.getNumHeartbeats` after the final lookup assertions
+and subtracts the heartbeats of the imports alone. Each row prints one line:
 
 ```text
 PASS compiling an extracted method costs <n> heartbeats per instruction at 502 instructions and <n> at 2002, <ratio> times as many
 ```
 
-The suite fails when a ratio exceeds 1.25. Linear equations measure 0.99 for the extraction and
-1.01 for the body and the template; equations proved against the whole list measure 3.09 for the
-extraction and about 3.7 for the body. A ratio that rises toward 1.25 means some proof or
-elaboration step walks the code list again. The suite also fails when a `cil_lookup` at a
-computed pc costs more than 1.25 times as much per case at 16 repeated segments as at 4.
+The suite fails when a ratio exceeds 1.15. The ratios are 0.98 for the extraction, 1.02 for the
+hand-written body and 0.95 for the decoded template. At 502 and 2,002 instructions the template
+costs 52,427 and 49,854 heartbeats per instruction. Proving each equation against the whole list
+costs 3.09 times as much per instruction for the extraction and about 3.7 for the hand-written
+body at the longer length. The suite also fails when a `cil_lookup` at a
+computed pc costs more than 1.15 times as much per case at 16 repeated segments as at 4.
+
+The lookup fixture checks the hand-written multiply-add code against the entire decoded template
+after reading its heartbeat count. A second fixture keeps eight branch sites and varies either
+the number of input profiles or the number of distinct feature getters over 2, 4 and 8, holding
+the other dimension at 4. It measures the whole shared module after imports and the public
+selection, leaf proofs and instruction equations after the closed decoder inputs. Each doubling
+may cost at most 1.15 times as much per instruction per input or per distinct flag.
+The input row adds a distinct observed flag assignment for each input. The flag row uses the
+same four profiles at every size, with two observed assignments. A template with no flags uses
+its decoded input's code directly. With flags, each conditional instruction compiles separately
+so the compiler can handle one pc without tracing the branches at later pcs.
+
+The same method at 125, 250 and 500 statements also reports, from its extraction, the heartbeats
+of `Extracted.method0_calls_validated` and of `Extracted.method0_evidence_validated` alone. The
+suite fails when the call check costs more than 1.15 times as much per statement as at the length
+before, or when the evidence theorem costs more than 1.15 times as much in total. The evidence
+theorem only assembles the conjuncts' theorems, so it costs about 260,000 heartbeats at every
+length; a conjunct stated through another term than `CIL.Extraction.MethodEvidenceValid` states
+makes the elaborator reduce the whole decoded body, about 390,000 heartbeats per instruction.
+
+The suite also measures the body obligation of one method that passes 125, 500 and 1,000 distinct
+string literals to another method, less the same file with the proof left open, per instruction of
+the method's 2n + 2. A body over 256 bytes is one `CIL.Extraction.fixedBytes` literal whose code
+joins numerals of at most 256 bytes, and the check costs about 88,900, 92,700 and 99,800
+heartbeats per instruction. The suite fails when the cost per instruction is more than 1.1 times
+the cost at the size before. The kernel's caches hash a numeral by its low 64 bits, so numerals
+with equal last bytes collide there: the same bodies written as separate numerals joined by `++`
+cost about 89,600, 136,300 and 201,500 heartbeats per instruction.
+
+The suite also measures `decide +kernel` on two `CIL.TypeIdentity` values whose names are 20 or 80
+characters long and differ only in their last character, less the same statement closed with
+`sorry`. A name is one code, so the decision costs about 7,500 heartbeats for equal names and
+8,300 for unequal ones at either length; one enclosing type adds about 2,500. The suite fails when the 80-character case costs more
+than 1.05 times the 20-character case or when either costs more than 9,500 heartbeats. This
+check takes about 5 seconds.
+
+Exception decisions compare `CIL.ExceptionType` constructors. The equality, inequality,
+CLR mapping and optional outcome rows each allow 2,000 to 9,500 kernel heartbeats. Using
+`applicationException` instead of `format` may increase the cost by at most 1.05 times.
+
+The suite also measures `decide +kernel` on one `add` of an int32 offset to a native method
+table of 16, 64 and 256 entries, less the same statement closed with `sorry`. Each table and its
+static storage are definitions outside the decision, so the proof of `MethodTable.counted` is
+checked once there and not in the measured statement. The step reads `MethodTable.entryCount`,
+not the entries, and costs about 24,700 heartbeats at each size; geometry checks that read
+`targets.size` cost 29,500, 41,800 and 90,900. The suite fails when the cost at 64 or 256 entries
+exceeds 1.15 times the cost at 16.
+
+The same files measure `loadNativeTable` of the table's first and of its last entry. The load
+bounds the entry index by `MethodTable.entryCount`, so the first entry costs about 27,400
+heartbeats at each size; a bound read from `targets[index]?`, which walks the array to its size,
+costs 30,100, 42,700 and 92,800. Reading entry i still walks i cells of the literal array, which
+the kernel holds as a list, so the last entry costs 36,000, 63,700 and 174,300, about 576
+heartbeats per index at each size. The suite fails when the first entry's cost at 64 or 256
+entries exceeds 1.15 times the cost at 16, or when the last entry's cost beyond the first's,
+divided by its index, does. Run these rows alone with
+`dotnet run --file Tests/LookupScaling.cs -- --native-table-only`.
+
+The suite also measures `decide +kernel` on the name clause of the call and field operand checks,
+`MetadataName.spells`, for names of 20, 80 and 320 bytes that share all but their last byte, less
+the same statements closed with `sorry`. The clause reads the name's code back into bytes: about
+41,300, 151,400 and 589,600 heartbeats, or 2,070, 1,890 and 1,840 per byte. The suite fails when
+the cost per byte grows more than 1.15 times from one length to the next. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --metadata-name-only`.
+
+The suite also measures `decide +kernel` on runtime model lookups of the first, middle and last
+entry of a table of 16 and of 256 entries, less the same statements closed with `sorry`.
+`model_table%` writes the table as a literal balanced tree keyed by method name code, so a lookup
+walks at most four more levels in the larger table and compares one method reference at the leaf:
+66,364 and 68,298 heartbeats for the first entry, 64,693 and 64,700 for the middle entry (the
+root), and 66,319 and 68,478 for the last. The suite fails when any position costs more than
+1.05 times as much at 256 entries as at 16.
+
+The same file measures 8, 32 and 128 live sites, each calling a distinct modelled method.
+Checking rejection at every site costs 169,266, 521,797 and 1,938,694 heartbeats.
+The suite permits up to 1.15 times the previous rejection cost per site.
+Checking the complete body with `ModelsAgree` costs 253,782, 840,794 and 3,195,521 heartbeats
+when every site retains its call. The cost per retained call must stay flat or decrease.
+It falls from 31,723 to 26,275 to 24,965 heartbeats.
+
+The compiled checks interleave sizes across nine trials. The table gives median times in
+milliseconds. Each size doubles the instruction count or both the tuple field count and query
+count. Tuple queries retain the same computed layout and change only the indexed raw row.
+
+| Production check | 512 | 1,024 | 2,048 |
+| --- | ---: | ---: | ---: |
+| `RuntimeModelsAgree`, live nops | 1.811 | 3.515 | 7.257 |
+| `RuntimeModelsAgree`, dead nops with reverse-ordered links | 1.514 | 2.906 | 6.203 |
+| `integerPairResult`, oversized DivRem tuple | 0.486 | 0.973 | 1.908 |
+
+Each doubling permits up to 1.15 times the preceding median cost per instruction, or 1.25
+times the preceding median cost per tuple query. Run these rows alone with
+`dotnet run --file Tests/LookupScaling.cs -- --model-table-only`.
+
+The platform lookup benchmark measures the kernel cost of resolving a reference, admitting an
+enum, checking a pair field, ending a class chain, checking the byte-order constant and
+classifying a base. Each table contains the six definitions these checks use and 16, 128 or
+1,024 filler definitions. Separate rows look up an absent type and a simple name that occurs
+in several namespaces. A further row looks up identical name parts in distinct assembly scopes.
+It checks two entries with different kinds and a third, absent scope. The three lookups together
+cost about 61,000, 65,000 and 68,000 heartbeats at the three sizes.
+
+When names repeat across scopes, the literal index includes the assembly's name bytes in the key,
+and a lookup compares the whole typed `AssemblyName` of each candidate. The suite
+compares each lookup at consecutive table sizes and allows up to 1.15 times the previous cost.
+The same growth limit applies to elaboration heartbeats per definition. Run these rows with
+`dotnet run --file Tests/LookupScaling.cs -- --platform-table-only`.
+
+The suite also measures `cil_kernel_rfl` on `CIL.Safety.indirectTarget`, the selection of a
+`calli` body, for a pointer whose owner is 64, 256 or 1,024 bytes long and a catalog whose second
+entry holds the same owner, less the same statement closed with `sorry`. The kernel compares
+the owners byte by byte, at 8,300 to 8,900 heartbeats per byte: 572,000, 2,165,000 and 8,533,000
+heartbeats. The suite fails when the cost grows more than 1.1 times as fast as the length from one
+size to the next. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --indirect-target-only`.
+
+The suite also checks the kernel heartbeats of `ScalarFlowValid` on generated bodies of 128, 256
+and 512 array element addresses, each followed by a branch, with and without a `readonly.`
+prefix, less the heartbeats of stating the same certificate. Each instruction of these bodies, as
+of the local bodies whose `ScalarFlowValid` is checked below, carries the byte offset extraction
+writes for it. It fails when the cost per address
+at 256 or 512 exceeds 1.15 times the cost at 128. The check reads the raw instructions next to a
+site from a `FlowIndex` built once per body, only at the sites that need them, and measures
+1.01 for plain and 1.02 for prefixed addresses.
+
+The prefix measurements use bodies of 500, 2,000 and 8,000 instructions. Each segment
+contains `readonly.`, `ldelema`, `pop` and a branch to a segment's prefix.
+The body evidence row measures `prefixSequenceValid`. Three raw construction rows measure
+`rawPrefixesValid` with the same destinations in ascending, descending and shuffled order.
+Each branch or switch destination requires one lookup of its preceding instruction. Compiled
+code reads a single array for the method. Kernel reduction shares the suffix at each pc.
+Each row permits at most 25% growth in heartbeats per instruction when the size quadruples.
+Each reordered row must also stay within 2% of ascending at each size. Run the rows with
+`dotnet run --file Tests/LookupScaling.cs -- --prefix-entry-only`.
+
+The method-decoding and decoded-definition rows each use 500, 2,000 and 8,000 instructions.
+A fully live body with no method-token calls or possible fold heads uses the ordinary decoder,
+which carries the preceding instruction for prefix handling. Other bodies consult the reachability
+mask and fold roles at each pc. The kernel shares the preceding lookup's list suffix, and
+compiled code reads the array directly. A body without prefixes needs no branch-target lookups
+for prefix validation. Run these rows individually with `--method-decode-only` and
+`--decoded-definition-only`.
+
+It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of
+128, 256 and 512 locals, each stored once and then loaded or addressed once, less the heartbeats
+of stating the same certificate. Integer locals take a constant and are popped after a load or
+after `ldloca`; native-int locals take a method
+address and are consumed by `calli`, which makes each a pointer local. For the pointer locals it
+also checks `closedArguments`. The suite fails when the cost per instruction at 256 or 512 locals
+exceeds 1.25 times the cost at 128. The scalar check and fold discovery read local types from a
+`FlowIndex` and pointer locals from a `Std.TreeSet`, built once per body, as does the closed
+argument storage. They measure 1.01 for loaded, 1.01 for addressed and 1.07 for pointer locals,
+and 1.17 for the closed argument storage, whose set lookups cost the logarithm of the locals.
+Checks that walk the locals list or the pointer local list at each site measure 1.33, 1.54, 1.62
+and 2.33.
+
+The suite also checks the kernel heartbeats of `FeatureFlowValid` on generated bodies of 256, 1,024
+and 4,096 instructions that cycle `ldloc.s`, `stloc.s`, `ldloca.s` and `pop` over four `int32`
+locals, less the heartbeats of stating the same certificate. It fails when the cost per instruction
+at 1,024 or 4,096 exceeds 1.25 times the cost at 256. A local load, store or address is checked by
+its opcode and index, and the cost per instruction measures 1.00 at 1,024 and 1.05 at 4,096.
+
+It checks `FeatureFlowValid` on bodies of 2,049 instructions over 16, 64 and 256 `int32` locals as
+well. Each segment loads, stores and addresses a local, then addresses the argument and stores a
+constant into it. A feature state lists only the locals that hold a known word, as (local index,
+word) pairs in increasing index order, so none of these states holds a local fact. The suite fails
+when the cost per instruction at 64 or 256 locals exceeds 1.25 times the cost at 16; it measures
+1.01 at 64 and 1.02 at 256.
+
+A last body over 64 `int32` locals stores zero into the first 4, 16 or 64 of them. Then, in each
+of 128 rounds, it stores a new word into one of those locals in turn and loads it back, so each of
+the 512 loop states holds every stored fact. Its certificate is written out as literal states, as
+the extractor writes them. The suite subtracts the cost of the stores alone, whose states together
+hold about the square of the facts, and fails when the increment from 16 to 64 facts exceeds 4.5
+times the increment from 4 to 16. Linear growth in the facts gives four; at the measured cost per
+fact, a quadratic term of one heartbeat per pair of facts in each state exceeds 4.5, and a check
+that also compares every pair of facts in each state measures 10.6. Reads, stores and weakening
+walk the known facts, and each fact's eligibility is a lookup in a balanced index built once per
+body. The ratio measures 4.05, about 400 kernel heartbeats per fact per state, or about 13 million
+for 64 facts over 512 states.
+
+The suite embeds a hand-written body built with `Method.withCode` and its own link table, one call per segment, into an
+extraction with a dead block after each return, at 512 and 2,048 calls, and reads the kernel
+heartbeats to recheck the lemma `cil_embed` states. It fails when the heartbeats per call grow
+more than 1.15 times. The recheck costs about 56,800 heartbeats per call at both sizes, 1.00
+times; link reads whose cost grows with the square of the calls measure 1.29. The suite also
+embeds a body whose head branches over its first block to its second into an extraction that
+places the second block first, at 256 and 1,024 calls, under the same limit. Its pc map descends
+once, and the link reads and code lookups start again from the head of the table and the code
+there; it costs about 53,800 heartbeats per call at both sizes.
+
+The suite declares `cil_resolution_facts` for methods of 8, 32 and 128 `int32` parameters, once
+with no parameter homes and once with every other argument homed, and reads every argument's
+`Method.argumentAccess` through the facts with `simp only [cil_code]`. The facts walk the parameter
+types and homes once, from named 16-entry suffixes built as the code suffixes are. The suite fails
+when the heartbeats per argument of the facts, or of the reads, grow more than 1.35 times from
+one size to the next. The facts cost about 7,400, 8,400 and 8,400 heartbeats per argument without
+homes and 8,300, 10,500 and 10,800 with homes; a size below one block walks fewer entries, which
+accounts for the lower cost at 8. The reads cost 11,200 to 12,500 heartbeats per argument at every
+size.
+
+The suite also declares `cil_resolution_facts` for methods of 8, 32 and 128 static sites at even
+pcs and reads every site's `Method.staticAt` through the facts, under the same 1.35 limit per
+site. The facts cost about 5,500, 7,000 and 7,000 heartbeats per site, lower at 8 for the same
+reason, and the reads 22,400 to 23,800 heartbeats per site at every size.
+
+The suite also decides `StaticIdentitiesValid` for one method of 8, 32 and 128 static sites, each
+of its own field and identity, under the same 1.35 limit per site. The check walks the recorded
+accesses beside the sites once and sorts the pairs of identity and field both ways, and costs
+about 22,900, 21,000 and 22,700 heartbeats per site.
+
+The suite also declares `cil_resolution_facts` for a method whose raw method names one struct
+element type per layout, at 8, 32 and 128 layouts, and reads every element's
+`Method.elementShape` through the facts with `simp only [cil_code]`. Each struct fact reads its
+raw and computed layout entries from named 16-entry suffixes of the layout lists, declared once
+for the environment constant. The suite fails when the heartbeats per element type of the facts,
+or of the reads, grow more than 1.35 times from one size to the next. The facts cost about 8,700,
+11,300 and 11,400 heartbeats per element type, and the reads 14,200, 13,100 and 14,000; a size
+below one block walks fewer entries, which accounts for the lower cost of the facts at 8.
+The suite also names 8 element types from 8, 32 and 128 sites, so that most sites repeat a type,
+and fails when the total heartbeats of the facts, or of the reads, grow more than 1.35 times from
+one site count to the next. The facts cost about 69,700, 71,200 and 77,200 heartbeats and the
+reads 113,700 at every site count, since the facts state one shape per element type.
+Run this row alone with `dotnet run --file Tests/LookupScaling.cs -- --element-shape-only`.
+
+The suite declares `cil_field_shape` for 8, 32 and 128 `int32` fields of one struct and for 8,
+32, 128 and 512 fields each in a struct of its own, and `cil_value_shape` for 8, 32, 128 and 512
+struct types, and reads every operand's `Method.fieldShape` or `Method.valueShape` through the
+facts with `simp only [cil_code]` from a 512-instruction body. It fails when the heartbeats per
+operand of the facts, or of the reads, grow more than 1.35 times from one size to the next. The
+first fact of an environment names 16-entry suffixes of its layout lists, about 517,000
+heartbeats at 512 layouts, and each fact reads its struct's entries from the suffix that starts
+the entry's block, so an entry further into its block costs about 750 heartbeats more. The
+compiled resolver that proposes each shape evaluates the environment once. The field facts cost
+about 269,000, 280,000 and 326,000 heartbeats per field in one struct, where each fact walks the
+struct's field list to its index, and 269,000, 271,000, 272,000 and 272,000 with a struct per
+field; most of a field fact is the kernel deciding the storage of the field's `int32` type. The
+value facts cost about 13,300, 15,900, 16,000 and 16,100 heartbeats per type. Facts that walk the
+layout lists to the struct instead cost 293,000, 313,000, 386,000 and 672,000 heartbeats per
+field and 38,000, 58,000, 131,000 and 417,000 per type. The reads cost 11,100 to 14,700
+heartbeats per operand at every size.
+
+The suite locates a field of the furthest base on a fresh instance whose class has 2, 8 and 32
+bases, and rejects a field whose owner is outside that lineage, deciding membership in the
+lineage with `decide`. It fails when the heartbeats per base of either grow more than 1.35 times
+from one size to the next. Rejecting costs about 146,400, 65,900 and 45,000 heartbeats per base
+and locating 135,800, 69,300 and 51,100, so the total grows linearly with the bases. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --lineage-only`.
+
+The suite decides `ManagedCallsValid` on bodies of 64, 256 and 1,024 call sites, each followed by a
+`nop`, with the literal link table the extractor writes, and reads the heartbeats of that one
+command. It fails when the heartbeats per call site grow more than 1.35 times from one size to the
+next. The check reads each pc's link by one walk beside the code and costs about 10,900, 9,500 and
+9,100 heartbeats per call site; a scan of the table at each pc costs 41,500 and 133,900 at 64 and
+256 sites and exhausts a 16 GB memory limit at 1,024. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --call-check-only`.
+
+The suite states and proves with `decodedProgram?_eq_some` that 8, 32 and 128 evidence records
+decode to their methods, given a proof for the program's masks and one decoding fact per record.
+It reads the heartbeats for that command and fails when the cost per record grows more than 1.25
+times from one size to the next. With body facts alone, the measured costs were about 14,300,
+13,000 and 14,200 heartbeats per record. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --decoded-program-only`.
+
+The suite decides with `decide +kernel` the closure of method 0 in four shapes of program: a chain
+of 8, 32 and 128 methods each calling the next, whose closure is the whole program; the same chain
+at 128, 256 and 512 methods, the scale of the largest closures of the corpus, which reuses the
+chain's program and measurement at 128; one method whose
+link table enters seven others 32, 128 and 512 times; and a closure of four methods at the start
+of a program of 128, 512 and 2,048 methods. Each program states its index with `program_index%`,
+as an extraction does, and the closure is decided as `closureWith` over that index. A search over
+n methods with e link callees in a program of P methods reads each method from the index and
+gives each callee one packed table entry, so it costs O(n * log P + e). The suite fails when, in
+any shape, the heartbeats each added unit of n * log P + e costs grow more than 1.15 times from
+the first two sizes to the last two, and checks that the bound refuses the n * P of list reads
+in a growing whole-program closure. For the three shapes measured through the list, the same
+1.15 limit applies to the cost per added unit of n * P + e.
+
+| Shape | Sizes | Through the index | Through the list |
+| --- | --- | --- | --- |
+| chain | 8 / 32 / 128 | 87,300 / 335,424 / 1,423,146 | 90,411 / 437,548 / 3,533,801 |
+| long chain | 128 / 256 / 512 | 1,423,146 / 3,013,631 / 6,569,794 | not measured |
+| fan | 32 / 128 / 512 | 140,789 / 367,239 / 1,272,991 | 144,007 / 370,505 / 1,276,294 |
+| tail | 128 / 512 / 2,048 | 55,798 / 58,520 / 61,171 | 81,738 / 179,808 / 571,770 |
+
+The chain through the list grows with the square of its methods, since its closure is the whole
+program; through the index each added unit costs 0.84 times as much at the larger sizes, and the
+long chain 1.02 times. The suite fails unless the tail, a closure of four methods, costs less
+through the index than through the list at every size. Building each tail program's literal index
+and proving its length and lookup equations costs 323,143, 934,058 and 3,383,553 heartbeats.
+Each additional method costs about 1,591 heartbeats from 128 to 512 and 1,595 from 512 to 2,048.
+The suite limits the ratio to 1.15 and audits all three certificate theorems after timing them.
+
+The native elaboration check times the same literal index at 2,048 and 32,768 cells. It takes the
+fastest of three runs at each size and allows up to 64 times the smaller time. This includes list
+traversal that allocates no memory and therefore consumes no heartbeats. Run the closure checks with
+`dotnet run --file Tests/LookupScaling.cs -- --closure-only`.
+
+Three callers each execute a direct call and return. Their callees occupy positions 1, n/2 and n
+in programs of 16, 64 and 256 methods. Each callee pushes its own index and returns. Each proof
+covers four CIL instructions. The closed proofs evaluate the list interpreter or rewrite the
+invocation with `invoke_eq_invokeWith` and evaluate the index. The symbolic proofs use
+`cil_checked_steps` with an arbitrary initial memory and prove that the call preserves it.
+
+| Proof route | 16 methods | 64 methods | 256 methods |
+| --- | --- | --- | --- |
+| List, `rfl` | 269,536 / 277,919 / 287,544 | 269,390 / 301,940 / 335,187 | 270,547 / 398,335 / 526,622 |
+| Indexed, `rfl` | 297,495 / 298,328 / 298,798 | 304,040 / 305,652 / 306,059 | 310,995 / 312,991 / 313,378 |
+| List, `cil_kernel_rfl` | 87,144 / 89,896 / 93,132 | 87,416 / 98,959 / 110,968 | 88,286 / 134,968 / 182,133 |
+| Indexed, `cil_kernel_rfl` | 106,285 / 106,520 / 106,657 | 107,905 / 108,369 / 108,531 | 110,145 / 110,840 / 110,978 |
+| Symbolic, `cil_checked_steps` | 1,452,716 / 1,406,526 / 1,406,648 | 1,404,382 / 1,406,963 / 1,406,683 | 1,404,730 / 1,407,064 / 1,406,423 |
+
+These are raw heartbeats for the statement and proof. Divide by four for the cost per executed
+instruction. For each indexed proof route and for symbolic stepping, the most expensive of
+the nine calls must cost at most 1.15 times the cheapest. The list measurements include the
+walk to the callee on each fetch. Constructing all method equations costs 648,941, 2,649,459 and
+10,822,764 heartbeats at the three sizes. The suite bounds growth per added unit of P * log2(P)
+at 1.15 times. Printing their shared axiom report costs 29,166, 99,872 and 383,823 heartbeats,
+with the same growth limit per additional method. The suite checks that the report names each
+method equation and all three index certificates exactly once. A separate interval measures one
+`cil_lookup [program]` proof at every method position and bounds marginal cost per added method
+at 1.15 times its value in the smaller interval. The proofs cost 561,305, 2,249,666 and
+9,137,207 heartbeats, with a marginal cost ratio of 1.020. Run the comparison with
+`dotnet run --file Tests/LookupScaling.cs -- --run-only`.
 
 ## Reference figures
 

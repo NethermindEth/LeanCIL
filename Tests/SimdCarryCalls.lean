@@ -1,6 +1,8 @@
+import Tests.Support.IntrinsicMethods
 import CIL.Safety.MethodContract
 import CIL.Safety.CheckedMemoryFacts
 import CIL.SIMD.PackedLanes
+import Tests.Support
 
 /-!
 # Checked SIMD carry and borrow composition
@@ -44,20 +46,20 @@ def cascade (subtract : Bool) (left right : V256) : W32 :=
     (propagate subtract left right + (generate subtract left right <<< 1))
 
 /-- CIL evaluates both by-value operands before applying their lane arithmetic. -/
-@[cil_code] def laneCode (subtract : Bool) : List Op :=
-  [.arg 0, .arg 1,
-    .intrinsic (if subtract then .vector (.sub64 256) else .avx2 .add64) 2]
+@[cil_code] def laneCode (subtract : Bool) : List Instruction :=
+  [.ldarg 0, .ldarg 1,
+    .call (if subtract then Tests.IntrinsicMethods.subtract else Tests.IntrinsicMethods.add64)]
 
 /-- A checked helper computes the packed flag cascade, retaining its outgoing flag bit. -/
 @[cil_code] def maskBody (subtract : Bool) : Method :=
   { profile, locals := [], returnsValue := true,
     code :=
-      (if subtract then [.arg 0, .arg 1] else
-        laneCode false ++ [.const64 (~~~0), .intrinsic (.vector (.create64 256)) 1]) ++
-      [.intrinsic (.avx2 .eq64) 2, .intrinsic (.avx512DQ .moveMask64) 1, .dup] ++
-      (if subtract then [.arg 0, .arg 1] else laneCode false ++ [.arg 0]) ++
-      [.intrinsic (.avx512 .ltu64) 2, .intrinsic (.avx512DQ .moveMask64) 1,
-        .const32 1, .shl, .add, .bxor, .ret] }
+      (if subtract then [.ldarg 0, .ldarg 1] else
+        laneCode false ++ [.ldc_i8 (~~~0), .call CIL.Extraction.broadcast256Method]) ++
+      [.call Tests.IntrinsicMethods.compareEqual, .call Tests.IntrinsicMethods.moveMask, .dup] ++
+      (if subtract then [.ldarg 0, .ldarg 1] else laneCode false ++ [.ldarg 0]) ++
+      [.call Tests.IntrinsicMethods.compareLessThan, .call Tests.IntrinsicMethods.moveMask,
+        .ldc_i4 1, .shl, .add, .xor, .ret] }
 
 /-- The mask helper returns the exact cascade and leaves every caller byte unchanged. -/
 def maskContract (subtract : Bool) : MethodContract (V256 × V256) W32 where
@@ -106,17 +108,17 @@ theorem flag_lanes (flags : W32) :
 #print axioms flag_lanes
 
 /-- The CIL scalar extraction uses an unsigned shift, masks one bit and widens it. -/
-@[cil_code] def flagCode (index : W32) : List Op :=
-  [.arg 0, .const32 index, .shrUn, .const32 1, .band, .convU8]
+@[cil_code] def flagCode (index : W32) : List Instruction :=
+  [.ldarg 0, .ldc_i4 index, .shr_un, .ldc_i4 1, .and, .conv_u8]
 
 /-- The repair helper adds or subtracts all three incoming flags in their own lanes. -/
 @[cil_code] def repairBody (subtract : Bool) : Method :=
   { profile, locals := [], returnsValue := true,
-    code := [.arg 1, .arg 2,
-      .intrinsic (if subtract then .vector (.sub64 256) else .avx2 .add64) 2,
-      .const64 0] ++ flagCode 1 ++ flagCode 2 ++ flagCode 3 ++
-      [.intrinsic (.vector (.create64 256)) 4,
-        .intrinsic (if subtract then .vector (.sub64 256) else .avx2 .add64) 2, .ret] }
+    code := [.ldarg 1, .ldarg 2,
+      .call (if subtract then Tests.IntrinsicMethods.subtract else Tests.IntrinsicMethods.add64),
+      .ldc_i8 0] ++ flagCode 1 ++ flagCode 2 ++ flagCode 3 ++
+      [.call Tests.IntrinsicMethods.createFour,
+        .call (if subtract then Tests.IntrinsicMethods.subtract else Tests.IntrinsicMethods.add64), .ret] }
 
 /-- The corrected SIMD result before applying the shared whole-vector arithmetic theorem. -/
 def repaired (subtract : Bool) (flags : W32) (left right : V256) : V256 :=
@@ -163,7 +165,8 @@ theorem repaired_subtract (left right : V256) :
 /-- A checked caller obtains the cascade from one helper and supplies it to the repair helper. -/
 @[cil_code] def callerBody : Method :=
   { profile, locals := [], returnsValue := true,
-    code := [.arg 0, .arg 1, .call 1 2, .arg 0, .arg 1, .call 2 3, .ret] }
+    code := [.ldarg 0, .ldarg 1, .call (Tests.callee 2) {}, .ldarg 0, .ldarg 1, .call
+      (Tests.callee 3) {}, .ret], links := [(2, .direct 1), (5, .direct 2)] }
 
 /-- The public contract specifies whole-vector wrapping arithmetic and unchanged memory. -/
 def arithmeticContract (subtract : Bool) : MethodContract (V256 × V256) V256 where
@@ -219,8 +222,8 @@ structure StoredInput where
 /-- Both reads precede the helper call and the only store, so any input/output overlap is valid. -/
 @[cil_code] def storedBody : Method :=
   { profile, locals := [], returnsValue := false,
-    code := [.arg 0, .arg 1, .memory .load256, .arg 2, .memory .load256,
-      .call 0 2, .memory .store256, .ret] }
+    code := [.ldarg 0, .ldarg 1, .ldobj Tests.IntrinsicMethods.vector256UInt64, .ldarg 2, .ldobj Tests.IntrinsicMethods.vector256UInt64,
+      .call (Tests.callee 2) {}, .stobj Tests.IntrinsicMethods.vector256UInt64, .ret], links := [(5, .direct 0)] }
 
 /-- The output becomes the exact arithmetic result, with no separation or initial-output premise. -/
 def storedContract (subtract : Bool) : MethodContract StoredInput Unit where
@@ -269,16 +272,16 @@ private def carrying : V256 := pack256 (~~~0) (~~~0) 5 0
 /-- This incorrect helper shifts generated flags without cascading them through full lanes. -/
 @[cil_code] private def singleHopBody (subtract : Bool) : Method :=
   { maskBody subtract with
-    code := (if subtract then [.arg 0, .arg 1] else laneCode false ++ [.arg 0]) ++ [
-      .intrinsic (.avx512 .ltu64) 2, .intrinsic (.avx512DQ .moveMask64) 1,
-      .const32 1, .shl, .ret] }
+    code := (if subtract then [.ldarg 0, .ldarg 1] else laneCode false ++ [.ldarg 0]) ++ [
+      .call Tests.IntrinsicMethods.compareLessThan, .call Tests.IntrinsicMethods.moveMask,
+      .ldc_i4 1, .shl, .ret] }
 
 /-- This incorrect helper repairs lane two from lane one's incoming flag. -/
 @[cil_code] private def wrongLaneBody : Method :=
   { repairBody false with
-    code := [.arg 1, .arg 2, .intrinsic (.avx2 .add64) 2, .const64 0] ++
+    code := [.ldarg 1, .ldarg 2, .call Tests.IntrinsicMethods.add64, .ldc_i8 0] ++
       flagCode 1 ++ flagCode 1 ++ flagCode 3 ++
-      [.intrinsic (.vector (.create64 256)) 4, .intrinsic (.avx2 .add64) 2, .ret] }
+      [.call Tests.IntrinsicMethods.createFour, .call Tests.IntrinsicMethods.add64, .ret] }
 
 /-- Checked invocation exposes the returned vector independently of the memory representation. -/
 private def observedVector (mask repair : Method) (left right : V256) : Option V256 :=
@@ -354,8 +357,9 @@ private def overlapArguments : List CIL.Safety.Value :=
 
 /-- This incorrect caller overwrites the first input before taking its snapshot. -/
 @[cil_code] private def earlyStoreBody : Method :=
-  { storedBody with code := [.arg 0, .const64 0, .intrinsic (.vector (.create64 256)) 1,
-      .memory .store256] ++ storedBody.code }
+  { storedBody.withCode ([.ldarg 0, .ldc_i8 0, .call CIL.Extraction.broadcast256Method,
+      .stobj Tests.IntrinsicMethods.vector256UInt64] ++ storedBody.code) with
+    links := storedBody.links.map fun entry => (entry.1 + 4, entry.2) }
 
 /-- Observe the output bytes only after the real checked invocation returns. -/
 private def observedStore (body : Method) :=

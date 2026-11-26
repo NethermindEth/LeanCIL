@@ -1,16 +1,33 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Reflection;
 using System.Text.Json;
+
+const string holeCorpus = "Tests/HoleCorpus.cs";
+string[] holeArguments = ["--admission-report", At("artifacts/SelfAdmission/blockers.json")];
+var holeCommand = PreparedFixtureCommand(holeCorpus, holeArguments);
+if (holeCommand is null)
+{
+    // Build before admission. The project reference can replace the extractor whose hash the report records.
+    Run(["dotnet", "build", holeCorpus, "-c", "Release",
+        "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
+    holeCommand = FixtureCommand(holeCorpus, holeArguments, prepared: true);
+}
 
 // Admission report: shared blockers are deduplicated with every chain, excluded branches stay silent.
 var directory = At("artifacts/Blockers");
 var source = Path.Combine(directory, "Assembly");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Fixture.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<Optimize>true</Optimize></PropertyGroup></Project>
 """);
 var fixture = """
 using System.Runtime.CompilerServices;
@@ -120,6 +137,10 @@ var summary = Run(["dotnet", ExtractorPath, "blockers", assembly, "--manifest", 
 var json = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(report));
 var entries = json.GetProperty("entries").EnumerateArray().ToArray();
 var blockers = json.GetProperty("blockers").EnumerateArray().ToArray();
+// A chain names its methods by index into its own report's method table.
+string[] MethodNames(JsonElement report) =>
+    [.. report.GetProperty("methods").EnumerateArray().Select(method => method.GetString()!)];
+var methodNames = MethodNames(json);
 var checks = 0;
 
 void Require(bool condition, string message)
@@ -133,15 +154,20 @@ string[] expected = ["admitted", "blocked", "blocked", "admitted", "blocked", "n
     "admitted", "notChecked", "notChecked", "blocked", "blocked", "admitted", "blocked", "blocked", "blocked"];
 Require(entries.Select(e => e.GetProperty("status").GetString()).SequenceEqual(expected), "Wrong entry classification");
 Require(entries[0].GetProperty("method").GetString() == "System.UInt64 Fixture::Admitted(System.UInt64,System.UInt64)" &&
-    entries[0].GetProperty("reachableMethods").GetInt32() == 1, "Admitted entry lost its resolved method");
+    entries[0].GetProperty("reachableMethods").GetInt32() == 1 &&
+    entries[0].GetProperty("decodedMethods").EnumerateArray().Select(method => method.GetString())
+        .SequenceEqual([entries[0].GetProperty("method").GetString()]),
+    "Admitted entry lost its resolved or extracted method");
 
 
 // Validation continues past the first construct, and each construct is one blocker however many sites and entries reach it.
 const string helper = "System.Int32 Fixture::Helper(System.Int32)";
 const string excluded = "System.UInt64 Fixture::Excluded(System.UInt64,System.UInt64)";
 JsonElement Blocker(string construct) => blockers.Single(b => b.GetProperty("construct").GetString() == construct);
-string[] Reached(JsonElement blocker) => blocker.GetProperty("entries").EnumerateArray()
-    .Select(e => e.GetProperty("profile").GetString() + " " + string.Join(" -> ", e.GetProperty("chains").EnumerateArray().Single().EnumerateArray().Select(m => m.GetString())))
+string[] Reached(JsonElement blocker, string[]? names = null) => blocker.GetProperty("entries").EnumerateArray()
+    .Select(e => e.GetProperty("profile").GetString() + " " + string.Join(" -> ",
+        e.GetProperty("chains").EnumerateArray().Single().EnumerateArray()
+            .Select(m => (names ?? methodNames)[m.GetInt32()])))
     .Order(StringComparer.Ordinal).ToArray();
 string Id(JsonElement blocker) => blocker.GetProperty("id").GetString()!;
 Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(StringComparer.Ordinal)
@@ -286,8 +312,64 @@ var debug = ExtractAdmitted(BuildAs("Debug"), "Debug");
 Require(debug.Code != 0 && debug.Output.Contains("build configuration"),
     "A Debug build is accepted:\n" + debug.Output);
 
+// A runtime-async body returns the awaited result under a task signature: refused as an entry and as a callee.
+var asyncSource = Path.Combine(directory, "RuntimeAsync");
+Directory.CreateDirectory(asyncSource);
+File.WriteAllText(Path.Combine(asyncSource, "RuntimeAsync.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize>
+<Features>runtime-async=on</Features></PropertyGroup></Project>
+""");
+File.WriteAllText(Path.Combine(asyncSource, "RuntimeAsync.cs"), """
+using System.Threading.Tasks;
+
+public static class Awaiting
+{
+    public static async ValueTask<long> Twice(long x) => x * 2;
+
+    public static long Caller(long x) => Twice(x).Result;
+}
+""");
+Run(["dotnet", "build", Path.Combine(asyncSource, "RuntimeAsync.csproj"), "-c", "Release"]);
+var asyncAssembly = Path.Combine(asyncSource, "bin/RuntimeAsync.dll");
+const int runtimeAsyncFlag = 0x2000;
+using (var image = new System.Reflection.PortableExecutable.PEReader(File.OpenRead(asyncAssembly)))
+{
+    var metadata = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(image);
+    var twice = metadata.MethodDefinitions.Select(metadata.GetMethodDefinition)
+        .Single(method => metadata.GetString(method.Name) == "Twice");
+    Require(((int)twice.ImplAttributes & runtimeAsyncFlag) != 0, "The fixture's Twice is not a runtime-async method");
+}
+var asyncManifest = Path.Combine(directory, "runtime-async-manifest.json");
+File.WriteAllText(asyncManifest, JsonSerializer.Serialize(new
+{
+    entries = new object[]
+    {
+        new { signature = "Awaiting::Twice(long)", profile = "scalar" },
+        new { signature = "Awaiting::Caller(long)", profile = "scalar" }
+    }
+}));
+var asyncReport = Path.Combine(directory, "runtime-async-blockers.json");
+var asyncSummary = Run(["dotnet", ExtractorPath, "blockers", asyncAssembly, "--manifest", asyncManifest,
+    "--output", asyncReport]);
+var asyncJson = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(asyncReport));
+const string twiceMethod = "System.Threading.Tasks.ValueTask`1<System.Int64> Awaiting::Twice(System.Int64)";
+const string callerMethod = "System.Int64 Awaiting::Caller(System.Int64)";
+var refusal = asyncJson.GetProperty("blockers").EnumerateArray()
+    .Single(b => b.GetProperty("construct").GetString() == "Unsupported method metadata: runtime-async method");
+var refusalSite = refusal.GetProperty("sites").EnumerateArray().Single();
+Require(asyncJson.GetProperty("entries").EnumerateArray().All(e => e.GetProperty("status").GetString() == "blocked") &&
+    refusalSite.GetProperty("method").GetString() == twiceMethod &&
+    refusalSite.GetProperty("message").GetString()!.Contains("returns the awaited result, not the declared task") &&
+    Reached(refusal, MethodNames(asyncJson))
+        .SequenceEqual([$"scalar {callerMethod} -> {twiceMethod}", $"scalar {twiceMethod}"]),
+    "Runtime-async method not refused as entry and callee:\n" + asyncSummary + "\n" + File.ReadAllText(asyncReport));
+var asyncExtract = Execute(["dotnet", ExtractorPath, "extract", asyncAssembly, "Awaiting::Twice(long)",
+    Path.Combine(directory, "extract", "runtime-async"), "scalar"]);
+Require(asyncExtract.Code != 0 && asyncExtract.Output.Contains("Unsupported method metadata: runtime-async method"),
+    "extract does not name the runtime-async refusal:\n" + asyncExtract.Output);
+
 // Distinct arrays and sites are compared by content, while output keeps first discovery order.
-var blockersType = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.Blockers", true)!;
+var blockersType = Assembly.Load(File.ReadAllBytes(ExtractorPath)).GetType("Nethermind.LeanCIL.Blockers", true)!;
 var findingType = blockersType.GetNestedType("Finding", BindingFlags.NonPublic)!;
 var siteType = blockersType.GetNestedType("Site", BindingFlags.NonPublic)!;
 const BindingFlags instanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -314,6 +396,8 @@ Require(sites.Count == 2 && reaches.Count == 2 && chains.Count == 2 &&
 // LeanCIL's own assembly against its checked-in baseline, then the gate's decisions on altered baselines.
 const string selfAdmission = "Tests/SelfAdmission.cs";
 Run(["dotnet", "run", "--file", selfAdmission], streamOutput: true, progress: "Self-admission");
+Run(["dotnet", "run", "--file", "Tests/ExampleAdmission.cs"], streamOutput: true, progress: "Example admission");
+Run(holeCommand, streamOutput: true, progress: "Hole corpus");
 var selfReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(At("artifacts/SelfAdmission/blockers.json")))
     .GetProperty("entries").EnumerateArray().ToArray();
 // Source-named methods, so the gate's stable names equal the report's.
@@ -330,6 +414,17 @@ string? Existing(string status) => selfReport.FirstOrDefault(e => e.GetProperty(
 // The exact admitted set passes; a lost admission, a removed method or an unrecorded gain each fail.
 var admittedMethods = selfReport.Where(e => e.GetProperty("status").GetString() == "admitted")
     .Select(e => e.GetProperty("signature").GetString()!).ToArray();
+// Each admitted method is extracted; an admitted entry may also extract closed generic callees it reaches.
+string[] Unextracted(IEnumerable<string> admitted, IEnumerable<string> extracted) =>
+    [.. admitted.Except(extracted, StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+var extractedMethods = selfReport.Where(e => e.GetProperty("status").GetString() == "admitted")
+    .SelectMany(e => e.GetProperty("decodedMethods").EnumerateArray()).Select(method => method.GetString()!);
+var unextracted = Unextracted(admittedMethods, extractedMethods);
+Require(unextracted.Length == 0,
+    "Admitted self-admission methods were not extracted:\n" + string.Join('\n', unextracted));
+Require(Unextracted(admittedMethods, extractedMethods.Where(method => method != admittedMethods[0]))
+        .SequenceEqual([admittedMethods[0]]),
+    "An admitted method that was not extracted went unreported");
 var exact = Gate(admittedMethods);
 Require(exact.Code == 0 && exact.Output.Contains("matching the baseline"),
     "The scan's own admitted set failed the gate:\n" + exact.Output);
@@ -357,4 +452,228 @@ if (admittedMethods.Length != 0)
         gained.Output.Contains("Gained admissions") && gained.Output.Contains(unrecorded),
         "An unrecorded admission passed the gate:\n" + gained.Output);
 }
+// A volatile field is read and written under a `volatile.` prefix, which the single-threaded model gives no meaning:
+// extraction stops at it and names the instruction, the method and the stage.
+var volatileSource = Path.Combine(directory, "VolatileAssembly");
+Directory.CreateDirectory(volatileSource);
+File.WriteAllText(Path.Combine(volatileSource, "Volatile.csproj"),
+    File.ReadAllText(Path.Combine(source, "Fixture.csproj")));
+File.WriteAllText(Path.Combine(volatileSource, "Volatile.cs"), """
+public sealed class Flag { public volatile int Raised; }
+public static class Access
+{
+    public static int Read(Flag flag) => flag.Raised;
+    public static void Write(Flag flag) { flag.Raised = 1; }
+}
+""");
+Run(["dotnet", "build", Path.Combine(volatileSource, "Volatile.csproj"), "-c", "Release"]);
+foreach (var (selector, method) in new[] { ("Access::Read(Flag)", "System.Int32 Access::Read(Flag)"),
+    ("Access::Write(Flag)", "System.Void Access::Write(Flag)") })
+{
+    var refused = Execute(["dotnet", ExtractorPath, "extract", Path.Combine(volatileSource, "bin/Volatile.dll"),
+        selector, Path.Combine(directory, "VolatileExtraction")]);
+    Require(refused.Code != 0 && refused.Output.Contains("Unsupported instruction: IL_", StringComparison.Ordinal) &&
+        refused.Output.Contains("volatile.", StringComparison.Ordinal) &&
+        refused.Output.Contains("Method: " + method, StringComparison.Ordinal) &&
+        refused.Output.Contains("Stage: metadata and CIL validation", StringComparison.Ordinal),
+        "A volatile access was not refused with the unsupported-instruction message:\n" + refused.Output);
+}
+// A virtual call scans the classes of the image for subclasses of its slot. Resolving every class's base from
+// disk makes that scan cost milliseconds per class, so four times the classes would cost four times as long.
+const int FewClasses = 125;
+const int ManyClasses = 500;
+const int VirtualCallers = 100;
+const double AllowedClassGrowth = 2.5;
+double VirtualDispatchSeconds(int classes)
+{
+    var fixtureDirectory = Path.Combine(directory, "Dispatch" + classes);
+    Directory.CreateDirectory(fixtureDirectory);
+    File.WriteAllText(Path.Combine(fixtureDirectory, "Dispatch.csproj"), """
+    <Project Sdk="Microsoft.NET.Sdk">
+      <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+    </Project>
+    """);
+    // Each caller is blocked after its virtual call, so no extraction runs and the dispatch scan is the cost.
+    File.WriteAllText(Path.Combine(fixtureDirectory, "Dispatch.cs"), string.Join('\n',
+        ["public abstract class Shape { public abstract int Speak(); }",
+         "public sealed class Circle : Shape { public override int Speak() => 1; }",
+         .. Enumerable.Range(0, classes).Select(index =>
+             $"public sealed class Bystander{index} {{ public int Value; }}"),
+         "public static class Callers {",
+         .. Enumerable.Range(0, VirtualCallers).Select(index =>
+             $"    public static int Call{index}(Shape shape, int size) => shape.Speak() + new decimal[size].Length;"),
+         "}"]));
+    Run(["dotnet", "build", Path.Combine(fixtureDirectory, "Dispatch.csproj"), "-c", "Release"]);
+    var callers = Path.Combine(fixtureDirectory, "callers.json");
+    File.WriteAllText(callers, JsonSerializer.Serialize(new
+    {
+        entries = Enumerable.Range(0, VirtualCallers).Select(index =>
+            new { signature = $"Callers::Call{index}(Shape,int)", profile = "scalar" })
+    }));
+    var seconds = double.MaxValue;
+    for (var sample = 0; sample < 3; sample++)
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        Run(["dotnet", ExtractorPath, "blockers", Path.Combine(fixtureDirectory, "bin/Dispatch.dll"),
+            "--manifest", callers, "--output", Path.Combine(fixtureDirectory, "blockers.json")]);
+        seconds = Math.Min(seconds, timer.Elapsed.TotalSeconds);
+    }
+    return seconds;
+}
+var fewClassesSeconds = VirtualDispatchSeconds(FewClasses);
+var manyClassesSeconds = VirtualDispatchSeconds(ManyClasses);
+Require(manyClassesSeconds <= fewClassesSeconds * AllowedClassGrowth,
+    $"{VirtualCallers} virtual calls took {fewClassesSeconds:F1} s with {FewClasses} classes and " +
+    $"{manyClassesSeconds:F1} s with {ManyClasses}; the limit is {AllowedClassGrowth} times as long.");
+// A regex runner reads fields of its platform base class. Each reference to that class must resolve to one
+// definition, so the body is blocked by its unsupported constructs rather than by an internal error.
+var regexDirectory = Path.Combine(directory, "Regex");
+Directory.CreateDirectory(regexDirectory);
+File.WriteAllText(Path.Combine(regexDirectory, "Regex.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+</Project>
+""");
+File.WriteAllText(Path.Combine(regexDirectory, "Patterns.cs"), """
+using System.Text.RegularExpressions;
+
+public static partial class Patterns
+{
+    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_']*\z")]
+    public static partial Regex Identifier { get; }
+}
+""");
+Run(["dotnet", "build", Path.Combine(regexDirectory, "Regex.csproj"), "-c", "Release"]);
+var regexAssembly = Path.Combine(regexDirectory, "bin/Regex.dll");
+// The generated runner's type name carries a hash of the pattern, so it is read from the built assembly.
+var runner = Run(["dotnet", ExtractorPath, "list", regexAssembly]).Split('\n').Select(line => line.Trim())
+    .Single(line => line.EndsWith("/RunnerFactory/Runner::TryFindNextPossibleStartingPosition(" +
+        "System.ReadOnlySpan`1<System.Char>)", StringComparison.Ordinal));
+var runnerType = runner[(runner.IndexOf(' ', StringComparison.Ordinal) + 1)..
+    runner.IndexOf("::", StringComparison.Ordinal)];
+var regexManifest = Path.Combine(regexDirectory, "manifest.json");
+File.WriteAllText(regexManifest, JsonSerializer.Serialize(new
+{
+    entries = new[] { new { signature = runner, profile = "scalar" } }
+}));
+var regexReport = Path.Combine(regexDirectory, "blockers.json");
+Run(["dotnet", ExtractorPath, "blockers", regexAssembly, "--manifest", regexManifest, "--output", regexReport]);
+var regexConstructs = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(regexReport)).GetProperty("blockers")
+    .EnumerateArray().Select(blocker => blocker.GetProperty("construct").GetString()!).Order(StringComparer.Ordinal)
+    .ToArray();
+Require(regexConstructs.SequenceEqual([
+        "Unsupported aggregate layout: System.Text.RegularExpressions.RegexRunner",
+        "Unsupported class instance type: " + runnerType]),
+    "The regex runner is not blocked by its own constructs: " + string.Join("; ", regexConstructs));
+
+// Lean refuses a field operand no carried row positions at every pc, so a dead read of one blocks its method.
+var unpinnedDirectory = Path.Combine(directory, "UnpinnedField");
+var unpinnedLibrary = Path.Combine(unpinnedDirectory, "Lib");
+var unpinnedApplication = Path.Combine(unpinnedDirectory, "App");
+Directory.CreateDirectory(unpinnedLibrary);
+Directory.CreateDirectory(unpinnedApplication);
+File.WriteAllText(Path.Combine(unpinnedLibrary, "Lib.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AssemblyName>Unpinned.Lib</AssemblyName><Optimize>true</Optimize></PropertyGroup></Project>
+""");
+File.WriteAllText(Path.Combine(unpinnedLibrary, "Point.cs"), """
+namespace Unpinned;
+public struct Point { public int X; public int Y; }
+""");
+File.WriteAllText(Path.Combine(unpinnedApplication, "App.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AssemblyName>Unpinned.App</AssemblyName><Optimize>true</Optimize></PropertyGroup>
+<ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
+""");
+File.WriteAllText(Path.Combine(unpinnedApplication, "Reader.cs"), """
+using System.Runtime.Intrinsics.X86;
+public static class Reader
+{
+    public static Unpinned.Point Origin;
+
+    public static int Read(int x)
+    {
+        if (Avx2.IsSupported) return Origin.Y;
+        return x;
+    }
+}
+""");
+Run(["dotnet", "build", Path.Combine(unpinnedApplication, "App.csproj"), "-c", "Release"]);
+var unpinnedAssembly = Path.Combine(unpinnedApplication, "bin/Unpinned.App.dll");
+var unpinnedManifest = Path.Combine(unpinnedDirectory, "manifest.json");
+File.WriteAllText(unpinnedManifest, JsonSerializer.Serialize(new
+{
+    entries = new[] { new { signature = "Reader::Read(int)", profile = "scalar" } }
+}));
+var unpinnedReport = Path.Combine(unpinnedDirectory, "blockers.json");
+Run(["dotnet", ExtractorPath, "blockers", unpinnedAssembly, "--manifest", unpinnedManifest,
+    "--output", unpinnedReport]);
+const string UnpinnedConstruct = "Unsupported field access: System.Int32 Unpinned.Point::Y";
+const string UnpinnedReason = "Its owner has no carried definition, so no metadata row gives the field's position.";
+var unpinnedBlockers = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(unpinnedReport))
+    .GetProperty("blockers").EnumerateArray().ToArray();
+Require(unpinnedBlockers.Length == 1 &&
+    unpinnedBlockers[0].GetProperty("construct").GetString() == UnpinnedConstruct &&
+    unpinnedBlockers[0].GetProperty("sites")[0].GetProperty("message").GetString()!.Contains(UnpinnedReason,
+        StringComparison.Ordinal),
+    "A dead read of an unpinned struct's field is not blocked by that field: " + File.ReadAllText(unpinnedReport));
+var unpinnedExtraction = Execute(["dotnet", ExtractorPath, "extract", unpinnedAssembly, "Reader::Read(int)",
+    Path.Combine(unpinnedDirectory, "Extracted"), "scalar"]);
+var refusedWithReason = unpinnedExtraction.Code != 0 &&
+    unpinnedExtraction.Output.Contains(UnpinnedConstruct, StringComparison.Ordinal) &&
+    unpinnedExtraction.Output.Contains(UnpinnedReason, StringComparison.Ordinal);
+Require(refusedWithReason,
+    "Extraction does not refuse the dead read with the blocker's diagnostic: " + unpinnedExtraction.Output);
+
+// Each admitted entry is extracted again. Reading and hashing the whole image per entry makes that linear in the
+// image, so doubling the methods of an image that grows with them would make admission four times as long.
+const int FewAdmitted = 100;
+const int ManyAdmitted = 200;
+// A resource stands for the rest of an assembly, so the image grows with the methods without adding analysis.
+const int PaddingPerMethod = 512 * 1024;
+const double AllowedPerMethodGrowth = 1.25;
+// One wall-clock run on a loaded machine varied by 1.6 times; the fastest of three tracks the work.
+const int AdmissionRuns = 3;
+double AdmissionSeconds(int methods)
+{
+    var fixtureDirectory = Path.Combine(directory, "Admission" + methods);
+    Directory.CreateDirectory(fixtureDirectory);
+    File.WriteAllText(Path.Combine(fixtureDirectory, "Admission.csproj"), """
+    <Project Sdk="Microsoft.NET.Sdk">
+      <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+      <ItemGroup><EmbeddedResource Include="padding.bin" /></ItemGroup>
+    </Project>
+    """);
+    File.WriteAllBytes(Path.Combine(fixtureDirectory, "padding.bin"), new byte[methods * PaddingPerMethod]);
+    File.WriteAllText(Path.Combine(fixtureDirectory, "Admission.cs"), string.Join('\n',
+        ["public static class Admitted {",
+         .. Enumerable.Range(0, methods).Select(index =>
+             $"    public static ulong Add{index}(ulong x) => x + {index}UL;"),
+         "}"]));
+    Run(["dotnet", "build", Path.Combine(fixtureDirectory, "Admission.csproj"), "-c", "Release"]);
+    var admissionManifest = Path.Combine(fixtureDirectory, "manifest.json");
+    File.WriteAllText(admissionManifest, JsonSerializer.Serialize(new
+    {
+        entries = Enumerable.Range(0, methods).Select(index =>
+            new { signature = $"Admitted::Add{index}(ulong)", profile = "scalar" })
+    }));
+    var admissionReport = Path.Combine(fixtureDirectory, "blockers.json");
+    var seconds = double.MaxValue;
+    for (var run = 0; run < AdmissionRuns; run++)
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        Run(["dotnet", ExtractorPath, "blockers", Path.Combine(fixtureDirectory, "bin/Admission.dll"),
+            "--manifest", admissionManifest, "--output", admissionReport]);
+        seconds = Math.Min(seconds, timer.Elapsed.TotalSeconds);
+    }
+    var admitted = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(admissionReport)).GetProperty("counts")
+        .GetProperty("admitted").GetInt32();
+    Require(admitted == methods, $"{admitted} of {methods} padded fixture methods admitted");
+    return seconds;
+}
+var fewAdmittedSeconds = AdmissionSeconds(FewAdmitted);
+var manyAdmittedSeconds = AdmissionSeconds(ManyAdmitted);
+Require(manyAdmittedSeconds <= fewAdmittedSeconds * 2 * AllowedPerMethodGrowth,
+    $"Admitting {FewAdmitted} methods took {fewAdmittedSeconds:F1} s and {ManyAdmitted} took " +
+    $"{manyAdmittedSeconds:F1} s; the limit is {2 * AllowedPerMethodGrowth} times as long.");
 Console.WriteLine($"PASS {checks} admission report checks");

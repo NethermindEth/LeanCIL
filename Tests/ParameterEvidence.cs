@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
@@ -16,11 +21,13 @@ var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringCo
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 RequireLeanFixtures("Tests.ExtractionParameters");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
+const string instanceParameter = "Counter::Parameter(byte)";
+var instanceControl = Path.Combine(output, "StaticFieldLoad");
 var samples = new[]
 {
     "Arguments::Overwrite(uint,uint)", "Arguments::Alias(uint)", "Arguments::Address(uint)",
     "Arguments::Native(nint)", "Arguments::Narrow(byte)",
-    "Arguments::ReassignReference(uint&,uint&)", "Arguments::Struct(Examples.Packet)", "Counter::Parameter(byte)"
+    "Arguments::ReassignReference(uint&,uint&)", "Arguments::Struct(Examples.Packet)", instanceParameter
 };
 ExtractBatch("extract", "Examples", samples.Select((selector, index) =>
     new GeneratedExtraction(assembly, selector, Path.Combine(output, index.ToString()))));
@@ -46,10 +53,19 @@ using (var module = ModuleDefinition.ReadModule(assembly))
             else if (instruction.OpCode.Code == Code.Starg_S) instruction.OpCode = OpCodes.Starg;
             else if (instruction.OpCode.Code == Code.Ldarga_S) instruction.OpCode = OpCodes.Ldarga;
         }
+    // The decoded instance method homes argument 1 after the platform field load.
+    var counter = module.GetType("Examples.Counter").Methods.Single(method => method.Name == "Parameter");
+    var processor = counter.Body.GetILProcessor();
+    var entry = counter.Body.Instructions[0];
+    var endian = module.GetType("Examples.Capabilities").Methods.Single(method => method.Name == "Endian");
+    var load = endian.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Ldsfld);
+    processor.InsertBefore(entry, processor.Create(OpCodes.Ldsfld, (FieldReference)load.Operand));
+    processor.InsertBefore(entry, processor.Create(OpCodes.Pop));
     var longAssembly = Path.Combine(output, "LongArguments.dll");
     module.Write(longAssembly);
     ExtractBatch("extract", "Examples", samples.Take(3).Select((selector, index) =>
-        new GeneratedExtraction(longAssembly, selector, Path.Combine(output, "Long" + index))));
+        new GeneratedExtraction(longAssembly, selector, Path.Combine(output, "Long" + index)))
+        .Append(new GeneratedExtraction(longAssembly, instanceParameter, instanceControl)));
     foreach (var selector in samples.Take(3))
     {
         var folder = Path.Combine(output, "Long" + Array.IndexOf(samples, selector));
@@ -57,21 +73,34 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     }
 }
 
+evidence.Add(Path.Combine(instanceControl, "Extracted.lean"), "PASS decoded instance parameter after a field load");
 evidence.Check();
-var baseline = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
-void Reject(string name, string mutated)
+var decoded = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
+var baseline = File.ReadAllText(Path.Combine(instanceControl, "Extracted.lean"));
+if (!IsDecodedMethod(decoded, 0) || !IsDecodedMethod(baseline, 0))
+    throw new InvalidOperationException("Both parameter controls must decode.");
+
+const string obligation = "method0_parameters_validated";
+void Reject(string name, string source, string before, string after)
 {
-    if (mutated == baseline) throw new InvalidOperationException("Mutation did not change generated source: " + name);
+    var control = NarrowEvidence(source, obligation);
+    var mutated = control.Replace(before, after, StringComparison.Ordinal);
+    if (mutated == control)
+        throw new InvalidOperationException($"Missing parameter obligation for {name}");
     var path = Path.Combine(output, name + ".lean");
     File.WriteAllText(path, mutated);
-    rejected.Add(path, "PASS parameter evidence rejects " + name, "decide");
+    rejected.Add(path, $"PASS parameter evidence rejects {name}", "ParameterHomesValid");
 }
 
-// Mutate lookup lemmas along with code so their rfl proofs cannot cause the rejection.
-Reject("omitted-home", baseline.Replace("[(0, .word32)]", "[]"));
-Reject("wrong-slot", baseline.Replace(".setLocal 0", ".setLocal 1").Replace(".local 0", ".local 1"));
-Reject("omitted-redirection", baseline.Replace(".local 0", ".arg 0"));
-Reject("wrong-home-type", baseline.Replace("[(0, .word32)]", "[(0, .word64)]"));
-Reject("omitted-raw-site", baseline.Replace(".load 1, .store 0, .load 0, .other", ".load 1, .other, .load 0, .other"));
+// Argument 1 is the homed byte and argument 0 is the receiver.
+void RejectMethod(string name, string update) =>
+    Reject(name, baseline, "method0Reachable method0 :=", $$"""method0Reachable { method0 with {{update}} } :=""");
+RejectMethod("omitted-home", "parameterHomes := []");
+RejectMethod("wrong-home-type", "parameterHomes := [(1, .word32)]");
+RejectMethod("wrong-argument", "code := method0.code.set 6 (.starg 0)");
+RejectMethod("home-slot-store", "code := method0.code.set 6 (.stloc 0)");
+RejectMethod("home-slot-load", "code := method0.code.set 2 (.ldloc 0)");
+Reject("omitted-raw-site", decoded, "computedLayouts method0RawArguments method0Reachable",
+    "computedLayouts { method0RawArguments with code := method0RawArguments.code.set 1 .other } method0Reachable");
 rejected.Check();
 Console.WriteLine("PASS complete parameter-home mapping, argument types, instance indices and long/short encodings");

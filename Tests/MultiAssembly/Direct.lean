@@ -1,4 +1,6 @@
 import Extracted
+import CIL.Safety.DecodedSummary
+import CIL.Safety.SymbolicExecution
 
 /-! Direct call from the selected assembly into a pinned referenced assembly's static method. -/
 
@@ -12,4 +14,93 @@ theorem correctness (x : W64) :
   rfl
 
 #print axioms correctness
+open Safety Extraction
+
+/-- The library method returns three times its input plus one and preserves caller memory. -/
+def stepContract : MethodContract W64 W64 where
+  args x := [.scalar (.i64 x)]
+  results value := [.scalar (.i64 value)]
+  pre _ _ := True
+  footprint _ := []
+  post x initial final value := value = x * 3 + 1 ∧ final = initial
+
+/-- The compiled definition of Step is the second method, from the pinned reference. -/
+theorem step_summary :
+    DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
+      Extracted.environment 1 Extracted.assembly1 Extracted.method1Original.token [] []
+      stepContract := by
+  apply DecodedSummary.of_translation Extracted.translation_valid ⟨1, by decide⟩
+    Extracted.program_method1 (listed := .of_sites [1] (by decide) (by decide) rfl)
+  intro x memory _
+  exact MethodContract.Holds.intro memory (x * 3 + 1) ⟨8, rfl⟩ (Confined.refl _ _) ⟨rfl, rfl⟩
+
+#print axioms step_summary
+
+/-- The caller's MemberRef resolves to Step's MethodDef in the referenced library's slice. -/
+theorem direct_member_resolution :
+    ∃ env site position index row,
+      Extracted.method0Body.environment = .ok env ∧
+      env.methodSite Extracted.method0Body.tokens.operands[0].1 = .ok site ∧
+      site.definition = some (position, Extracted.method1Original.token) ∧
+      env.slices.find? position = some index ∧
+      index.identity.spelling = Extracted.assembly1.identity.spelling ∧
+      index.methodDef Extracted.method1Original.token = .ok row := by
+  obtain ⟨token, env, site, position, index, row, listed, built, resolved, defined,
+    lookup, pin, methodRow⟩ :=
+    Extracted.translation_valid.direct_definition ⟨0, by decide⟩ ⟨1, by decide⟩
+      (pc := 1) (target := Extracted.method1Original.token)
+      Extracted.program_method0 rfl rfl rfl rfl rfl rfl rfl rfl
+  have same := congrArg Prod.fst (List.mem_singleton.mp
+    (show (_, _) ∈ [Extracted.method0Body.tokens.operands[0]] from listed))
+  change token = _ at same
+  subst token
+  exact ⟨env, site, position, index, row, built, resolved, defined, lookup,
+    pin, methodRow⟩
+
+#print axioms direct_member_resolution
+
+/-- At App.Direct's call, the bound callee must belong to Lib. Both assemblies use the same
+    MethodDef token for their respective methods. -/
+theorem direct_callee_identity {pin : AssemblyPin} {token : Nat} {arguments : List TypeExpr}
+    (bound : DecodedAt Extracted.program Extracted.methodEvidence Extracted.profile
+      Extracted.environment 1 pin token arguments) :
+    pin.identity.spelling = Extracted.assembly1.identity.spelling ∧
+      token = Extracted.method0Original.token ∧ arguments = [] := by
+  obtain ⟨spelled, tokenEq, argumentsEq⟩ := bound.direct_site Extracted.method0_calls_validated
+    (pc := 1) rfl rfl rfl rfl rfl rfl rfl
+  exact ⟨spelled.trans (by cil_kernel_rfl), tokenEq, argumentsEq⟩
+
+#print axioms direct_callee_identity
+
+/-- Changing only the callee's pin rejects the direct link, even though both DLLs use the
+same MethodDef token. Its original body, owner, signature and type arguments are unchanged. -/
+theorem switched_link_pin_refused :
+    let callee := { Extracted.specializedMethods[1] with assembly := Extracted.assembly0 }
+    ¬ ManagedCallsValid (Extracted.specializedMethods.set 1 callee) Extracted.imports
+      (callModelled Extracted.method0) Extracted.method0Closed Extracted.method0Reachable
+      Extracted.method0 := by decide +kernel
+
+#print axioms switched_link_pin_refused
+
+/-- The identical token in the calling assembly cannot certify the summary of the library call. -/
+theorem app_pin_refused (models : List ModelledCall) :
+    ¬ DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
+      Extracted.environment 1 Extracted.assembly0 Extracted.method0Original.token [] models
+      stepContract := by
+  intro summary
+  exact (by decide +kernel :
+    Extracted.assembly0.identity.spelling ≠ Extracted.assembly1.identity.spelling)
+    (direct_callee_identity summary.bound).1
+
+#print axioms app_pin_refused
+
+/-- The caller uses the library summary and returns the incremented result in unchanged memory. -/
+theorem direct_uses_summary (x : W64) (memory : Safety.Memory) :
+    WP (Execution (fun fuel => invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory))
+      (fun (final, values) => final = memory ∧ values = [.scalar (.i64 (x * 3 + 1 + 1))]) := by
+  cil_contract_steps [step_summary.holds (.nil _), stepContract] with after value result
+  obtain ⟨rfl, rfl⟩ := result.post
+  exact ⟨rfl, rfl⟩
+
+#print axioms direct_uses_summary
 end MultiAssemblyProof

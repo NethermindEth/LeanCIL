@@ -55,8 +55,6 @@ namespace CIL.Vector
     evalIntrinsic (.avx .testZ64) [.v256 a, .v256 b] =
       some (.i32 (if (a &&& b) == 0 then 1 else 0)) := rfl
 
-theorem pack256_zero : pack256 0 0 0 0 = 0 := by decide
-
 private theorem append_eq {a b c d : V128} (h : a = b) (k : c = d) :
     a ++ c = b ++ d := by
   cases h

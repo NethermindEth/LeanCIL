@@ -28,6 +28,64 @@ namespace CIL.Safety
     Pure.pure, Except.pure]
 #print axioms checkedValue_span
 
+/-- A call argument that is a scalar is checked as a pushed value is. -/
+@[cil_checked] theorem callArgument_scalar (frame : Frame) (memory : Memory) (value : CIL.Value) :
+    callArgument frame memory (.scalar value) = checkedValue memory (.scalar value) := rfl
+#print axioms callArgument_scalar
+
+/-- A call argument that is a managed reference is checked as a pushed value is. -/
+@[cil_checked] theorem callArgument_reference (frame : Frame) (memory : Memory)
+    (reference : ManagedReference) :
+    callArgument frame memory (.reference reference) =
+      checkedValue memory (.reference reference) := rfl
+#print axioms callArgument_reference
+
+/-- A call argument that is a readonly reference is checked as a pushed value is. -/
+@[cil_checked] theorem callArgument_readOnlyReference (frame : Frame) (memory : Memory)
+    (reference : ManagedReference) :
+    callArgument frame memory (.readOnlyReference reference) =
+      checkedValue memory (.readOnlyReference reference) := rfl
+#print axioms callArgument_readOnlyReference
+
+/-- A call argument that is a reference span is checked as a pushed value is. -/
+@[cil_checked] theorem callArgument_span (frame : Frame) (memory : Memory)
+    (reference : ManagedReference) (length : Nat) :
+    callArgument frame memory (.span reference length) =
+      checkedValue memory (.span reference length) := rfl
+#print axioms callArgument_span
+
+/-- A call argument that is a span view is checked as a pushed value is. -/
+@[cil_checked] theorem callArgument_bufferSpan (frame : Frame) (memory : Memory)
+    (view : SpanView) :
+    callArgument frame memory (.bufferSpan view) =
+      checkedValue memory (.bufferSpan view) := rfl
+#print axioms callArgument_bufferSpan
+
+/-- A call argument that is an array view is checked as a pushed value is. -/
+@[cil_checked] theorem callArgument_array (frame : Frame) (memory : Memory) (view : ArrayView) :
+    callArgument frame memory (.array view) = checkedValue memory (.array view) := rfl
+#print axioms callArgument_array
+
+/-- A call argument that is a method pointer is checked as a pushed value is. -/
+@[cil_checked] theorem callArgument_methodPointer (frame : Frame) (memory : Memory)
+    (pointer : CIL.MethodPointer) :
+    callArgument frame memory (.methodPointer pointer) =
+      checkedValue memory (.methodPointer pointer) := rfl
+#print axioms callArgument_methodPointer
+
+/-- A call argument that is a method table is checked as a pushed value is. -/
+@[cil_checked] theorem callArgument_methodTable (frame : Frame) (memory : Memory)
+    (table : CIL.MethodTable) :
+    callArgument frame memory (.methodTable table) =
+      checkedValue memory (.methodTable table) := rfl
+#print axioms callArgument_methodTable
+
+/-- A call argument that is an object reference is checked as a pushed value is. -/
+@[cil_checked] theorem callArgument_object (frame : Frame) (memory : Memory)
+    (reference : ManagedReference) :
+    callArgument frame memory (.object reference) = checkedValue memory (.object reference) := rfl
+#print axioms callArgument_object
+
 /-- Validating an array stack value, as a call does with each array argument, keeps the view. -/
 @[cil_checked] theorem checkedValue_array (memory : Memory) (view : ArrayView)
     (valid : view.validate memory = .ok ()) :

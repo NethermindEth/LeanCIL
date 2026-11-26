@@ -81,10 +81,21 @@ internal static class VerificationSelection
         // The shortest job carries the libraries: it starts last and has the most room before the
         // other jobs of its round finish.
         var carrier = ordered.LastOrDefault();
-        return ordered.Select(group => new Group(Name(group), group.ToArray(),
-                group.Max(name => name == "imports" ? 90 :
-                    name.StartsWith("exports", StringComparison.Ordinal) ? 120 : 30),
+        return ordered.Select(group => new Group(Name(group), group.ToArray(), Timeout(group, Seconds(group)),
                 group.Any(VerificationSuites.ProofSuites.Contains), group == carrier)).ToArray();
+    }
+
+    const int TimeoutStepMinutes = 10;
+
+    // A job is stopped at the largest limit of its members and no sooner than twice its measured
+    // time, in whole steps: a suite that slows by half still finishes, and a hung one is stopped.
+    static int Timeout(List<string> group, double seconds)
+    {
+        var named = group.Max(name => name == "imports" ? 90 :
+            name.StartsWith("exports", StringComparison.Ordinal) ? 120 : 30);
+        if (!double.IsFinite(seconds)) return named;
+        var measured = (int)Math.Ceiling(seconds * 2 / (TimeoutStepMinutes * 60)) * TimeoutStepMinutes;
+        return Math.Max(named, measured);
     }
 
     internal static Dictionary<string, HashSet<string>> SuiteInputs(string? root = null)
@@ -118,26 +129,49 @@ internal static class VerificationSelection
             "Tests/InvocationCertificates.lean", "Tests/ValidCallTransport.lean",
             "Tests/BufferContents.lean", "Tests/Linking.lean", "Tests/StepFlow.lean", "Tests/RegionRun.lean",
             "Tests/StoreFacts.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
-            "Tests/VerificationReuse.cs", "Tests/RuntimeExceptions.lean", "Tests/ProfileContract.lean",
+            "Tests/VerificationReuse.cs", "Tests/SupportExtractionCache.cs", "Tests/SummaryCalls.cs",
+            "Tests/RuntimeExceptions.lean", "Tests/ProfileContract.lean",
             "Tests/InstructionEquations.lean", "Tests/CodeAt.lean", "Tests/SimdLanes.lean",
+            "Tests/SegmentContract.lean",
             "Tests/OperationFacts.lean", "Tests/VectorLocalCalls.lean", "Tests/SimdCarryCalls.lean",
-            "Tests/OperationFactAdapters.lean", "Tests/AggregateMemorySteps.lean"
+            "Tests/OperationFactAdapters.lean", "Tests/AggregateMemorySteps.lean", "Tests/BodyDecoding.lean",
+            "Tests/Identity.lean", "Tests/MetadataDecoding.lean",
+            "Tests/MetadataBinding.lean", "Tests/MetadataBuilder.lean", "Tests/ResolutionFacts.lean",
+            "Tests/ValueDecoding.lean", "Tests/DecodedMethod.lean", "Tests/DecodedSummary.lean",
+            "Tests/DecodedSegment.lean", "Tests/LoopSummary.lean",
+            "Tests/ReplayDiagnostics.lean", "Tests/BodyLiteral.lean", "Tests/ReturnOpcode.lean",
+            "Tests/ReturnMetadataBinding.lean", "Tests/ReferenceArrays.lean", "Tests/ArrayFields.lean",
+            "Tests/RetainedNumericLocals.lean", "Tests/ProfileEmbedding.lean", "Tests/FullTransfer.lean",
+            "Tests/Crypto.lean", "Tests/MetadataAssemblies.lean", "Tests/PinnedIndexScaling.lean",
+            "Tests/FieldRef.lean", "Tests/FieldShape.lean", "Tests/RuntimeModels.lean",
+            "Tests/PlatformDefinitions.lean", "Tests/BitModels.lean", "Tests/SpanHomes.lean"
         };
-        inputs["core"].UnionWith(new[] { "Add", "AddModel", "Choose", "Calls", "Alias", "Struct", "StructCopy",
-            "LargeStruct", "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }.Select(name => $"Examples/Proofs/{name}.lean"));
+        inputs["core"].UnionWith(new[] { "Add", "AddModel", "DecodedAdd", "Choose", "Calls", "CallsSummary",
+            "CountCallsSummary", "IdentitySummary", "RepeatedSummary", "VectorSummary", "Alias", "Struct",
+            "StructCopy", "LargeStruct", "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }
+            .Select(name => $"Examples/Proofs/{name}.lean"));
         inputs["core"].Add("Tests/ModularStatics.lean");
         inputs["docs"].UnionWith(WalkthroughInputs(root));
         inputs["evidence"].UnionWith(new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests",
-            "Throws", "SpanTables", "StaticValues", "StaticScalarValues", "TranslationAudit" }
+            "Throws", "SpanTables", "StaticValues", "StaticScalarValues", "TranslationAudit", "MetadataDifferential",
+            "Guards", "CallSiteAgreement" }
             .Select(name => $"Tests/{name}.cs"));
+        inputs["evidence"].Add("Examples/Proofs/Percent.lean");
         inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "ScalarEvidence", "TypeTestEvidence",
-            "ThrowEvidence", "SpanEvidence", "StaticValueEvidence", "LayoutCoverage", "ImportEvidence", "ImportedLayouts", "AssemblyPins" }.Select(name => $"Tests/{name}.lean"));
+            "ThrowEvidence", "SpanEvidence", "StaticValueEvidence", "LayoutCoverage", "ImportEvidence", "ImportedLayouts", "AssemblyPins",
+            "BodyEncoding", "CallDecoding", "PercentRuntime", "PercentRuntime/Source",
+            "PercentRuntime/Startup", "PercentRuntime/Program", "CompiledPercent/Proof", "ExceptionConstructor/Proof" }
+            .Select(name => $"Tests/{name}.lean"));
         inputs["imports"].UnionWith(["Tests/ContractClosure.lean", "Tests/ContractImports/Lib.leancil.contracts", "Tests/ContractImports/ImportFixture.lean", "Tests/ContractImports/Caller.lean",
             "Tests/ContractImports/Lib/Lib.csproj", "Tests/ContractImports/Lib/Library.cs", "Tests/ContractImports/App/App.csproj", "Tests/ContractImports/App/Application.cs"]);
+        inputs["closures"].UnionWith(["Tests/ProgramClosures/Proof.lean",
+            "Tests/ProgramClosures/Assembly/ProgramClosures.csproj", "Tests/ProgramClosures/Assembly/Closure.cs"]);
         inputs["unsafe"].UnionWith(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
+        inputs["intrinsics"].UnionWith(["Tests/ExactIntrinsics.lean", "Tests/ExactIntrinsics/WordContracts.lean"]);
         inputs["stepping"].Add("scripts/ProofCost.lean");
         // Self-admission scans the extractor itself, so every source compiled into it can change the result.
-        inputs["blockers"].Add("Tests/SelfAdmissionBaseline.txt");
+        inputs["blockers"].UnionWith(["Tests/SelfAdmissionBaseline.txt", "Tests/ExampleAdmissionBaseline.txt"]);
+        inputs["blockers"].UnionWith(["Tests/HoleCorpus.cs", "Tests/HoleCorpusBaseline.txt"]);
         inputs["blockers"].UnionWith(Matches(File.ReadAllText(Path.Combine(root, "Extractor/Extractor.csproj")),
             @"<Compile Include=""\.\./([^""]+\.cs)""").Select(path => path.Replace('\\', '/')));
 
@@ -148,12 +182,13 @@ internal static class VerificationSelection
             var pending = new Stack<string>(paths);
             while (pending.TryPop(out var path))
             {
-                if (path == "scripts/ExportVerificationSuites.cs") continue;
+                // Registries name every fixture; including their types does not execute those fixtures.
+                if (path is "scripts/ExportVerificationSuites.cs" or "scripts/VerificationSuites.cs") continue;
                 var source = Path.Combine(root, path);
                 if (!File.Exists(source)) continue;
                 var text = File.ReadAllText(source);
                 var references = new HashSet<string>(
-                    Matches(text, @"""((?:Tests|Examples)/[^""{}\n]+\.(?:cs|lean))"""), StringComparer.Ordinal);
+                    Matches(text, @"""((?:Tests|Examples)/[^""{}\n]+\.(?:cs|lean(?:\.in)?))"""), StringComparer.Ordinal);
                 foreach (var pattern in Matches(text, @"""(Examples/Proofs/[^""\n]*\{[^""\n]+\.lean)"""))
                 {
                     var glob = Regex.Replace(pattern, @"\{[^}]+\}", "*");
@@ -208,7 +243,7 @@ internal static class VerificationSelection
             if (path == "LICENSE") continue;
             // Other workflows run in their own jobs; only this workflow's definition feeds the suites.
             if (path.StartsWith(".github/workflows/", StringComparison.Ordinal) && path != ".github/workflows/verification.yml") continue;
-            if (path == "scripts/ExportVerificationSuites.cs") return all;
+            if (path is "scripts/ExportVerificationSuites.cs" or "scripts/VerificationSuites.cs") return all;
             // A script compiled into the CLI reaches every suite through the built command, include edge or not.
             if (new[] { "CIL/", "Extractor/", "Examples/Assembly/", "Examples/FSharp/" }
                     .Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) || path == "Tests/Support.lean" ||

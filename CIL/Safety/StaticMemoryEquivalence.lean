@@ -7,7 +7,7 @@ import CIL.Safety.InstructionMemoryEquivalence
 
 Equivalent memories (same allocations, bytes, bindings and permissions, however the access
 views are listed) give equivalent results for static field resolution and for the static
-and span instructions.
+field instructions.
 -/
 
 namespace CIL.Safety
@@ -48,33 +48,56 @@ theorem Memory.Equivalent.staticReference {m n : Memory} (same : m.Equivalent n)
     · exact (equivalent.prependView _).permissions
     · simp only [equivalent.staticBindings]
 
-/-- Equivalent memories give equivalent results for every static or span instruction. -/
+/-- Equivalent memories give equivalent results for every static or memory instruction. -/
 theorem Memory.Equivalent.staticInstruction {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (CIL.Safety.staticInstruction body pc operation stack m)
       (CIL.Safety.staticInstruction body pc operation stack n) := by
   unfold CIL.Safety.staticInstruction
-  split <;> try simp only [checkedAt, liveAllocation, same.allocations, same.formValue]
+  exact same.memoryInstruction _ _
+
+#print axioms Memory.Equivalent.staticInstruction
+
+/-- Equivalent memories give equivalent results for `ldsfld`. -/
+theorem Memory.Equivalent.staticLoad {m n : Memory} (same : m.Equivalent n)
+    (body : CIL.Method) (pc : Nat) :
+    ResultEquivalent MemoryFirstEquivalent (CIL.Safety.staticLoad body pc m)
+      (CIL.Safety.staticLoad body pc n) := by
+  unfold CIL.Safety.staticLoad
+  split
   all_goals repeat first
-    | exact same.memoryInstruction _ _
     | exact .ok ⟨same, rfl⟩
     | exact .error _
-    | (apply ResultEquivalent.bind_same; intro)
     | (apply ResultEquivalent.bind (same.staticReference _)
        intro left right related
        obtain ⟨memory, reference⟩ := left
        obtain ⟨otherMemory, otherReference⟩ := right
        obtain ⟨equivalent, rfl⟩ := related
-       first
+       simp only [checkedAt, equivalent.read]
+       repeat first
          | exact .ok ⟨equivalent, rfl⟩
-         | (simp only [equivalent.read]
-            repeat first
-              | exact .ok ⟨equivalent, rfl⟩
-              | exact .error _
-              | (apply ResultEquivalent.bind_same; intro)
-              | split))
+         | exact .error _
+         | (apply ResultEquivalent.bind_same; intro)
+         | split)
     | split
 
-#print axioms Memory.Equivalent.staticInstruction
+#print axioms Memory.Equivalent.staticLoad
+
+/-- Equivalent memories give equivalent results for `ldsflda` and a field `ldtoken`. -/
+theorem Memory.Equivalent.staticAddress {m n : Memory} (same : m.Equivalent n)
+    (body : CIL.Method) (pc : Nat) :
+    ResultEquivalent MemoryFirstEquivalent (CIL.Safety.staticAddress body pc m)
+      (CIL.Safety.staticAddress body pc n) := by
+  unfold CIL.Safety.staticAddress
+  split
+  · apply ResultEquivalent.bind (same.staticReference _)
+    intro left right related
+    obtain ⟨memory, reference⟩ := left
+    obtain ⟨otherMemory, otherReference⟩ := right
+    obtain ⟨equivalent, rfl⟩ := related
+    exact .ok ⟨equivalent, rfl⟩
+  · exact .error _
+
+#print axioms Memory.Equivalent.staticAddress
 #print axioms Memory.Equivalent.staticReference
 end CIL.Safety

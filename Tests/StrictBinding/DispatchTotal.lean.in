@@ -1,0 +1,47 @@
+import Extracted
+import CIL.Safety.MethodContract
+
+/-! A caller enters both unrelated virtual slots and reuses the inherited shape slot. -/
+
+namespace DispatchGate
+open CIL CIL.Extraction CIL.Safety
+
+/-- The classes of the pinned assembly used as receiver types. -/
+private def named (name : String) :=
+  TypeExpr.object Extracted.assembly0Scope ("Geometry." ++ name)
+
+/-- The caller owns a triangle (possibly an equilateral one) and a distinct cube. -/
+private def caller (equilateral : Bool) : Safety.Memory := { Safety.Memory.empty with
+  allocations := fun id =>
+    if id == 0 then
+      let shape := if equilateral then named "Polygons/Equilateral" else named "Triangle"
+      let bases := if equilateral then [named "Triangle", named "Shape"] else [named "Shape"]
+      some ⟨.object ⟨shape, bases⟩, ⟨8,8,[]⟩, true, []⟩
+    else if id == 1 then some ⟨.object ⟨named "Cube", [named "Solid"]⟩, ⟨8,8,[]⟩, true, []⟩
+    else none
+  nextIdentity := 2 }
+
+/-- The two shape calls count three sides each and the solid call counts six faces. -/
+def contract : MethodContract Bool W32 where
+  args _ := [.object (.address ⟨0,0⟩), .object (.address ⟨1,0⟩)]
+  results value := [.scalar (.i32 value)]
+  pre equilateral memory := memory = caller equilateral
+  footprint _ := []
+  post _ initial final value := final = initial ∧ value = 12
+
+/-- Both receiver types preserve caller memory across all three virtual calls. -/
+theorem holds (ran : ∀ shape, invoke Extracted.program 50 0 (contract.args shape) (caller shape) =
+    .ok (caller shape, contract.results 12)) : contract.Holds Extracted.program 0 := by
+  rintro shape _ rfl
+  exact MethodContract.Holds.intro (c := contract) _ _ ⟨50, ran shape⟩
+    (Confined.refl [] _) ⟨rfl, rfl⟩
+#print axioms holds
+
+/-- Returning five faces for the cube produces an ordinary return of eleven. -/
+theorem refuted (ran : invoke Extracted.program 50 0 (contract.args true) (caller true) =
+    .ok (caller true, [.scalar (.i32 11)])) : contract.Refuted Extracted.program 0 := by
+  apply MethodContract.Refuted.of_return (c := contract) (input := true) rfl ran
+  rintro ⟨_, value, encoded, _, rfl⟩
+  revert encoded
+  decide +kernel
+#print axioms refuted

@@ -2,8 +2,14 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
+#:include BulkCallEvidence.cs
 #:include RejectedEvidence.cs
 
 using Mono.Cecil;
@@ -66,7 +72,10 @@ foreach (var method in metadata.GetType("Examples.AggregateSpanFill").Methods.Wh
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
+    File.WriteAllText(proof, """
+        import Extracted
+        import CIL.Safety.StepComposition
+        namespace ExampleProof
         /-- Successful observations identify the checked execution result. -/
         private theorem result_of_toOption {error value : Type} {result : Except error value}
             {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
@@ -84,22 +93,7 @@ foreach (var method in metadata.GetType("Examples.AggregateSpanFill").Methods.Wh
         " := by\n  repeat' apply And.intro\n" +
         "  all_goals first | decide +kernel | (apply result_of_toOption; decide +kernel)\n" +
         "#print axioms correctness\nend ExampleProof\n");
+    File.AppendAllText(proof, BulkCallEvidence(0, name == "Aliased" ? 5 : 2, $".spanFill {width} false"));
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS aggregate fill: " + name));
 }
 queue.Flush();
-var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
-foreach (var (name, before, after, theorem) in new[]
-{
-    ("Words", ".spanFill 32 false", ".spanFill 16 false", "method0_layouts_validated"),
-    ("Words", ".spanFill 32 false", ".spanFill 32 true", "method0_scalars_validated"),
-    ("Vector128", ".spanFill 16 false", ".spanFill 32 false", "method0_scalars_validated")
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
-    if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing fill mutation");
-    var path = Path.Combine(root, "Rejected" + name + theorem + ".lean");
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS aggregate fill evidence rejection: " + name,
-        theorem.EndsWith("layouts_validated", StringComparison.Ordinal) ? "MethodLayoutsValid" : "ScalarFlowValid");
-}
-rejected.Check();

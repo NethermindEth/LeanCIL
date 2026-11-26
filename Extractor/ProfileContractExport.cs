@@ -13,9 +13,9 @@ partial class Program
         var identityPath = Path.Combine(artifact, "identity.json");
         var sourceBytes = File.ReadAllBytes(sourcePath);
         var identityBytes = File.ReadAllBytes(identityPath);
-        RunExtractor(["dotnet", ExtractorPath, "check", artifact]);
+        var digest = CheckManifest(["dotnet", ExtractorPath, "check", artifact]);
         if (Sha(sourcePath) != ContractInterface.Hash(sourceBytes) ||
-            Sha(identityPath) != ContractInterface.Hash(identityBytes))
+            digest != Sha256Digest.Of(identityBytes))
             throw new InvalidDataException("Profile family reference changed during its extraction check.");
         var identity = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(identityBytes);
         var current = ExtractionIdentity.Read(export.Request.Artifact).Root;

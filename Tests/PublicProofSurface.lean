@@ -20,7 +20,10 @@ def successor : MethodContract CIL.W32 CIL.W32 where
 
 /-- The caller forwards one checked scalar and returns the helper's output. -/
 @[cil_code] def forwarding : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.call 1 1, .ret] }
+  { locals := [], returnsValue := true,
+    code := [.call { owner := .void, name := ⟨1⟩, hasThis := false, genericArity := 0,
+                     returnType := .void, parameters := [.void] } {}, .ret],
+    links := [(0, .direct 1)] }
 
 /-- A call continuation selects postcondition and preservation facts by their names. -/
 theorem named_call_continuation (program : CIL.Program) (memory : Memory) (value : CIL.W32)
@@ -42,10 +45,34 @@ theorem named_call_continuation (program : CIL.Program) (memory : Memory) (value
   exact ⟨final_formed, by rw [output_eq]⟩
 #print axioms named_call_continuation
 
+open CIL.Extraction in
+private def wordVector (width : Nat) : TypeExpr :=
+  .apply (.constructor intrinsicsScope s!"System.Runtime.Intrinsics.Vector{width}`1")
+    (.primitive .uint64)
+
+open CIL.Extraction in
+private def permuteMethod : MethodRef :=
+  { owner := .atom intrinsicsScope "System.Runtime.Intrinsics.X86.Avx2" .classType,
+      name := name!"Permute4x64",
+    hasThis := false, genericArity := 0, returnType := wordVector 256,
+    parameters := [wordVector 256, .primitive .byte] }
+
+open CIL.Extraction in
+private def zeroMethod : MethodRef :=
+  { owner := wordVector 256, name := name!"get_Zero", hasThis := false,
+    genericArity := 0, returnType := wordVector 256, parameters := [] }
+
+open CIL.Extraction in
+private def equalityMethod (width : Nat) : MethodRef :=
+  { owner := wordVector width, name := name!"op_Equality", hasThis := false,
+    genericArity := 0, returnType := .primitive .boolean,
+    parameters := [wordVector width, wordVector width] }
+
 /-- The vector control is an ordinary literal in the emitted instructions. -/
 @[cil_code] def reverseVector : CIL.Method :=
   { profile := { architecture := .x64, avx2 := true }, locals := [], returnsValue := true,
-    code := [.const32 27, .intrinsic (.avx2 .permute4x64) 2, .ret] }
+    code := [.ldc_i4 27, .call permuteMethod, .ret] }
+cil_runtime_models reverseVector
 
 /-- A rewrite stated with a literal still matches the vector value left by stepping. -/
 theorem vector_literal_rewrite (memory : Memory) (frame : Frame) (vector reversed : BitVec 256)
@@ -60,12 +87,26 @@ theorem vector_literal_rewrite (memory : Memory) (frame : Frame) (vector reverse
   rw [reverse]
 #print axioms vector_literal_rewrite
 
+open CIL.Extraction in
+/-- The closed Unsafe.BitCast from the fixture's 32-byte aggregate to Vector256<UInt64>. -/
+private def bytesToVector : MethodRef :=
+  let source := TypeExpr.aggregate "Fixture::Bytes" 0
+  let target := wordVector 256
+  { owner := unsafeOwner, name := name!"BitCast", hasThis := false, genericArity := 2,
+    methodArguments := [source, target], parameters := [source], returnType := target }
+
 /-- An aggregate is reinterpreted as a vector and compared with zero before a narrow return. -/
 @[cil_code] def aggregateZero : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.loadAggregate 32,
-    .memory (.bitcastValue (.aggregate 32) .vector256),
-    .intrinsic (.vector (.zero 256)) 0, .intrinsic (.vector (.equalsAll 256)) 2,
-    .ret (some .unsigned8)] }
+  {
+  declared := { returnType := .primitive .boolean },
+  environment := {
+    rawLayouts := [{ identity := "Fixture::Bytes", explicit := true, packing := 1,
+                     declaredSize := 32, fields := [] }]
+    layouts := #[⟨{ size := 32, fields := [] }, 1⟩] },
+  locals := [], returnsValue := true, code := [.ldobj (.aggregate "Fixture::Bytes" 0),
+    .call bytesToVector,
+    .call zeroMethod, .call (equalityMethod 256), .ret] }
+cil_runtime_models aggregateZero
 
 /-- Snapshot map rewrites and symbolic intrinsic results remain usable after checked stepping. -/
 theorem aggregate_boolean_return (memory : Memory) (frame : Frame) (input : Reference)
@@ -81,8 +122,11 @@ theorem aggregate_boolean_return (memory : Memory) (frame : Frame) (input : Refe
 
 /-- A vector comparison returns its scalar Boolean through the narrow return instruction. -/
 @[cil_code] def equalVector : CIL.Method :=
-  { locals := [], returnsValue := true,
-    code := [.intrinsic (.vector (.equalsAll 128)) 2, .ret (some .unsigned8)] }
+  {
+  declared := { returnType := .primitive .boolean },
+  locals := [], returnsValue := true,
+    code := [.call (equalityMethod 128), .ret] }
+cil_runtime_models equalVector
 
 /-- An intrinsic's private result helper does not obstruct a symbolic scalar return. -/
 theorem vector_boolean_return (memory : Memory) (frame : Frame) (left right : BitVec 128) :
@@ -96,18 +140,51 @@ theorem checked_conversion_result (body : CIL.Method) (frame : Frame) (memory : 
     (input : CIL.W64)
     (calculated : CIL.convertInteger 32 false true (.i64 input) =
       .ok (.i32 (BitVec.ofNat 32 input.toNat))) :
-    step body (.checkedConvert 32 false true) 0 [] frame [.scalar (.i64 input)] memory =
+    step body (.conv_ovf_un .u4) 0 [] frame [.scalar (.i64 input)] memory =
       .ok (.next 1 [.scalar (.i32 (BitVec.ofNat 32 input.toNat))] frame memory) := by
   cil_checked_step [calculated]
 #print axioms checked_conversion_result
 
+/-- A fact about a 64-bit signed range drives the conversion to the native `int` target. -/
+theorem native_conversion_result (body : CIL.Method) (frame : Frame) (memory : Memory)
+    (input : CIL.W64)
+    (calculated : CIL.convertInteger 64 true true (.i64 input) = .ok (.i64 input)) :
+    step body (.conv_ovf_un .i) 0 [] frame [.scalar (.i64 input)] memory =
+      .ok (.next 1 [.scalar (.i64 input)] frame memory) := by
+  cil_checked_step [calculated]
+#print axioms native_conversion_result
+
 /-- A two-word aggregate argument is described independently of any callee body. -/
 def pairView (reference : Reference) : ArgumentView := ⟨reference, 16⟩
 
+/-- The checked call that accepts the output byref before the two field reads. -/
+private def skipWord : CIL.Extraction.MethodRef :=
+  let word := CIL.Extraction.TypeExpr.primitive .uint64
+  { owner := CIL.Extraction.unsafeOwner, name := name!"SkipInit", hasThis := false,
+    genericArity := 1, parameters := [.byref word], methodArguments := [word], returnType := .void }
+
+private def pairEnvironment : CIL.LayoutEnvironment :=
+  { rawLayouts := [
+      { identity := "Pair", explicit := false, packing := 0, declaredSize := 0,
+        fields := [{ type := .unsigned64 }, { type := .unsigned64 }] }]
+    layouts := #[⟨⟨16, [⟨0, 8, false⟩, ⟨8, 8, false⟩]⟩, 8⟩] }
+
+private def low : CIL.Extraction.FieldRef :=
+  { owner := .aggregate "Pair" 0, index := 0, name := name!"Low",
+    type := .primitive .uint64 }
+
+private def high : CIL.Extraction.FieldRef := { low with index := 1, name := name!"High" }
+
+cil_field_shape pairEnvironment low
+cil_field_shape pairEnvironment high
+
 /-- Both source fields are loaded before any output could overwrite them. -/
 @[cil_code] def readPair : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.arg 2, .skipInit,
-      .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 8 8, .add, .ret] }
+  { environment := pairEnvironment, locals := [], returnsValue := true, code := [.ldarg 2, .call skipWord {},
+      .ldarg 0, .ldfld low, .ldarg 1, .ldfld high, .add, .ret] }
+
+cil_instruction_equations Tests.PublicProofSurface.readPair
+cil_runtime_models Tests.PublicProofSurface.readPair
 
 /-- Named call validity supplies field reads even when output aliases an entire input. -/
 theorem overlapping_fields (memory : Memory) (left right : Reference)
@@ -130,7 +207,7 @@ theorem mixed_local_snapshot {caller current final : Memory} {word vector : Refe
     (confined : Confined [(word, 8)] current final) (formed : final.WellFormed)
     (loaded : read final word 8 1 = .ok (numberBytes value.toNat 8))
     (body : CIL.Method) (pc : Nat) (arguments stack : List Value) :
-    step body (.local 1) pc arguments
+    step body (.ldloc 1) pc arguments
       { activation := 0, locals := [.bytes .word64 word, .bytes .vector256 vector], owned := [] }
       stack final = .ok (.next (pc + 1) (.scalar (.v256 saved) :: stack)
         { activation := 0, locals := [.bytes .word64 word, .bytes .vector256 vector], owned := [] }
@@ -143,7 +220,7 @@ theorem mixed_local_snapshot {caller current final : Memory} {word vector : Refe
 #print axioms mixed_local_snapshot
 
 /-- One reusable arithmetic prefix adds one to the top word. -/
-def incrementCode : List CIL.Op := [.const32 1, .add]
+def incrementCode : List CIL.Instruction := [.ldc_i4 1, .add]
 
 /-- A placed segment computes its stack value through the shared checked stepper. -/
 theorem increment_segment {program : CIL.Program} {method start : Nat} {body : CIL.Method}
@@ -169,7 +246,7 @@ theorem repeated_segment {program : CIL.Program} {method : Nat} {body : CIL.Meth
 /-- A countdown body has one return and one continuing edge. -/
 @[cil_code] def countdown : CIL.Method :=
   { locals := [], returnsValue := true,
-    code := [.dup, .brzero 5, .const32 1, .sub, .branch 0, .ret] }
+    code := [.dup, .brfalse 5, .ldc_i4 1, .sub, .br 0, .ret] }
 
 /-- The checked continuing path retains the exact stack expression at the loop head. -/
 theorem loop_cutpoint (memory : Memory) (frame : Frame) (value : CIL.W32)

@@ -77,7 +77,7 @@ input and `site` a `bind_call` name.
 | A `Raises` goal | `cil_raise_steps [facts]` | [Outcomes](PROOFS-CONTRACTS.md#name-exceptional-outcomes) |
 | A call whose callee has an `OutcomeContract` | `cil_outcome_call`, `cil_formed_outcome_call`, `cil_outcome_raise` | [Outcomes](PROOFS-CONTRACTS.md#name-exceptional-outcomes) |
 | A loop path to the next head | `cil_loop_recurse hypothesis values [facts]` | [Loops](PROOFS-STEPPING.md#compose-a-helper-call-inside-a-loop) |
-| A loop path to a call or return | `cil_loop_advance [facts]` | [Loops](PROOFS-STEPPING.md#compose-a-helper-call-inside-a-loop) |
+| A loop path to a linked call or return | `cil_loop_advance [facts]` | [Loops](PROOFS-STEPPING.md#compose-a-helper-call-inside-a-loop) |
 | A call inside a loop | `cil_loop_call holds input at site [facts]` | [Loops](PROOFS-STEPPING.md#compose-a-helper-call-inside-a-loop) |
 | A loop exit and its postcondition | `cil_loop_finish [facts]` | [Loops](PROOFS-STEPPING.md#step-loops) |
 | The progress goal of a loop verification condition | `cil_loop_continue next [facts]`, `cil_loop_finish [facts]` | [Loop VCs](PROOFS-STEPPING.md#loop-verification-conditions) |
@@ -99,6 +99,8 @@ These commands name parts of an extraction:
 | A checked frame entry and a loop cutpoint | `bind_entry`, `bind_cutpoint` | [Loop scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding) |
 | A local by its C# name | `local_named sum "carry"` | [PDB names](PROOFS-BINDING.md#pdb-local-names-and-source-locations) |
 | Per-pc instruction equations of a parametric body | `cil_instruction_equations` | [Instruction equations](PROOFS-BINDING.md#instruction-equations-for-parametric-bodies) |
+| A method defined from its decoder, with kernel-checked facts | `cil_decoded_method` | [Decoded methods](PROOFS-BINDING.md#methods-defined-from-their-decoder) |
+| How every method resolves a field or type operand | `cil_field_shape`, `cil_value_shape` | [Field and value shapes](PROOFS-BINDING.md#field-and-value-shapes) |
 
 ## Public proof surface
 
@@ -112,7 +114,7 @@ import-closure size guarantee. Import these separately when a proof uses them:
 | --- | --- |
 | State checked execution | `step`, `run`, `invoke`, `Execution`, `WP`, `Ensures` |
 | Compose instruction and segment proofs | `cil_checked_step`, `cil_checked_steps`, `CodeAt`, `Segment`, `Segment.trans`, `cil_segment` |
-| Use a proved helper | `MethodContract`, `CallResult`, `FrameInvariants`, `run_call_of_contract_formed`, `cil_contract_steps` |
+| Use a proved helper | `MethodContract`, `CallResult`, `FrameInvariants`, `run_call_of_contract_formed`, `cil_contract_steps`, `DecodedSummary` |
 | Describe byref arguments and overlap | `ArgumentView`, `ValidCall`, the `CallingFields` lemmas |
 | Preserve mixed local contents | `LocalSnapshots`, `LoopFrame`, `LoopFrame.after_local_write` |
 | Prove checked loop paths | `LoopReaches`, `LoopSpec`, `cil_loop_steps` |

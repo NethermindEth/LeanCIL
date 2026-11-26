@@ -3,9 +3,15 @@
 #:property AllowUnsafeBlocks=true
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include ReferenceAddOutlines.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -13,6 +19,8 @@ using Mono.Cecil.Cil;
 
 var root = At("artifacts/ReferenceInstructions");
 Directory.CreateDirectory(root);
+CheckReferenceAddOutlines(root);
+if (args is ["--outlines-only"]) return;
 var evidence = new GeneratedEvidence(root);
 var rejected = new RejectedEvidence(root);
 var assembly = Path.Combine(root, "Examples.dll");
@@ -70,14 +78,15 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
         }
         il.Emit(OpCodes.Ret);
     }
+    // The commuted reference fixture also covers an addition in a method with a dead tail.
     foreach (var (name, native, pointer) in additions)
         AddOffset(name, native ? module.TypeSystem.IntPtr : module.TypeSystem.Int32,
-            pointer, OpCodes.Add);
+            pointer, OpCodes.Add, deadTail: name == "Offset32Reference");
     AddOffset("InvalidInt64Offset", module.TypeSystem.Int64, true, OpCodes.Add);
     AddOffset("InvalidReferenceSum", new ByReferenceType(module.TypeSystem.Int64), false, OpCodes.Add);
     AddOffset("InvalidReversedSubtract", module.TypeSystem.Int32, true, OpCodes.Sub);
 
-    void AddOffset(string name, TypeReference offset, bool pointer, OpCode operation)
+    void AddOffset(string name, TypeReference offset, bool pointer, OpCode operation, bool deadTail = false)
     {
         var method = new MethodDefinition(name,
             Mono.Cecil.MethodAttributes.Public | Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
@@ -90,6 +99,9 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
         body.Emit(OpCodes.Ldarg_1);
         body.Emit(operation);
         body.Emit(OpCodes.Ldind_U1);
+        body.Emit(OpCodes.Ret);
+        if (!deadTail) return;
+        body.Emit(OpCodes.Ldc_I4_0);
         body.Emit(OpCodes.Ret);
     }
 
@@ -139,9 +151,9 @@ foreach (var (name, count, expected) in cases)
     {
         var narrowed = NarrowEvidence(source, "method0_scalars_validated");
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, ["method0_scalars_validated"], 0));
-        if (!narrowed.Contains(".eq", StringComparison.Ordinal)) throw new Exception("Missing equality mutation target");
+        // The method is defined from its decoder, so the forgery changes the ceq (0xFE01) it reads to clt (0xFE04).
         var forged = Path.Combine(root, "ForgedEquality.lean");
-        File.WriteAllText(forged, narrowed.Replace(".eq", ".lt", StringComparison.Ordinal));
+        File.WriteAllText(forged, ForgeDecodedOriginal(narrowed, 0, "opcode := 65025,", "opcode := 65028,"));
         rejected.Add(forged, "PASS independent forged reference equality rejection", "ScalarFlowValid");
     }
     evidence.Add(proof, "PASS runtime, certificate and reference execution: " + name);
@@ -191,19 +203,37 @@ foreach (var (name, native, pointer) in additions)
         """);
     if (name == "Offset32Reference")
     {
-        var narrowed = NarrowEvidence(source, "method0_scalars_validated");
-        File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, ["method0_scalars_validated"], 0));
-        const string target = ".memory (.add 1 true)";
+        File.AppendAllText(proof, """
+
+            namespace Extracted
+            /-- The scalar checker validates emitted instructions against the commuted operands. -/
+            private abbrev scalarFits (code : List CIL.Instruction) :=
+              CIL.Extraction.ScalarFlowValid method0Closed method0FeatureStates
+                method0ScalarStates code
+
+            /-- The unchanged commuted addition satisfies the explicit scalar encoding. -/
+            theorem original_add_valid : scalarFits method0.code := by decide +kernel
+            #print axioms original_add_valid
+            end Extracted
+
+            """);
         foreach (var (mutation, replacement) in new[]
         {
-            ("scalar", ".add"), ("subtract", ".sub"),
-            ("stride", ".memory (.add 2 true)"), ("unsigned", ".memory (.add 1 false)")
+            ("signedOverflow", ".add_ovf"), ("subtract", ".sub"),
+            ("shift", ".shl"), ("unsignedOverflow", ".add_ovf_un")
         })
         {
-            if (!narrowed.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing commuted add target");
-            var forged = Path.Combine(root, "ForgedAdd-" + mutation + ".lean");
-            File.WriteAllText(forged, narrowed.Replace(target, replacement, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS independent forged commuted addition: " + mutation, "ScalarFlowValid");
+            File.AppendAllText(proof, $$"""
+
+                namespace Extracted
+                /-- The scalar operands exclude the substituted instruction. -/
+                theorem forged_{{mutation}}_rejected :
+                    Not (scalarFits (method0.code.map fun op => match op with
+                      | .add => {{replacement}} | _ => op)) := by decide +kernel
+                #print axioms forged_{{mutation}}_rejected
+                end Extracted
+
+                """);
         }
     }
     evidence.Add(proof, "PASS runtime, certificate and commuted reference addition: " + name);
@@ -236,7 +266,7 @@ File.WriteAllText(throwProof, throwSource + """
 
     theorem null_message_raises :
         CIL.Safety.invoke Extracted.program 16 0 [] CIL.Safety.Memory.empty =
-          .error ⟨0, 2, .thrown "System.DivideByZeroException"⟩ := rfl
+          .error ⟨0, 2, .thrown .divideByZero⟩ := rfl
     #print axioms null_message_raises
     """);
 evidence.Add(throwProof, "PASS existing null-message throw folding, runtime and certificate");

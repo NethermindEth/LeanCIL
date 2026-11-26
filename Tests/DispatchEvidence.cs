@@ -1,13 +1,19 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 
 if (args is not ([] or ["--prepare-only"]))
     throw new ArgumentException("Usage: DispatchEvidence.cs [--prepare-only]");
 using var fixtures = new Program();
-fixtures.PrepareLeanFixtures("Tests.ConstrainedEvidence", "Tests.ConstantCalls", "Tests.NativeMethodTables",
-    "Tests.StackAllocation", "Tests.StackAllocationEvidence");
+fixtures.PrepareLeanFixtures("Tests.ConstrainedEvidence", "Tests.MetadataBuilder",
+    "Tests.BodyEncoding", "Tests.ConstantCalls",
+    "Tests.NativeMethodTables", "Tests.StackAllocation", "Tests.StackAllocationEvidence");
 if (args is ["--prepare-only"]) return;
 Run(["dotnet", "run", "--file", "Tests/ConstrainedResolution.cs"], streamOutput: true,
     progress: "ConstrainedResolution");

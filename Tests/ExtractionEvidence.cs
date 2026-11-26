@@ -1,13 +1,21 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 
 if (args is not ([] or ["--prepare-only"]))
     throw new ArgumentException("Usage: ExtractionEvidence.cs [--prepare-only]");
 using var fixtures = new Program();
 fixtures.PrepareLeanFixtures(
-    "Tests.ExtractionLayout", "Tests.ExtractionParameters", "Tests.FeatureEvidence", "Tests.ScalarEvidence",
+    "Tests.MetadataBuilder", "Tests.BodyEncoding", "Tests.ExtractionLayout", "Tests.ExtractionParameters",
+    "Tests.FeatureEvidence", "Tests.CallDecoding",
+    "Tests.ScalarEvidence", "Tests.CoreStringLength", "Tests.CoreExceptionHResult", "Tests.CoreMonitor",
+    "Tests.CoreHeaderPointer", "Tests.PercentRuntime",
     "Tests.LayoutCoverage", "Tests.TypeTestEvidence", "Tests.ThrowEvidence", "Tests.SpanEvidence",
     "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.AssemblyPins", "Tests.StaticValueEvidence", "Tests.SpanViews",
     "Tests.MemorySpanExecution", "Tests.ManagedPointerValues", "Tests.PrimitiveArrays", "Tests.ArrayElementReferences",
@@ -22,13 +30,15 @@ Run(["dotnet", "run", "--file", "Tests/ArrayElementReferences.cs"], streamOutput
     progress: "Array element references");
 Run(["dotnet", "run", "--file", "Tests/ReadOnlyArrayReferences.cs"], streamOutput: true,
     progress: "Readonly array references");
+Run(["dotnet", "run", "--file", "Tests/SpanHomeReads.cs"], streamOutput: true,
+    progress: "Span locals read through their addresses");
 Run(["dotnet", "run", "--file", "Tests/ExternalIdentityEncoding.cs"], streamOutput: true,
     progress: "UTF-8 metadata identity certificates");
 foreach (var name in new[]
 {
     "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "Throws", "SpanTables",
     "MemorySpans", "ReferenceInstructions", "PointerOperations", "Objects", "StaticValues", "StaticScalarValues",
-    "TranslationAudit"
+    "TranslationAudit", "MetadataDifferential", "Guards", "CallSiteAgreement"
 })
     Run(["dotnet", "run", "--file", $"Tests/{name}.cs"], streamOutput: true, progress: name);
 Console.WriteLine("PASS complete extraction evidence, compiled fixtures, mutations and mandatory certificate audit");

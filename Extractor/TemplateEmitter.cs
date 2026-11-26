@@ -7,12 +7,41 @@ namespace Nethermind.LeanCIL;
 // Templates are proof inputs. Only the generated, kernel-checked bindings connect them to CIL.
 internal static partial class TemplateEmitter
 {
-    internal sealed record Method(string Identity, string Metadata, string[] Ops, bool HasStaticSites);
-    internal sealed record Variant(string Directory, string AssemblyHash, FeatureProfile Profile, Method[] Methods);
-    sealed record Row(Variant Variant, Method Method, string[] Ops);
-    sealed record Template(string Identity, string Metadata, Feature[] Features, string[] Callees, Row[] Rows);
+    /// <summary>One decoded method's frame, observed hardware features, raw opcodes and linked method indices.</summary>
+    internal sealed record Method(string Identity, FrameMetadata Frame, Feature[] Features, int[] Opcodes,
+        int[] LinkedMethods);
+    internal sealed record Variant(string Directory, string AssemblyHash, FeatureProfile Profile, Method[] Methods)
+    {
+        /// <summary>The closed decoder inputs for this extraction in method index order.</summary>
+        internal required string DecoderInputs;
 
-    const string MissingProfile = ".unsupported \"Profile combination not selected for template\"";
+        /// <summary>
+        /// The number of a constructor image's CoreLib rows that end the program, in image order; their decoded
+        /// methods have no raw source definition of their own.
+        /// </summary>
+        internal required int ImageRows;
+
+        /// <summary>
+        /// The identities of the call table's declarations after the program's methods, in table order: an image's
+        /// getters, which links may name and no binding defines.
+        /// </summary>
+        internal required string[] Declarations;
+
+        /// <summary>The position among the image's CoreLib rows of the method at an index, or null if local.</summary>
+        internal int? ImageRow(int index) =>
+            index >= Methods.Length - ImageRows ? index - (Methods.Length - ImageRows) : null;
+    }
+    /// <summary>One profile's frame and body, its callees renumbered to the template's callee parameters.</summary>
+    sealed record Row(Variant Variant, FrameMetadata Frame, string ComparisonBody)
+    {
+        /// <summary>The qualified name of the decoded method in the shared module.</summary>
+        internal required string Body;
+        /// <summary>The decoded body's links with its method indices mapped to template parameters.</summary>
+        internal required string RelocatedLinks;
+    }
+    sealed record Template(string Identity, FrameMetadata Frame, Feature[] Features, string[] Callees, Row[] Rows,
+        int[] Opcodes);
+
     const string Usage = "Usage: leancil templates output-directory extraction-directory... [--check] " +
         "[--namespace name] [--omit-equations] [--module file.lean]";
 
@@ -44,7 +73,7 @@ internal static partial class TemplateEmitter
             }
         }
         if (positional.Count < 2) throw new ArgumentException(Usage);
-        if (name is not null && !LeanName().IsMatch(name))
+        if (name is not null && !LeanName.IsMatch(name))
             throw new ArgumentException("--namespace takes a Lean name such as Proofs.Generated: " + name);
         var output = Path.GetFullPath(positional[0]);
         var modulePath = Path.GetFullPath(module ?? Path.Combine(output, "Templates.lean"));
@@ -52,7 +81,7 @@ internal static partial class TemplateEmitter
         // The bindings import the module by its path under the output directory, a Lean source root.
         var moduleName = relative.EndsWith(".lean", StringComparison.Ordinal) ? relative[..^".lean".Length]
             .Replace('/', '.') : "";
-        if (!LeanName().IsMatch(moduleName))
+        if (!LeanName.IsMatch(moduleName))
             throw new ArgumentException("--module takes a .lean file under the output directory whose path " +
                 "names a Lean module: " + module);
         return new(output, [.. positional.Skip(1).Select(Path.GetFullPath)], name ?? "Templates", omit, modulePath,
@@ -60,7 +89,11 @@ internal static partial class TemplateEmitter
     }
 
     [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_']*(\.[A-Za-z_][A-Za-z0-9_']*)*\z")]
-    private static partial Regex LeanName();
+    internal static partial Regex LeanName { get; }
+
+    /// <summary>The generated binding filenames checked for stale inputs.</summary>
+    [GeneratedRegex(@"\ATemplateBindings[0-9]+\.lean\z")]
+    internal static partial Regex BindingName { get; }
 
     /// <summary>
     /// Writes the shared template module, one binding per extraction and <c>templates.json</c>, with LF line endings,
@@ -73,20 +106,21 @@ internal static partial class TemplateEmitter
         var variants = options.Extractions.Select(read).ToArray();
         if (variants.Select(variant => variant.AssemblyHash).Distinct(StringComparer.Ordinal).Count() != 1)
             throw new InvalidDataException("Template inputs must come from the same exact assembly.");
-        if (variants.Any(variant => variant.Methods.Select(method => method.Identity)
-            .Distinct(StringComparer.Ordinal).Count() != variant.Methods.Length))
+        if (variants.Any(variant => variant.Methods.Select(method => method.Identity).Concat(variant.Declarations)
+            .Distinct(StringComparer.Ordinal).Count() != variant.Methods.Length + variant.Declarations.Length))
             throw new InvalidDataException("Template inputs contain ambiguous managed method identities.");
         if (variants.Any(variant => string.Equals(output, variant.Directory, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("Template output must be separate from its extraction inputs.");
-        var methods = variants.SelectMany(variant => variant.Methods.Select(method =>
-            (Variant: variant, Method: method))).ToLookup(row => row.Method.Identity, StringComparer.Ordinal);
+        var methods = variants.SelectMany((variant, input) => variant.Methods.Select((method, index) =>
+            (Variant: variant, Method: method, Body: $"Input{input}.method{index}")))
+            .ToLookup(row => row.Method.Identity, StringComparer.Ordinal);
         var templates = methods.OrderBy(group => group.Key, StringComparer.Ordinal)
             .Select(group => Prepare(group.Key, group.ToArray())).ToArray();
         var templateIndices = templates.Select((template, index) => (template.Identity, index))
             .ToDictionary(pair => pair.Identity, pair => pair.index, StringComparer.Ordinal);
         var files = new SortedDictionary<string, string>(StringComparer.Ordinal)
         {
-            [options.ModulePath] = EmitTemplates(templates, options.Namespace, options.OmitEquations)
+            [options.ModulePath] = EmitTemplates(templates, variants, options.Namespace, options.OmitEquations)
         };
         for (var index = 0; index < variants.Length; index++)
             files[Path.Combine(output, $"TemplateBindings{index}.lean")] =
@@ -140,102 +174,165 @@ internal static partial class TemplateEmitter
         }
         if (Directory.Exists(output))
             problems.AddRange(Directory.EnumerateFiles(output, "TemplateBindings*.lean")
-                .Where(path => Regex.IsMatch(Path.GetFileName(path), @"\ATemplateBindings[0-9]+\.lean\z") &&
+                .Where(path => BindingName.IsMatch(Path.GetFileName(path)) &&
                     !files.ContainsKey(Path.GetFullPath(path)))
                 .Order(StringComparer.Ordinal).Select(path => "Template output has no input: " + path));
         if (problems.Count > 0) throw new InvalidDataException(string.Join("\n", problems));
     }
 
+    // Callable signature keys belong to the extraction that interned them. Templates compare
+    // these slots on the decoded methods, which retain their types across metadata sessions.
+    static bool HasCallableSlots(FrameMetadata frame) =>
+        frame.LocalKinds.Any(Callable) || frame.ParameterHomes.Any(home => Callable(home.Kind));
+
+    static bool Callable(LocalKind kind) =>
+        kind is LocalKind.MethodPointer or LocalKind.MethodTable or LocalKind.NativeMethodTable;
+
     static string Flag(Feature feature) => FeatureProfile.LeanFeature(feature)[1..];
 
-    static (string Identity, string Prefix, string Tail)? Callee(Variant variant, string op)
-    {
-        if (op.StartsWith(".newVector256 ", StringComparison.Ordinal))
-            throw new InvalidDataException("Templates do not yet support vector constructor calls: " + op);
-        var prefix = new[] { ".call ", ".callInstance ", ".newAggregate ", ".newObject " }
-            .FirstOrDefault(prefix => op.StartsWith(prefix, StringComparison.Ordinal));
-        if (prefix is null) return null;
-        var end = op.IndexOf(' ', prefix.Length);
-        if (end < 0 || !int.TryParse(op[prefix.Length..end], out var index) ||
-            index < 0 || index >= variant.Methods.Length)
-            throw new InvalidDataException("Templates do not support imported callee slots: " + op);
-        return (variant.Methods[index].Identity, prefix, op[end..]);
-    }
+    static string CalleeIdentity(Variant variant, int index) => index >= 0 && index < variant.Methods.Length
+        ? variant.Methods[index].Identity
+        : index >= variant.Methods.Length && index - variant.Methods.Length < variant.Declarations.Length
+            ? variant.Declarations[index - variant.Methods.Length]
+            : throw new InvalidDataException("Templates do not support imported callee slots: method " + index);
 
-    static Template Prepare(string identity, (Variant Variant, Method Method)[] selected)
+    static Template Prepare(string identity, (Variant Variant, Method Method, string Body)[] selected)
     {
         var first = selected[0].Method;
-        if (selected.Any(row => row.Method.HasStaticSites != first.HasStaticSites ||
-            row.Method.Metadata != first.Metadata ||
-            row.Method.Ops.Length != first.Ops.Length))
+        if (selected.Any(row => !row.Method.Opcodes.AsSpan().SequenceEqual(first.Opcodes)))
             throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
                 identity);
-        var features = Enum.GetValues<Feature>().Where(feature => selected.Any(row =>
-            row.Method.Ops.Contains(".feature " + FeatureProfile.LeanFeature(feature), StringComparer.Ordinal)))
-            .ToArray();
-        var callees = selected.SelectMany(row => row.Method.Ops.Select(op => Callee(row.Variant, op)))
-            .Where(callee => callee is not null).Select(callee => callee!.Value.Identity)
+        var features = selected.SelectMany(row => row.Method.Features).Distinct().Order().ToArray();
+        var callees = selected.SelectMany(row => row.Method.LinkedMethods.Concat(row.Method.Frame.Methods)
+                .Select(index => CalleeIdentity(row.Variant, index)))
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         var calleeIndices = callees.Select((callee, index) => (callee, index))
             .ToDictionary(pair => pair.callee, pair => pair.index, StringComparer.Ordinal);
-        var rows = selected.Select(row => new Row(row.Variant, row.Method, row.Method.Ops.Select(op =>
+        var rows = selected.Select(row =>
         {
-            var callee = Callee(row.Variant, op);
-            return callee is null ? op : callee.Value.Prefix +
-                "callee" + calleeIndices[callee.Value.Identity] + callee.Value.Tail;
-        }).ToArray())).ToArray();
-        return new(identity, first.Metadata, features, callees, rows);
+            int Renumbered(int index) => calleeIndices[CalleeIdentity(row.Variant, index)];
+            string Relocate(Func<int, string> name)
+            {
+                if (row.Method.LinkedMethods.Length == 0) return row.Body;
+                var cases = string.Join(" ", row.Method.LinkedMethods.Select(index =>
+                    $"| {index} => {name(Renumbered(index))}"));
+                return $"({row.Body}.reindexLinks (fun {cases} | index => index))";
+            }
+            return new Row(row.Variant, row.Method.Frame.Renumber(Renumbered),
+                Relocate(index => index.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+                { Body = row.Body, RelocatedLinks = Relocate(Callee) + ".links" };
+        }).ToArray();
+        // Frames compare once their callees share the template's numbering, as each body does.
+        var firstFrame = rows[0].Frame;
+        var stableFrame = firstFrame with { LocalKinds = [], ParameterHomes = [] };
+        if (rows.Skip(1).Any(row => HasCallableSlots(firstFrame) || HasCallableSlots(row.Frame)
+                ? (row.Frame with { LocalKinds = [], ParameterHomes = [] }) != stableFrame
+                : row.Frame != firstFrame))
+            throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
+                identity);
+        return new(identity, rows[0].Frame, features, callees, rows, first.Opcodes);
     }
 
-    // Missing combinations stay unsupported even where all selected rows share an instruction.
-    static string Instruction(Template template, Row[] rows, int pc, int featureIndex = 0)
+    static string Callee(int index) => $"callee{index}";
+
+    /// <summary>The decoded code and relocated links selected by the same feature flags.</summary>
+    static (string Code, string Links) SelectBody(Template template, Row[] rows,
+        List<(string Identity, string Left, string Right)> comparisons, int featureIndex = 0)
     {
-        if (rows.Length == 0) return MissingProfile;
+        if (rows.Length == 0) return ($"Extraction.templateHoles {template.Rows[0].Body}Closed.code", "[]");
         if (featureIndex == template.Features.Length)
         {
-            var values = rows.Select(row => row.Ops[pc]).Distinct(StringComparer.Ordinal).ToArray();
-            if (values.Length != 1)
-                throw new InvalidDataException("Profiles with identical observed flags emit different instructions: " +
-                    template.Identity + " at pc " + pc);
-            return values[0];
+            var selected = rows[0];
+            foreach (var other in rows.AsSpan(1))
+                comparisons.Add((template.Identity, selected.ComparisonBody, other.ComparisonBody));
+            return ($"{selected.Body}.code", selected.RelocatedLinks);
         }
         var feature = template.Features[featureIndex];
-        var enabled = Instruction(template, rows.Where(row => row.Variant.Profile.Get(feature)).ToArray(),
-            pc, featureIndex + 1);
-        var disabled = Instruction(template, rows.Where(row => !row.Variant.Profile.Get(feature)).ToArray(),
-            pc, featureIndex + 1);
-        return enabled == disabled ? enabled : $"if {Flag(feature)} then ({enabled}) else ({disabled})";
+        var enabled = SelectBody(template, [.. rows.Where(row => row.Variant.Profile.Get(feature))], comparisons, featureIndex + 1);
+        var disabled = SelectBody(template, [.. rows.Where(row => !row.Variant.Profile.Get(feature))], comparisons, featureIndex + 1);
+        string Select(string yes, string no) => yes == no ? yes : $"if {Flag(feature)} then ({yes}) else ({no})";
+        return (Select(enabled.Code, disabled.Code), Select(enabled.Links, disabled.Links));
     }
 
     // Lines end in LF on every platform, so committed output compares equal wherever it was generated.
-    static string EmitTemplates(Template[] templates, string space, bool omitEquations)
+    static string EmitTemplates(Template[] templates, Variant[] variants, string space, bool omitEquations)
     {
-        var depth = LeanEmitter.RecursionDepth(templates.Max(template => template.Rows[0].Ops.Length));
-        var lean = new StringBuilder("import CIL.InstructionEquations\n\n" +
-            "/-! Shared bodies for the selected extraction profiles; bindings establish their CIL identity. -/\n\n" +
-            $"namespace {space}\nopen CIL\n\nset_option maxRecDepth {depth}\n\n");
+        var depth = LeanEmitter.RecursionDepth(templates.Max(template => template.Opcodes.Length));
+        var lean = new StringBuilder();
         void Line(string text = "") => lean.Append(text).Append('\n');
+        Line("import CIL.InstructionEquations");
+        Line("import CIL.Extraction.TemplateCode");
+        Line("import CIL.Safety.Linking");
+        // A bound extraction's decoder inputs bind its callers to a CoreLib constructor image.
+        if (variants.Any(variant => variant.ImageRows > 0))
+            Line("import CIL.Runtime.Net11WinX64.RangeConstructor");
+        Line();
+        Line("/-! Shared decoded bodies for the selected extraction profiles. -/");
+        Line();
+        Line($"namespace {space}");
+        Line("open CIL");
+        Line($"set_option maxRecDepth {depth}");
+        Line();
+        for (var input = 0; input < variants.Length; input++)
+        {
+            Line($"namespace Input{input}");
+            lean.Append(variants[input].DecoderInputs);
+            Line($"end Input{input}");
+            Line();
+        }
+        var decoderLength = lean.Length;
+        List<(string Identity, string Left, string Right)> comparisons = [];
+        List<(string Identity, string Left, string Right)> slots = [];
         for (var index = 0; index < templates.Length; index++)
         {
             var template = templates[index];
+            var first = template.Rows[0];
+            foreach (var other in template.Rows.AsSpan(1))
+                if (HasCallableSlots(first.Frame) || HasCallableSlots(other.Frame))
+                    slots.Add((template.Identity, first.Body, other.Body));
             Line($"/-- The stable managed identity of `method{index}`. -/");
-            Line($"def method{index}Signature : String := {JsonSerializer.Serialize(template.Identity)}");
+            Line($"def method{index}Signature : String := {IdentityText.Quote(template.Identity)}");
             Line("/-- A fixed-PC template for the selected flag combinations, with explicit callee indices. -/");
-            lean.Append($"@[cil_code] def method{index} (profile : FeatureProfile)");
+            lean.Append($"@[cil_code] def method{index} (profile : FeatureProfile) " +
+                $"({FrameMetadata.EnvironmentLean} : LayoutEnvironment)");
             foreach (var feature in template.Features) lean.Append($" ({Flag(feature)} : Bool)");
             for (var callee = 0; callee < template.Callees.Length; callee++) lean.Append($" (callee{callee} : Nat)");
-            Line($" : Method := {{ profile, {template.Metadata}, code := [");
-            Line(string.Join(",\n", Enumerable.Range(0, template.Rows[0].Ops.Length)
-                .Select(pc => "  " + Instruction(template, template.Rows, pc))) + "] }");
+            var sites = template.Frame.StaticSitesLeanWith(Callee);
+            Line($$""" : Method := { {{template.Rows[0].Body}} with""");
+            Line("  profile, environment,");
+            var body = SelectBody(template, template.Rows, comparisons);
+            Line($"  links := {body.Links}, staticSites := [{sites}],");
+            Line($$"""  code := cil_template_code% ({{body.Code}}) }""");
+            var callees = Enumerable.Range(0, template.Callees.Length).Select(Callee).ToArray();
+            var binders = callees.Length == 0 ? "" : $" ({string.Join(' ', callees)} : Nat)";
+            foreach (var (rowIndex, row) in template.Rows.Index())
+            {
+                var arguments = new List<string> { "profile", "environment" };
+                foreach (var feature in template.Features)
+                    arguments.Add(LeanText.Bool(row.Variant.Profile.Get(feature)));
+                arguments.AddRange(callees);
+                var instance = $"(method{index} {string.Join(' ', arguments)})";
+                var name = $"method{index}_input{rowIndex}";
+                Line("/-- The selected flags give this input's decoded code for every caller. -/");
+                Line($"theorem {name}_code (profile : FeatureProfile) (environment : LayoutEnvironment){binders} :");
+                Line($"    {instance}.code = {row.Body}.code := rfl");
+                Line($"#print axioms {name}_code");
+                Line("/-- The selected links enter this input's callees at the supplied method indices. -/");
+                Line($"theorem {name}_links (profile : FeatureProfile) (environment : LayoutEnvironment){binders} :");
+                Line($"    {instance}.links = {row.RelocatedLinks} := rfl");
+                Line($"#print axioms {name}_links");
+            }
             if (!omitEquations)
             {
                 Line($"cil_instruction_equations method{index}");
                 // The last equation's proof reaches every code suffix, so its axioms include every equation's.
-                if (template.Rows[0].Ops.Length is > 0 and var length)
+                if (template.Opcodes.Length is > 0 and var length)
                     Line($"#print axioms method{index}_instruction{length - 1}");
             }
             Line();
         }
+        if (comparisons.Count != 0 || slots.Count != 0)
+            global::Program.CheckTemplateBodies(lean.ToString(0, decoderLength), space, comparisons, slots);
         Line($"end {space}");
         return lean.ToString();
     }
@@ -247,23 +344,25 @@ internal static partial class TemplateEmitter
             "/-! Exact bindings for one checked profile extraction; recheck with that extraction. -/\n\n" +
             "namespace TemplateBindings\nopen CIL\n\n");
         void Line(string text) => lean.Append(text).Append('\n');
-        var methodIndices = variant.Methods.Select((method, index) => (method.Identity, index))
-            .ToDictionary(pair => pair.Identity, pair => pair.index, StringComparer.Ordinal);
+        var methodIndices = variant.Methods.Select(method => method.Identity).Concat(variant.Declarations)
+            .Select((identity, index) => (identity, index))
+            .ToDictionary(pair => pair.identity, pair => pair.index, StringComparer.Ordinal);
         for (var index = 0; index < variant.Methods.Length; index++)
         {
             var templateIndex = templateIndices[variant.Methods[index].Identity];
             var template = templates[templateIndex];
-            var arguments = new List<string> { "Extracted.profile" };
-            arguments.AddRange(template.Features.Select(feature => variant.Profile.Get(feature) ? "true" : "false"));
+            var arguments = new List<string> { "Extracted.profile", "Extracted.environment" };
+            arguments.AddRange(template.Features.Select(feature => LeanText.Bool(variant.Profile.Get(feature))));
             foreach (var callee in template.Callees)
             {
                 var target = methodIndices.GetValueOrDefault(callee, -1);
                 // A callee absent from this extraction can occur only under an excluded branch.
                 arguments.Add(Math.Max(0, target).ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
+            var instance = $"{options.Namespace}.method{templateIndex} {string.Join(' ', arguments)}";
             Line("/-- This extracted method is exactly the instantiated shared template. -/");
             Line($"@[cil_code] theorem method{index}_template : Extracted.program[{index}]? =");
-            Line($"    some ({options.Namespace}.method{templateIndex} {string.Join(' ', arguments)}) := rfl");
+            Line($"    some ({instance}) := by cil_kernel_rfl");
             Line($"#print axioms method{index}_template");
         }
         Line("end TemplateBindings");

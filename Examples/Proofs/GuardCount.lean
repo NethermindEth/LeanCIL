@@ -5,34 +5,39 @@ import CIL.Safety.SymbolicExecution
 # Argument guards
 
 `Examples.Guards.Count(count)` calls `ArgumentOutOfRangeException.ThrowIfNegative(count)` and
-returns `count`. The compiler passes the parameter name as the literal `"count"`, an opaque
-string the guard never reads, so the caller binds it. Proved: a negative count raises
-`ArgumentOutOfRangeException` at the guard and any other count is returned with memory unchanged.
+returns `count`. The caller binds the parameter name loaded at the guard site. A negative count
+raises `ArgumentOutOfRangeException` and any other count returns with memory unchanged.
 -/
 
 open CIL.Safety
 namespace ExampleProof
 
+/-- The parameter-name operand at the compiled guard's `ldstr` instruction. -/
+abbrev parameterName : String := ldstrOperand Extracted.method0_instruction1
+
 /-- `Count` returns a nonnegative count and raises `ArgumentOutOfRangeException` otherwise. -/
 theorem correctness (memory : Memory) (literal : Reference) (count : CIL.W32)
-    (bound : memory.literals.lookup "count" = some literal)
+    (bound : memory.literals.lookup parameterName = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i32 count)] memory =
-      if count.toInt < 0 then .error ⟨0, 2, .thrown "System.ArgumentOutOfRangeException"⟩
+      if count.toInt < 0 then .error ⟨0, 2, .thrown .argumentOutOfRange⟩
       else .ok (memory, [.scalar (.i32 count)]) := by
+  have outcome : zeroGuardOutcome .negative 32 true (.i32 count) =
+      if count.toInt < 0 then .error (.thrown .argumentOutOfRange)
+      else .ok () := by
+    by_cases negative : count.toInt < 0 <;>
+      simp [zeroGuardOutcome, CIL.guardOperand, CIL.ZeroGuard.throws, negative]
   by_cases negative : count.toInt < 0
   · simp only [negative, ite_true]
-    cil_checked_steps [literalObject_of_lookup bound, formed, zeroGuardOutcome,
-      CIL.guardOperand, CIL.ZeroGuard.throws, BitVec.setWidth_eq, negative]
+    cil_checked_steps [literalObject_of_lookup bound, formed, outcome, negative]
   · simp only [negative, ite_false]
-    cil_checked_steps [literalObject_of_lookup bound, formed, zeroGuardOutcome,
-      CIL.guardOperand, CIL.ZeroGuard.throws, BitVec.setWidth_eq, negative]
+    cil_checked_steps [literalObject_of_lookup bound, formed, outcome, negative]
 
 #print axioms correctness
 
 /-- Zero passes `ThrowIfNegative`; `ThrowIfNegativeOrZero` would raise for it. -/
 theorem zero_returned (memory : Memory) (literal : Reference)
-    (bound : memory.literals.lookup "count" = some literal)
+    (bound : memory.literals.lookup parameterName = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i32 0)] memory =
       .ok (memory, [.scalar (.i32 0)]) := by

@@ -9,11 +9,11 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-internal static class ExceptionLint
+internal static partial class ExceptionLint
 {
     const string Usage = "Usage: leancil lint-exceptions output-directory --documentation assembly.xml";
     const string Notice = "Diagnostic only. Sites are potential model paths, not proved exceptions. XML comments are untrusted documentation, not evidence.";
-    sealed record Site(string Method, int IlOffset, string Exception, string Origin);
+    sealed record Site(string Method, int IlOffset, ExceptionType Exception, string Origin);
     sealed record Declaration(string Exception, string Text);
 
     internal static int Run(string[] args)
@@ -37,7 +37,8 @@ internal static class ExceptionLint
         byte[] xml = new byte[checked((int)documentationStream.Length)];
         documentationStream.ReadExactly(xml);
         if (documentationStream.ReadByte() != -1) throw new InvalidDataException("Exception documentation changed while reading.");
-        using ModuleDefinition module = StaticData.ReadModule(assembly);
+        using PinnedAssemblies pinned = new(assembly, Hash(assembly), []);
+        ModuleDefinition module = pinned.Selected;
         FeatureProfile profile = identity.GetProperty("profile").Deserialize<FeatureProfile>()
             ?? throw new InvalidDataException("Missing extraction profile.");
         SortedSet<string> initialized = new(identity.GetProperty("initializedTypes").Deserialize<string[]>() ?? [], StringComparer.Ordinal);
@@ -50,40 +51,49 @@ internal static class ExceptionLint
             throw new InvalidDataException("Extraction changed during exception lint.");
         string member = DocumentationId(MethodSpecialization.Definition(methods[0]));
         Declaration[] declarations = ReadDocumentation(xml, module.Assembly.Name.Name, member);
-        var methodIndices = methods.Select((method, index) => (method, index))
-            .ToDictionary(pair => pair.method, pair => pair.index);
         List<Site> sites = [];
-        for (int methodIndex = 0; methodIndex < methods.Length; methodIndex++)
+        foreach (var method in methods)
         {
-            MethodDefinition method = methods[methodIndex];
-            var instructions = new InstructionIndex(method);
             var reachable = Reachability.Analyze(method, profile);
-            var nativeOperands = NativeOperands.Certify(method, reachable, profile);
-            var parameterHomes = ParameterStorage.IndexHomes(ParameterStorage.Analyze(method, reachable));
-            Throws.Analysis folded = Throws.Analyze(method);
-            foreach (Instruction instruction in reachable.OrderBy(value => value.Offset))
+            var folded = Throws.Analyze(method);
+            foreach (var instruction in method.Body.Instructions)
             {
-                if (folded.Raises.TryGetValue(instruction, out string? exception))
+                if (!reachable.Contains(instruction)) continue;
+                if (folded.Raises.TryGetValue(instruction, out var exception))
                     sites.Add(new(method.FullName, instruction.Offset, exception, "folded throw"));
-                string operation = InstructionTranslation.Translate(instruction, method, methodIndices,
-                    methodIndex, instructions, profile, nativeOperands, parameterHomes);
-                foreach (string named in RuntimeExceptions(operation))
-                    sites.Add(new(method.FullName, instruction.Offset, named, "interpreter operation: " + operation));
+                else if (instruction.OpCode.Code == Code.Throw && instruction.Previous is { } previous &&
+                    previous.OpCode.Code == Code.Ldnull && reachable.Contains(previous))
+                    sites.Add(new(method.FullName, instruction.Offset, ExceptionType.NullReference, "throw of null"));
+                if (Faults(method, instruction, profile) is not { } faults) continue;
+                var origin = $"interpreter operation: {instruction}";
+                foreach (var named in RuntimeExceptions(faults))
+                    sites.Add(new(method.FullName, instruction.Offset, named, origin));
             }
         }
-        string[] modeled = sites.Select(site => site.Exception).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        ExceptionType[] modeled = sites.Select(site => site.Exception).Distinct()
+            .OrderBy(exception => exception.FullName(), StringComparer.Ordinal).ToArray();
+        HashSet<ExceptionType> modeledSet = [.. modeled];
         string[] documented = declarations.Select(value => value.Exception).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-        string[] undocumented = modeled.Except(documented, StringComparer.Ordinal).ToArray();
-        string[] absent = documented.Except(modeled, StringComparer.Ordinal).ToArray();
+        HashSet<ExceptionType> documentedMembers = [.. documented.Select(DocumentedMember).OfType<ExceptionType>()];
+        string[] undocumented = modeled.Where(exception => !documentedMembers.Contains(exception))
+            .Select(exception => exception.FullName()).ToArray();
+        string[] absent = documented.Where(name => DocumentedMember(name) is not ExceptionType member ||
+            !modeledSet.Contains(member)).ToArray();
         string report = JsonSerializer.Serialize(new
         {
             schema = 1, note = Notice,
-            coverage = "Profile-reachable admitted methods; folded throws and named arithmetic/span faults. No path feasibility, preconditions, runtime-completeness or proof analysis. Invalid state, invalid operands/bounds, memory faults, unsupported operations and fuel exhaustion have no CLR mapping here.",
+            coverage = "Profile-reachable admitted methods; folded constructors, adjacent null throws and named " +
+                "arithmetic/span faults. No path feasibility, preconditions, runtime-completeness or proof " +
+                "analysis. Invalid state, invalid operands/bounds, memory faults, unsupported operations " +
+                "and fuel exhaustion have no CLR mapping here.",
             documentationBinding = "XML assembly name and compiler member ID matched. The XML hash records supplied bytes; it does not establish that the XML came from this DLL build.",
             assemblyIdentity = module.Assembly.Name.FullName, assemblySha256 = Hash(assembly),
             documentationSha256 = Hash(xml), generatedSha256 = regeneratedHash,
             entry = methods[0].FullName, documentationMember = member, profile = profile.Name,
-            potentialModeled = modeled, documented = declarations, sites,
+            potentialModeled = modeled.Select(exception => exception.FullName()),
+            documented = declarations,
+            sites = sites.Select(site =>
+                new { site.Method, site.IlOffset, Exception = site.Exception.FullName(), site.Origin }),
             findings = undocumented.Select(exception => new { exception, message = "potential modelled exception not documented" })
                 .Concat(absent.Select(exception => new { exception, message = "documented exception not found in the model" }))
         }, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
@@ -99,25 +109,57 @@ internal static class ExceptionLint
         return 0;
     }
 
-    static IEnumerable<string> RuntimeExceptions(string operation)
+    enum FaultKind { DivideByZeroAndOverflow, DivideByZero, Overflow, IndexOutOfRange }
+
+    static IEnumerable<ExceptionType> RuntimeExceptions(FaultKind kind)
     {
-        if (operation.StartsWith(".nativeBinary (", StringComparison.Ordinal)) operation = operation[15..^1];
-        if (operation.StartsWith(".divide ", StringComparison.Ordinal))
+        if (kind is FaultKind.DivideByZeroAndOverflow or FaultKind.DivideByZero)
+            yield return ExceptionType.DivideByZero;
+        if (kind is FaultKind.DivideByZeroAndOverflow or FaultKind.Overflow)
+            yield return ExceptionType.Overflow;
+        if (kind == FaultKind.IndexOutOfRange)
+            yield return ExceptionType.IndexOutOfRange;
+    }
+
+    static FaultKind? Faults(MethodDefinition method, Instruction instruction, FeatureProfile profile)
+    {
+        var code = instruction.OpCode.Code;
+        if (InstructionOperands.IsCheckedConversion(code)) return FaultKind.Overflow;
+        FaultKind? kind = code switch
         {
-            yield return "System.DivideByZeroException";
-            if (operation.StartsWith(".divide true ", StringComparison.Ordinal)) yield return "System.OverflowException";
-        }
-        else if (operation.StartsWith(".checkedArithmetic ", StringComparison.Ordinal) ||
-            operation.StartsWith(".checkedConvert ", StringComparison.Ordinal) ||
-            operation.StartsWith(".intrinsic (.scalar (.math .abs ", StringComparison.Ordinal))
-            yield return "System.OverflowException";
-        else if (operation == ".intrinsic (.x86Base .divRem64) 3")
+            Code.Div or Code.Rem => FaultKind.DivideByZeroAndOverflow,
+            Code.Div_Un or Code.Rem_Un => FaultKind.DivideByZero,
+            Code.Add_Ovf or Code.Sub_Ovf or Code.Mul_Ovf or
+                Code.Add_Ovf_Un or Code.Sub_Ovf_Un or Code.Mul_Ovf_Un => FaultKind.Overflow,
+            _ => null
+        };
+        if (kind.HasValue) return kind;
+        if (code != Code.Call || instruction.Previous?.OpCode.Code == Code.Constrained ||
+            instruction.Operand is not MethodReference reference) return null;
+        var typeTests = TypeTests.Analyze(method);
+        if (typeTests.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction)) return null;
+        return RuntimeModels.CallModel(reference, profile) switch
         {
-            yield return "System.DivideByZeroException";
-            yield return "System.OverflowException";
-        }
-        else if (operation.StartsWith(".memory (.spanItem ", StringComparison.Ordinal))
-            yield return "System.IndexOutOfRangeException";
+            true when RuntimeModels.IntegerAbs(reference) => FaultKind.Overflow,
+            true when reference.FullName == RuntimeModels.X86DivRemSignature => FaultKind.DivideByZeroAndOverflow,
+            true when Spans.MemberWidth(instruction, "get_Item", 1, profile.Architecture) is not null =>
+                FaultKind.IndexOutOfRange,
+            _ => null
+        };
+    }
+
+    [GeneratedRegex(@"\AT:[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z")]
+    internal static partial Regex DocumentationReference { get; }
+
+    [GeneratedRegex(@"`[0-9]+")]
+    internal static partial Regex GenericArity { get; }
+
+    // The documentation boundary: a documented type name is the member of that full name, or none.
+    static ExceptionType? DocumentedMember(string name)
+    {
+        foreach (ExceptionType exception in ExceptionTypeText.All)
+            if (exception.FullName() == name) return exception;
+        return null;
     }
 
     static Declaration[] ReadDocumentation(byte[] xml, string assembly, string member)
@@ -135,7 +177,7 @@ internal static class ExceptionLint
         foreach (XElement declaration in matches[0].Elements("exception"))
         {
             string? cref = (string?)declaration.Attribute("cref");
-            if (cref is null || !Regex.IsMatch(cref, @"\AT:[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z"))
+            if (cref is null || !DocumentationReference.IsMatch(cref))
                 throw new InvalidDataException("Exception documentation requires a resolved type cref, not prose or an unresolved reference.");
             result.Add(new(cref[2..], declaration.Value.Trim()));
         }
@@ -157,7 +199,7 @@ internal static class ExceptionLint
         PointerType pointer => DocumentationType(pointer.ElementType) + "*",
         ArrayType array => DocumentationType(array.ElementType) + (array.IsVector ? "[]" : "[" + string.Join(",", Enumerable.Repeat("0:", array.Rank)) + "]"),
         GenericParameter parameter => (parameter.Type == GenericParameterType.Method ? "``" : "`") + parameter.Position,
-        GenericInstanceType generic => Regex.Replace(generic.ElementType.FullName.Replace('/', '.'), @"`[0-9]+", "") +
+        GenericInstanceType generic => GenericArity.Replace(generic.ElementType.FullName.Replace('/', '.'), "") +
             "{" + string.Join(",", generic.GenericArguments.Select(DocumentationType)) + "}",
         RequiredModifierType modifier => DocumentationType(modifier.ElementType),
         OptionalModifierType modifier => DocumentationType(modifier.ElementType),

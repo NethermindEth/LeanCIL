@@ -126,6 +126,7 @@ internal static class ImportReviewRegressions
             AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", extractorDirectory + Path.DirectorySeparatorChar);
             if (Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory) != extractorDirectory)
                 throw new InvalidOperationException("The isolated ambiguity test did not select the actual CLI's framework directory.");
+            using PinnedMetadata metadata = new(assembly, implementation);
             sources.SetValue(firstSource, 1);
             using (IDisposable duplicate = (IDisposable)Construct(resolutionType, sources))
             {

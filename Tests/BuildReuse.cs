@@ -1,8 +1,20 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // Reusing a parent's build requires matching source and output bytes, not an environment flag.
+static string FixtureOutput(string[] command)
+{
+    var result = Execute(command);
+    if (result.Code != 0) throw new InvalidOperationException(result.Output);
+    return result.Stdout.Trim();
+}
+
 var buildElapsed = System.Diagnostics.Stopwatch.StartNew();
 Run(["dotnet", "build", "Extractor", "-c", "Release",
     "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
@@ -22,16 +34,17 @@ try
         """);
     Run(["dotnet", "build", fixture, "-c", "Release",
         "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
-    if (Run(FixtureCommand(fixture, ["prepared"], prepared: true)).Trim() != "Release prepared")
+    if (FixtureOutput(FixtureCommand(fixture, ["prepared"], prepared: true)) != "Release prepared")
         throw new Exception("Prepared fixture did not use its Release build or forward arguments");
-    if (Run(FixtureCommand(fixture, ["unprepared"], prepared: false)).Trim() != "Release unprepared")
+    if (FixtureOutput(FixtureCommand(fixture, ["unprepared"], prepared: false)) != "Release unprepared")
         throw new Exception("Unprepared fixture did not build normally or forward arguments");
-    if (Run(["dotnet", "run", "--file", fixture, "--", "nested"]).Trim() != "Release nested")
+    if (FixtureOutput(["dotnet", "run", "--file", fixture, "--", "nested"]) != "Release nested")
         throw new Exception("Nested fixture did not use Release or forward arguments");
     File.AppendAllText(fixture, "\nConsole.WriteLine(\"changed\");\n");
-    if (!Run(["dotnet", "run", "--file", fixture, "--", "nested"]).TrimEnd().EndsWith("changed"))
+    var rebuilt = FixtureOutput(["dotnet", "run", "--file", fixture, "--", "nested"]);
+    if (rebuilt.ReplaceLineEndings("\n") != "Release nested\nchanged")
         throw new Exception("Nested fixture did not rebuild changed source");
-    if (!Run(["dotnet", "run", "--file", fixture, "-c", "Debug", "--", "explicit"]).Contains("Debug explicit"))
+    if (!FixtureOutput(["dotnet", "run", "--file", fixture, "-c", "Debug", "--", "explicit"]).Contains("Debug explicit"))
         throw new Exception("Explicit fixture configuration was overridden");
     Environment.SetEnvironmentVariable(ExtractorBuildEnvironment, "true");
     if (PreparedExtractorMatches()) throw new Exception("Boolean bypass accepted");

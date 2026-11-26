@@ -1,5 +1,6 @@
 import CIL.Safety.FuelLemmas
-import CIL.Safety.LiveValues
+import CIL.Safety.ExecutionLifetime
+import CIL.Safety.HandlerSteps
 
 /-!
 # Composing a call with its caller
@@ -15,7 +16,7 @@ namespace CIL.Safety
     The invocation includes child setup and teardown; no helper body is assumed, and the
     caller's later outcome, normal or faulting, carries over unchanged. -/
 theorem run_call_of_invoke {program : CIL.Program} {fuel method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest returned : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack arguments rest returned : List Value}
     {frame : Frame} {memory updated childResult : Memory}
     {outcome : Except LocatedFault (Memory × List Value)}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
@@ -25,24 +26,30 @@ theorem run_call_of_invoke {program : CIL.Program} {fuel method pc callee : Nat}
       run program fuel method (pc + 1) args frame (returned ++ rest) childResult = outcome) :
     run program (fuel + 1) method pc args frame stack memory = outcome := by
   cases hb : program[callee]? with
-  | none => simp [invoke, hb] at child
+  | none => simp [invoke_eq, hb] at child
   | some childBody =>
     cases ha : arguments.mapM (checkedValue updated) with
-    | error fault => simp [invoke, hb, ha, Except.mapError, Bind.bind, Except.bind] at child
+    | error fault => simp [invoke_eq, hb, ha, Except.mapError, Bind.bind, Except.bind] at child
     | ok checked =>
       have same := (checkedValues_valid _ _ _ ha).1
       subst checked
       cases he : enterFrame childBody arguments updated with
-      | error fault => simp [invoke, hb, ha, he, Except.mapError, Bind.bind, Except.bind] at child
+      | error fault => simp [invoke_eq, hb, ha, he, Except.mapError, Bind.bind,
+                         Except.bind] at child
       | ok entered =>
         obtain ⟨childFrame, childMemory⟩ := entered
-        simp only [invoke, hb, ha, he, Except.mapError, Bind.bind, Except.bind] at child
-        simp only [run, methodFound, instructionFound, stepped, hb, he, child,
-          continuation, Except.mapError, Bind.bind, Except.bind]
+        simp only [invoke_eq, hb, ha, he, Except.mapError, Bind.bind, Except.bind] at child
+        have childRun := runFaulting_of_run_ok child
+        unfold run runWith at continuation ⊢
+        rw [runFaulting]
+        simp only [methodFound, instructionFound, stepped, hb, he, childRun,
+          Except.mapError, Bind.bind, Except.bind]
+        exact continuation
 
 /-- Independently sufficient budgets combine without requiring equal proof fuel. -/
 theorem run_call_exists {program : CIL.Program} {method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest returned values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction}
+    {args stack arguments rest returned values : List Value}
     {frame : Frame} {memory updated childResult result : Memory}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
@@ -65,7 +72,7 @@ theorem run_call_exists {program : CIL.Program} {method pc callee : Nat}
 
 /-- Compose a separately proved child invocation with a caller postcondition. -/
 theorem run_call_post {program : CIL.Program} {method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack arguments rest values : List Value}
     {frame : Frame} {memory updated final : Memory} {post : Memory → List Value → Prop}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory =

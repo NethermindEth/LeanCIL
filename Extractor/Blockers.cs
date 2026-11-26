@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -8,7 +7,7 @@ using Mono.Cecil;
 namespace Nethermind.LeanCIL;
 
 // Runs extraction and its validators over explicit method/profile pairs; it never checks a proof.
-internal static class Blockers
+internal static partial class Blockers
 {
     const string Usage = "Usage: leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] " +
         "[--assembly 'assembly name or full identity'] [--reference Lib.dll]... [--import Lib.leancil.contracts]... " +
@@ -21,7 +20,9 @@ internal static class Blockers
     ];
     const string Disclaimer = "Admission only: admitted entries are extractable under their profile; nothing here is proved.";
 
-    sealed record Site(string Method, int? IlOffset, string? Instruction, string? Source, string Message);
+    /// <summary>One occurrence of a blocker: the method and instruction it names, its source line and its
+    /// diagnostic.</summary>
+    internal sealed record Site(string Method, int? IlOffset, string? Instruction, string? Source, string Message);
 
     sealed class ChainComparer : IEqualityComparer<string[]>
     {
@@ -74,9 +75,10 @@ internal static class Blockers
         int? ReachableMethods, List<Finding> Findings)
     {
         internal string[] TypeArguments { get; init; } = [];
+        // Names, not definitions: a definition holds its extraction's whole module alive across every later entry.
+        /// <summary>The full names of the extracted methods, each defined from its decoder.</summary>
+        internal string[] DecodedMethods { get; init; } = [];
     }
-
-    static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
     static string Option(string[] args, ref int index)
     {
@@ -138,26 +140,34 @@ internal static class Blockers
         var initializedTypes = root.TryGetProperty("initializedTypes", out var types)
             ? new SortedSet<string>(types.Deserialize<string[]>() ?? [], StringComparer.Ordinal) : new SortedSet<string>(StringComparer.Ordinal);
 
-        var assembly = File.ReadAllBytes(assemblyPath);
-        VectorSignatures.Validate(assembly);
+        // Each admitted entry is extracted again; the batch reads and hashes the image, PDB and extractor once.
+        var batch = new Program.ExtractionBatch();
+        var image = batch.ReadAssembly(assemblyPath);
+        image.ValidateSignatures();
+        var assembly = image.Bytes;
         string identity, symbols;
         Guid mvid;
         using (var probe = ModuleDefinition.ReadModule(new MemoryStream(assembly)))
         {
             identity = probe.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             mvid = probe.Mvid;
-            symbols = Symbols.Read(probe, assemblyPath, out _) is { } origin ? origin == "embedded" ? "embedded portable PDB" : "portable PDB " + origin : "none";
+            symbols = Symbols.Read(probe, assemblyPath, out _, batch.ReadPdb) is { } origin
+                ? origin == "embedded" ? "embedded portable PDB" : "portable PDB " + origin : "none";
         }
 
         var findings = new Dictionary<string, Finding>(StringComparer.Ordinal);
         var outcomes = new List<Outcome>();
+        // Chains repeat the same methods across entries; one name per method keeps the report's memory linear.
+        var names = new Dictionary<MethodDefinition, string>(ReferenceEqualityComparer.Instance);
+        string NameOf(MethodDefinition method) =>
+            names.TryGetValue(method, out var name) ? name : names[method] = method.FullName;
         // One module serves every entry, so per-method analyses are computed once; each entry's
         // operand rewrites are undone before the next entry is validated.
         var references = referencePaths.Distinct(StringComparer.Ordinal).ToArray();
-        using var pinned = new PinnedAssemblies(assembly, Hash(assembly),
-            references.Select(path => new PinnedAssemblies.Source(path)));
+        using var pinned = new PinnedAssemblies(image,
+            references.Select(path => new PinnedAssemblies.Source(path)), batch.ReadAssembly);
         var module = pinned.Selected;
-        Symbols.Read(module, assemblyPath, out _);
+        Symbols.Read(module, assemblyPath, out _, batch.ReadPdb);
         foreach (var entry in entries.EnumerateArray())
         {
             var signature = entry.ValueKind == JsonValueKind.Object ? Text(entry, "signature") : null;
@@ -224,28 +234,26 @@ internal static class Blockers
                     rewrites[index].Instruction.Operand = rewrites[index].Operand;
             }
             // `admitted` means exactly that `extract` succeeds, so an entry without blockers is extracted.
-            if (blocked.Count == 0 && Extract(assemblyPath, signature, profileName, manifestDirectory, expectedAssembly,
-                    typeArguments, initializedTypes, references, imports) is { } rejected)
-                blocked.Add(new(methods[0], null, rejected, [methods[0]]));
+            Program.MethodDefinitions? definitions = null;
+            if (blocked.Count == 0 && Extract(batch, assemblyPath, signature, profileName, manifestDirectory,
+                    expectedAssembly, typeArguments, initializedTypes, references, imports,
+                    extracted => definitions = extracted) is { } rejected)
+                blocked.Add(Rejection(methods[0], rejected));
             if (blocked.Count == 0)
             {
+                string[] decoded = [.. definitions!.Methods.Select(method => method.FullName)];
                 outcomes.Add(new(signature, profileName, "admitted", methods[0].FullName, null, methods.Length, [])
-                    { TypeArguments = typeArguments });
+                    { TypeArguments = typeArguments, DecodedMethods = decoded });
                 continue;
             }
             var entryFindings = new List<Finding>();
             var knownFindings = new HashSet<Finding>();
             foreach (var failure in blocked)
             {
-                var message = failure.Error.Message;
-                int? offset = failure.At?.Offset ?? (Regex.Match(message, @"\bIL_([0-9a-f]{4,})\b") is { Success: true } label
-                    ? Convert.ToInt32(label.Groups[1].Value, 16) : null);
-                // The construct is the diagnostic without its site, so every occurrence shares one blocker.
-                var construct = Regex.Replace(message.Split('\n')[0], @"\bIL_[0-9a-f]{4,}: ", "");
+                var construct = Construct(failure.Error.Message);
                 if (!findings.TryGetValue(construct, out var finding)) findings[construct] = finding = new(construct);
-                var site = new Site(failure.Method.FullName, offset, failure.At?.ToString(),
-                    offset is int at ? Symbols.Location(failure.Method, at, Path.GetFileName) : null, message);
-                var chain = failure.Chain.Select(method => method.FullName).ToArray();
+                var site = SiteOf(failure);
+                var chain = failure.Chain.Select(NameOf).ToArray();
                 finding.Add(site, chain[0], profileName, chain);
                 if (knownFindings.Add(finding)) entryFindings.Add(finding);
             }
@@ -261,15 +269,21 @@ internal static class Blockers
             .ToDictionary(pair => pair.finding, pair => pair.index);
         foreach (var outcome in outcomes) outcome.Findings.Sort((left, right) => ranks[left].CompareTo(ranks[right]));
 
-        var report = JsonSerializer.Serialize(new
+        batch.RequireUnchanged();
+        // A chain names each method by its index in `methods`, so a name is written once however many chains hold it.
+        string[] methodTable = [.. ordered.SelectMany(f => f.Entries).SelectMany(r => r.Chains)
+            .SelectMany(chain => chain).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+        var methodIndex = methodTable.Select((name, index) => (name, index))
+            .ToDictionary(pair => pair.name, pair => pair.index, StringComparer.Ordinal);
+        var report = new
         {
-            schema = 1,
+            schema = 2,
             note = Disclaimer,
             assemblyPath = Path.GetFullPath(assemblyPath),
             assemblyIdentity = identity,
             mvid,
-            assemblySha256 = Hash(assembly),
-            extractorSha256 = Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)),
+            assemblySha256 = image.Hash,
+            extractorSha256 = batch.ExtractorHash,
             symbols,
             initializedTypes,
             counts = new
@@ -282,25 +296,68 @@ internal static class Blockers
             {
                 signature = o.Signature, typeArguments = o.TypeArguments, profile = o.Profile, status = o.Status,
                 method = o.Method, reason = o.Reason,
-                reachableMethods = o.ReachableMethods, blockers = o.Findings.Select(f => f.Id)
+                reachableMethods = o.ReachableMethods,
+                decodedMethods = o.DecodedMethods,
+                blockers = o.Findings.Select(f => f.Id)
             }),
+            methods = methodTable,
             blockers = ordered.Select(f => new
             {
                 id = f.Id, construct = f.Construct,
                 sites = f.Sites.Select(s => new { method = s.Method, ilOffset = s.IlOffset, instruction = s.Instruction, source = s.Source, message = s.Message }),
-                entries = f.Entries.Select(r => new { signature = r.Signature, profile = r.Profile, chains = r.Chains })
+                entries = f.Entries.Select(r => new
+                {
+                    signature = r.Signature, profile = r.Profile,
+                    chains = r.Chains.Select(chain => chain.Select(name => methodIndex[name]))
+                })
             })
-        }, new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        };
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-        File.WriteAllText(outputPath, report + "\n", new UTF8Encoding(false));
+        // Streamed, since the report can exceed the longest string the runtime allocates.
+        using (var stream = File.Create(outputPath))
+        {
+            JsonSerializer.Serialize(stream, report,
+                new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+            stream.WriteByte((byte)'\n');
+        }
         Console.Write(Summary(identity, outcomes, ordered, outputPath));
         return 0;
     }
 
-    // Runs `extract` with the entry's settings into a scratch directory; returns its failure, if any.
-    static Exception? Extract(string assemblyPath, string signature, string profileName, string manifestDirectory,
-        string? expectedAssembly, string[] typeArguments, IEnumerable<string> initializedTypes,
-        IEnumerable<string> references, ImportOptions imports)
+    /// <summary>The blocker of an entry whose extraction failed with `error`: an undecoded instruction names its
+    /// method and instruction, and any other failure names the entry.</summary>
+    internal static MetadataValidation.Blocked Rejection(MethodDefinition entry, Exception error) =>
+        error is GenericEvidence.UndecodedInstruction undecoded
+            ? new(undecoded.Method, undecoded.Refusal.At, error, [entry])
+            : new(entry, null, error, [entry]);
+
+    /// <summary>The construct a diagnostic reports: its first line without its site, so every occurrence of
+    /// one construct shares one blocker.</summary>
+    internal static string Construct(string message) =>
+        SiteLabel.Replace(message.Split('\n')[0], "");
+
+    /// <summary>The report site of a blocker, at its instruction or at the IL offset its message names.</summary>
+    internal static Site SiteOf(MetadataValidation.Blocked failure)
+    {
+        var message = failure.Error.Message;
+        int? offset = failure.At?.Offset ?? (OffsetLabel.Match(message) is { Success: true } label
+            ? Convert.ToInt32(label.Groups[1].Value, 16) : null);
+        return new(failure.Method.FullName, offset, failure.At?.ToString(),
+            offset is int at ? Symbols.Location(failure.Method, at, Path.GetFileName) : null, message);
+    }
+
+    [GeneratedRegex(@"\bIL_[0-9a-f]{4,}: ")]
+    private static partial Regex SiteLabel { get; }
+
+    [GeneratedRegex(@"\bIL_([0-9a-f]{4,})\b")]
+    private static partial Regex OffsetLabel { get; }
+
+    // Runs `extract` with the entry's settings into a scratch directory; returns its failure, if any, and passes
+    // the extracted methods to `definitions`.
+    static Exception? Extract(Program.ExtractionBatch batch, string assemblyPath, string signature, string profileName,
+        string manifestDirectory, string? expectedAssembly, string[] typeArguments,
+        IEnumerable<string> initializedTypes, IEnumerable<string> references, ImportOptions imports,
+        Action<Program.MethodDefinitions> definitions)
     {
         var output = Path.Combine(Path.GetTempPath(), "leancil-blockers-" + Guid.NewGuid().ToString("N"));
         string profile = profileName.StartsWith('@') ? "@" + Path.GetFullPath(profileName[1..], manifestDirectory) :
@@ -311,7 +368,8 @@ internal static class Blockers
                 .. expectedAssembly is null ? Array.Empty<string>() : ["--assembly", expectedAssembly],
                 .. typeArguments.SelectMany(argument => new[] { "--type-argument", argument }),
                 .. initializedTypes.SelectMany(type => new[] { "--assume-initialized", type }),
-                .. references.SelectMany(path => new[] { "--reference", path }), .. imports.Arguments()]);
+                .. references.SelectMany(path => new[] { "--reference", path }), .. imports.Arguments()], batch,
+                definitions);
             return null;
         }
         catch (Exception error) { return error; }

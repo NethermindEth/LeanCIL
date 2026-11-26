@@ -15,46 +15,53 @@ open CIL.Safety
 /-- Initialized bytes load as an ordinary aggregate. -/
 theorem initialized_load {memory : Memory} {source : Reference} {width : Nat}
     {bytes : List (BitVec 8)} (loaded : read memory source width 1 = .ok bytes)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.loadAggregate width) pc args frame (.reference (.address source) :: rest)
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate width)
+    (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.reference (.address source) :: rest)
       memory = .ok (.next (pc + 1) (.scalar (.aggregate bytes) :: rest) frame memory) := by
-  cil_checked_step [loaded]
+  cil_checked_step [shape, loaded]
 #print axioms initialized_load
 
 /-- Readonly loads preserve the same initialized byte evidence. -/
 theorem readonly_load {memory : Memory} {source : Reference} {width : Nat}
     {bytes : List (BitVec 8)} (loaded : read memory source width 1 = .ok bytes)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.loadAggregate width) pc args frame (.readOnlyReference (.address source) :: rest)
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate width)
+    (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.readOnlyReference (.address source) :: rest)
       memory = .ok (.next (pc + 1) (.scalar (.aggregate bytes) :: rest) frame memory) := by
-  cil_checked_step [loaded]
+  cil_checked_step [shape, loaded]
 #print axioms readonly_load
 
 /-- A read stated at a local kind's width, as a remembered aggregate local gives it, supplies
     the load at the numeral width the opcode carries. -/
 theorem kind_width_load {memory : Memory} {source : Reference} {bytes : List (BitVec 8)}
     (loaded : read memory source (localWidth (.aggregate 32)) 1 = .ok bytes)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.loadAggregate 32) pc args frame (.reference (.address source) :: rest)
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate 32)
+    (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.reference (.address source) :: rest)
       memory = .ok (.next (pc + 1) (.scalar (.aggregate bytes) :: rest) frame memory) := by
-  cil_checked_step [loaded]
+  cil_checked_step [shape, loaded]
 #print axioms kind_width_load
 
 /-- One contract step derives the aggregate load from a supplied read, as a checked step does,
     so a walk taken one step at a time crosses a load through a managed-reference address. -/
 theorem contract_step_load {memory : Memory} {source : Reference} {bytes : List (BitVec 8)}
     (loaded : read memory source 32 1 = .ok bytes)
-    (body : CIL.Method) (program : CIL.Program) (method : Nat)
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate 32) (program : CIL.Program) (method : Nat)
     (found : program[method]? = some body)
-    (instruction : body.code[0]? = some (.loadAggregate 32)) (frame : Frame) (rest : List Value)
+    (instruction : body.code[0]? = some (.ldobj type)) (frame : Frame) (rest : List Value)
     (continuation : WP (Execution (fun fuel => run program fuel method 1 [] frame
       (.scalar (.aggregate bytes) :: rest) memory)) (fun _ => True)) :
     WP (Execution (fun fuel => run program fuel method 0 [] frame
       (.reference (.address source) :: rest) memory)) (fun _ => True) := by
   cil_contract_prepare []
   -- The read is no step fact until it is prepared, so the unprepared step stops here.
-  fail_if_success cil_contract_step_normalized [found, instruction, loaded]
-  cil_contract_step [found, instruction, loaded]
+  fail_if_success cil_contract_step_normalized [shape, found, instruction, loaded]
+  cil_contract_step [shape, found, instruction, loaded]
   exact WP.adequate.mp continuation
 #print axioms contract_step_load
 
@@ -63,15 +70,16 @@ theorem contract_step_load {memory : Memory} {source : Reference} {bytes : List 
 theorem contract_step_kind_width_load {memory : Memory} {source : Reference}
     {bytes : List (BitVec 8)}
     (loaded : read memory source (localWidth (.aggregate 32)) 1 = .ok bytes)
-    (body : CIL.Method) (program : CIL.Program) (method : Nat)
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate 32) (program : CIL.Program) (method : Nat)
     (found : program[method]? = some body)
-    (instruction : body.code[0]? = some (.loadAggregate 32)) (frame : Frame) (rest : List Value)
+    (instruction : body.code[0]? = some (.ldobj type)) (frame : Frame) (rest : List Value)
     (continuation : WP (Execution (fun fuel => run program fuel method 1 [] frame
       (.scalar (.aggregate bytes) :: rest) memory)) (fun _ => True)) :
     WP (Execution (fun fuel => run program fuel method 0 [] frame
       (.readOnlyReference (.address source) :: rest) memory)) (fun _ => True) := by
   cil_contract_prepare []
-  cil_contract_step [found, instruction, loaded]
+  cil_contract_step [shape, found, instruction, loaded]
   exact WP.adequate.mp continuation
 #print axioms contract_step_kind_width_load
 
@@ -80,122 +88,139 @@ theorem contract_step_kind_width_load {memory : Memory} {source : Reference}
 theorem contract_walk_restated_kind_load {memory : Memory} {source : Reference}
     {bytes : List (BitVec 8)}
     (loaded : read memory source (localWidth (.aggregate 32)) 1 = .ok bytes)
-    (body : CIL.Method) (program : CIL.Program) (method : Nat)
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate 32) (program : CIL.Program) (method : Nat)
     (found : program[method]? = some body)
-    (instruction : body.code[0]? = some (.loadAggregate 32)) (frame : Frame) (rest : List Value)
+    (instruction : body.code[0]? = some (.ldobj type)) (frame : Frame) (rest : List Value)
     (continuation : WP (Execution (fun fuel => run program fuel method 1 [] frame
       (.scalar (.aggregate bytes) :: rest) memory)) (fun _ => True)) :
     WP (Execution (fun fuel => run program fuel method 0 [] frame
       (.reference (.address source) :: rest) memory)) (fun _ => True) := by
   have restated := loaded
   clear loaded
-  cil_contract_steps [found, instruction, restated] until continuation
+  cil_contract_steps [shape, found, instruction, restated] until continuation
 #print axioms contract_walk_restated_kind_load
 
 /-- The same walk takes a restated read at the numeral width. -/
 theorem contract_walk_restated_load {memory : Memory} {source : Reference}
     {bytes : List (BitVec 8)} (loaded : read memory source 32 1 = .ok bytes)
-    (body : CIL.Method) (program : CIL.Program) (method : Nat)
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate 32) (program : CIL.Program) (method : Nat)
     (found : program[method]? = some body)
-    (instruction : body.code[0]? = some (.loadAggregate 32)) (frame : Frame) (rest : List Value)
+    (instruction : body.code[0]? = some (.ldobj type)) (frame : Frame) (rest : List Value)
     (continuation : WP (Execution (fun fuel => run program fuel method 1 [] frame
       (.scalar (.aggregate bytes) :: rest) memory)) (fun _ => True)) :
     WP (Execution (fun fuel => run program fuel method 0 [] frame
       (.reference (.address source) :: rest) memory)) (fun _ => True) := by
   have restated := loaded
   clear loaded
-  cil_contract_steps [found, instruction, restated] until continuation
+  cil_contract_steps [shape, found, instruction, restated] until continuation
 #print axioms contract_walk_restated_load
 
 /-- An unknown byte loads as a snapshot without becoming initialized. -/
 theorem unknown_load {memory : Memory} {source : Reference}
     (loaded : readSnapshot memory source 1 1 = .ok [(0, false)])
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.loadAggregate 1) pc args frame (.reference (.address source) :: rest) memory =
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate 1)
+    (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.reference (.address source) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.snapshot (.aggregate 1) [(0, false)]) :: rest)
         frame memory) := by
-  cil_checked_step [loaded]
+  cil_checked_step [shape, loaded]
 #print axioms unknown_load
 
 /-- Readonly aggregate loads also retain an unknown byte's initialization flag. -/
 theorem readonly_unknown_load {memory : Memory} {source : Reference}
     (loaded : readSnapshot memory source 1 1 = .ok [(0, false)])
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.loadAggregate 1) pc args frame (.readOnlyReference (.address source) :: rest)
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate 1)
+    (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.readOnlyReference (.address source) :: rest)
       memory = .ok (.next (pc + 1)
         (.scalar (.snapshot (.aggregate 1) [(0, false)]) :: rest) frame memory) := by
-  cil_checked_step [loaded]
+  cil_checked_step [shape, loaded]
 #print axioms readonly_unknown_load
 
 /-- A symbolic snapshot preserves all its flags when at least one byte is unknown. -/
 theorem symbolic_unknown_load {memory : Memory} {source : Reference} {width : Nat}
     {bytes : List (BitVec 8 × Bool)} (loaded : readSnapshot memory source width 1 = .ok bytes)
     (unknown : bytes.all Prod.snd = false)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.loadAggregate width) pc args frame (.reference (.address source) :: rest)
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate width)
+    (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.reference (.address source) :: rest)
       memory = .ok (.next (pc + 1) (.scalar (.snapshot (.aggregate width) bytes) :: rest)
         frame memory) := by
-  cil_checked_step [loaded, unknown]
+  cil_checked_step [shape, loaded, unknown]
 #print axioms symbolic_unknown_load
 
 /-- A store uses the checked byte write and does not need old destination contents. -/
 theorem initialized_store {memory after : Memory} {destination : Reference}
     {bytes : List (BitVec 8)} (written : write memory destination bytes 1 = .ok after)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.storeAggregate bytes.length) pc args frame
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value)
+    {type : CIL.Extraction.TypeExpr} (shape : body.valueShape type = .aggregate bytes.length) :
+    step body (.stobj type) pc args frame
       (.scalar (.aggregate bytes) :: .reference (.address destination) :: rest) memory =
       .ok (.next (pc + 1) rest frame after) := by
-  cil_checked_step [written]
+  cil_checked_step [shape, written]
 #print axioms initialized_store
 
 /-- Storing unknown bytes uses the snapshot write, which retains their initialization flags. -/
 theorem unknown_store {memory after : Memory} {destination : Reference}
     (written : writeSnapshot memory destination [(0, false)] 1 = .ok after)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.storeAggregate 1) pc args frame
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value)
+    {type : CIL.Extraction.TypeExpr} (shape : body.valueShape type = .aggregate 1) :
+    step body (.stobj type) pc args frame
       (.scalar (.snapshot (.aggregate 1) [(0, false)]) ::
         .reference (.address destination) :: rest) memory =
       .ok (.next (pc + 1) rest frame after) := by
-  cil_checked_step [written]
+  cil_checked_step [shape, written]
 #print axioms unknown_store
 
 /-- An unknown snapshot cannot be reported as an initialized aggregate. -/
 theorem unknown_is_not_initialized {memory : Memory} {source : Reference}
     (loaded : readSnapshot memory source 1 1 = .ok [(0, false)])
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.loadAggregate 1) pc args frame (.reference (.address source) :: rest) memory ≠
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate 1)
+    (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.reference (.address source) :: rest) memory ≠
       .ok (.next (pc + 1) (.scalar (.aggregate [0]) :: rest) frame memory) := by
-  rw [unknown_load loaded]
+  rw [unknown_load loaded body shape]
   simp
 #print axioms unknown_is_not_initialized
 
 /-- A snapshot with the wrong shape width is rejected before its write operation. -/
 theorem wrong_snapshot_width (memory : Memory) (destination : Reference)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.storeAggregate 1) pc args frame
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value)
+    {type : CIL.Extraction.TypeExpr} (shape : body.valueShape type = .aggregate 1) :
+    step body (.stobj type) pc args frame
       (.scalar (.snapshot (.aggregate 2) [(0, false)]) ::
         .reference (.address destination) :: rest) memory = .error .invalidState := by
-  cil_checked_step []
+  cil_checked_step [shape]
 #print axioms wrong_snapshot_width
 
 /-- A null aggregate load preserves the requested width in its fault. -/
-theorem null_load_width (memory : Memory) (body : CIL.Method) (pc : Nat) (args : List Value)
+theorem null_load_width (memory : Memory) (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate 8)
+    (pc : Nat) (args : List Value)
     (frame : Frame) (rest : List Value) :
-    step body (.loadAggregate 8) pc args frame (.reference .null :: rest) memory =
+    step body (.ldobj type) pc args frame (.reference .null :: rest) memory =
       .error (.memory .nullDereference .null 8) := by
-  cil_checked_step []
+  cil_checked_step [shape]
 #print axioms null_load_width
 
 /-- Read authority alone cannot prove any particular loaded aggregate. -/
 theorem access_does_not_supply_contents (memory : Memory) (source : Reference)
     (_readable : access memory source 1 1 false = .ok ())
-    (_body : CIL.Method) (_pc : Nat) (_args : List Value) (_frame : Frame) (_rest : List Value) :
+    (_body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : _body.valueShape type = .aggregate 1)
+    (_pc : Nat) (_args : List Value) (_frame : Frame) (_rest : List Value) :
     True := by
   fail_if_success
-    have : step _body (.loadAggregate 1) _pc _args _frame
+    have : step _body (.ldobj type) _pc _args _frame
         (.reference (.address source) :: _rest) memory =
         .ok (.next (_pc + 1) (.scalar (.aggregate [0]) :: _rest) _frame memory) := by
-      cil_checked_step [_readable]
+      cil_checked_step [shape, _readable]
   trivial
 #print axioms access_does_not_supply_contents
 

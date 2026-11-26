@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Buffers.Binary;
@@ -37,6 +42,17 @@ void Prove(string name, int width, string source, string target)
         string.Join(" ∧\n", claims) + " := by exact ⟨" +
         string.Join(", ", claims.Select(_ => "by rfl")) + "⟩\n" +
         "#print axioms correctness\nend ExampleProof\n");
+    if (name.StartsWith("From", StringComparison.Ordinal) || name.StartsWith("To", StringComparison.Ordinal))
+        File.AppendAllText(proof, $$"""
+
+            /-- The compiled BitCast keeps its call and resolves the two snapshot shapes. -/
+            theorem ExampleProof.cast_call :
+                (Extracted.method0.code[1]?).bind (fun
+                  | .call method _ => CIL.Extraction.runtimeModel Extracted.environment .call method
+                  | _ => none) = some (.memory (.bitcastValue {{source}} {{target}})) := by decide +kernel
+            #print axioms ExampleProof.cast_call
+
+            """);
     pending.Add(new GeneratedVerification(selectors[name], proof, output),
         () => Console.WriteLine("PASS compiled BitCast full/partial/unknown masks: " + name));
 }

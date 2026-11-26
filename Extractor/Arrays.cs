@@ -1,16 +1,19 @@
 using Mono.Cecil;
 using Mono.Cecil.Cil;
-using System.Text.Json;
 
 namespace Nethermind.LeanCIL;
 
 // Array identity and physical element shape remain distinct throughout extraction.
 internal static class Arrays
 {
-    internal sealed record Element(string Lean, int Width, bool Signed, NativeOperands.Kind Kind)
+    /// <summary>
+    /// An array element shape. <paramref name="Compound"/> marks a vector, aggregate or enumeration element, whose
+    /// Lean term takes arguments and so is parenthesized where it is an argument itself.
+    /// </summary>
+    internal sealed record Element(string Lean, int Width, bool Signed, NativeOperands.Kind Kind,
+        bool Compound = false)
     {
-        internal string Expression => Lean.Contains(' ', StringComparison.Ordinal)
-            ? $"(.{Lean})" : $".{Lean}";
+        internal string Expression => Compound ? $"(.{Lean})" : $".{Lean}";
     }
 
     static readonly Dictionary<string, Element> elements = new(StringComparer.Ordinal)
@@ -37,14 +40,14 @@ internal static class Arrays
     internal static Element? Storage(TypeReference type, string? architecture = null)
     {
         if (MetadataValidation.IntegerVectorWidth(type) is { } vectorWidth)
-            return new($"vector {JsonSerializer.Serialize(type.FullName)} {vectorWidth}",
-                vectorWidth, false, NativeOperands.Kind.ArrayComposite);
+            return new($"vector {IdentityText.Quote(type.FullName)} {vectorWidth}",
+                vectorWidth, false, NativeOperands.Kind.ArrayComposite, Compound: true);
         if (MetadataValidation.IsAggregate(type, type.Module))
         {
             if (MetadataValidation.IsByRefLike(type)) return null;
             var width = architecture is null ? 0 : Spans.ElementWidth(type, architecture)!.Value;
-            return new($"aggregate {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} {width}",
-                width, false, NativeOperands.Kind.ArrayComposite);
+            return new($"aggregate {IdentityText.Quote(LayoutEvidence.Identity(type))} {width}",
+                width, false, NativeOperands.Kind.ArrayComposite, Compound: true);
         }
         if (!EnumTypes.IsEnum(type)) return Primitive(type);
         return EnumTypes.Cached(type, EnumStorage);
@@ -53,55 +56,128 @@ internal static class Arrays
     static Element EnumStorage(TypeReference type)
     {
         var underlying = Primitive(EnumTypes.Storage(type))!;
-        var identity = JsonSerializer.Serialize(LayoutEvidence.Identity(type));
-        return underlying with { Lean = $"enumeration {identity} .{underlying.Lean}" };
+        var identity = EnumTypes.Identity(type).ToLean();
+        return underlying with { Lean = $"enumeration {identity} .{underlying.Lean}", Compound = true };
+    }
+
+    /// <summary>Array.Fill accepts primitive and enum storage with an optional int32 range.</summary>
+    internal static bool Fill(MethodReference method, string architecture)
+    {
+        if (method.Name != "Fill" || method.DeclaringType.FullName != "System.Array" || method.HasThis ||
+            method.ExplicitThis || method.CallingConvention != MethodCallingConvention.Generic ||
+            method is not GenericInstanceMethod { GenericArguments.Count: 1 } generic ||
+            generic.ElementMethod.GenericParameters.Count != 1 || method.ReturnType.MetadataType != MetadataType.Void ||
+            !RuntimeModels.ExactScope(method.DeclaringType, PlatformAssemblies.SystemRuntime)) return false;
+
+        var parameters = method.Parameters;
+        var counted = parameters.Count == 4;
+        if (parameters.Count is not (2 or 4) ||
+            parameters[0].ParameterType is not ArrayType { IsVector: true } array ||
+            !MethodElement(array.ElementType) || !MethodElement(parameters[1].ParameterType) ||
+            counted && (parameters[2].ParameterType.MetadataType != MetadataType.Int32 ||
+                parameters[3].ParameterType.MetadataType != MetadataType.Int32)) return false;
+
+        var element = generic.GenericArguments[0];
+        if (Primitive(element) is null && !EnumTypes.IsEnum(element)) return false;
+        RuntimeModels.ValidateSignature(method, architecture);
+        return Storage(element, architecture) is not null;
+
+        static bool MethodElement(TypeReference type) =>
+            type is GenericParameter { Type: GenericParameterType.Method, Position: 0 };
     }
 
     internal static Element? Of(TypeReference type, string? architecture = null) =>
         type is ArrayType { IsVector: true } array ? Storage(array.ElementType, architecture) : null;
 
-    internal static string? StackKind(NativeOperands.Kind kind) =>
+    internal static LocalKind.Array? StackKind(NativeOperands.Kind kind) =>
         elements.Values.FirstOrDefault(element => element.Kind == kind) is { } element
-            ? $".array .{element.Lean}" : null;
+            ? new LocalKind.Array(element) : null;
 
-    internal static string? Translate(Instruction instruction, string architecture) => instruction.OpCode.Code switch
+    internal static bool SupportsInstruction(Instruction instruction, string architecture)
     {
-        Code.Newarr when Storage((TypeReference)instruction.Operand, architecture) is
-            { Width: > 0 and <= ushort.MaxValue } element => $".newArray {element.Expression}",
-        Code.Ldlen => ".memory .arrayLength",
-        Code.Ldelema => $".memory (.arrayAddress {(Storage((TypeReference)instruction.Operand, architecture) ??
-            throw new InvalidDataException("Unsupported array element token: " + instruction.Operand)).Expression}" +
-            (instruction.Previous?.OpCode.Code == Code.Readonly ? " false)" : ")"),
-        Code.Ldelem_I1 => ".memory (.arrayLoad 1 true)",
-        Code.Ldelem_U1 => ".memory (.arrayLoad 1 false)",
-        Code.Ldelem_I2 => ".memory (.arrayLoad 2 true)",
-        Code.Ldelem_U2 => ".memory (.arrayLoad 2 false)",
-        Code.Ldelem_I4 or Code.Ldelem_U4 => ".memory (.arrayLoad 4 false)",
-        Code.Ldelem_I8 or Code.Ldelem_I => ".memory (.arrayLoad 8 false)",
-        Code.Stelem_I1 => ".memory (.arrayStore 1)",
-        Code.Stelem_I2 => ".memory (.arrayStore 2)",
-        Code.Stelem_I4 => ".memory (.arrayStore 4)",
-        Code.Stelem_I8 or Code.Stelem_I => ".memory (.arrayStore 8)",
-        Code.Ldelem_Any => Typed(instruction, false, architecture),
-        Code.Stelem_Any => Typed(instruction, true, architecture),
+        if (instruction.OpCode.Code is Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any)
+        {
+            ElementStorage(instruction, architecture);
+            return true;
+        }
+        return instruction.OpCode.Code switch
+        {
+            Code.Newarr when Storage((TypeReference)instruction.Operand, architecture) is
+                { Width: > 0 and <= ushort.MaxValue } => true,
+            Code.Ldlen => true,
+            _ when NumericElement(instruction.OpCode.Code).HasValue => true,
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// A numeric element load or store: its width, whether a load sign-extends, and the step lemma a proof outline
+    /// cites for it. <paramref name="Kind"/> is the opcode's suffix, or null for a typed access naming its element
+    /// by token, which steps from <paramref name="Shape"/>, the shape fact of its element type.
+    /// </summary>
+    internal sealed record NumericAccess(int Width, bool Signed, bool Store, NumericKind? Kind, string? Shape = null)
+    {
+        /// <summary>The lemma stepping a load of an element whose address and load succeed.</summary>
+        internal string LoadLemma =>
+            Kind is { } kind ? $"step_ldelem_of_element {kind.Term()}" : $"step_ldelem_any_of_element {Typed} rfl";
+
+        /// <summary>The lemma stepping a store into an element whose write succeeds.</summary>
+        internal string StoreLemma => (Kind, Width) switch
+        {
+            ({ } kind, 8) => $"step_stelem_wide_of_write {kind.Term()}",
+            ({ } kind, _) => $"step_stelem_narrow_of_write {kind.Term()}",
+            (null, 8) => $"step_stelem_any_of_wide_write {Typed} rfl",
+            _ => $"step_stelem_any_of_write {Typed} rfl"
+        };
+
+        string Typed => Shape ?? throw new InvalidOperationException("A typed element access has no shape fact");
+    }
+
+    /// <summary>The integer kind and access direction encoded by a numeric array opcode.</summary>
+    internal static (NumericKind Kind, bool Store)? NumericElement(Code code) => code switch
+    {
+        Code.Ldelem_I1 => (NumericKind.I1, false),
+        Code.Ldelem_U1 => (NumericKind.U1, false),
+        Code.Ldelem_I2 => (NumericKind.I2, false),
+        Code.Ldelem_U2 => (NumericKind.U2, false),
+        Code.Ldelem_I4 => (NumericKind.I4, false),
+        Code.Ldelem_U4 => (NumericKind.U4, false),
+        Code.Ldelem_I8 => (NumericKind.I8, false),
+        Code.Ldelem_I => (NumericKind.I, false),
+        Code.Stelem_I1 => (NumericKind.I1, true),
+        Code.Stelem_I2 => (NumericKind.I2, true),
+        Code.Stelem_I4 => (NumericKind.I4, true),
+        Code.Stelem_I8 => (NumericKind.I8, true),
+        Code.Stelem_I => (NumericKind.I, true),
         _ => null
     };
 
-    internal static void ValidateReadOnly(InstructionIndex instructions, Instruction prefix)
-    {
-        if (prefix.Next is not { OpCode.Code: Code.Ldelema } address || prefix.Operand is not null)
-            throw new InvalidDataException("Readonly prefix requires an immediate array element address");
-        if (instructions.IsTarget(address))
-            throw new InvalidDataException("Branch enters an array address after its readonly prefix");
-    }
+    /// <summary>A numeric access uses the method's checked shape for its closed element type.</summary>
+    internal static NumericAccess? Numeric(Code? op, MethodDefinition method, int pc, int methodIndex = 0) =>
+        op switch
+        {
+            Code raw when NumericElement(raw) is { } access =>
+                new(access.Kind.Width(), access.Kind.Signed(), access.Store, access.Kind),
+            Code.Ldelem_Any or Code.Stelem_Any when
+                method.Body.Instructions[pc] is { Operand: TypeReference element } site &&
+                Storage(element) is { Kind: not NativeOperands.Kind.ArrayComposite } storage =>
+                new(storage.Width, storage.Signed, site.OpCode.Code == Code.Stelem_Any, null,
+                    $"(cil_element_shape% Extracted.method{methodIndex} {pc})"),
+            _ => null
+        };
 
-    static string Typed(Instruction instruction, bool store, string architecture)
+    internal static Element ElementStorage(Instruction instruction, string architecture)
     {
-        var element = Storage((TypeReference)instruction.Operand, architecture) ??
-            throw new InvalidDataException("Unsupported array element token: " + instruction.Operand);
-        if (element.Kind == NativeOperands.Kind.ArrayComposite)
-            return $".memory (.arrayTransfer {element.Expression} {store.ToString().ToLowerInvariant()})";
-        return store ? $".memory (.arrayStore {element.Width})" :
-            $".memory (.arrayLoad {element.Width} {element.Signed.ToString().ToLowerInvariant()})";
+        var element = (TypeReference)instruction.Operand;
+        if (ObjectTypes.Candidate(element) || ReferenceArrays.Element(element))
+        {
+            var operand = $"{instruction.OpCode.Name} {element.FullName}";
+            throw new InvalidDataException($"""
+                Unsupported typed element access on an array of class references: {operand}
+                  Element addresses would expose a reference slot; only ldelem.ref and stelem.ref are modelled.
+                """.ReplaceLineEndings("\n"));
+        }
+        return Storage(element, architecture) ??
+            throw new InvalidDataException($"Unsupported array element token: {element}");
     }
 }

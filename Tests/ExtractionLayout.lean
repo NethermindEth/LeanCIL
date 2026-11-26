@@ -1,12 +1,18 @@
-import CIL.Extraction.LayoutUses
+import CIL.Extraction.ValueDecoding
+import CIL.Resolution
+
+/-! Raw and computed struct layouts and their field uses. -/
 
 open CIL CIL.Extraction
 
 namespace Tests.ExtractionLayout
 
+/-- The sequential leaf and its packed parent whose second field embeds the leaf. -/
 def raw : List RawLayout := [
-  { explicit := false, packing := 0, declaredSize := -1, fields := [⟨.unsigned8, none⟩, ⟨.unsigned32, none⟩] },
-  { explicit := false, packing := 1, declaredSize := -1, fields := [⟨.unsigned8, none⟩, ⟨.aggregate 0, none⟩] }]
+  { identity := "Leaf", explicit := false, packing := 0, declaredSize := -1,
+    fields := [⟨.unsigned8, none⟩, ⟨.unsigned32, none⟩] },
+  { identity := "Parent", explicit := false, packing := 1, declaredSize := -1,
+    fields := [⟨.unsigned8, none⟩, ⟨.aggregate 0, none⟩] }]
 
 def computed : Array ComputedLayout := #[
   ⟨⟨8, [⟨0, 1, false⟩, ⟨4, 4, false⟩]⟩, 4⟩,
@@ -35,10 +41,29 @@ example : computeLayouts [{ explicit := false, auto := true, packing := -1, decl
 example : computeLayouts [{ explicit := false, packing := 0, declaredSize := -1, fields := [⟨.unsigned64, none⟩] },
   { explicit := false, auto := true, packing := -1, declaredSize := -1, fields := [⟨.aggregate 0, none⟩, ⟨.aggregate 0, none⟩] }] = none := by decide
 
-def goodMethod : Method := { code := [.fieldAt 4 4], locals := [], returnsValue := true }
-def wrongMethod : Method := { goodMethod with code := [.fieldAt 3 4] }
-example : MethodLayoutsValid raw computed goodMethod [.field 0 0 1 .load] := by decide
-example : validateLayoutUse raw computed wrongMethod (.field 0 0 1 .load) = false := by decide
-example : validateLayoutUse raw computed goodMethod (.field 0 1 1 .load) = false := by decide
+/-- The second field of Leaf holds an unsigned word at byte four. -/
+private def leafWord : FieldRef :=
+  { owner := .aggregate "Leaf" 0, index := 1, name := name!"word",
+    type := .primitive .uint32 }
+
+/-- The decoded load and its execution environment share the typed field operand. -/
+theorem leaf_word_shape :
+    let site : RawInstruction := ⟨0, 0x7b,
+      .field leafWord.owner leafWord.index leafWord.type leafWord.name false⟩
+    let environment : LayoutEnvironment := { rawLayouts := raw, layouts := computed }
+    Instruction.ofRaw? none site = some (.ldfld leafWord) ∧
+      environment.fieldShape leafWord = .value 4 4 false := ⟨rfl, by decide +kernel⟩
+#print axioms leaf_word_shape
+
+/-- Layout validation rejects the in-bounds offset three. A correct layout also refuses a
+    field operand that names the parent with the leaf's row or holds the parent's nested field. -/
+theorem leaf_word_forgeries :
+    let environment : LayoutEnvironment := { rawLayouts := raw, layouts := computed }
+    ¬ LayoutsValid raw (computed.set! 0 wrong) .x64 ∧
+      environment.fieldShape { leafWord with owner := .aggregate "Parent" 0 } =
+        .unsupported "Field owner is not a value type" ∧
+      environment.fieldShape { leafWord with owner := .aggregate "Parent" 1 } =
+        .unsupported "Field outside the checked layouts" := by decide +kernel
+#print axioms leaf_word_forgeries
 
 end Tests.ExtractionLayout

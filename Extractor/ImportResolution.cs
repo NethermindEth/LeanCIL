@@ -36,6 +36,7 @@ internal sealed class ImportResolution : IDisposable
     readonly HashSet<string>? allowedDependencies;
     readonly string? validatingAssembly;
     readonly bool ownsLibraries = true;
+    readonly PinnedAssemblies? identityOwner;
     readonly HashSet<Library> used = [];
     readonly Dictionary<string, Source> discovered = new(StringComparer.Ordinal);
     readonly List<Binding> bindings = [];
@@ -51,6 +52,7 @@ internal sealed class ImportResolution : IDisposable
 
     internal ImportResolution(IEnumerable<Source> sources)
     {
+        identityOwner = PinnedAssemblies.Active;
         try
         {
             foreach (Source source in sources)
@@ -92,7 +94,7 @@ internal sealed class ImportResolution : IDisposable
                         throw new InvalidDataException("Import implementation MVID mismatch.");
                     string? framework = module.Assembly.CustomAttributes.SingleOrDefault(attribute =>
                         attribute.AttributeType.FullName == "System.Runtime.Versioning.TargetFrameworkAttribute")?.ConstructorArguments.Single().Value as string;
-                    if (framework != contract.TargetFramework || framework != ".NETCoreApp,Version=v10.0")
+                    if (framework != contract.TargetFramework || framework != ".NETCoreApp,Version=v11.0")
                         throw new InvalidDataException("Import target framework mismatch.");
                     Library? existing = librariesByIdentity.GetValueOrDefault(contract.AssemblyIdentity);
                     if (existing is not null)
@@ -107,11 +109,20 @@ internal sealed class ImportResolution : IDisposable
                     if (simpleNames.Contains(module.Assembly.Name.Name))
                         throw new InvalidDataException("Ambiguous import assembly simple name: " + module.Assembly.Name.Name);
                     var library = new Library(source, contract, ContractInterface.Hash(sidecar), module);
+                    var pinned = identityOwner ?? throw new InvalidDataException(
+                        "Import identity without a pinned module context");
+                    PlatformSignatures.Validate(implementation);
+                    pinned.RegisterIdentityImage(module, implementation);
                     libraries.Add(library);
                     librariesByIdentity.Add(contract.AssemblyIdentity, library);
                     simpleNames.Add(module.Assembly.Name.Name);
                 }
-                catch { module.Dispose(); throw; }
+                catch
+                {
+                    identityOwner?.UnregisterIdentityImage(module);
+                    module.Dispose();
+                    throw;
+                }
     }
 
     void ValidateGraph()
@@ -129,6 +140,7 @@ internal sealed class ImportResolution : IDisposable
 
     ImportResolution(ImportResolution parent, ContractInterface contract)
     {
+        identityOwner = parent.identityOwner;
         libraries = parent.libraries;
         librariesByIdentity = parent.librariesByIdentity;
         simpleNames = parent.simpleNames;
@@ -202,14 +214,16 @@ internal sealed class ImportResolution : IDisposable
         (string Identity, string Profile) key = (identity, profile.Name);
         if (!validatedMetadata.TryGetValue(key, out ValidatedMetadata metadata))
         {
+            ImportedLayoutMetadata.SelectedLayout[] selected = [];
             ContractLayout[] actualLayouts = [];
             if (library.Interface.FormatVersion == 2)
             {
-                actualLayouts = ImportedLayoutMetadata.Signature(selection.Reference, library.Module, profile.Architecture);
+                selected = ImportedLayoutMetadata.Signature(selection.Reference, library.Module, profile.Architecture);
+                actualLayouts = [.. selected.Select(item => item.Layout)];
                 if (!MetadataEqual(export.TypedSignature, selection.Signature) || !MetadataEqual(export.Layouts, actualLayouts))
                     throw new InvalidDataException("Contract import typed signature or raw layout differs from selected implementation metadata.");
             }
-            metadata = new(actualLayouts, ImportedLayoutMetadata.ComputedLean(actualLayouts, library.Module, profile.Architecture));
+            metadata = new(actualLayouts, ImportedLayoutMetadata.ComputedLean(selected, profile.Architecture));
         }
         StaticIdentity.ValidateFields(certification.StaticIdentities, library.Module);
         if (library.Interface.IsReferenceAssembly &&
@@ -319,9 +333,8 @@ internal sealed class ImportResolution : IDisposable
         TypeDefinition definition = ImportedLayoutMetadata.Definition(type, library.Module);
         if (MetadataValidation.IsByRefLike(definition))
             throw new InvalidDataException("Unsupported byref-like imported aggregate local: " + type.FullName);
-        foreach (ContractLayout layout in PublishedClosure(definition, library, profile, requirePublished: true))
-            localLayouts.TryAdd(layout.Identity, library.Module.GetTypes()
-                .Single(candidate => LayoutEvidence.Identity(candidate) == layout.Identity));
+        foreach (var item in PublishedClosure(definition, library, profile, requirePublished: true))
+            localLayouts.TryAdd(item.Layout.Identity, item.Definition);
         return true;
     }
 
@@ -359,12 +372,13 @@ internal sealed class ImportResolution : IDisposable
     }
 
     // Every layout in the selected closure must equal each published copy; locals also need one.
-    ContractLayout[] PublishedClosure(TypeReference element, Library library, FeatureProfile profile,
+    ImportedLayoutMetadata.SelectedLayout[] PublishedClosure(TypeReference element, Library library, FeatureProfile profile,
         bool requirePublished)
     {
-        ContractLayout[] actual = ImportedLayoutMetadata.ForType(element, library.Module, profile.Architecture);
-        foreach (ContractLayout layout in actual)
+        var actual = ImportedLayoutMetadata.ForType(element, library.Module, profile.Architecture);
+        foreach (var item in actual)
         {
+            var layout = item.Layout;
             ContractLayout[] published = library.Interface.Exports.SelectMany(export => export.Layouts ?? [])
                 .Where(candidate => candidate.Identity == layout.Identity).ToArray();
             if (requirePublished && published.Length == 0)
@@ -376,23 +390,25 @@ internal sealed class ImportResolution : IDisposable
         return actual;
     }
 
-    internal static string LeanSlot(Binding binding) =>
-        "{ identity := " + JsonSerializer.Serialize(binding.Identity) + ", closureDigest := " + JsonSerializer.Serialize(binding.ClosureDigest) +
-        ", parameterCount := " + binding.ParameterCount + ", hasThis := false, returnsValue := " + (binding.ReturnsValue ? "true" : "false") +
-        (binding.TypedSignature is null ? "" : ", signature := some (" + binding.TypedSignature.Lean + "), layouts := { published := " +
-            ImportedLayoutMetadata.RawLean(binding.PublishedLayouts) + ", actual := " + ImportedLayoutMetadata.RawLean(binding.ActualLayouts) +
-            ", computed := " + binding.ComputedLayouts + " }") + " }";
-
-    internal bool TryTranslate(Instruction instruction, int methodCount, out string translated)
+    internal static string LeanSlot(Binding binding, string identity)
     {
-        if (sites.TryGetValue(instruction, out int slot))
+        var digest = IdentityText.Quote(binding.ClosureDigest);
+        var metadata = $"identity := {identity}, closureDigest := {digest}";
+        var arity = $"parameterCount := {binding.ParameterCount}, hasThis := false";
+        var result = $"returnsValue := {LeanText.Bool(binding.ReturnsValue)}";
+        var typed = "";
+        if (binding.TypedSignature is { } signature)
         {
-            translated = $".call {methodCount + slot} {bindings[slot].ParameterCount}";
-            return true;
+            var published = ImportedLayoutMetadata.RawLean(binding.PublishedLayouts);
+            var actual = ImportedLayoutMetadata.RawLean(binding.ActualLayouts);
+            var computed = binding.ComputedLayouts;
+            var layouts = $$"""{ published := {{published}}, actual := {{actual}}, computed := {{computed}} }""";
+            typed = $", signature := some ({signature.Lean}), layouts := {layouts}";
         }
-        translated = "";
-        return false;
+        return $$"""{ {{metadata}}, {{arity}}, {{result}}{{typed}} }""";
     }
+
+    internal int? Slot(Instruction instruction) => sites.TryGetValue(instruction, out var slot) ? slot : null;
 
     // Bound libraries and their declared dependencies contribute modules to the extraction.
     internal SortedDictionary<string, string> InterfaceModules() => Modules(libraries.Where(used.Contains));
@@ -429,7 +445,11 @@ internal sealed class ImportResolution : IDisposable
     public void Dispose()
     {
         if (!ownsLibraries) return;
-        foreach (Library library in libraries) library.Module.Dispose();
+        foreach (Library library in libraries)
+        {
+            identityOwner?.UnregisterIdentityImage(library.Module);
+            library.Module.Dispose();
+        }
         libraries.Clear();
         librariesByIdentity.Clear();
         simpleNames.Clear();

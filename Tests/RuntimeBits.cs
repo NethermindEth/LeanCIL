@@ -2,7 +2,15 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
+#:include EmptyReturnVariants.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
+#:include KernelComparisons.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -63,6 +71,43 @@ string LeanValue(object value) => value switch
     _ => throw new InvalidOperationException("Unexpected value: " + value)
 };
 
+// Each group proves its comparisons at the default limits and preserves the remaining conjunction.
+static string BoundaryProof(List<(string Left, string Right)> claims)
+{
+    const int comparisonsPerGroup = 16;
+    const string conjunction = " \u2227\n";
+    static string Equation((string Left, string Right) claim) => $"{claim.Left} =\n  {claim.Right}";
+    string Comparison(int index) => Projection("results", claims.Count, index);
+    var groups = Enumerable.Range(0, claims.Count - 1).Chunk(comparisonsPerGroup).ToArray();
+    var declarations = groups.Select((group, index) =>
+    {
+        var statement = string.Join(conjunction, group.Select(position => Equation(claims[position])).Append("tail"));
+        var tuple = $"\u27e8{string.Join(", ", group.Select(Comparison).Append("rest"))}\u27e9";
+        return $$"""
+            /-- These boundary comparisons hold for any proved continuation. -/
+            private theorem boundary{{index}} {tail : Prop} (rest : tail) :
+            {{statement}} :=
+              {{tuple}}
+            #print axioms boundary{{index}}
+            """;
+    });
+    var names = groups.Select((_, index) => $"boundary{index}").Append(Comparison(claims.Count - 1));
+    var witness = $"{string.Join(" (", names)}{new string(')', groups.Length)}";
+    return $"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
+        {ComparisonResults(claims)}
+        {string.Join("\n\n", declarations)}
+        /-- Each compiled call returns the value obtained from the runtime. -/
+        theorem correctness :
+        {string.Join(conjunction, claims.Select(Equation))} := {witness}
+        #print axioms correctness
+        end ExampleProof
+
+        """;
+}
+
 // Every supported overload is extracted from compiled C#, then compared with .NET.
 foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Static)
     .Where(m => !m.Name.Contains("RoundTrip") && !m.Name.StartsWith("Wrong", StringComparison.Ordinal)))
@@ -83,7 +128,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
             [0, 1, 2, 1UL << 31, 1UL << 63, ulong.MaxValue];
         counts = rotations ? [-1, 0, 65] : [0];
     }
-    var claims = new List<string>();
+    var claims = new List<(string Left, string Right)>();
     var narrow = method.Name.StartsWith("PrimitiveNarrow", StringComparison.Ordinal);
     if (narrow) values = [0, 1, 2, 127, 128, 255, 256, 32767, 32768, 65535, 65536, uint.MaxValue];
     if (narrow && rotations)
@@ -99,25 +144,13 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         object[] inputs = rotations ? [value, count] : [value];
         var expected = method.Invoke(null, inputs)!;
         var fuel = narrow ? 96 : method.Name.StartsWith("PrimitiveCounts", StringComparison.Ordinal) ? 32 : 8;
-        claims.Add($"""
+        claims.Add(($"""
             (CIL.Safety.invoke Extracted.program {fuel} 0
-              [{string.Join(", ", inputs.Select(LeanValue))}] CIL.Safety.Memory.empty).map Prod.snd =
-              .ok [{LeanValue(expected)}]
-            """);
+              [{string.Join(", ", inputs.Select(LeanValue))}] CIL.Safety.Memory.empty).map Prod.snd
+            """, $".ok [{LeanValue(expected)}]"));
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, $"""
-        import Extracted
-        import CIL.Safety.Execution
-        set_option maxRecDepth 8192
-        namespace ExampleProof
-        theorem correctness :
-        {string.Join(" ∧\n", claims)} := by
-          exact ⟨{string.Join(", ", claims.Select(_ => "rfl"))}⟩
-        #print axioms correctness
-        end ExampleProof
-
-        """);
+    File.WriteAllText(proof, BoundaryProof(claims));
     var selector = $"Bits::{method.Name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
     var comparisons = claims.Count;
     queue.Add(new(selector, proof, output), () =>
@@ -132,32 +165,20 @@ queue.Flush();
 var contract = At("Examples/Proofs/RotateRoundTrip.lean");
 verification.Verify(assembly, "Examples", "Bits::RoundTrip(ulong)", contract, Path.Combine(root, "RoundTrip"));
 var wrongOutput = Path.Combine(root, "WrongRoundTrip");
-var failed = false;
-try
-{
-    verification.Verify(assembly, "Examples", "Bits::WrongRoundTrip(ulong)", contract, wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    failed = true;
-}
-if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect rotation inverse accepted");
+verification.VerifyEmptyReturn(assembly, "Bits::RoundTrip(ulong)",
+    contract, assembly, "Bits::WrongRoundTrip(ulong)", wrongOutput,
+    new("W64", "[.scalar (.i64 input)]",
+        ".scalar (.i64 input)", 8,
+        "exact ExampleProof.correctness input", "1"));
 
 var logarithm = At("Examples/Proofs/IntegerLog2.lean");
 verification.Verify(assembly, "Examples", "Bits::Log64(ulong)", logarithm, Path.Combine(root, "UniversalLog"));
 var wrongLog = Path.Combine(root, "WrongLog");
-failed = false;
-try
-{
-    verification.Verify(assembly, "Examples", "Bits::WrongLog64(ulong)", logarithm, wrongLog);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    failed = true;
-}
-if (!failed || File.Exists(Path.Combine(wrongLog, "verified.json")))
-    throw new InvalidOperationException("Incorrect integer logarithm accepted");
+verification.VerifyEmptyReturn(assembly, "Bits::Log64(ulong)",
+    logarithm, assembly, "Bits::WrongLog64(ulong)", wrongLog,
+    new("W64", "[.scalar (.i64 input)]",
+        ".scalar (.i32 (BitVec.ofNat 32 input.toNat.log2))", 8,
+        "exact ExampleProof.correctness input", "0"));
 
 // Preserve exact runtime identity and signature checks for the new allowlist.
 foreach (var mutation in new[] { "scope", "version", "instance", "return", "argument", "generic", "unsupported",

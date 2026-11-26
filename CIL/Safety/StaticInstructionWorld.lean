@@ -70,7 +70,7 @@ theorem memoryInstruction_preserves_static_world (descriptors : List CIL.StaticD
   exact (memoryInstruction_effect _ _ _ _ _ h).staticWorld descriptors world
 
 theorem instruction_preserves_static_world (descriptors : List CIL.StaticDescriptor)
-    (operation : CIL.Op) (stack values : List Value) (m result : Memory)
+    (operation : CIL.Instruction) (stack values : List Value) (m result : Memory)
     (world : StaticWorldValid descriptors m)
     (h : instruction operation stack m = .ok (result, values)) :
     StaticWorldValid descriptors result := by
@@ -107,6 +107,25 @@ theorem staticInstruction_preserves_static_world (descriptors : List CIL.StaticD
     StaticWorldValid descriptors result := by
   exact (staticInstruction_effect _ _ _ _ _ _ _ h).staticWorld descriptors hm sites world
 
+/-- A successful `ldsfld` keeps the static world valid when the method's static sites all name
+    descriptors of that world. -/
+theorem staticLoad_preserves_static_world (descriptors : List CIL.StaticDescriptor)
+    (body : CIL.Method) (pc : Nat) (m result : Memory) (value : Value) (hm : m.WellFormed)
+    (sites : StaticSitesValid descriptors body) (world : StaticWorldValid descriptors m)
+    (h : staticLoad body pc m = .ok (result, value)) : StaticWorldValid descriptors result :=
+  (staticLoad_contract body pc [] m result value h).effect.staticWorld descriptors hm sites world
+
+/-- A successful `ldsflda` or field `ldtoken` keeps the static world valid when the method's
+    static sites all name descriptors of that world. -/
+theorem staticAddress_preserves_static_world (descriptors : List CIL.StaticDescriptor)
+    (body : CIL.Method) (pc : Nat) (m result : Memory) (value : Value) (hm : m.WellFormed)
+    (sites : StaticSitesValid descriptors body) (world : StaticWorldValid descriptors m)
+    (h : staticAddress body pc m = .ok (result, value)) : StaticWorldValid descriptors result :=
+  (staticAddress_contract body pc [] m result value h).effect.staticWorld descriptors hm sites
+    world
+
+#print axioms staticLoad_preserves_static_world
+#print axioms staticAddress_preserves_static_world
 #print axioms write_preserves_static_world
 #print axioms memoryInstruction_preserves_static_world
 #print axioms instruction_preserves_static_world

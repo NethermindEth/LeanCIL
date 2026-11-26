@@ -1,22 +1,78 @@
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
 // Generic runtime helpers share the same validated managed layout as CIL storage.
 internal static class UnsafeModels
 {
-    internal static string? Translate(MethodReference reference, string architecture = "scalar")
+    static readonly TypeLevel Owner = new(MetadataName.OfText("System.Runtime.CompilerServices"),
+        MetadataName.OfText("Unsafe"));
+
+    // Admission checks the helper signature and its closed element type.
+    internal static bool CallModel(MethodReference reference, string architecture) =>
+        ClassifyCall(reference, architecture, out _, out _, out _, out _);
+
+    internal static Code? StackCode(MethodReference reference, string architecture)
     {
-        if (MemoryTransfers.Unsafe(reference, architecture) is { } transfer) return transfer;
-        if (ReinterpretReference(reference, architecture) is { } cast) return cast;
+        ClassifyCall(reference, architecture, out _, out _, out _, out var code);
+        return code;
+    }
+
+    // Proof outlines read the closed storage type from the validated unaligned call at this site.
+    internal static TypeReference? UnalignedStorage(Instruction site, string name, string architecture)
+    {
+        if (site.OpCode.Code != Code.Call || site.Operand is not GenericInstanceMethod call || call.Name != name)
+            return null;
+        ClassifyCall(call, architecture, out var storage, out _, out _, out _);
+        return storage;
+    }
+
+    /// <summary>The signedness and native-width stride of a retained Unsafe pointer addition.</summary>
+    internal static (ulong Stride, bool Signed)? Offset(Instruction site, string architecture)
+    {
+        if (site.OpCode.Code != Code.Call || site.Operand is not GenericInstanceMethod
+            { Name: "Add" or "Subtract" or "AddByteOffset" } call) return null;
+        ClassifyCall(call, architecture, out _, out var offset, out _, out _);
+        return offset;
+    }
+
+    /// <summary>The element width of an admitted Unsafe.SizeOf call.</summary>
+    internal static int? SizeOf(MethodReference reference, string architecture)
+    {
+        if (reference.Name != "SizeOf") return null;
+        ClassifyCall(reference, architecture, out _, out _, out var size, out _);
+        return size;
+    }
+
+    static bool ClassifyCall(MethodReference reference, string architecture, out TypeReference? storage,
+        out (ulong Stride, bool Signed)? offset, out int? size, out Code? stackCode)
+    {
+        stackCode = null;
+        size = null;
+        storage = null;
+        offset = null;
+        if (reference.Name is "As" or "AsRef" or "BitCast")
+        {
+            if (reference.DeclaringType is TypeSpecification ||
+                !IdentityRows.TopLevelMatches(reference.DeclaringType, Owner, PlatformAssemblies.SystemRuntime))
+                return false;
+            return reference.Name == "BitCast" ? ValueBitCasts.CallModel(reference, architecture) :
+                ReinterpretReference(reference, architecture);
+        }
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 1 ||
             generic.ElementMethod.GenericParameters.Count != 1 || reference.HasThis || reference.ExplicitThis ||
             (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
-            return null;
+            return false;
 
         var element = generic.GenericArguments[0];
+        if (reference.Name is "Read" or "Write" or "ReadUnaligned" or "WriteUnaligned")
+            return generic.ElementMethod.CallingConvention == MethodCallingConvention.Generic &&
+                reference.DeclaringType is not TypeSpecification &&
+                IdentityRows.TopLevelMatches(reference.DeclaringType, Owner, PlatformAssemblies.SystemRuntime)
+                ? MemoryTransfers.CallModel(generic, architecture, out storage) : false;
         var definition = generic.ElementMethod;
         bool Parameter(TypeReference type) => type is GenericParameter parameter &&
             parameter.Type == GenericParameterType.Method && parameter.Position == 0 && parameter.Owner == definition;
@@ -34,7 +90,8 @@ internal static class UnsafeModels
               reference.Parameters[1].ParameterType.FullName == "System.Int32"));
         var skipInit = reference.Name == "SkipInit" && reference.Parameters.Count == 1 &&
             Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Void;
-        var nullRef = reference.Name == "NullRef" && reference.Parameters.Count == 0 && Reference(reference.ReturnType);
+        var nullRef = reference.Name == "NullRef" && reference.Parameters.Count == 0 &&
+            Reference(reference.ReturnType);
         var isNullRef = reference.Name == "IsNullRef" && reference.Parameters.Count == 1 &&
             Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Boolean;
         var referencePair = reference.Parameters.Count == 2 &&
@@ -50,16 +107,43 @@ internal static class UnsafeModels
             Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
             reference.Parameters[1].ParameterType.FullName is "System.IntPtr" or "System.UIntPtr";
         if (!sizeOf && !elementOffset && !skipInit && !nullRef && !isNullRef && !comparison && !byteOffset &&
-            !addBytes && !subtractBytes) return null;
+            !addBytes && !subtractBytes) return false;
 
         if (element is ByReferenceType || element is PointerType || element is GenericParameter)
             throw new InvalidDataException($"Unsupported Unsafe element type: {element.FullName}");
         MetadataValidation.Type(element, reference.Module, architecture: architecture);
         RuntimeModels.ValidateSignature(reference, architecture);
-        if (skipInit) return ".skipInit";
-        if (nullRef) return ".memory .nullRef";
-        if (isNullRef) return ".memory .isNullRef";
-        var width = element is GenericInstanceType vector && RuntimeModels.SupportedType(vector)
+        if (nullRef || isNullRef) return true;
+        var width = ElementWidth(element, reference.Module, architecture);
+
+        if (skipInit) return true;
+        if (comparison || subtractBytes)
+        {
+            stackCode = reference.Name switch
+            {
+                "AreSame" => Code.Ceq,
+                "IsAddressLessThan" => Code.Clt_Un,
+                "IsAddressGreaterThan" => Code.Cgt_Un,
+                _ => Code.Sub
+            };
+            return true;
+        }
+        if (byteOffset) return true;
+        if (sizeOf)
+        {
+            size = width;
+            return true;
+        }
+        var signed = reference.Parameters[1].ParameterType.FullName != "System.UIntPtr";
+        // Native-width negative strides reuse the checked wrapping offset operation.
+        var stride = reference.Name == "Subtract" ? unchecked(0UL - (ulong)width) : (ulong)(addBytes ? 1 : width);
+        offset = (stride, signed);
+        return true;
+    }
+
+    // An element of field or vector storage has a width; any other element is unsupported.
+    static int ElementWidth(TypeReference element, ModuleDefinition module, string architecture) =>
+        element is GenericInstanceType vector && RuntimeModels.SupportedType(vector)
             ? vector.ElementType.FullName switch
             {
                 "System.Runtime.Intrinsics.Vector128`1" => 16,
@@ -67,36 +151,19 @@ internal static class UnsafeModels
                 "System.Runtime.Intrinsics.Vector512`1" => 64,
                 _ => throw new InvalidDataException($"Unsupported Unsafe element layout: {element.FullName}")
             }
-            : MetadataValidation.FieldSize(element, reference.Module, architecture);
-
-        if (comparison) return reference.Name switch
-        {
-            "AreSame" => ".eq",
-            "IsAddressLessThan" => ".ltu",
-            _ => ".gtu"
-        };
-        if (byteOffset) return ".memory .byteOffset";
-        if (subtractBytes) return ".sub";
-        if (sizeOf) return $".const32 {width}";
-        var signed = reference.Parameters[1].ParameterType.FullName != "System.UIntPtr";
-        // Native-width negative strides reuse the checked wrapping offset operation.
-        var stride = reference.Name == "Subtract" ? unchecked(0UL - (ulong)width) : (ulong)(addBytes ? 1 : width);
-        return $".memory (.add {stride} {signed.ToString().ToLowerInvariant()})";
-    }
+            : MetadataValidation.FieldSize(element, module, architecture);
 
     // A byref reinterpretation changes only its static type, never the allocation,
     // offset, initialized bytes or access bounds used by checked memory operations.
-    private static string? ReinterpretReference(MethodReference reference, string architecture)
+    private static bool ReinterpretReference(MethodReference reference, string architecture)
     {
-        if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
-            reference is not GenericInstanceMethod generic || reference.HasThis || reference.ExplicitThis ||
+        if (reference is not GenericInstanceMethod generic || reference.HasThis || reference.ExplicitThis ||
             (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
-            return null;
+            return false;
         var definition = generic.ElementMethod;
         var arity = reference.Name switch { "As" => 2, "AsRef" => 1, _ => 0 };
         if (arity == 0 || generic.GenericArguments.Count != arity || definition.GenericParameters.Count != arity ||
-            definition.Parameters.Count != 1) return null;
+            definition.Parameters.Count != 1) return false;
         bool Reference(TypeReference type, int position) => type is ByReferenceType byRef &&
             byRef.ElementType is GenericParameter parameter && parameter.Type == GenericParameterType.Method &&
             parameter.Position == position && parameter.Owner == definition;
@@ -104,14 +171,58 @@ internal static class UnsafeModels
             definition.Parameters[0].ParameterType is PointerType { ElementType.MetadataType: MetadataType.Void };
         if ((!pointer && !Reference(definition.Parameters[0].ParameterType, 0)) ||
             !Reference(definition.ReturnType, arity - 1))
-            return null;
+            return false;
         foreach (var type in generic.GenericArguments)
         {
             if (type is ByReferenceType or PointerType or GenericParameter)
                 throw new InvalidDataException($"Unsupported Unsafe reference element: {type.FullName}");
             MetadataValidation.Type(type, reference.Module, architecture: architecture);
+            // A span, array or class reference is not the address of bytes the other type can name.
+            _ = ElementWidth(type, reference.Module, architecture);
         }
         RuntimeModels.ValidateSignature(reference, architecture);
-        return ".memory .asRef";
+        return true;
+    }
+}
+
+// A value cast reads the closed pair's representations and preserves the snapshot's initialization flags.
+internal static class ValueBitCasts
+{
+    internal static bool CallModel(MethodReference reference, string architecture)
+    {
+        if (reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 2 ||
+            generic.ElementMethod.GenericParameters.Count != 2 || reference.HasThis || reference.ExplicitThis ||
+            generic.ElementMethod.CallingConvention != MethodCallingConvention.Generic ||
+            reference.Parameters.Count != 1) return false;
+
+        bool Parameter(TypeReference type, int position) => type is GenericParameter parameter &&
+            parameter.Type == GenericParameterType.Method && parameter.Position == position &&
+            parameter.Owner == generic.ElementMethod;
+        if (!Parameter(reference.Parameters[0].ParameterType, 0) || !Parameter(reference.ReturnType, 1)) return false;
+
+        var source = generic.GenericArguments[0];
+        var target = generic.GenericArguments[1];
+        if (source.MetadataType == MetadataType.Byte && target.MetadataType == MetadataType.Boolean)
+        {
+            RuntimeModels.ValidateSignature(reference, architecture);
+            return true;
+        }
+        if (!generic.GenericArguments.Any(type => MetadataValidation.IsAggregate(type, reference.Module) ||
+            type is GenericInstanceType)) return false;
+        var fromWidth = SnapshotWidth(source, reference.Module, architecture);
+        var toWidth = SnapshotWidth(target, reference.Module, architecture);
+        if (fromWidth is null || toWidth is null || fromWidth != toWidth)
+            throw new InvalidDataException($"Unsupported Unsafe.BitCast value layouts: {reference.FullName}");
+        RuntimeModels.ValidateSignature(reference, architecture);
+        return true;
+    }
+
+    static int? SnapshotWidth(TypeReference type, ModuleDefinition module, string architecture)
+    {
+        MetadataValidation.Type(type, module, architecture: architecture);
+        RuntimeModels.ValidateTypeIdentity(type, module, architecture);
+        if (MetadataValidation.IsAggregate(type, module))
+            return MetadataValidation.Layout(type, module, architecture);
+        return MetadataValidation.IntegerVectorWidth(type);
     }
 }

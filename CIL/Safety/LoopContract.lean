@@ -34,7 +34,7 @@ theorem loop_terminates_induction {α : Type} (program : CIL.Program) (method : 
 /-- A loop path crosses a fetched call through the callee's contract, never its body or
     fuel. -/
 theorem loop_terminates_call {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)
@@ -53,7 +53,7 @@ theorem loop_terminates_call {Input Output : Type} {c : MethodContract Input Out
 /-- `loop_terminates_call` that also hands the continuation the callee's `WellFormed`, static
     world and catalog agreement. -/
 theorem loop_terminates_call_formed {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)

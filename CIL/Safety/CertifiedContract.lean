@@ -64,7 +64,7 @@ theorem MethodContract.Certified.weaken {Input Output : Type}
     callee's `InvocationCertificate`, with its entered frame, live entry and visited states
     and returned state, besides the footprint and the typed output. -/
 theorem run_call_of_certified {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (certified : c.Certified program callee) (input : Input)
@@ -98,7 +98,7 @@ theorem run_call_of_certified {Input Output : Type} {c : MethodContract Input Ou
     callee's `InvocationCertificate`, so beyond `run_call_of_contract_formed` it learns the
     callee's entered frame and that its entry and every visited state are live. -/
 theorem run_call_of_contract_certified {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)

@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include ../Extractor/ExternalIdentityEvidence.cs
 
@@ -43,7 +48,7 @@ var identities = new[]
 {
     "", "ASCII", new string('a', 31) + "λ", new string('b', 30) + "漢",
     new string('c', 29) + "🚀", "embedded\0null", "quote\" and slash\\",
-    "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::" +
+    "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::" +
         "System.Boolean System.Runtime.Intrinsics.Vector256::get_IsHardwareAccelerated()"
 };
 foreach (var identity in identities)

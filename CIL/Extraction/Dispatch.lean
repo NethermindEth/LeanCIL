@@ -29,6 +29,9 @@ structure DispatchMethod where
   overrides : List (Nat × TypeExpr)
   owner : TypeExpr := .void
   ownerArguments : List TypeExpr := []
+  /-- Method type parameters in declaration order, with the constraints on each slot. -/
+  genericParameters : List GenericConstraint :=
+    List.replicate genericArity { flags := 0, types := [] }
   deriving DecidableEq, Repr
 
 /-- Direct interfaces and declared methods of one metadata type; no inherited dispatch table. -/
@@ -39,29 +42,24 @@ structure DispatchType where
   interfaces : List TypeExpr
   methods : List DispatchMethod
   /-- The pinned assembly whose metadata supplied this entry. -/
-  assembly : AssemblyPin := {}
+  assembly : AssemblyPin
   /-- A class's base class, or `.void` when it derives from `System.Object` or is no class. -/
   base : TypeExpr := .void
   /-- The class is abstract, so it has no instances of its own. -/
   abstractType : Bool := false
   deriving DecidableEq, Repr
 
-/-- The entry names a valid pin that scopes its type. Dispatch reads only such entries, so every
-    type it consults comes from the selected assembly or a pinned reference, never elsewhere. -/
+/-- The entry's pin scopes its type. Dispatch reads only such entries, so every type it
+    consults comes from the selected assembly or a pinned reference, never elsewhere. -/
 def DispatchType.pinned (entry : DispatchType) : Bool :=
-  pinIdentityValid entry.assembly.identity &&
-    match managedOwner entry.identity with
-    | some (owner, _) => ownedBy entry.assembly.identity owner
-    | none => false
+  match managedOwner entry.identity with
+  | some (owner, _) => entry.assembly.identity.scopes owner
+  | none => false
 
 /-- Ambiguous metadata never selects an arbitrary first candidate. -/
 private def unique : List α → Option α
   | [value] => some value
   | _ => none
-
-/-- The method type arguments of a call: the prefix of `typeArguments` before the owner's. -/
-def siteMethodArguments (site : CallSite) : List TypeExpr :=
-  site.typeArguments.take (site.typeArguments.length - site.ownerArgumentCount)
 
 /-- The ECMA-335 calling-convention bit of a generic method signature. -/
 private def genericCallingConvention : Nat := 16
@@ -84,21 +82,28 @@ def ownerBase : TypeExpr → TypeExpr
   | .apply owner _ => ownerBase owner
   | type => type
 
-/-- Generic dispatch metadata must name precisely the closed receiver specialization. -/
+/-- A generic implementation must name the value type and arguments of its struct receiver. -/
 def dispatchOwnerMatches (receiver : TypeExpr) (target : DispatchMethod) : Bool :=
   if target.ownerArguments.isEmpty then target.owner == .void else
-  match receiver with
-  | .aggregate identity _ => genericOwnerIdentity target.owner target.ownerArguments == some identity
-  | _ => false
+  match receiver, target.owner with
+  | .aggregate identity _, owner@(.constructor ..) =>
+    genericOwnerIdentity owner target.ownerArguments == some identity
+  | _, _ => false
 
-/-- A closed struct slot uses its receiver's layout identity; interface identities stay structural. -/
-private def declaringIdentity (receiver : TypeExpr) (site : CallSite) : TypeExpr :=
+/-- A matching struct head denotes the receiver only with at least one owner argument.
+    A reference-type head at that identity conflicts. Other slots retain their declared type. -/
+private def declaringIdentity (receiver : TypeExpr) (site : CallSite) : Option TypeExpr :=
   match receiver with
   | .aggregate identity _ =>
-    if !site.typeArguments.isEmpty &&
-        genericOwnerIdentity (ownerBase site.declaringType) site.typeArguments == some identity
-      then receiver else site.declaringType
-  | _ => site.declaringType
+    -- A generic owner containing the receiver as an argument has a strictly longer identity.
+    if site.typeArguments.contains receiver then some site.declaringType else
+    let owner := ownerBase site.declaringType
+    if genericOwnerIdentity owner site.typeArguments == some identity then
+      match owner with
+      | .constructor .. => if site.ownerArgumentCount > 0 then some receiver else none
+      | _ => none
+    else some site.declaringType
+  | _ => some site.declaringType
 
 /-- Owner arguments are the site's closed owner arguments; method arguments precede them, must
     be closed, and are admitted only for static slots. -/
@@ -235,14 +240,15 @@ def resolveConstrained (types : List DispatchType) (receiver : TypeExpr) (site :
   let .managed token := site.target | none
   let concrete ← unique (types.filter fun type => type.identity == receiver)
   if !concrete.valueType || concrete.interfaceType || !concrete.pinned then none else pure ()
-  let declaring ← unique (types.filter fun type => type.identity == declaringIdentity receiver site)
+  let identity <- declaringIdentity receiver site
+  let declaring <- unique (types.filter fun type => type.identity == identity)
   if !declaring.pinned then none else pure ()
   let slot ← unique (declaring.methods.filter fun method => method.token == token)
   if slot.name != site.name || !signatureMatches slot site then none else pure ()
-  let target ← if receiver == declaring.identity then
+  let target <- if receiver == identity then
       (if site.hasThis then some (.implementation slot) else none) else do
     if !declaring.interfaceType || !slot.isVirtual ||
-        !concrete.interfaces.contains declaring.identity then none else pure ()
+        !concrete.interfaces.contains identity then none else pure ()
     selectTarget site slot
       (concrete.methods.filter fun method => method.overrides.contains (token, site.declaringType))
       (concrete.methods.filter fun method =>
@@ -276,7 +282,7 @@ def classChain (find : TypeExpr → Option DispatchType) : Nat → TypeExpr → 
     with the class declaring it: the nearest class from `runtime` up to the slot's class with a
     virtual method of the slot's name and signature (ECMA-335 II.10.3.2). The slot must
     introduce itself (`NewSlot`) in a non-generic class; every class on the chain is a pinned
-    class of the slot's assembly, and none has a `MethodImpl` naming a class of the chain. A
+    class in its own assembly, and none has a `MethodImpl` naming a class of the chain. A
     nearer match that starts its own slot (hiding), is abstract or is ambiguous fails rather
     than select a less specific body. -/
 def resolveVirtualWith (find : TypeExpr → Option DispatchType) (fuel : Nat) (runtime : TypeExpr)
@@ -290,7 +296,6 @@ def resolveVirtualWith (find : TypeExpr → Option DispatchType) (fuel : Nat) (r
   let chain ← classChain find fuel runtime site.declaringType
   let classes := chain.map (·.identity)
   if !(chain.all fun entry => entry.pinned && !entry.valueType && !entry.interfaceType &&
-      entry.assembly == declaring.assembly &&
       entry.methods.all fun method =>
         method.overrides.all fun (_, owner) => !classes.contains owner)
     then none else pure ()
@@ -323,8 +328,8 @@ def virtualTableValid (types : List DispatchType) (find : TypeExpr → Option Di
     | some (owner, method), some callee =>
       callee.arguments.isEmpty && callee.closed.token == method.token &&
       managedOwner owner == some (callee.closed.owner, []) &&
-      callee.closed.objectReceiver && callee.closed.hasThis && !callee.closed.code.isEmpty &&
-      callee.closed.attributes == method.attributes &&
+      callee.closed.receiverClass == some owner && callee.closed.hasThis &&
+      !callee.closed.code.isEmpty && callee.closed.attributes == method.attributes &&
       callee.closed.returnType == site.returnType &&
       callee.closed.parameters == site.parameterTypes
     | _, _ => false) &&
@@ -340,28 +345,6 @@ def castTargetValid (find : TypeExpr → Option DispatchType) (target : TypeExpr
   | .object _ name => name != "System.Object" && (find target).any fun entry =>
     entry.pinned && !entry.valueType && !entry.interfaceType
   | _ => false
-
-
-/-- Ordered candidate buckets retain every matching metadata entry. -/
-private def groupIndex {α κ : Type} [Ord κ] (key : α → κ) :
-    List α → Std.TreeMap κ (List α)
-  | [] => ∅
-  | value :: rest =>
-    let index := groupIndex key rest
-    index.insert (key value) (value :: index.getD (key value) [])
-/-- Each bucket is exactly the corresponding ordered filter of the input. -/
-private theorem groupIndex_get {α κ : Type} [Ord κ] [Std.TransOrd κ] [Std.LawfulEqOrd κ]
-    [BEq κ] [LawfulBEq κ] (key : α → κ) (values : List α) (query : κ) :
-    (groupIndex key values).getD query [] = values.filter (fun value => key value == query) := by
-  induction values with
-  | nil => simp [groupIndex]
-  | cons value rest ih =>
-    simp only [groupIndex, Std.TreeMap.getD_insert, Std.compare_eq_iff_eq]
-    by_cases same : key value = query
-    · simp [same, ih]
-    · simp [same, ih]
-
-#print axioms groupIndex_get
 
 /-- Add one candidate at each advertised key, without duplicating repeated keys. -/
 private def insertKeys (base : Std.TreeMap Nat (List α)) (value : α) :
@@ -397,35 +380,6 @@ private theorem multiGroup_get (keys : α → List Nat) (values : List α) (quer
     simp only [multiGroup, insertKeys_get, ih, List.filter_cons]
 
 #print axioms multiGroup_get
-
-/-- Linked UTF-8 bytes avoid indexed string decoding while comparing dispatch keys. -/
-private def keyBytes (text : String) : List UInt8 := text.toByteArray.data.toList
-
-/-- Constructor-delimited type buckets retain scopes and aggregate positions. Exact identity
-    checks below remain mandatory even if two encodings were to share a bucket. -/
-private def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
-  | .void, rest => keyBytes "void" :: rest
-  | .atom scope name, rest => keyBytes "atom" :: keyBytes scope :: keyBytes name :: rest
-  | .aggregate identity index, rest =>
-    keyBytes "aggregate" :: keyBytes identity :: keyBytes (toString index) :: rest
-  | .enum identity underlying, rest =>
-    keyBytes "enum" :: keyBytes identity :: typeKeyInto underlying rest
-  | .parameter index, rest => keyBytes "parameter" :: keyBytes (toString index) :: rest
-  | .byref element, rest => keyBytes "byref" :: typeKeyInto element rest
-  | .pointer element, rest => keyBytes "pointer" :: typeKeyInto element rest
-  | .array element, rest => keyBytes "array" :: typeKeyInto element rest
-  | .functionPointer result parameters convention hasThis explicitThis, rest =>
-    keyBytes "functionPointer" :: keyBytes (toString convention) ::
-      keyBytes (toString hasThis) :: keyBytes (toString explicitThis) ::
-      typeKeyInto result (typeKeyInto parameters rest)
-  | .signatureParameter head tail, rest =>
-    keyBytes "signatureParameter" :: typeKeyInto head (typeKeyInto tail rest)
-  | .constructor scope name, rest =>
-    keyBytes "constructor" :: keyBytes scope :: keyBytes name :: rest
-  | .apply constructor argument, rest =>
-    keyBytes "apply" :: typeKeyInto constructor (typeKeyInto argument rest)
-  | .object scope name, rest =>
-    keyBytes "object" :: keyBytes scope :: keyBytes name :: rest
 
 /-- Raw metadata and its order-preserving method candidate indexes. -/
 structure DispatchTypeIndex where
@@ -498,14 +452,15 @@ def DispatchIndex.resolve (index : DispatchIndex) (receiver : TypeExpr) (site : 
   let concrete ← index.findType receiver
   if !concrete.raw.valueType || concrete.raw.interfaceType || !concrete.raw.pinned then none
     else pure ()
-  let declaring ← index.findType (declaringIdentity receiver site)
+  let identity <- declaringIdentity receiver site
+  let declaring <- index.findType identity
   if !declaring.raw.pinned then none else pure ()
   let slot ← unique (declaring.tokens.getD token [])
   if slot.name != site.name || !signatureMatches slot site then none else pure ()
-  let target ← if receiver == declaring.raw.identity then
+  let target <- if receiver == identity then
       (if site.hasThis then some (.implementation slot) else none) else do
     if !declaring.raw.interfaceType || !slot.isVirtual ||
-        !concrete.raw.interfaces.contains declaring.raw.identity then none else pure ()
+        !concrete.raw.interfaces.contains identity then none else pure ()
     selectTarget site slot
       ((concrete.overrides.getD token []).filter fun method =>
         method.overrides.contains (token, site.declaringType))

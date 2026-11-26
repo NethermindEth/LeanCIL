@@ -5,16 +5,32 @@
 #:include GeneratedEvidence.cs
 #:include MultiAssemblyFixture.cs
 #:include MultiAssemblyGenerics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/DeepCheckInputs.cs
+#:include StrictBindingFacts.cs
+#:include StrictBindingDecoding.cs
+#:include StrictBindingScaling.cs
+#:include DeepBinding.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
 // Two SDK-built assemblies: App calls into Lib, and Lib is passed as a pinned `--reference`.
 MultiAssemblyFixture fixture = new("MultiAssembly");
+Run(["dotnet", "run", "--file", "Tests/MetadataAssemblyIndexes.cs"]);
+Run(["dotnet", "run", "--file", "Tests/ExactMetadataBytes.cs"]);
+Run(["dotnet", "run", "--file", "Tests/StrictBindingFixture.cs"]);
 string root = fixture.Root;
 string[] cli = fixture.Cli;
 const string libName = "MultiFixture.Lib";
 const string unsigned = ", Culture=neutral, PublicKeyToken=null";
+Run(["dotnet", "run", "--file", At("Tests/DeepCheckInputs.cs")]);
+Run(["dotnet", "run", "--file", At("Tests/DeepSession.cs")]);
+Run(["dotnet", "run", "--file", At("Tests/DeepDiagnostics.cs")]);
+Run(["dotnet", "run", "--file", At("Tests/ConsumerDeepChecks.cs")]);
 const string libraryText = """
 namespace MultiFixture;
 public struct Cell { public ulong Value; }
@@ -40,6 +56,8 @@ public interface IGet { ulong Get(); }
 public struct Holder : IGet { public ulong Value; public ulong Get() => Value + 1; }
 public struct GenericOn<T> : IFlag where T : unmanaged { public static bool IsActive => true; }
 public struct GenericPlain<T> : IScale where T : unmanaged { }
+// Last, so its constructor does not renumber the methods before it, whose tokens the strict audit cases name.
+public sealed class Marker { }
 """;
 
 string Library(string name, string step, string properties = "") =>
@@ -50,7 +68,8 @@ string lib = Library("Lib", "3 + 1");
 string substitute = Library("Substitute", "3 + 2");
 string versioned = Library("Versioned", "3 + 1", "<AssemblyVersion>2.0.0.0</AssemblyVersion>");
 // An assembly App references but extraction never pins.
-fixture.Build("Other", "MultiFixture.Other", "namespace MultiFixture.Other;\npublic interface IMarker { }\n");
+string other = fixture.Build("Other", "MultiFixture.Other",
+    "namespace MultiFixture.Other;\npublic interface IMarker { }\n");
 string appDirectory = fixture.Project("App", "MultiFixture.App", "",
     """<ProjectReference Include="../Lib/Lib.csproj" /><ProjectReference Include="../Other/Other.csproj" />""");
 File.WriteAllText(Path.Combine(appDirectory, "Application.cs"), """
@@ -59,6 +78,7 @@ namespace MultiFixture;
 public static class Application
 {
     public static ulong Direct(ulong x) => Mix.Step(x) + 1;
+    public static ulong Take(Marker marker, ulong x) => x;
     public static ulong Nested(ulong x) => Mix.Twice(x);
     public static ulong Local(ulong x) { Cell cell = default; cell.Value = x; Mix.Bump(ref cell); return cell.Value; }
     public static ulong Size<T>(ulong x) where T : struct => x + (ulong)Unsafe.SizeOf<T>();
@@ -71,6 +91,7 @@ public static class Application
     public static ulong RunGenericOn(ulong x) => Run<GenericOn<uint>>(x);
     public static ulong RunAppGenericOff(ulong x) => Run<AppGenericOff<uint>>(x);
     public static ulong ScaledGenericPlain(ulong x) => Scaled<GenericPlain<uint>>(x);
+    public static string Text() => "carried user string";
 }
 // App structs and interfaces built on Lib's interfaces: dispatch reads both pinned assemblies.
 public struct AppScale : IScale { public static ulong Scale(ulong x) => x + 9; }
@@ -81,6 +102,17 @@ public interface IAppScale : IScale { static ulong IScale.Scale(ulong x) => x * 
 public struct AppDerived : IAppScale { }
 public struct Marked : IScale, MultiFixture.Other.IMarker { }
 public struct AppGenericOff<T> : IFlag where T : unmanaged { public static bool IsActive => false; }
+public static class CounterCaller { public static ulong Read(ulong x) => Counter.Next(x); }
+public struct Counter
+{
+    public ulong Value;
+    public static ulong Next(ulong x)
+    {
+        Counter cell = default;
+        cell.Value = x;
+        return Mix.Step(cell.Value);
+    }
+}
 """);
 Run(["dotnet", "build", Path.Combine(appDirectory, "App.csproj"), "-c", "Release"]);
 string app = Path.Combine(appDirectory, "bin", "MultiFixture.App.dll");
@@ -105,7 +137,7 @@ string Extract(string name, string selector, bool referencedBody, string[] extra
         throw new InvalidOperationException("Artifact did not record the pinned reference: " + pin);
     string extracted = File.ReadAllText(Path.Combine(artifact, "Extracted.lean"));
     if (!extracted.Contains("def assembly1 : Extraction.AssemblyPin", StringComparison.Ordinal) ||
-        extracted.Contains("assembly := assembly1", StringComparison.Ordinal) != referencedBody)
+        extracted.Contains("assembly := assembly1, signature", StringComparison.Ordinal) != referencedBody)
         throw new InvalidOperationException("Certificate misattributes the referenced assembly's bodies: " + name);
     // The certificate depends on the program alone; byte hashes and MVIDs stay in identity.json.
     string[] rebuildSensitive = [libSha, Sha(app), pin.GetProperty("mvid").GetString()!,
@@ -142,6 +174,45 @@ void Decided(params (string Name, bool Stepped)[] runs)
 }
 
 Verified("Direct", "MultiFixture.Application::Direct(ulong)", "Tests/MultiAssembly/Direct.lean", referencedBody: true);
+Proved("Counter", "MultiFixture.CounterCaller::Read(ulong)", "Tests/MultiAssembly/Counter.lean", referencedBody: true);
+// A refutation of a callee from the reference names that callee with its own assembly and digest.
+_ = Extract("StepRefuted", "MultiFixture.Application::Direct(ulong)", referencedBody: true, []);
+string stepRefutation = Path.Combine(root, "StepRefuted.lean");
+File.WriteAllText(stepRefutation, """
+    import Extracted
+    import CIL.Safety.MethodContract
+
+    /-! A counterexample about Lib's `Mix.Step`, a callee of App's `Direct`. -/
+
+    open CIL.Safety
+    namespace MultiAssemblyProof
+
+    /-- Promises that `Step` never returns. -/
+    def neverReturns : MethodContract CIL.W64 CIL.W64 where
+      args x := [.scalar (.i64 x)]
+      results v := [.scalar (.i64 v)]
+      pre _ _ := True
+      footprint _ := []
+      post _ _ _ _ := False
+
+    /-- `Step 0` returns. -/
+    theorem refuted : neverReturns.Refuted Extracted.program 1 :=
+      .of_return (input := 0) (initial := Memory.empty) trivial
+        (rfl : invoke Extracted.program 16 1 (neverReturns.args 0) Memory.empty = .ok _)
+        (fun holds => holds.2.elim fun _ returned => returned.2)
+
+    #print axioms refuted
+    end MultiAssemblyProof
+    """);
+var refutedStep = Execute([.. cli, "verify", Artifact("StepRefuted"), "--proof", stepRefutation, "--theorem",
+    "MultiAssemblyProof.refuted"]);
+var refutedMethod = JsonDocument.Parse(File.ReadAllText(Path.Combine(Artifact("StepRefuted"), "failed.json")))
+    .RootElement.GetProperty("method");
+if (refutedMethod.GetProperty("entry").GetString() != "System.UInt64 MultiFixture.Mix::Step(System.UInt64)" ||
+    refutedMethod.GetProperty("assembly").GetString()?.StartsWith(libName + ", ", StringComparison.Ordinal) != true ||
+    refutedMethod.GetProperty("assemblySha256").GetString() != libSha)
+    throw new InvalidOperationException($"A refuted callee was reported with another assembly:\n{refutedStep.Output}");
+Console.WriteLine("PASS a refuted callee from a reference is reported with that assembly's identity and digest");
 Proved("Nested", "MultiFixture.Application::Nested(ulong)", "Tests/MultiAssembly/Nested.lean", referencedBody: true);
 Proved("Local", "MultiFixture.Application::Local(ulong)", "Tests/MultiAssembly/Local.lean", referencedBody: true);
 // Only the layout comes from Lib here, so no body is attributed to it.
@@ -187,6 +258,67 @@ Decided(("RunAppGenericOff", false), ("RunGenericOn", true));
 Proved("ScaledGenericPlain", "MultiFixture.Application::ScaledGenericPlain(ulong)",
     "Tests/MultiAssembly/Scaled.lean", referencedBody: true);
 
+// Compile the caller against the original facade, then supply the facade that forwards the type.
+(string Caller, string[] References) ProveForwardedCall()
+{
+    const string facadeName = "ForwardFacade";
+    const string classes = " public class Shape { } public sealed class Second : Shape { } " +
+        "public static class Family { public sealed class Child : Shape { } }";
+    fixture.Build("OriginalFacade", facadeName,
+        "namespace Forward; public static class Value { public static int Next(int input) => input; }" + classes);
+    var caller = fixture.Build("ForwardCaller", "ForwardCaller",
+        "namespace Forward; public static class Entry { public static int Run(int value) => Value.Next(value); " +
+        "public static int Test(Shape value) => value is Second ? 1 : value is Family.Child ? 2 : 0; }",
+        references: """<ProjectReference Include="../OriginalFacade/OriginalFacade.csproj" />""");
+    var implementation = fixture.Build("ForwardImplementation", "ForwardImplementation",
+        "namespace Forward; public static class Value { public static int Next(int input) => input + 1; }" + classes);
+    var facade = fixture.Build("ForwardFacade", facadeName,
+        """
+        [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Value))]
+        [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Shape))]
+        [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Second))]
+        [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Family))]
+        """,
+        references: """<ProjectReference Include="../ForwardImplementation/ForwardImplementation.csproj" />""");
+    var artifact = Artifact("ForwardedCall");
+    Run([.. cli, "extract", caller, "Entry::Run(int)", artifact, .. Reference(facade), .. Reference(implementation)]);
+    var proof = Path.Combine(root, "accepted-ForwardedCall.lean");
+    File.WriteAllText(proof, File.ReadAllText(Path.Combine(artifact, "Extracted.lean")) + """
+
+        open CIL in
+        theorem forwarded_call (value : W32) :
+            (Safety.invoke Extracted.program 16 0 [.scalar (.i32 value)] Safety.Memory.empty).map Prod.snd =
+              .ok [.scalar (.i32 (value + 1))] := rfl
+        #print axioms forwarded_call
+        """);
+    evidence.Add(proof, "PASS a facade binds the implementation used by a compiled caller");
+    var classTest = Artifact("ForwardedClass");
+    Run([.. cli, "extract", caller, "Forward.Entry::Test(Forward.Shape)", classTest,
+        .. Reference(facade), .. Reference(implementation)]);
+    var pins = Path.Combine(classTest, "inputs.sha256");
+    File.WriteAllLines(pins, new[] { caller, facade, implementation }.Select(path => Sha(path) + "  " + path));
+    Run([.. cli, "verify", classTest, "--proof", At("Tests/MultiAssembly/ForwardedClass.lean"),
+        "--theorem", "ForwardedClass.correctness", "--deep-checks", pins]);
+    using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(classTest, "verified.json")));
+    var fact = report.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
+        .Single(item => item.GetProperty("id").GetString() == "dispatch-catalogs");
+    if (fact.GetProperty("status").GetString() != "reconfirmed" ||
+        fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
+        throw new InvalidDataException("Expected the forwarded class test to bind the defining TypeDef: " + fact);
+    var renamedFacade = Path.Combine(fixture.Root, "RenamedNestedExport.dll");
+    using (var image = Mono.Cecil.ModuleDefinition.ReadModule(facade))
+    {
+        image.ExportedTypes.Single(row => row.FullName == "Forward.Family/Child").Name = "Renamed";
+        image.Write(renamedFacade);
+    }
+    fixture.RejectedExtract("renamed nested class export", "Missing type forwarder: Forward.Family/Child",
+        caller, "Forward.Entry::Test(Forward.Shape)", [.. Reference(renamedFacade), .. Reference(implementation)]);
+    Console.WriteLine("PASS forwarded class tests distinguish null, base, top-level and nested derived objects");
+    return (caller, [facade, implementation]);
+}
+
+var forwarded = ProveForwardedCall();
+
 evidence.Check();
 
 void Rejected(string name, string marker, string[] command) => MultiAssemblyFixture.Rejected(name, marker, command);
@@ -209,6 +341,77 @@ RejectedExtract("unpinned entry type argument", "no single pinned --reference as
 // An interface of an unpinned assembly could hide a more specific body, so the default is not selected.
 RejectedExtract("unpinned receiver interface", "Unpinned assembly reference: MultiFixture.Other",
     scaled, [.. Reference(lib), "--type-argument", "MultiFixture.Marked"]);
+
+// A pinned type its assembly does not define is refused (by the class check, ahead of the metadata slice's own
+// "Unresolved pinned type" backstop), unlike a custom modifier, which needs no definition at all.
+string gone = fixture.Build("Gone", libName, libraryText.Replace("STEP", "3 + 1")
+    .Replace("public sealed class Marker { }", ""));
+RejectedExtract("pinned type without definition", "Unresolved class: MultiFixture.Marker",
+    "MultiFixture.Application::Take(MultiFixture.Marker,ulong)", Reference(gone));
+// No extraction reaches the metadata slice's own refusal, since the aggregate and class checks run first, so the
+// collector is called directly on the method whose signature names the pinned type the library no longer defines.
+{
+    const System.Reflection.BindingFlags Internal = System.Reflection.BindingFlags.Instance |
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public;
+    var extractor = System.Reflection.Assembly.LoadFrom(ExtractorPath);
+    var pinnedType = extractor.GetType("Nethermind.LeanCIL.PinnedAssemblies", throwOnError: true)!;
+    var sourceType = pinnedType.GetNestedType("Source", System.Reflection.BindingFlags.NonPublic |
+        System.Reflection.BindingFlags.Public)!;
+    var sources = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(sourceType))!;
+    sources.Add(Activator.CreateInstance(sourceType, gone, null)!);
+    var pinned = Activator.CreateInstance(pinnedType, Internal, null,
+        [File.ReadAllBytes(app), Sha(app), sources, null], null)!;
+    var slices = Activator.CreateInstance(extractor.GetType("Nethermind.LeanCIL.MetadataSlices", throwOnError: true)!,
+        pinned)!;
+    var selected = (Mono.Cecil.ModuleDefinition)pinnedType.GetProperty("Selected", Internal)!.GetValue(pinned)!;
+    var original = (Mono.Cecil.ModuleDefinition)pinnedType.GetMethod("Original", Internal)!
+        .Invoke(pinned, [selected])!;
+    var take = original.GetType("MultiFixture.Application").Methods.Single(method => method.Name == "Take");
+    var collect = slices.GetType().GetMethod("Method", Internal)!;
+    try
+    {
+        collect.Invoke(slices, [take, Array.Empty<uint>(), false, Array.Empty<Mono.Cecil.TypeDefinition>()]);
+        throw new InvalidOperationException("The metadata slice accepted a pinned type with no definition.");
+    }
+    catch (System.Reflection.TargetInvocationException refusal) when (
+        refusal.InnerException is InvalidDataException { Message: "Unresolved pinned type: MultiFixture.Marker" })
+    {
+        Console.WriteLine("PASS the metadata slice refuses a pinned non-modifier type with no definition");
+    }
+}
+
+// Extraction is deterministic across processes. The order of --reference options numbers the pins in the
+// certificate, so only extractions with the same order write the same files; every order pins the same assemblies.
+void Deterministic(string name, string selector, string[][] referenceOrders, params string[] extra)
+{
+    string[] outputs = [.. referenceOrders.Select((references, index) =>
+    {
+        string output = Artifact("determinism-" + name + "-" + index);
+        Run([.. cli, "extract", app, selector, output, .. references.SelectMany(Reference), .. extra]);
+        return output;
+    })];
+    string[] Pins(string output) => [.. JsonSerializer.Deserialize<JsonElement>(
+            File.ReadAllText(Path.Combine(output, "identity.json"))).GetProperty("references").EnumerateArray()
+        .Select(pin => pin.GetProperty("sha256").GetString()!).Order(StringComparer.Ordinal)];
+    for (int index = 1; index < outputs.Length; index++)
+    {
+        int same = Array.FindIndex(referenceOrders, order => order.SequenceEqual(referenceOrders[index]));
+        if (same < index && FirstDifference(outputs[same], outputs[index]) is { } difference)
+            throw new InvalidOperationException($"Extraction of {name} is not deterministic: {difference}");
+        if (!Pins(outputs[0]).SequenceEqual(Pins(outputs[index])))
+            throw new InvalidOperationException($"Reference order changed the pinned assemblies of {name}");
+    }
+    Console.WriteLine($"PASS cross-assembly {name}: {outputs.Length} extractions write identical files per order");
+}
+
+string[][] twice = [[lib], [lib]];
+string[][] bothOrders = [[lib, other], [lib, other], [other, lib], [other, lib]];
+Deterministic("Direct", direct, twice);
+Deterministic("Size", "MultiFixture.Application::Size(ulong)", twice,
+    "--type-argument", "MultiFixture.Cell, " + libName);
+Deterministic("RunGenericOn", "MultiFixture.Application::RunGenericOn(ulong)", twice);
+Deterministic("PlainBothPins", scaled, bothOrders, "--type-argument", "MultiFixture.Plain, " + libName);
+Deterministic("MarkedBothPins", scaled, bothOrders, "--type-argument", "MultiFixture.Marked");
 
 // Proofs bind bodies by unscoped signature, so a same-named type in two pinned assemblies is rejected.
 string aliasDirectory = fixture.Project("Alias", "MultiFixture.Alias", "",
@@ -272,12 +475,14 @@ Rejected("dropped reference", "External managed dependency", Verify(dropped));
 string extractedSource = File.ReadAllText(Path.Combine(Artifact("Direct"), "Extracted.lean"));
 string libIdentity = libName + ", Version=0.1.0.0" + unsigned;
 string appIdentity = "MultiFixture.App, Version=0.1.0.0" + unsigned;
-if (!extractedSource.Contains($"identity := \"{libIdentity}\"", StringComparison.Ordinal))
-    throw new InvalidOperationException("Precondition: the certificate must pin " + libIdentity);
+const string libPinDefinition = "def assembly1 : Extraction.AssemblyPin := ⟨assembly1Identity⟩";
+if (!extractedSource.Contains(libPinDefinition, StringComparison.Ordinal))
+    throw new InvalidOperationException("Precondition: the certificate must pin the library as assembly1");
 foreach ((string name, string from, string to) in new[]
 {
-    ("misattributed body", "assembly := assembly1", "assembly := assembly0"),
-    ("duplicate certificate identity", $"identity := \"{libIdentity}\"", $"identity := \"{appIdentity}\"")
+    ("misattributed body", "assembly := assembly1, signature", "assembly := assembly0, signature"),
+    ("duplicate certificate identity", libPinDefinition,
+        libPinDefinition.Replace("⟨assembly1Identity⟩", "⟨assembly0Identity⟩", StringComparison.Ordinal))
 })
 {
     string forged = Copy(name.Replace(' ', '-'));
@@ -310,12 +515,12 @@ Console.WriteLine("PASS Lean rejected moved dispatch catalog");
 // The App receiver's catalog reads Lib's IScale entry; attributing that entry to App's pin fails dispatch.
 string repinned = Copy("Repinned", "ScaledAppDerived");
 string repinnedCatalog = Path.Combine(repinned, "Extracted.lean");
-string libPinText = $"assembly := {{ identity := \"{libIdentity}\" }}";
+const string libPinText = "assembly := assembly1 }";
 string repinnedSource = File.ReadAllText(repinnedCatalog);
 if (!repinnedSource.Contains(libPinText, StringComparison.Ordinal))
     throw new InvalidOperationException("Precondition: Scaled<AppDerived> must catalog a Lib entry.");
 File.WriteAllText(repinnedCatalog, repinnedSource.Replace(libPinText,
-    $"assembly := {{ identity := \"{appIdentity}\" }}", StringComparison.Ordinal));
+    "assembly := assembly0 }", StringComparison.Ordinal));
 (int Code, string Output, string Stdout, string Stderr) repinnedKernel =
     Execute(["lake", "env", "lean", repinnedCatalog], cwd: FixturePackage());
 if (repinnedKernel.Code == 0 || !repinnedKernel.Output.Contains("ConstrainedCallsValid", StringComparison.Ordinal))
@@ -365,4 +570,18 @@ RejectedExtract("import and reference", "An assembly cannot be both a typed impo
 Console.WriteLine("PASS pinned referenced assemblies: proofs, missing, duplicate, substituted, misattributed");
 
 // Generic structs and generic class statics run in the same job with their own Lib and App.
-CheckGenericAssemblies();
+var generic = CheckGenericAssemblies();
+
+// The strict binding library decodes images as an independent reader does, and its own tests pass.
+Run(["lake", "build", "StrictBinding", "Tests.StrictBinding"], FixturePackage(),
+    progress: "Building strict binding tests");
+Console.WriteLine("PASS strict binding library: SHA-256, SHA-1, container and table decoding tests");
+CheckBindingDecoding(Path.Combine(root, "binding"));
+// The slices the extractor carries for every method of the fixture and of both assembly pairs.
+string strictFixture = Path.Combine(root, "StrictFixture.dll");
+File.WriteAllBytes(strictFixture, StrictBindingFacts.ReadImage(File.ReadAllText(Fixture)));
+CheckExtractedSlices(Path.Combine(root, "binding-slices"), FixturePackage(),
+    (strictFixture, []), (app, [lib]), (lib, []),
+    (generic.App, [generic.Lib]), (generic.Lib, []), forwarded);
+CheckBindingScaling(Path.Combine(root, "binding-scaling"));
+CheckDeepBinding(root, cli, Artifact("Direct"), app, lib, libName, Verify(Artifact("Direct")));

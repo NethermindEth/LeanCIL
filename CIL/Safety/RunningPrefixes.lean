@@ -6,7 +6,7 @@ import CIL.Safety.StepLiveState
 `RunningVisits` relates the start of a run to every frame state it later passes through
 while that frame is still running or suspended in a call. `LiveState` holds at each such
 visit, and a successful run ends with a `ReturnedState`: well-formed memory, valid results
-and an intact static world. `CIL.Safety.RunReturnTrace` uses this to locate the final return.
+and an intact static world.
 -/
 
 namespace CIL.Safety

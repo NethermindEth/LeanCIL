@@ -8,7 +8,9 @@
 Value-only instructions delegate to `CIL.step`. Memory operations and frame transitions use
 checked rules; unknown instructions cannot fall through to unchecked accesses.
 
-Successful execution excludes model faults on its path. Under their stated initial premises,
+Successful execution excludes model faults on its path. An `unsupported` fault marks a run the
+model does not cover: stepping stops at it, and the refutation lemmas take only settled outcomes
+(`Settled`), so none of them refutes a contract from it. Under their stated initial premises,
 the library proves well-formedness, allocation extension, live values, frame ownership and expiry,
 caller-memory preservation and static-world consistency. `InvocationCertificate` packages these
 properties with execution. Valid initial storage, references and authority are caller obligations.
@@ -22,7 +24,12 @@ properties with execution. Valid initial storage, references and authority are c
 | Buffer contents | Checked write/readback, sequence predicates and confinement | Readability and write authority are separate. |
 
 `RaisesCLR` and `OutcomeContract.HoldsCLR` also name arithmetic overflow and divide-by-zero.
-Handlers, exception-object identity, unwinding and post-throw memory are outside the model.
+Typed catch and finally clauses run in the checked model, which unwinds a fault through the
+enclosing clauses of each frame innermost first, as [Throws](OPCODES.md#throws) describes. Filter
+and fault clauses are refused at extraction. A folded `throw new E(...)` raises a named fault
+without an exception object; only an operand-free `throw` gives a catch an object identity. A
+construction bound to its CoreLib constructor is not folded, so its `throw` raises the object the
+constructor builds; see [bound constructors](SOUNDNESS-EVIDENCE.md#folded-instruction-patterns).
 Outcome loop rules require preservation and decrease only for continuing iterations; exits must
 establish the specified normal or exceptional outcome from the initial state.
 
@@ -52,7 +59,7 @@ implementations. Heap-array lifetime and resource assumptions are in
 
 ### Virtual dispatch
 
-`callvirt` of a virtual method of an admitted class extracts to `.callVirtual targets argc`.
+`callvirt` of a virtual method of an admitted class extracts to `.callvirt method` with a `.virtual targets` link.
 `targets` pairs each class with the body the CLR selects for its instances: the nearest
 override on its chain up to the slot's class, or the slot's own body. A null receiver throws
 `NullReferenceException`. A live receiver enters the body listed for its exact runtime class;
@@ -70,9 +77,9 @@ in another assembly, a method that hides the slot with `newslot`, a concrete cla
 an abstract slot, an explicit `MethodImpl`, and generic virtual methods.
 
 The closed world is a checked premise; it is not an assumption: a run that
-reaches the call with an instance of an outside class ends in `outsideDispatchTable`, which is
-neither a return nor a named exception, and more fuel does not change it. Interface calls are not
-modelled.
+reaches the call with an instance of an outside class ends in `outsideDispatchTable`, an
+`unsupported` fault that is neither a return nor a named exception and that no refutation lemma
+takes. Interface calls are not modelled.
 
 ## Aggregate storage
 
@@ -84,11 +91,13 @@ not CLR correspondence. See [layout assumptions](SOUNDNESS-RUNTIME.md#sequential
 
 ## Method-body embedding
 
-`MethodEmbeds` checks execution metadata, static descriptors and live instructions under a PC map.
-Entry, branch/call targets and resumable fallthroughs must match. Expected `.unsupported` locations
-constrain no actual code and cannot occur on a successful expected path. Even a live inserted `nop`
-is outside this exact relation. `cil_embed` computes a candidate map; the kernel checks every
-field.
+`MethodEmbeds` checks execution metadata, the declared signature, the layout environment, static
+descriptors, call links and live instructions under a PC map. A body built as
+`extracted.withCode code` keeps the signature and environment of `extracted` and clears its links and
+static sites. Supply both tables at the replacement body's pcs. Entry, branch/call targets and resumable
+fallthroughs must match. Expected holes (`.unadmitted`) constrain no actual code and cannot
+occur on a successful expected path. Even a live inserted `nop` is outside this exact relation.
+`cil_embed` computes a candidate map; the kernel checks every field.
 
 `ProgramRefines` transfers successful runs with the same fuel and final memory. Outcome variants
 transfer named throws with relocated PCs, preserving method and exception. They do not transfer
@@ -99,7 +108,7 @@ fuel exhaustion, unsupported-operation, invalid-state, memory or arithmetic faul
 | Relation | Preconditions | Guarantee and limit |
 | --- | --- | --- |
 | `MethodEmbedsDeadLocals` | Trailing null/unmodeled reference or bounded span slots; matching retained local/kind lengths; no parameter homes; opaque slots stay retained | Same memory, results and named throws. No invocation-certificate transfer or general `ProgramRefines` composition. |
-| `AllocationRefinement` | Checked local renaming/initializers; ordinary frames without opaque/vector/parameter argument homes; well-formed memory and bounded statics | Scalar results and caller-prefix preservation of allocations, bytes and authority (`BytesBelow`); caller fields agree wherever the source holds null or a caller reference (`SlotsAgreeBelow`); named throws require valid arguments. Fresh identities/counters, caller fields holding fresh objects and arbitrary reference-valued postconditions need not match. |
+| `AllocationRefinement` | Checked local renaming/initializers; ordinary frames without opaque vector locals or parameter homes; well-formed memory and bounded statics | Scalar results and caller-prefix preservation of allocations, bytes and authority (`BytesBelow`); caller fields agree wherever the source holds null or a caller reference (`SlotsAgreeBelow`); named throws require valid arguments. Fresh identities/counters, caller fields holding fresh objects and arbitrary reference-valued postconditions need not match. |
 
 Allocation refinement proves the complete dispatcher simulation with injective retained-allocation
 and activation mappings. Extra private homes lie outside the mapped image. Contract transport also
@@ -108,7 +117,8 @@ confinement follows from execution. See [binding and transport](PROOFS-BINDING.m
 
 ## Shared proof contracts and reduction
 
-`RunTrace`, `FrameSetup` and instruction contracts expose proved execution and preservation facts.
+`OutcomeTrace`, `RunTrace`, `FrameSetup` and instruction contracts expose proved execution and
+preservation facts.
 Checked stepping, `rfl`, simplification and optional proved summaries produce kernel-checked terms.
 Failed summaries install no declarations. A `VC` does not discover invariants or specifications.
 [Loop scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding) supplies checked

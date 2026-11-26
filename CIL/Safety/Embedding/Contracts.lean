@@ -16,7 +16,8 @@ theorem WP.of_embedded_run {program : CIL.Program} {index pc : Nat}
     {frame : Frame} {memory : Memory} {post : (Memory × List Value) → Prop}
     (proof : WP (Execution (fun fuel => run (program.set index expected) fuel index pc
       args frame stack memory)) post)
-    (found : program[index]? = some target) (embedded : CIL.Embeds expected target map) :
+    (found : program[index]? = some target) (embedded : CIL.Embeds expected target map)
+    (free : HandlerFree program := by handler_free) :
     WP (Execution (fun fuel =>
       run program fuel index (CIL.Embedding.rename map target.code.length pc)
       args frame stack memory)) post := by
@@ -29,7 +30,8 @@ theorem WP.of_embedded_run {program : CIL.Program} {index pc : Nat}
 theorem MethodContract.Holds.of_embeds {Input Output : Type}
     {contract : MethodContract Input Output} {program : CIL.Program} {index method : Nat}
     {expected : CIL.Method} (holds : contract.Holds (program.set index expected) method)
-    (embedded : CIL.MethodEmbeds program index expected) : contract.Holds program method := by
+    (embedded : CIL.MethodEmbeds program index expected)
+    (free : HandlerFree program := by handler_free) : contract.Holds program method := by
   intro input initial permitted
   obtain ⟨fuel, returned, invoked, result⟩ := holds input initial permitted
   exact ⟨fuel, returned, embedded.invoke invoked, result⟩

@@ -65,7 +65,8 @@ partial class Program
 
     /// <summary>
     /// How a variant's verified statement relates to production's `T`, both as the theorem audits print them:
-    /// `same` when the kernel accepts the variant's theorem at `T`, or its refutation at `Not T`; `different` when
+    /// `same` when the kernel accepts the variant's theorem at `T`, or its refutation at the counterexample predicate
+    /// of the contract whose `Holds` `T` states, with `T`'s arguments; `different` when
     /// it does not; `unavailable` when there was nothing to compare; `independent` when the manifest says so.
     /// </summary>
     sealed record GateStatement(string status, string? production, string? variant);
@@ -150,8 +151,9 @@ partial class Program
     /// <summary>
     /// Builds, extracts and verifies an explicit catalog of gates and their variants, plans the selected rows
     /// into balanced jobs, runs one job of a plan, or checks that the results of every job passed. A `rejected`
-    /// variant passes only when its refutation verifies at the negation of production's statement and its proof
-    /// fails at proof checking; a certifying variant's theorem must verify at production's statement.
+    /// variant passes only when production's statement is a contract's `Holds`, its refutation verifies at that
+    /// contract's counterexample predicate with the same arguments, and its proof fails at proof checking; a
+    /// certifying variant's theorem must verify at production's statement.
     /// </summary>
     internal static int RunGates(string[] args)
     {
@@ -530,8 +532,18 @@ partial class Program
         PrepareGateRows(gates, selected);
         if (options.CheckOnly && selected.Any(row => row.Expect == "rejected"))
             throw new ArgumentException("--check cannot evaluate mutation rejection expectations.");
+        var decoderInputs = new Dictionary<string, TemplateEmitter.Variant>(StringComparer.Ordinal);
+        TemplateEmitter.Variant Input(string output)
+        {
+            if (!decoderInputs.TryGetValue(output, out var input))
+            {
+                input = Nethermind.LeanCIL.Program.ReadDecoderInput(output, gateInput: true);
+                decoderInputs.Add(output, input);
+            }
+            return input;
+        }
         foreach (var row in selected.Where(row => row.ProgramBase is not null && !row.Failed))
-            CompareGateProgram(row, row.ProgramBase!);
+            CompareGateProgram(row, row.ProgramBase!, Input);
 
         foreach (var row in selected.Where(row => row.Failed && !options.Json))
         {
@@ -558,7 +570,8 @@ partial class Program
                 requests.Add(new(row.Output, row.RefutationProof, row.RefutationTheorem!, "verified"));
             }
             requestIndex[row] = (refutation, requests.Count);
-            requests.Add(new(row.Output, row.Proof, row.Theorem, row.Expect));
+            // A rejected variant's own proof must fail at proof checking; its refutation is the request above.
+            requests.Add(new(row.Output, row.Proof, row.Theorem, row.Expect == "rejected" ? "unproved" : row.Expect));
         }
         foreach (var row in selected.Except(compared).Concat(origins.Distinct())
             .Where(row => !row.Failed && row.Expect != "unchanged"))
@@ -577,8 +590,9 @@ partial class Program
             var origin = requestIndex.TryGetValue(production[(row.Gate, row.Profile)], out var at)
                 ? first.Verified[at.Proof]?.statementIdentity?.term : null;
             var index = requestIndex[row];
-            // Without production's statement the variant still verifies, and its statement is unavailable.
-            if (origin is { } term)
+            // Without production's statement the variant still verifies, and its statement is unavailable; a raw
+            // statement has no counterexample predicate, so a refutation of it is never compared.
+            if (origin is { } term && (row.Expect != "rejected" || StatesContract(term)))
                 statements[row.Expect == "rejected" ? index.Refutation!.Value : index.Proof] =
                     new(false, term.GetRawText(), row.Expect == "rejected");
         }
@@ -600,7 +614,8 @@ partial class Program
                 return (new("independent", null, own is null ? null : StatementOf(own)), null);
             var origin = production[(row.Gate, row.Profile)];
             var verified = requestIndex.TryGetValue(origin, out var at);
-            return CompareGateStatement(row, origin, origin.Stage ?? (verified ? run.Results[at.Proof].stage : "build"),
+            return CompareStatement(row.Expect == "rejected", own?.theorem ?? row.Theorem,
+                $"Production {origin.Name}", origin.Stage ?? (verified ? run.Results[at.Proof].stage : "build"),
                 verified ? Verified(at.Proof) : null, own);
         }
         var results = selected.Select(row => GateOutcome(row, options.CheckOnly,
@@ -1008,53 +1023,86 @@ partial class Program
     }
 
     /// <summary>Fails `row` unless its program relates to its base row's as the manifest says.</summary>
-    static void CompareGateProgram(GateRow row, GateRow origin)
+    static void CompareGateProgram(GateRow row, GateRow origin, Func<string, TemplateEmitter.Variant> input)
     {
         try
         {
             if (origin.Failed)
                 throw new InvalidDataException($"The extraction of {origin.Name} is unavailable: {origin.Stage} " +
                     "failed.");
-            var relation = ProgramRelation(origin.Output, row.Output);
+            var relation = ProgramRelation(input(origin.Output), input(row.Output));
             if (relation != row.ExpectedProgram)
                 throw new InvalidDataException($"Expected the program to be {row.ExpectedProgram} with respect " +
                     $"to {origin.Variant}, but it is {relation}.");
             row.ProgramStatus = "passed";
         }
-        catch (Exception error) when (error is IOException or InvalidDataException)
+        catch (Exception error) when (error is IOException or InvalidDataException or InvalidOperationException)
         {
             row.ProgramStatus = "failed";
             row.Fail("program comparison", error.Message);
         }
     }
 
-    /// <summary>
-    /// How the program extracted into `variant` relates to the one in `production`: `same` when the method
-    /// bodies (each `def methodN : Method`, in order) and method signatures are equal, `renamed` when only the
-    /// signatures differ, otherwise `different`. Everything else in Extracted.lean is ignored, including the
-    /// assembly identity, digests, paths and metadata tokens.
-    /// </summary>
-    static string ProgramRelation(string production, string variant)
+    /// <summary>Compare the typed raw bodies and the canonical methods they produce at this profile.</summary>
+    static string ProgramRelation(TemplateEmitter.Variant left, TemplateEmitter.Variant right)
     {
-        static (string[] Bodies, string[] Signatures) Methods(string output)
+        if (left.Methods.Length != right.Methods.Length) return "different";
+        for (var index = 0; index < left.Methods.Length; index++)
+            if (!left.Methods[index].Opcodes.AsSpan().SequenceEqual(right.Methods[index].Opcodes) ||
+                left.ImageRow(index) != right.ImageRow(index))
+                return "different";
+        var namesMatch = left.Methods.Select(method => method.Identity)
+            .SequenceEqual(right.Methods.Select(method => method.Identity), StringComparer.Ordinal);
+        if (left.DecoderInputs == right.DecoderInputs) return namesMatch ? "same" : "renamed";
+
+        // An appended CoreLib row has no source definition of its own; its image definition is its raw body.
+        var checks = Enumerable.Range(0, left.Methods.Length).Select(index => left.ImageRow(index) is { } row ? $"""
+            (Left.constructorImage.methods[{row}]?.map Prod.snd ==
+               Right.constructorImage.methods[{row}]?.map Prod.snd &&
+             decide (Left.method{index} = Right.method{index}))
+            """ : $"""
+            (body Left.method{index}Original == body Right.method{index}Original &&
+             body Left.method{index}Closed == body Right.method{index}Closed &&
+             decide (Left.method{index} = Right.method{index}))
+            """);
+        var size = Math.Max(left.Methods.Max(method => method.Opcodes.Length),
+            right.Methods.Max(method => method.Opcodes.Length));
+        const string marker = "Gate bodies equal: ";
+        var query = $$"""
+            import CIL.Extraction.TemplateCode
+            import CIL.Extraction.Translation
+            {{(left.ImageRows > 0 ? "import CIL.Runtime.Net11WinX64.RangeConstructor" : "")}}
+
+            namespace GateComparison
+            open CIL
+            set_option maxRecDepth {{LeanEmitter.RecursionDepth(size)}}
+            namespace Left
+            {{left.DecoderInputs}}
+            end Left
+            namespace Right
+            {{right.DecoderInputs}}
+            end Right
+
+            /-- A gate permits renumbering or renaming the body being compared. -/
+            private def body (raw : Extraction.RawMethod) : Extraction.RawMethod :=
+              { raw with token := 0, owner := "" }
+            #eval IO.println ("{{marker}}" ++ toString ([{{string.Join(",\n  ", checks)}}].all id))
+            end GateComparison
+            """;
+        using var verifier = new Program();
+        var session = verifier.Library(CommonInputs());
+        var probe = Path.Combine(session, "GateComparison.lean");
+        File.WriteAllText(probe, query);
+        var answer = Run([verifier.LeanExecutable, probe], cwd: session, leanPath: verifier.SessionLeanPath(session));
+        var result = answer.Split('\n', StringSplitOptions.TrimEntries).Single(line => line.StartsWith(marker,
+            StringComparison.Ordinal));
+        return result[marker.Length..] switch
         {
-            var text = File.ReadAllText(Path.Combine(output, "Extracted.lean")).ReplaceLineEndings("\n");
-            string[] bodies = [.. MethodBody().Matches(text).Select(match => match.Value)];
-            if (bodies.Length == 0)
-                throw new InvalidDataException("No method bodies in " + CliPaths.Display(output));
-            return (bodies, [.. MethodSignature().Matches(text).Select(match => match.Value)]);
-        }
-        var (bodies, signatures) = Methods(production);
-        var (variantBodies, variantSignatures) = Methods(variant);
-        return !bodies.SequenceEqual(variantBodies) ? "different"
-            : signatures.SequenceEqual(variantSignatures) ? "same" : "renamed";
+            "true" => namesMatch ? "same" : "renamed",
+            "false" => "different",
+            _ => throw new InvalidDataException("Lean returned an invalid gate comparison.")
+        };
     }
-
-    [GeneratedRegex(@"^def method\d+ : Method := .*?(?=^\S)", RegexOptions.Multiline | RegexOptions.Singleline)]
-    private static partial Regex MethodBody();
-
-    [GeneratedRegex(@"^def method\d+Signature : String := .*$", RegexOptions.Multiline)]
-    private static partial Regex MethodSignature();
 
     /// <summary>
     /// The result of `row`: its verdict, its proof's outcome, its refutation's when it has one, and how its
@@ -1076,8 +1124,9 @@ partial class Program
         var refutation = requested.Refutation is { } at ? results[at] : null;
         var passed = proof.status != "failed" && refutation?.status is null or "verified";
         var mismatch = passed && statement.Error is not null;
-        return new(row.Name, proof.output, proof.proof, proof.theorem, proof.expect,
-            passed && !mismatch ? proof.status : "failed", mismatch ? StatementIdentityStage : proof.stage,
+        var expect = checkOnly ? "checked" : row.Expect;
+        return new(row.Name, proof.output, proof.proof, proof.theorem, expect,
+            passed && !mismatch ? expect : "failed", mismatch ? StatementIdentityStage : proof.stage,
             mismatch ? statement.Error : proof.error, proof.axioms, proof.libraryBuild, proof.failure,
             proof.elapsedSeconds, row.Gate, row.Profile, row.Variant, row.BuildStatus, row.ExtractionStatus,
             row.ProgramStatus, refutation is null ? null : new(refutation.proof, refutation.theorem, refutation.status,
@@ -1085,32 +1134,71 @@ partial class Program
     }
 
     /// <summary>
-    /// How the statement `row` verified relates to production's statement `T`: the kernel must accept a `rejected`
-    /// variant's refutation at `¬ T` and any other variant's theorem at `T`, in the variant's own environment. No
-    /// statement is compared when the variant's own leg did not verify; that leg reports why.
+    /// How the statement of `report`, a verified theorem, relates to the statement `T` of `originReport`, the
+    /// theorem `origin` names: `T` must state a contract's `Holds` when the theorem `refutes` it, and the kernel
+    /// must accept the theorem at that contract's counterexample predicate with `T`'s arguments; otherwise the
+    /// kernel must accept it at `T`, in the theorem's own environment. No statement is compared when the theorem
+    /// did not verify; its own failure reports why.
     /// </summary>
-    static (GateStatement?, string?) CompareGateStatement(GateRow row, GateRow production, string productionStage,
-        Report? productionReport, Report? variantReport)
+    static (GateStatement?, string?) CompareStatement(bool refutes, string theorem, string origin, string originStage,
+        Report? originReport, Report? report)
     {
-        if (variantReport is null) return (null, null);
-        var refutes = row.Expect == "rejected";
-        var shown = StatementOf(variantReport);
-        var expected = productionReport?.statementIdentity;
-        var identity = variantReport.statementIdentity;
-        var reason = productionReport is null
-            ? $"Production {production.Name} did not verify (stage: {productionStage}), so the statement of " +
-                $"{row.Name} has nothing to match."
+        if (report is null) return (null, null);
+        var shown = StatementOf(report);
+        var expected = originReport?.statementIdentity;
+        var identity = report.statementIdentity;
+        const string requirement = "an expected rejection needs the refuted theorem to state";
+        const string predicates = "MethodContract.Holds, OutcomeContract.Holds, OutcomeContract.HoldsCLR " +
+            "or OutcomeContract.HoldsAtEntryCLR";
+        var reason = originReport is null
+            ? $"""{origin} did not verify (stage: {originStage}), so the statement of {theorem
+                } has nothing to match."""
             : expected?.term is null
-            ? $"Production {production.Name} has no statement to compare: {expected?.termError ?? "none reported"}"
-            : identity?.matches is null ? $"{variantReport.theorem} was not compared with production's statement."
+            ? $"""{origin} has no statement to compare: {expected?.termError ?? "none reported"}"""
+            : refutes && !StatesContract(expected.term.Value)
+            ? $"""{origin} does not state a contract's Holds, so {theorem} has no refutation to state: {
+                requirement} {predicates}"""
+            : identity?.matches is null ? $"""{theorem} was not compared with the statement of {origin}."""
             : identity.matches == true ? null
-            : (refutes ? $"Refutation {variantReport.theorem} does not state the negation of production's statement"
-                : $"{variantReport.theorem} does not state production's statement") + ": " + identity.mismatch;
-        var productionText = productionReport is null ? null : StatementOf(productionReport);
+            : refutes && report.refutation is null
+            ? $"""{theorem} states no counterexample predicate, so it refutes nothing: {identity.mismatch}"""
+            : refutes
+            ? $"""Refutation {theorem} does not state the counterexample predicate of the contract of {
+                origin}, so it refutes another contract: {identity.mismatch}"""
+            : $"""{theorem} does not state the statement of {origin}: {identity.mismatch}""";
+        var originText = originReport is null ? null : StatementOf(originReport);
         var status = reason is null ? "same" : identity?.matches == false ? "different" : "unavailable";
-        return (new(status, productionText, shown), reason is null ? null : reason + "\n  Production: " +
-            (productionText ?? "unavailable") + "\n  " + (refutes ? "Refutation: " : "Variant: ") + shown);
+        var label = refutes ? "Refutation" : "Variant";
+        var error = reason is null ? null
+            : $"""{reason}{'\n'}  {origin}: {originText ?? "unavailable"}{'\n'}  {label}: {shown}""";
+        return (new(status, originText, shown), error);
     }
+
+    /// <summary>
+    /// The library contract predicates, by declaring module and name, that a `rejected` variant refutes.
+    /// </summary>
+    static readonly (string Module, string Name)[] ContractPredicates =
+    [
+        ("CIL.Safety.MethodContract", "CIL.Safety.MethodContract.Holds"),
+        ("CIL.Safety.OutcomeContract", "CIL.Safety.OutcomeContract.Holds"),
+        ("CIL.Safety.RuntimeExceptions", "CIL.Safety.OutcomeContract.HoldsCLR"),
+        ("CIL.Runtime.EntryContract", "CIL.Safety.OutcomeContract.HoldsAtEntryCLR")
+    ];
+
+    /// <summary>
+    /// Whether the audited statement applies a library contract predicate. The walk is linear in the
+    /// statement's node count.
+    /// </summary>
+    internal static bool StatesContract(JsonElement term)
+    {
+        JsonElement[] nodes = [.. term.GetProperty("nodes").EnumerateArray()];
+        var node = nodes[term.GetProperty("root").GetInt32()];
+        while (node[0].GetString() == "app") node = nodes[node[1].GetInt32()];
+        return node[0].GetString() == "const" && ContractPredicates.Contains((Dotted(node[1]), Dotted(node[2])));
+    }
+
+    /// <summary>A name the audit encodes as its components, written with dots.</summary>
+    static string Dotted(JsonElement name) => string.Join('.', name.EnumerateArray().Select(part => part.ToString()));
 
     static bool SafeGateName(string? name) => name is not (null or "" or "." or "..") &&
         Regex.IsMatch(name, @"\A[A-Za-z0-9_.-]+\z");

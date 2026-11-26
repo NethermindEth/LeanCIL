@@ -89,12 +89,8 @@ theorem writeSnapshot_cell (m result : Memory) (r : Reference)
     (bytes : List (BitVec 8 × Bool)) (alignment i : Nat)
     (written : writeSnapshot m r bytes alignment = .ok result) (bound : i < bytes.length) :
     result.cells r.allocation (r.offset + i) = ⟨bytes[i].1, bytes[i].2⟩ := by
-  unfold writeSnapshot at written
-  cases hw : write m r (bytes.map Prod.fst) alignment <;>
-    simp only [hw, Bind.bind, Except.bind, Pure.pure, Except.pure] at written
-  · cases written
-  · cases written
-    simp [List.getElem?_eq_getElem bound]
+  rw [writeSnapshot_cells_eq written]
+  simp [List.getElem?_eq_getElem bound]
 
 /-- Reading back a stored snapshot returns exactly its bytes and flags. -/
 theorem writeSnapshot_readback (m result : Memory) (r : Reference)
@@ -123,7 +119,7 @@ theorem writeSnapshot_readback (m result : Memory) (r : Reference)
     · simp
     · intro i left right
       simp only [List.getElem_map, List.getElem_range]
-      simp [List.getElem?_eq_getElem right]
+      simp [snapshotCellAt_eq, List.getElem?_eq_getElem right]
 
 #print axioms vector128_bytes_roundtrip
 #print axioms vector256_bytes_roundtrip

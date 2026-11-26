@@ -27,19 +27,4 @@ structure ValidCall (memory : Memory) (inputs outputs : List ArgumentView) : Pro
   /-- Each output range is writable, including initially unknown storage. -/
   writable : ∀ output ∈ outputs, access memory output.reference output.width 1 true = .ok ()
 
-/-- Every byte of every input buffer is initialized. -/
-theorem validCall_inputs_initialized (m : Memory) (inputs outputs : List ArgumentView)
-    (h : ValidCall m inputs outputs) (input : ArgumentView) (hi : input ∈ inputs) :
-    ∀ i ∈ List.range input.width,
-      (m.cells input.reference.allocation (input.reference.offset + i)).initialized = true := by
-  obtain ⟨bytes, hread⟩ := h.readable input hi
-  exact read_requires_initialization _ _ _ _ _ hread
-
-/-- Every output buffer lies inside a live allocation. -/
-theorem validCall_output_live (m : Memory) (inputs outputs : List ArgumentView)
-    (h : ValidCall m inputs outputs) (output : ArgumentView) (ho : output ∈ outputs) :
-    ∃ a, m.allocations output.reference.allocation = some a ∧ a.live = true ∧
-      output.reference.offset + output.width ≤ a.layout.size := by
-  exact access_within_allocation _ _ _ _ _ (h.writable output ho)
-
 end CIL.Safety

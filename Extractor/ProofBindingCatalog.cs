@@ -315,7 +315,7 @@ partial class Program
     static string Substitute(string text, IReadOnlyDictionary<string, string> values, ISet<string>? used = null)
     {
         var missing = new SortedSet<string>(StringComparer.Ordinal);
-        var result = TemplatePlaceholder().Replace(text, match =>
+        var result = TemplatePlaceholder.Replace(text, match =>
         {
             var name = match.Groups[1].Value;
             if (!values.TryGetValue(name, out var value))
@@ -333,10 +333,10 @@ partial class Program
 
     /// <summary>The names of the placeholders in `text`.</summary>
     static IEnumerable<string> TemplatePlaceholders(string text) =>
-        TemplatePlaceholder().Matches(text).Select(match => match.Groups[1].Value);
+        TemplatePlaceholder.Matches(text).Select(match => match.Groups[1].Value);
 
     [GeneratedRegex(@"@([A-Za-z_][A-Za-z0-9_]*)@")]
-    private static partial Regex TemplatePlaceholder();
+    private static partial Regex TemplatePlaceholder { get; }
 }
 
 namespace LeanCIL

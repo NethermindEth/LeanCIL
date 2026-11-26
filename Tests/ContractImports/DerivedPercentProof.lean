@@ -20,7 +20,7 @@ def percentExact : OutcomeContract CIL.W64 CIL.W64 where
   pre _ _ := True
   footprint _ := []
   post value _ _ output := output = value
-  raises value _ := if value ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+  raises value _ := if value ≤ 100 then none else some .argumentOutOfRange
 
 /-- Each input returns itself or throws the named exception. -/
 theorem percent_exact : percentExact.Holds Extracted.program 0 := by
@@ -61,29 +61,6 @@ theorem correctness : DerivedInterface.percentBounded.Holds Extracted.program 0 
     derive is false of the actual extraction. -/
 namespace Rejected
 
-/-- Two outcomes of one invocation that both raise name the same exception. -/
-theorem raises_unique {method : Nat} {args : List Value} {memory : Memory}
-    {one other : String} (first : Raises Extracted.program method args memory one)
-    (second : Raises Extracted.program method args memory other) : one = other := by
-  obtain ⟨_, fault, ran, thrown⟩ := first
-  obtain ⟨_, otherFault, otherRan, otherThrown⟩ := second
-  cases invoke_unique (by simp [Settled, thrown]) (by simp [Settled, otherThrown]) ran otherRan
-  rw [thrown] at otherThrown
-  cases otherThrown
-  rfl
-
-#print axioms raises_unique
-
-/-- An invocation that raises never also returns. -/
-theorem raises_not_returns {method fuel : Nat} {args : List Value} {memory : Memory}
-    {exception : String} {result : Memory × List Value}
-    (raised : Raises Extracted.program method args memory exception)
-    (returned : invoke Extracted.program fuel method args memory = .ok result) : False := by
-  obtain ⟨_, fault, ran, thrown⟩ := raised
-  cases invoke_unique (second := .ok result) (by simp [Settled, thrown]) trivial ran returned
-
-#print axioms raises_not_returns
-
 /-- `Percent(100)` returns 100. -/
 theorem percent_hundred : ∃ fuel final,
     invoke Extracted.program fuel 0 [.scalar (.i64 100)] Memory.empty =
@@ -98,7 +75,7 @@ theorem percent_hundred : ∃ fuel final,
 
 /-- `Percent(101)` raises `ArgumentOutOfRangeException`. -/
 theorem percent_above : Raises Extracted.program 0 [.scalar (.i64 101)] Memory.empty
-    "System.ArgumentOutOfRangeException" :=
+    .argumentOutOfRange :=
   percent_exact.raising (input := 101) trivial (by decide)
 
 #print axioms percent_above
@@ -115,15 +92,15 @@ theorem stronger_post_not_refines : ¬ percentExact.Refines percentTooStrong := 
   exact absurd bound (by decide)
 
 /-- No proof of the stronger post exists for the actual extraction. -/
-theorem stronger_post_rejected : ¬ percentTooStrong.Holds Extracted.program 0 := fun holds => by
-  obtain ⟨fuel, final, values, invoked, -, output, rfl, bound⟩ :=
-    holds.returning (input := 100) (initial := Memory.empty) Memory.empty_wellFormed (by decide)
-  obtain ⟨otherFuel, otherFinal, otherInvoked⟩ := percent_hundred
-  have same := invoke_ok_unique invoked otherInvoked
-  simp only [percentTooStrong, DerivedInterface.percentBounded, Prod.mk.injEq, List.cons.injEq,
-    Value.scalar.injEq, CIL.Value.i64.injEq, and_true] at same bound
-  rw [same.2] at bound
-  exact absurd bound (by decide)
+theorem stronger_post_rejected : percentTooStrong.Refuted Extracted.program 0 := by
+  obtain ⟨_, _, invoked⟩ := percent_hundred
+  refine .of_return (input := 100) (initial := Memory.empty) Memory.empty_wellFormed invoked ?_
+  simp only [OutcomeContract.Violates, MethodContract.Violates, percentTooStrong,
+    DerivedInterface.percentBounded, show (100 : CIL.W64) ≤ 100 by decide, ite_true]
+  rintro ⟨-, output, encoded, bound⟩
+  simp only [List.cons.injEq, Value.scalar.injEq, CIL.Value.i64.injEq, and_true] at encoded
+  subst encoded
+  exact absurd (show (100 : CIL.W64) < 100 from bound) (by decide)
 
 /-- `percentExact` with a pre that excludes every throwing input, so it names no exception. -/
 def percentInRangeOutcome : OutcomeContract CIL.W64 CIL.W64 :=
@@ -158,27 +135,27 @@ theorem weaker_pre_not_refines : ¬ percentInRange.Refines percentUnguarded := f
   exact absurd bound (by decide)
 
 /-- No proof of the weaker pre exists for the actual extraction. -/
-theorem weaker_pre_rejected : ¬ percentUnguarded.Holds Extracted.program 0 := fun holds => by
-  obtain ⟨fuel, ⟨final, values⟩, invoked, -⟩ := holds 101 Memory.empty trivial
-  exact raises_not_returns percent_above invoked
+theorem weaker_pre_rejected : percentUnguarded.Refuted Extracted.program 0 := by
+  obtain ⟨_, _, failed, thrown⟩ := percent_above
+  exact .of_fault (input := 101) (initial := Memory.empty) trivial
+    (by simp [thrown, ExecutionFault.definite]) failed
 
 /-- A changed exception type: `Percent(101)` throws `ArgumentOutOfRangeException`, not
     `ArgumentException`. -/
 def percentRenamed : OutcomeContract CIL.W64 CIL.W64 :=
   { DerivedInterface.percentBounded with
-    raises := fun value _ => if value ≤ 100 then none else some "System.ArgumentException" }
+    raises := fun value _ => if value ≤ 100 then none else some .argument }
 
 /-- The exact contract does not refine a renamed exception. -/
 theorem changed_exception_not_refines : ¬ percentExact.Refines percentRenamed :=
   fun refines => absurd (refines.raises 101 Memory.empty Memory.empty_wellFormed) (by decide)
 
 /-- No proof of the renamed exception exists for the actual extraction. -/
-theorem changed_exception_rejected : ¬ percentRenamed.Holds Extracted.program 0 :=
-  fun holds => by
-    have renamed : Raises Extracted.program 0 [.scalar (.i64 101)] Memory.empty
-        "System.ArgumentException" :=
-      holds.raising (input := 101) Memory.empty_wellFormed (by decide)
-    exact absurd (raises_unique renamed percent_above) (by decide)
+theorem changed_exception_rejected : percentRenamed.Refuted Extracted.program 0 := by
+  obtain ⟨_, _, failed, thrown⟩ := percent_above
+  refine .of_fault (input := 101) (initial := Memory.empty) Memory.empty_wellFormed
+    (by simp [thrown, ExecutionFault.definite]) failed ?_
+  simp [OutcomeContract.Violates, percentRenamed, thrown]
 
 -- An explicit `sorry` is only a warning, so each refutation's axioms are pinned to fail the build.
 /-- info: 'DerivedPercentProof.Rejected.stronger_post_not_refines'

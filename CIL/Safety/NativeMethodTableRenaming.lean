@@ -19,7 +19,8 @@ theorem Memory.Renamed.nativeTableCheck {mapping : AllocationRenaming}
     (bound : table.origin.allocation < mapping.sourceLimit)
     (sameAllocation : table.cursor.allocation = table.origin.allocation) :
     (mapping.nativeTable table).check target = table.check source := by
-  rcases table with ⟨signature, entries, ⟨originId, originOffset⟩, ⟨cursorId, cursorOffset⟩⟩
+  rcases table with ⟨signature, entries, ⟨originId, originOffset⟩, ⟨cursorId, cursorOffset⟩, count,
+    counted⟩
   dsimp only at bound sameAllocation
   subst cursorId
   have allocations := related.allocations originId bound
@@ -95,14 +96,12 @@ theorem Memory.Renamed.nativeTableView_success {mapping : AllocationRenaming}
     (viewed : nativeTableView table source = .ok view) :
     nativeTableView table target = .ok (mapping.nativeTable view) := by
   unfold nativeTableView at viewed ⊢
-  cases targets : table.targets with
-  | none => simp [targets] at viewed
-  | some entries =>
-    simp only [targets] at viewed ⊢
-    cases backingFound : table.backing with
-    | none => simp [backingFound] at viewed
+  rcases table with ⟨signature, _ | entries, storage, count, counted⟩
+  · simp at viewed
+  · cases storage with
+    | none => simp at viewed
     | some backing =>
-      simp only [backingFound] at viewed ⊢
+      dsimp only at viewed ⊢
       cases found : source.staticBindings.find? (·.1 == backing.identity) with
       | none => simp [found] at viewed
       | some binding =>
@@ -112,8 +111,8 @@ theorem Memory.Renamed.nativeTableView_success {mapping : AllocationRenaming}
           rw [related.staticBindings]
           simpa only [List.find?_map, Function.comp_def, found, Option.map_some]
         simp only [found, targetFound] at viewed ⊢
-        let original : NativeMethodTable := ⟨table.signature, entries, origin,
-          { origin with offset := origin.offset + backing.byteOffset }⟩
+        let original : NativeMethodTable := ⟨signature, entries, origin,
+          { origin with offset := origin.offset + backing.byteOffset }, count, counted entries rfl⟩
         change (original.check source >>= fun _ => pure original) = .ok view at viewed
         cases checked : original.check source with
         | error fault => simp [checked, Bind.bind, Except.bind] at viewed

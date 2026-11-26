@@ -33,7 +33,7 @@ def tilesSize : Nat := 16
     hold the two whole arrays it is given, and every allocation, byte and authority the caller
     held is unchanged. -/
 theorem correctness (memory : Memory) (formed : memory.WellFormed)
-    (budget : tilesSize ≤ memory.heapBudget) (pairs lanes : Reference) (pairCount laneCount : Nat)
+    (budget : tilesSize ≤ memory.heapBudget.getD tilesSize) (pairs lanes : Reference) (pairCount laneCount : Nat)
     (wholePairs : WholeArray memory Tiles.Pairs.elementType pairs pairCount)
     (wholeLanes : WholeArray memory Tiles.Lanes.elementType lanes laneCount) :
     ∃ fuel final, invoke Extracted.program fuel hold

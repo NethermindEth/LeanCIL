@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include Verification.cs
+#:include DeepChecks.cs
+#:include FailureReports.cs
+#:include LeanDiagnostics.cs
+#:include BindingImage.cs
+#:include DeepCheckInputs.cs
 
 using System.Runtime.InteropServices;
 using System.Text.Json;

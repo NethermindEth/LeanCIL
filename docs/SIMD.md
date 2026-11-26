@@ -58,6 +58,9 @@ the model's semantics and makes no claim about how a JIT implements them.
 | `Vector128.Sum<ulong>`, `Vector256.Sum<ulong>` | Vector of `ulong` | Wrapping sum of the 64-bit lanes |
 | `AsByte`, `AsUInt32`, `AsInt64`, `AsDouble`, `AsUInt64`, `AsInt32`, `AsSingle` on `Vector128` / `Vector256` | Source element type is `ulong`, `byte`, `uint`, `long`, `int` or `float`; target is the named type | Preserve the bit pattern. The extractor does not accept `double` as a source for these casts |
 
+A `CreateScalarUnsafe` or `GetElement` call keeps its `call`, which runs the vector operation the
+runtime model table gives its method reference; every other row is emitted as its operation.
+
 No other element types or operators are implied. In particular, portable vector multiplication is present as a Lean operation but has no generic vector-operator mapping in the extractor. There is no Vector64 support, Vector512 is limited to bitwise/equality operators, the rows naming it and the [vector storage](OPCODES.md#vector-storage-and-fields) instructions, and there is no general vector load/store API coverage beyond the byte-span `Create` and `Vector128<byte>` `LoadUnsafe`/`StoreUnsafe` rows. `Vector256.Create<ulong>(ReadOnlySpan<ulong>)` and the other element types of `LoadUnsafe`/`StoreUnsafe` are not mapped. The specific vector `ldobj`/`stobj` cases are documented in the [opcode table](OPCODES.md).
 
 ## SSE
@@ -143,7 +146,7 @@ The pointer-output `MultiplyNoFlags` overload is not mapped. The .NET 10 CoreCLR
 | --- | --- | --- | --- |
 | `X86Base.X64.DivRem` | `ulong lower, ulong upper, ulong divisor` -> `ValueTuple<ulong, ulong>` | `X86Base64` | Divide `upper * 2^64 + lower` by `divisor`; Item1 (`Quotient`) is the quotient and Item2 (`Remainder`) the remainder |
 
-The precondition is `upper < divisor`, so the quotient fits in 64 bits. Otherwise the instruction raises #DE, and the checked interpreter fails with a located arithmetic fault, never a wrapped result: `.divideByZero` for a zero divisor and `.overflow` for any other `upper >= divisor`, matching CoreCLR's `DivideByZeroException` and `OverflowException`. `CIL.Safety.divRem_fields` proves that Item1 and Item2 of a successful call are the `Nat` quotient and remainder, and `CIL.Safety.divRem_fault` that every input violating the precondition faults. The result is a 16-byte aggregate with Item1 at offset 0 and Item2 at offset 8; extraction requires the recomputed `ValueTuple<ulong, ulong>` layout to match it. The 32-bit `X86Base.DivRem` and the signed overloads are not mapped. The API is marked experimental (`SYSLIB5004`) in .NET 10, and only this exact signature is recognised.
+The precondition is `upper < divisor`, so the quotient fits in 64 bits. Otherwise the instruction raises #DE, and the checked interpreter fails with a located arithmetic fault, never a wrapped result: `.divideByZero` for a zero divisor and `.overflow` for any other `upper >= divisor`, matching CoreCLR's `DivideByZeroException` and `OverflowException`. `CIL.Safety.divRem_fields` proves that Item1 and Item2 of a successful call are the `Nat` quotient and remainder, and `CIL.Safety.divRem_fault` that every input violating the precondition faults. The result is a 16-byte aggregate with Item1 at offset 0 and Item2 at offset 8; extraction requires the recomputed `ValueTuple<ulong, ulong>` layout to match it. The 32-bit `X86Base.DivRem` and the signed overloads are not mapped. The API is marked experimental (`SYSLIB5004`) in .NET 11, and only this exact signature is recognised.
 
 ## AES
 
@@ -163,7 +166,7 @@ Byte `i` of the vector is AES state byte `i` (row `i % 4`, column `i / 4`), as w
 | `AdvSimd.ReverseElement8` | `V128<ulong>` -> `V128<ulong>` | `AdvSimd` | REV64 on bytes: reverse the bytes of each 64-bit lane, as `BinaryPrimitives.ReverseEndianness` does, without moving the lanes |
 | `ArmBase.Arm64.MultiplyHigh` | `ulong, ulong` -> `ulong` | `ArmBase64` | High 64 bits of the unsigned 128-bit product |
 
-No other AdvSimd operations or `ReverseElement8` overloads, signed `MultiplyHigh` overload or ARM ISA family besides [AES](#aes) is mapped. No ARM64 host runs the REV64 check; the intrinsics suite compares it with `ReverseEndianness` of each lane. Portable Vector128 operations can be used under an ARM profile when their signatures match the first table.
+No other AdvSimd operations or `ReverseElement8` overloads, signed `MultiplyHigh` overload or ARM ISA family besides [AES](#aes) is mapped. The intrinsics suite checks REV64 against `ReverseEndianness` within each lane and runs the compiled method on hosts that support AdvSimd. Portable Vector128 operations can be used under an ARM profile when their signatures match the first table.
 
 ## Feature getters, profiles and execution restrictions
 
@@ -172,14 +175,13 @@ Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `S
 | Built-in profile | Enabled capabilities |
 | --- | --- |
 | `scalar` | No hardware feature flags |
-| `x64-sse2` | `X86Base64`, `Sse2`, `Vector128Accelerated` |
-| `x64-sse42` | The above plus `Ssse3`, `Sse41`, `Sse42` |
+| `x64-sse42` | `X86Base64`, `Sse2`, `Ssse3`, `Sse41`, `Sse42`, `Vector128Accelerated` |
 | `x64-v3` | The above plus `Avx`, `Avx2`, `Bmi1`, `Bmi2`, `Vector256Accelerated` |
 | `x64-v4` | The above plus `Avx512F`, `Avx512FVL`, `Avx512DQ`, `Avx512DQVL` |
 | `arm64-advsimd` | `ArmBase64`, `AdvSimd`, `Vector128Accelerated` |
 
 Profiles target .NET 10 CoreCLR, and both the extractor and the Lean certificate reject capability
-sets that split its runtime groups. [Runtime profiles](RUNTIME-PROFILES.md) gives the group
+sets that split its runtime groups or, on x64, fall below the .NET 11 baseline (`x86-64-v2`). [Runtime profiles](RUNTIME-PROFILES.md) gives the group
 constraints, the custom-profile rules and the measured x64 and arm64 runtimes. Changing a profile
 requires fresh extraction and proof verification; certificates from another profile do not acquire
 its capabilities.
