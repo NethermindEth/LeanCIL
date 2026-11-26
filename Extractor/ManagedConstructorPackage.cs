@@ -85,29 +85,40 @@ internal static class ManagedConstructorPackage
               (Runtime.Net11WinX64.ConstructorImage.of? [{{package.Overload.Lean}}]).get (by cil_kernel_rfl)
             """);
 
-    /// <summary>The image's rows after the local methods, checked with the pins of the first bound caller.</summary>
-    internal static void EmitRows(StringBuilder lean, string locals, int caller) =>
-        lean.AppendLine($$"""
+    /// <summary>
+    /// The image's rows after the local methods, checked with the pins of the first bound caller. The decoder inputs
+    /// receive the local methods, which the appended rows' call table reads.
+    /// </summary>
+    internal static void EmitRows(StringBuilder lean, string locals, int caller, StringBuilder? decoderInputs)
+    {
+        var table = $$"""
             /-- The local methods in program order, the first slots of the call table. -/
             def localMethods : List Extraction.SpecializedMethod := [{{locals}}]
+            """;
+        lean.Append(table).Append('\n');
+        decoderInputs?.AppendLine(table);
+        lean.AppendLine($$"""
             /-- The image's CoreLib definitions after the local methods, and its getter declarations. -/
             def runtimeRows : List (Extraction.MethodEvidence × Method) × List Extraction.MethodEvidence :=
               (constructorImage.rows? localMethods method{{caller}}Body profile environment).get (by cil_kernel_rfl)
             def managedDeclarations : List Extraction.MethodEvidence := runtimeRows.2
             """);
+    }
 
     /// <summary>
     /// The appended CoreLib methods as literals with their instruction equations, the rows they equal and the check
-    /// of those rows against the callable table.
+    /// of those rows against the callable table. The decoder inputs receive each method's definition.
     /// </summary>
-    internal static void EmitRuntimeMethods(StringBuilder lean, int locals, int count)
+    internal static void EmitRuntimeMethods(StringBuilder lean, int locals, int count, StringBuilder? decoderInputs)
     {
         var names = Enumerable.Range(locals, count).Select(n => $"method{n}").ToArray();
         for (var index = 0; index < count; index++)
         {
-            var decoder = $"constructorImage.rowMethod? localMethods profile environment {index}";
+            var decoded = $"cil_decoded_method {names[index]} := " +
+                $"constructorImage.rowMethod? localMethods profile environment {index}";
+            decoderInputs?.AppendLine(decoded);
             lean.AppendLine($"""
-                cil_decoded_method {names[index]} := {decoder}
+                {decoded}
                 cil_instruction_equations {names[index]}
                 cil_resolution_facts {names[index]}
                 """);

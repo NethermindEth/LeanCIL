@@ -515,7 +515,17 @@ internal static partial class Program
             if (checkedTemplate is not null)
             {
                 var frames = gateInput ? emitted.Templates : global::Program.TemplateVectorFrames(source, emitted.Templates);
-                checkedTemplate(new(output, assemblyHash, profile, frames) { DecoderInputs = emitted.TemplateInputs });
+                string[] declarations = [];
+                if (emitted.ImageRows > 0)
+                {
+                    var image = global::Program.ImageRowTemplates(emitted.TemplateInputs, frames.Length,
+                        emitted.ImageRows);
+                    (frames, declarations) = ([.. frames, .. image.Rows], image.Declarations);
+                }
+                checkedTemplate(new(output, assemblyHash, profile, frames)
+                {
+                    DecoderInputs = emitted.TemplateInputs, ImageRows = emitted.ImageRows, Declarations = declarations
+                });
             }
             definitions?.Invoke(new(methods));
             if (args[0] == "check" && !refresh)

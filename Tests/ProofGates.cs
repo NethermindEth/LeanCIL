@@ -8,11 +8,14 @@
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
+#:package Mono.Cecil
 
 extern alias IdentityExtractor;
 
 using System.Diagnostics;
 using System.Text.Json;
+using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 CheckContractSpineScaling();
 if (args is ["--spine-only"]) return;
@@ -546,6 +549,145 @@ Manifest(false);
 Edit("\"plain\":\"@plain.json\"", "\"scalar\":\"@plain.json\"");
 Invalid("A named profile shadowed a built-in profile", "Profile scalar has the name of a built-in profile.");
 Console.WriteLine("PASS build, extraction, program, template, proof and internal failures never count as rejections");
+
+var examples = At("Examples/Assembly/bin/Examples.dll");
+var secondAssembly = Path.Combine(second, "output", "Second.dll");
+void Mutate(string source, string type, string method, string name, Action<MethodDefinition> mutate)
+{
+    var variant = Path.Combine(directory, "Variants", name);
+    Directory.CreateDirectory(variant);
+    using var module = ModuleDefinition.ReadModule(source);
+    mutate(module.GetType(type).Methods.Single(candidate => candidate.Name == method));
+    module.Write(Path.Combine(variant, Path.GetFileName(source)));
+}
+// An unchanged Second certifies, and an addition in place of its subtraction is refuted at a witness.
+Mutate(secondAssembly, "Methods", "Second", "wrong-add", subtraction => subtraction.Body.Instructions
+    .Single(instruction => instruction.OpCode == OpCodes.Sub).OpCode = OpCodes.Add);
+File.WriteAllText(Path.Combine(package, "SecondRefutation.lean.in"),
+    Witness("SecondWitness", "SecondWitness.contract.Refuted Extracted.program 0", "", "-"));
+// Rent binds its exhausted throw to CoreLib rows, which program comparison and both proofs read. A changed message
+// keeps the null-pool contract; a null-pool return refutes it.
+void MutateRent(string name, Action<MethodDefinition> mutate) =>
+    Mutate(examples, "Examples.ItemPool", "Rent", name, mutate);
+MutateRent("message", rent => rent.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldstr)
+    .Operand = "Every item is rented.");
+MutateRent("null-returns", rent =>
+{
+    var code = rent.Body.GetILProcessor();
+    var first = rent.Body.Instructions[0];
+    code.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_0));
+    code.InsertBefore(first, Instruction.Create(OpCodes.Brtrue, first));
+    code.InsertBefore(first, Instruction.Create(OpCodes.Ldnull));
+    code.InsertBefore(first, Instruction.Create(OpCodes.Ret));
+});
+const string NullPoolContract = """
+    /-- Renting from a null pool raises `NullReferenceException` from any well-formed memory. -/
+    def NAME.contract : OutcomeContract Unit where
+      args _ := [.object .null]
+      pre _ memory := memory.WellFormed
+      footprint _ := []
+      post _ _ _ _ := True
+      raises _ _ := some .nullReference
+    """;
+File.WriteAllText(Path.Combine(package, "Rent.lean"), $$"""
+    import Extracted
+    import CIL.MethodIdentity
+    import CIL.Safety.SymbolicExecution
+    import CIL.Safety.HeapObjectFacts
+    import CIL.Safety.ObjectFields
+    import CIL.Safety.ClassCatalog
+    import CIL.Safety.LoopScaffold
+    import CIL.Safety.Forwarders
+    import CIL.Safety.OutcomeContract
+    /-! `ItemPool.Rent()` on a null pool, stated as an outcome contract. -/
+    open CIL.Safety
+    namespace RentGate
+    bind_method rent rentBody := "Examples.PooledItem Examples.ItemPool::Rent()"
+    bind_entry entry (memory : Memory) (pool : ManagedReference) (wellFormed : memory.WellFormed) :=
+      rentBody with [.object pool] from memory allocating wellFormed
+    end RentGate
+    {{NullPoolContract.Replace("NAME", "RentGate", StringComparison.Ordinal)}}
+    /-- The first field load faults on the null pool. -/
+    theorem RentGate.correctness : RentGate.contract.Holds Extracted.program 0 := by
+      intro _ memory wellFormed
+      obtain ⟨home, entered, enter⟩ := RentGate.entry.checked memory .null wellFormed
+      show Raises Extracted.program RentGate.rent [.object .null] memory .nullReference
+      have ran : ∃ fuel, invoke Extracted.program fuel RentGate.rent [.object .null] memory =
+          .error ⟨RentGate.rent, 1, .thrown .nullReference⟩ := by
+        cil_checked_steps [enter.setup]
+      obtain ⟨fuel, ran⟩ := ran
+      exact ⟨fuel, _, ran, rfl⟩
+    #print axioms RentGate.correctness
+
+    """);
+File.WriteAllText(Path.Combine(package, "RentWitness.lean"), $$"""
+    import Extracted
+    import CIL.Safety.OutcomeContract
+    /-! A null pool that `ItemPool.Rent()` answers with null instead of raising. -/
+    open CIL.Safety
+    {{NullPoolContract.Replace("NAME", "RentWitness", StringComparison.Ordinal)}}
+    /-- From empty memory the method returns null for a null pool instead of raising. -/
+    theorem RentWitness.refuted : RentWitness.contract.Refuted Extracted.program 0 :=
+      .of_return (input := ()) (initial := Memory.empty) Memory.empty_wellFormed
+        (rfl : invoke Extracted.program 16 0 [.object .null] Memory.empty = .ok _) trivial
+    #print axioms RentWitness.refuted
+
+    """);
+var variantManifest = Path.Combine(directory, "variants.json");
+var variantResults = Path.Combine(directory, "variants-results.json");
+File.WriteAllText(variantManifest, JsonSerializer.Serialize(new
+{
+    schema = 1, proofRoot = "Package", outputRoot = "VariantOutputs", generatedRoot = "VariantGenerated",
+    gates = new object[] { new
+    {
+        name = "rent", assembly = examples, method = "ItemPool::Rent()", profiles = scalar, proof = "Rent.lean",
+        theorem = "RentGate.correctness",
+        variants = new object[]
+        {
+            new { name = "message", assembly = "Variants/message/Examples.dll", expect = "certifies",
+                program = "different" },
+            new { name = "null-returns", assembly = "Variants/null-returns/Examples.dll", expect = "rejected",
+                program = "different",
+                refutation = new { proof = "RentWitness.lean", theorem = "RentWitness.refuted" } }
+        }
+    }, new
+    {
+        name = "second", assembly = secondAssembly, method = "Methods::Second(ulong,ulong)", profiles = scalar,
+        proof = "Second.lean", theorem = "Second.correctness",
+        variants = new object[]
+        {
+            new { name = "identical", assembly = secondAssembly, expect = "certifies", program = "same" },
+            new { name = "wrong-add", assembly = "Variants/wrong-add/Second.dll", expect = "rejected",
+                program = "different", refutation = new { template = "SecondRefutation.lean.in",
+                    theorem = "SecondWitness.refuted",
+                    values = new Dictionary<string, string> { ["LEFT"] = "0", ["RIGHT"] = "1" } } }
+        }
+    } }
+}));
+var variantRun = Execute([.. cli, "gates", variantManifest, "--results", variantResults]);
+Expect(variantRun.Code == 0, "The bound Rent or Second gate failed:\n" + variantRun.Output);
+var variantRows = JsonDocument.Parse(File.ReadAllText(variantResults)).RootElement.GetProperty("rows").EnumerateArray()
+    .ToArray();
+var (rentMessage, rentReturn) =
+    (Row(variantRows, "message", gate: "rent"), Row(variantRows, "null-returns", gate: "rent"));
+Expect(variantRows.Length == 6 && Text(Row(variantRows, "production", gate: "rent"), "status") == "verified" &&
+    Text(Row(variantRows, "production", gate: "second"), "status") == "verified",
+    "The bound Rent or Second production proof did not verify:\n" + variantRun.Output);
+var (secondSame, secondAdd) =
+    (Row(variantRows, "identical", gate: "second"), Row(variantRows, "wrong-add", gate: "second"));
+Expect(Text(secondSame, "status") == "verified" && Text(secondSame, "program") == "passed" &&
+    StatementStatus(secondSame) == "same", "An unchanged Second did not certify", secondSame);
+Expect(Text(secondAdd, "status") == "rejected" && Text(secondAdd, "program") == "passed" &&
+    secondAdd.GetProperty("refutation").GetProperty("status").GetString() == "verified" &&
+    StatementStatus(secondAdd) == "same", "An addition in place of Second's subtraction was not refuted", secondAdd);
+Expect(Text(rentMessage, "status") == "verified" && Text(rentMessage, "program") == "passed" &&
+    StatementStatus(rentMessage) == "same", "A changed message did not certify bound Rent", rentMessage);
+Expect(Text(rentReturn, "status") == "rejected" && Text(rentReturn, "program") == "passed" &&
+    rentReturn.GetProperty("refutation").GetProperty("status").GetString() == "verified" &&
+    StatementStatus(rentReturn) == "same", "A null-pool return was not refuted in the kernel", rentReturn);
+NoRejectedCertificates(variantRows);
+Console.WriteLine("PASS a bound Rent compares its CoreLib rows, certifies a new message and refutes a null return");
+Console.WriteLine("PASS an unchanged Second certifies and an addition in place of its subtraction is refuted");
 
 static void CheckContractSpineScaling()
 {

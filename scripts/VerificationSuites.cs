@@ -180,7 +180,8 @@ internal static class VerificationSuites
         new("gates", "Tests/ProofGates.cs",
             "manifest project builds, extraction, named profiles, per-variant and templated proofs, " +
             "witness refutations, kernel statement comparison, binding catalogs, planned groups, " +
-            "changed-source selection and mutation expectations"),
+            "changed-source selection, mutation expectations and the program comparison and refutation of a " +
+            "method bound to CoreLib constructor rows"),
         new("stepping", "Tests/SteppingScaling.cs",
             "stepping of scalar, memory, hypotheses-in-scope and snapshot bodies with per-instruction work and " +
             "proof-size budgets and a per-hypothesis heartbeat limit"),
@@ -189,8 +190,8 @@ internal static class VerificationSuites
             "substitution rejection, the strict binding library and audit, and the checked-in strict binding " +
             "fixture module"),
         new("pool", "Tests/ItemPool.cs",
-            "object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations " +
-            "they reject"),
+            "object pool reuse, creation, exhaustion, null-pool and free-list search proofs, the mutations " +
+            "they reject, and shared templates binding Rent's CoreLib constructor rows in two profiles"),
         new("blockers", "Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains, " +
             "profile-excluded branches, runtime-async refusal, self-admission, the admitted hole corpus and the " +
             "self-admitted, example and fixture methods defined from their decoder"),

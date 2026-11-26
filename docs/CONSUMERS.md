@@ -147,7 +147,10 @@ included.
 `program` compares the variant with production or the selected `programOf` variant on the same
 profile. For each method in program order, the gate compares its original and specialized raw
 body and the complete decoded method, including layouts, links, locals and static field sites.
-The raw body comparison ignores the method's own token and declaring owner. The gate compares
+The raw body comparison ignores the method's own token and declaring owner. In an extraction of
+several methods, a CoreLib constructor row that an exception construction appends after the local
+methods compares by its CoreLib definition and its decoded method, and a row where the other
+program has a local method gives `different`. The gate compares
 method signatures separately. Equal bodies and signatures give `same`. A signature change alone
 gives `renamed`, and a body or layout change gives `different`. A mismatch stops the variant at
 `program comparison` before proof checking.

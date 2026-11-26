@@ -50,6 +50,8 @@ object Variant(string path, bool avx, object[] methods)
         Typed(emitter.GetNestedType("Method", BindingFlags.NonPublic)!, methods))!;
     var inputs = string.Concat(methods.Select((method, index) => $"def method{index} : Method := {bodies[method]}\n"));
     variantType.GetField("DecoderInputs", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(variant, inputs);
+    variantType.GetField("Declarations", BindingFlags.Instance | BindingFlags.NonPublic)!
+        .SetValue(variant, Array.Empty<string>());
     return variant;
 }
 FixtureSite Site(object instruction) => instruction switch

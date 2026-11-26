@@ -620,6 +620,11 @@ for the extraction's layout tables, parameters for the feature flags it reads, a
 indices keyed by full method identity. Each `Templates.InputN` namespace contains the closed raw
 bodies, argument metadata, links, layout environment and reachability masks for that input.
 Lean defines each input method with `cil_decoded_method` over `Method.ofClosed?`.
+For an extraction of several methods that binds exception constructions to CoreLib constructors,
+the namespace also holds each bound caller's binding, the pins, platform table and constructor
+image its source body reads, and the appended CoreLib rows over that input's local methods. A row's
+template takes its callees, including the getter declarations after the program, as parameters
+like a local method's.
 The templates command checks each extraction before it writes the shared module. A decoder
 refusal identifies the method and its first refused live instruction. When profiles have the same
 observed flags, Lean compares their decoded instructions and their links under one numbering of
@@ -666,7 +671,8 @@ arity and the operand widths or signedness that affect that function. Lean decod
 body and checks its exact instruction equations against the corresponding input extraction.
 Static descriptors are retained when their complete metadata agrees across the selected profiles,
 including field identities, bytes, initializer indices and arguments. Different static metadata is
-rejected rather than remapped. Imported callee slots are not supported in template generation.
+rejected rather than remapped. Template generation refuses a callee slot after the program other
+than a constructor image's getter declarations, such as an import slot.
 
 For inputs with 128-bit vector locals, the templates command reads the opaque slot lists
 from Lean before comparing the profiles' frames.

@@ -14,6 +14,22 @@ internal static partial class TemplateEmitter
     {
         /// <summary>The closed decoder inputs for this extraction in method index order.</summary>
         internal required string DecoderInputs;
+
+        /// <summary>
+        /// The number of a constructor image's CoreLib rows that end the program, in image order; their decoded
+        /// methods have no raw source definition of their own.
+        /// </summary>
+        internal required int ImageRows;
+
+        /// <summary>
+        /// The identities of the call table's declarations after the program's methods, in table order: an image's
+        /// getters, which links may name and no binding defines.
+        /// </summary>
+        internal required string[] Declarations;
+
+        /// <summary>The position among the image's CoreLib rows of the method at an index, or null if local.</summary>
+        internal int? ImageRow(int index) =>
+            index >= Methods.Length - ImageRows ? index - (Methods.Length - ImageRows) : null;
     }
     /// <summary>One profile's frame and body, its callees renumbered to the template's callee parameters.</summary>
     sealed record Row(Variant Variant, FrameMetadata Frame, string ComparisonBody)
@@ -90,8 +106,8 @@ internal static partial class TemplateEmitter
         var variants = options.Extractions.Select(read).ToArray();
         if (variants.Select(variant => variant.AssemblyHash).Distinct(StringComparer.Ordinal).Count() != 1)
             throw new InvalidDataException("Template inputs must come from the same exact assembly.");
-        if (variants.Any(variant => variant.Methods.Select(method => method.Identity)
-            .Distinct(StringComparer.Ordinal).Count() != variant.Methods.Length))
+        if (variants.Any(variant => variant.Methods.Select(method => method.Identity).Concat(variant.Declarations)
+            .Distinct(StringComparer.Ordinal).Count() != variant.Methods.Length + variant.Declarations.Length))
             throw new InvalidDataException("Template inputs contain ambiguous managed method identities.");
         if (variants.Any(variant => string.Equals(output, variant.Directory, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("Template output must be separate from its extraction inputs.");
@@ -176,7 +192,9 @@ internal static partial class TemplateEmitter
 
     static string CalleeIdentity(Variant variant, int index) => index >= 0 && index < variant.Methods.Length
         ? variant.Methods[index].Identity
-        : throw new InvalidDataException("Templates do not support imported callee slots: method " + index);
+        : index >= variant.Methods.Length && index - variant.Methods.Length < variant.Declarations.Length
+            ? variant.Declarations[index - variant.Methods.Length]
+            : throw new InvalidDataException("Templates do not support imported callee slots: method " + index);
 
     static Template Prepare(string identity, (Variant Variant, Method Method, string Body)[] selected)
     {
@@ -245,6 +263,9 @@ internal static partial class TemplateEmitter
         Line("import CIL.InstructionEquations");
         Line("import CIL.Extraction.TemplateCode");
         Line("import CIL.Safety.Linking");
+        // A bound extraction's decoder inputs bind its callers to a CoreLib constructor image.
+        if (variants.Any(variant => variant.ImageRows > 0))
+            Line("import CIL.Runtime.Net11WinX64.RangeConstructor");
         Line();
         Line("/-! Shared decoded bodies for the selected extraction profiles. -/");
         Line();
@@ -323,8 +344,9 @@ internal static partial class TemplateEmitter
             "/-! Exact bindings for one checked profile extraction; recheck with that extraction. -/\n\n" +
             "namespace TemplateBindings\nopen CIL\n\n");
         void Line(string text) => lean.Append(text).Append('\n');
-        var methodIndices = variant.Methods.Select((method, index) => (method.Identity, index))
-            .ToDictionary(pair => pair.Identity, pair => pair.index, StringComparer.Ordinal);
+        var methodIndices = variant.Methods.Select(method => method.Identity).Concat(variant.Declarations)
+            .Select((identity, index) => (identity, index))
+            .ToDictionary(pair => pair.identity, pair => pair.index, StringComparer.Ordinal);
         for (var index = 0; index < variant.Methods.Length; index++)
         {
             var templateIndex = templateIndices[variant.Methods[index].Identity];

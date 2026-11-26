@@ -1048,13 +1048,19 @@ partial class Program
     {
         if (left.Methods.Length != right.Methods.Length) return "different";
         for (var index = 0; index < left.Methods.Length; index++)
-            if (!left.Methods[index].Opcodes.AsSpan().SequenceEqual(right.Methods[index].Opcodes))
+            if (!left.Methods[index].Opcodes.AsSpan().SequenceEqual(right.Methods[index].Opcodes) ||
+                left.ImageRow(index) != right.ImageRow(index))
                 return "different";
         var namesMatch = left.Methods.Select(method => method.Identity)
             .SequenceEqual(right.Methods.Select(method => method.Identity), StringComparer.Ordinal);
         if (left.DecoderInputs == right.DecoderInputs) return namesMatch ? "same" : "renamed";
 
-        var checks = Enumerable.Range(0, left.Methods.Length).Select(index => $"""
+        // An appended CoreLib row has no source definition of its own; its image definition is its raw body.
+        var checks = Enumerable.Range(0, left.Methods.Length).Select(index => left.ImageRow(index) is { } row ? $"""
+            (Left.constructorImage.methods[{row}]?.map Prod.snd ==
+               Right.constructorImage.methods[{row}]?.map Prod.snd &&
+             decide (Left.method{index} = Right.method{index}))
+            """ : $"""
             (body Left.method{index}Original == body Right.method{index}Original &&
              body Left.method{index}Closed == body Right.method{index}Closed &&
              decide (Left.method{index} = Right.method{index}))
@@ -1065,6 +1071,7 @@ partial class Program
         var query = $$"""
             import CIL.Extraction.TemplateCode
             import CIL.Extraction.Translation
+            {{(left.ImageRows > 0 ? "import CIL.Runtime.Net11WinX64.RangeConstructor" : "")}}
 
             namespace GateComparison
             open CIL

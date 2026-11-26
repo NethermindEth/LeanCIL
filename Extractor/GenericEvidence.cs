@@ -538,7 +538,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,
         IReadOnlySet<Instruction> reachable, int methodCount, string staticInput, StringBuilder? decoderInputs = null,
-        bool compareOriginal = false, Binding? binding = null)
+        bool compareOriginal = false, Binding? binding = null, bool appendsRows = false)
     {
         // A bound caller's original and body are the binder's, derived from the source definitions.
         var source = binding is null ? "" : "Source";
@@ -550,11 +550,18 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var closedEvidence = Method(method, original, method, reachable, staticInput, closedTypes);
         ExternalIdentities.Emit(lean, decoderInputs);
         var originalInput = $"def method{number}{source}Original : Extraction.RawMethod := {originalEvidence}";
+        // A bound caller's closed definition is evaluated from its source body, so its decoder inputs carry them.
+        var carried = binding is null ? null : decoderInputs;
         lean.AppendLine(originalInput);
-        if (compareOriginal) decoderInputs!.AppendLine(originalInput);
+        (compareOriginal ? decoderInputs! : carried)?.AppendLine(originalInput);
         lean.AppendLine(body.Bytes);
+        carried?.AppendLine(body.Bytes);
         if (body.Slices.Length > 0)
-            foreach (var line in body.Slices.Split('\n')) lean.AppendLine(line);
+            foreach (var line in body.Slices.Split('\n'))
+            {
+                lean.AppendLine(line);
+                carried?.AppendLine(line);
+            }
         var hasImports = imports?.Bindings.Count > 0;
         var bodyImports = hasImports ? $""" method{number}BodyImports""" : "";
         if (hasImports)
@@ -563,17 +570,26 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 def method{number}BodyImports : Extraction.BodyImports :=
                   importIndex.forLinks {methodCount} method{number}Links
                 """);
-        lean.AppendLine(body.Definition);
+lean.AppendLine(body.Definition);
+        carried?.AppendLine(body.Definition);
         if (binding is not null)
-            lean.AppendLine($"""
+        {
+            var bound = $"""
                 /-- This caller with its constructions bound to the image's CoreLib definitions. -/
                 def method{number}Binding : Runtime.Net11WinX64.BoundCaller :=
                   (constructorImage.bindCaller? {binding.Base} method{number}SourceBody method{number}SourceOriginal
                     [{string.Join(", ", binding.Pcs)}]).get (by cil_kernel_rfl)
                 cil_evaluated method{number}Original : Extraction.RawMethod := method{number}Binding.original
                 def method{number}Body : Extraction.BodyEvidence := method{number}Binding.body
-                """);
-        lean.AppendLine($"def method{number}TypeArgumentsRaw : List Extraction.TypeExpr := {List(MethodSpecialization.Arguments(method).Select(Type))}");
+                """;
+            lean.AppendLine(bound);
+            carried?.AppendLine(bound);
+        }
+        var typeArguments = $"def method{number}TypeArgumentsRaw : List Extraction.TypeExpr := " +
+            List(MethodSpecialization.Arguments(method).Select(Type));
+        lean.AppendLine(typeArguments);
+        // The appended rows' call table lists every local method with its type arguments.
+        if (appendsRows) decoderInputs?.AppendLine(typeArguments);
         // A bound caller is not generic, so its closed definition is its original.
         var closed = binding is null ? $"def method{number}Closed : Extraction.RawMethod := {closedEvidence}"
             : $"def method{number}Closed : Extraction.RawMethod := method{number}Original";

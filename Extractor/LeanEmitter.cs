@@ -10,7 +10,7 @@ internal static class LeanEmitter
     internal readonly record struct Emission(string Source, string[] LayoutIdentities,
         TemplateEmitter.Method[] Templates, ProofOutline.Method[] Outlines, ClassViews.View[] Views,
         IReadOnlyList<ClassViews.Access> ClassFields,
-        ComputedLayout[] Layouts, string TemplateInputs);
+        ComputedLayout[] Layouts, string TemplateInputs, int ImageRows);
 
     internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -239,9 +239,6 @@ internal static class LeanEmitter
         var constructor = ManagedConstructorPackage.Site(methods, profile, importBindings.Count);
         var managed = constructor is not null;
         var package = ManagedConstructorPackage.Bind(methods, profile, importBindings.Count);
-        if (package is not null && templateInputs)
-            throw new InvalidDataException(
-                "Profile templates and gate decoder inputs do not support bound exception constructors");
         IReadOnlySet<Instruction>? BoundSites(MethodDefinition method) =>
             constructor is not null ? new HashSet<Instruction> { constructor } : package?.Of(method);
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution,
@@ -258,8 +255,13 @@ internal static class LeanEmitter
                 """);
         var shapeFactsAt = lean.Length;
         var operandShapes = new OperandShapes(layoutEvidence);
+        var metadataStart = lean.Length;
         genericEvidence.EmitAssemblyMetadata(lean);
         if (package is not null) ManagedConstructorPackage.EmitImage(lean, package);
+        // A bound caller's source body reads the pins, the platform table and the image, so a package's decoder
+        // inputs take this block, completed below with the platform definitions, before its methods.
+        var metadataEnd = lean.Length;
+        var metadataInputsAt = package is null ? null : inputs?.Length;
         var fieldAccesses = new List<ClassViews.Access>();
         for (int n = 0; n < methods.Length; n++)
         {
@@ -294,7 +296,11 @@ internal static class LeanEmitter
                 layoutContext, linkedMethods);
             var binding = package?.Of(m) is { } packaged
                 ? ManagedConstructorPackage.Binding(m, packaged, methods.Length) : null;
-            if (binding is not null) linkEntries = [.. linkEntries.Concat(binding.Links).OrderBy(entry => entry.Pc)];
+            if (binding is not null)
+            {
+                linkEntries = [.. linkEntries.Concat(binding.Links).OrderBy(entry => entry.Pc)];
+                linkedMethods?.Add(binding.Evidence.Base);
+            }
             lean.AppendLine($"def method{n}Signature : String := {IdentityText.Quote(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)
             {
@@ -338,7 +344,7 @@ internal static class LeanEmitter
             }
             inputs?.Append(lean, inputStart, lean.Length - inputStart);
             genericEvidence.EmitMethod(lean, m, n, reachable, methods.Length, staticInput, inputs, compareOriginal,
-                binding?.Evidence);
+                binding?.Evidence, appendsRows: package is not null);
             var (naming, objectProof) = operandShapes.RecordMethod(m, n, reachable, genericEvidence);
             if (GenericEvidence.FirstDecodeRefusal(m, reachable, callSites, importResolution, boundSites) is
                 { } refusal)
@@ -387,12 +393,16 @@ internal static class LeanEmitter
             lean.AppendLine($"cil_resolution_facts method{n}");
         }
         // The platform definitions sit after the shape facts' position, so they go in first.
+        var beforePlatform = lean.Length;
         genericEvidence.InsertPlatformDefinitions(lean);
+        if (metadataInputsAt is { } at)
+            inputs!.Insert(at, lean.ToString(metadataStart,
+                metadataEnd + lean.Length - beforePlatform - metadataStart));
         lean.Insert(shapeFactsAt, operandShapes.Lean());
         if (managed)
         {
             ManagedConstructorPackage.Emit(lean, pinned.Index(methods[0].Module));
-            return Finish("program.length", methods.Length);
+            return Finish("program.length", methods.Length, 0);
         }
         var specialized = Enumerable.Range(0, methods.Length).Select(n =>
             $"⟨method{n}TypeArgumentsRaw, method{n}Closed, assembly{pinned.Index(methods[n].Module)}⟩");
@@ -407,7 +417,8 @@ internal static class LeanEmitter
         }
         else
             ManagedConstructorPackage.EmitRows(lean, string.Join(", ", specialized),
-                methods.Select((method, n) => (method, n)).First(entry => package.Of(entry.method) is not null).n);
+                methods.Select((method, n) => (method, n)).First(entry => package.Of(entry.method) is not null).n,
+                inputs);
         // Whole-program data, so it stays after the `specializedMethods` boundary of per-method components;
         // feature obligations read callee certificates through it.
         var records = Enumerable.Range(0, methods.Length).Select(n =>
@@ -447,7 +458,8 @@ internal static class LeanEmitter
         }
         if (methods.Length == 1 && methods[0].Body.Instructions.Any(i => i.OpCode.Code == Code.Newobj))
             ManagedConstructorPackage.EmitSource(lean, pinned.Index(methods[0].Module));
-        if (package is not null) ManagedConstructorPackage.EmitRuntimeMethods(lean, methods.Length, runtimeCount);
+        if (package is not null)
+            ManagedConstructorPackage.EmitRuntimeMethods(lean, methods.Length, runtimeCount, inputs);
         var methodCount = methods.Length + runtimeCount;
         lean.AppendLine("def program : Program := [" +
             string.Join(", ", Enumerable.Range(0, methodCount).Select(n => $"method{n}")) + "]");
@@ -514,9 +526,10 @@ internal static class LeanEmitter
               rw [← runtime_methods]
               exact Extraction.MethodsChecked.of_rows runtimeRows.1 runtime_validated
             """);
-        return Finish(methodCount.ToString(System.Globalization.CultureInfo.InvariantCulture), methodCount);
+        return Finish(methodCount.ToString(System.Globalization.CultureInfo.InvariantCulture), methodCount,
+            runtimeCount);
 
-        Emission Finish(string programLength, int lookups)
+        Emission Finish(string programLength, int lookups, int imageRows)
         {
             // One index of the program, checked once, serves every closure and run that reads it.
             lean.AppendLine("/-- The number of methods in the extracted program. -/");
@@ -543,7 +556,7 @@ internal static class LeanEmitter
             lean.AppendLine("end Extracted");
             return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), outlines.ToArray(), classViews,
                 fieldAccesses, layouts,
-                inputs?.ToString().ReplaceLineEndings("\n") ?? "");
+                inputs?.ToString().ReplaceLineEndings("\n") ?? "", imageRows);
         }
     }
 

@@ -25,6 +25,49 @@ var proofLines = File.ReadAllLines(proof);
 verification.Verify(assembly, "Examples", Rent, proof, Path.Combine(root, "Rent"));
 Console.WriteLine("PASS Rent reuses the free-list head, creates under capacity, throws when exhausted or null");
 
+// Rent's exhausted throw binds to CoreLib constructor rows after its three local methods. One set of shared
+// templates must bind every row of both profiles' extractions, and must refuse the CoreLib head moved to another row.
+string[] templateProfiles = ["scalar", "x64-v3"];
+// Rent's three local methods and the six CoreLib rows of its exception's constructor.
+const int BoundProgramLength = 9;
+var shared = Path.Combine(root, "Templates");
+var profiled = templateProfiles.Select(profile => Path.Combine(root, "Rent-" + profile)).ToArray();
+for (var index = 0; index < templateProfiles.Length; index++)
+    Run(Extract("extract", assembly, "Examples", Rent, profiled[index], templateProfiles[index]));
+Run(["dotnet", ExtractorPath, "templates", shared, .. profiled]);
+var sharedPath = shared + Path.PathSeparator + FixtureLeanPath();
+CompileModule(shared, "Templates", sharedPath);
+for (var index = 0; index < profiled.Length; index++)
+{
+    var path = profiled[index] + Path.PathSeparator + sharedPath;
+    CompileModule(profiled[index], "Extracted", path);
+    var binding = "TemplateBindings" + index;
+    var bindings = File.ReadAllText(Path.Combine(shared, binding + ".lean"));
+    if (Regex.Matches(bindings, @"theorem method\d+_template :").Count != BoundProgramLength)
+        throw new InvalidOperationException($"Expected a binding for each of Rent's {BoundProgramLength} methods");
+    File.WriteAllText(Path.Combine(profiled[index], binding + ".lean"), bindings);
+    CompileModule(profiled[index], binding, path);
+}
+// Rent's callees are its two local helpers, then the first CoreLib row.
+var movedHead = File.ReadAllLines(Path.Combine(shared, "TemplateBindings0.lean"));
+var rentBinding = Array.FindIndex(movedHead, line =>
+    line.Contains("theorem method0_template :", StringComparison.Ordinal));
+const string RentCallees = "Extracted.environment 1 2 3)";
+if (rentBinding < 0 || !movedHead[rentBinding + 1].Contains(RentCallees, StringComparison.Ordinal))
+    throw new InvalidOperationException("Rent's template binding does not name callees 1, 2 and 3");
+movedHead[rentBinding + 1] = movedHead[rentBinding + 1].Replace(RentCallees, "Extracted.environment 1 2 4)",
+    StringComparison.Ordinal);
+File.WriteAllLines(Path.Combine(profiled[0], "MovedHead.lean"), movedHead);
+var movedRefusal = "";
+try { CompileModule(profiled[0], "MovedHead", profiled[0] + Path.PathSeparator + sharedPath); }
+catch (InvalidOperationException error) when (error.Message.Contains("error:"))
+{
+    movedRefusal = error.Message;
+}
+RequireFailureIn([.. movedHead.Select(line => line.Replace("@[cil_code] ", "", StringComparison.Ordinal))],
+    ["method0_template"], "moved-head", movedRefusal);
+Console.WriteLine("PASS shared templates bind Rent's local and CoreLib rows in two profiles and refuse a moved row");
+
 // Both paths share the final IsRented store, and the capacity test decides between creating and throwing,
 // so those mutations break two theorems each.
 foreach (var (mutation, theorems) in new[]
@@ -163,6 +206,14 @@ if (idleRefusal.Length == 0 || File.Exists(Path.Combine(unmatched, "verified.jso
 RequireFailureIn(File.ReadAllLines(idleProof), ["idle_holds"], "unmatched", idleRefusal);
 Console.WriteLine("PASS unmatched mutation fails idle_holds");
 Console.WriteLine("PASS item pool: Rent and IsIdle proofs and the mutations each postcondition rejects");
+
+void CompileModule(string directory, string module, string leanPath)
+{
+    var output = Run(["lean", "--root=" + directory, "-o", Path.Combine(directory, module + ".olean"),
+        Path.Combine(directory, module + ".lean")], leanPath: leanPath, progress: "Checking " + module);
+    if (output.Contains("sorryAx", StringComparison.Ordinal))
+        throw new InvalidOperationException("Admitted declaration in " + module);
+}
 
 Instruction Require(Instruction instruction, OpCode expected) => instruction.OpCode == expected
     ? instruction
