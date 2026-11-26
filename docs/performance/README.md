@@ -83,17 +83,19 @@ boundary proof:
 
 ```sh
 dir=artifacts/Throws/Percent
+sep=:; [ "$OS" = Windows_NT ] && sep=';'
 lake env lean -Dprofiler=true -Dprofiler.threshold=100 -o $dir/Extracted.olean $dir/Extracted.lean
-lake env sh -c "LEAN_PATH=\$LEAN_PATH:$dir lean -Dprofiler=true $dir/BoundaryProof.lean"
+lake env sh -c "LEAN_PATH=\"\$LEAN_PATH$sep$dir\" lean -Dprofiler=true $dir/BoundaryProof.lean"
 ```
 
-Reference figures for `Examples.Throws::Percent(uint)` on one Windows x64 workstation:
+Reference figures for `Examples.Throws::Percent(uint)` on one Windows x64 workstation, as the
+range over four runs:
 
 | Declaration | Kernel time |
 | --- | --- |
-| `boundPackage_eq` | 6.3 s |
-| `translation_valid` | 7.6 s |
-| All of `Extracted.lean` | 14.5 s |
-| All of `BoundaryProof.lean` (four `translation_valid.invoke` goals and one program lookup) | 0.9 s |
+| `boundPackage_eq` | 5.2 to 8.6 s |
+| `translation_valid` | 6.4 to 10.1 s |
+| All of `Extracted.lean` | 12.1 to 19.5 s |
+| All of `BoundaryProof.lean` (four `translation_valid.invoke` goals and one program lookup) | 0.7 to 1.3 s |
 
-Checking the eight rows, the caller and seven CoreLib methods, takes 6.3 s of `translation_valid`.
+Checking the eight rows, the caller and seven CoreLib methods, takes about 6 s of `translation_valid`.

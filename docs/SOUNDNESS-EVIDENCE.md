@@ -558,8 +558,10 @@ constructors: `ArgumentOutOfRangeException(string, string)`,
 owner and exact parameter types. Lean resolves the original MemberRef through
 the facade, checks the MethodDef and signature, and decodes the caller and every CoreLib method
 the constructor reaches with a non-null message. `Extracted.managedPackage` derives the
-executable table from the original body, metadata and flow inputs, and `Extracted.program`
-contains the caller and those runtime bodies. The public translation certificate binds exactly
+executable table from the original body, metadata and flow inputs. For a single caller,
+`Extracted.boundPackage` is that package as a literal, and the kernel checks
+`boundPackage_eq : managedPackage = some boundPackage`. `Extracted.program` contains the caller
+and those runtime bodies. The public translation certificate binds exactly
 that table and its separate managed declarations. The package checks every method against the
 same table, pins, layouts and platform, including their scalar and feature flow, static storage
 and call targets. When the constructor reads a default message from `System.SR` for a null
