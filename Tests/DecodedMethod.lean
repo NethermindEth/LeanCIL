@@ -1013,6 +1013,35 @@ def missingNames : Option (List String) := none
 #guard_msgs in
 cil_evaluated missingCopy : List String := missingNames
 
+/-- `ret`, the root body of the package below. -/
+def packagedRaw : RawMethod := method 8 false [] [instr 0 0x2A]
+
+/-- The body evidence the package below carries, over the world's metadata. -/
+def packagedBody : BodyEvidence :=
+  evidenceOf [0x06, 0x2A] [] { own := own.1, others := [lib] } packagedRaw
+
+/-- The profile the packaged method is compiled against. -/
+def packagedProfile : FeatureProfile := { architecture := .x64, sse2 := true }
+
+/-- A package computed from the definitions above, as an extraction's binding computes one. -/
+def computedPackage : Option ManagedPackage :=
+  let method : Method :=
+    { profile := packagedProfile, code := [.ret], locals := [], returnsValue := false }
+  some { root := (item packagedRaw packagedBody, method), definitions := [], declarations := [] }
+
+cil_evaluated writtenPackage : ManagedPackage := computedPackage
+
+-- A package literal names the module's definitions it repeats, so checks over the literal
+-- unfold the same constants that the extraction's other theorems state facts about.
+open Lean Meta in
+/-- info: [Tests.DecodedMethod.packagedRaw, Tests.DecodedMethod.packagedBody,
+  Tests.DecodedMethod.packagedProfile] -/
+#guard_msgs (whitespace := lax) in
+#eval show MetaM Unit from do
+  let some value := (← getConstInfo ``writtenPackage).value? | throwError "no value"
+  let sources := [``packagedRaw, ``packagedBody, ``packagedProfile]
+  logInfo m!"{sources.filter value.getUsedConstants.contains}"
+
 /-- warning: declaration uses `sorry` -/
 #guard_msgs in
 /-- A raw method whose value is `sorry`, as a declaration that failed to elaborate leaves it. -/
