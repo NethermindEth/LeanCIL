@@ -1002,6 +1002,10 @@ partial class Program
     [GeneratedRegex(@"(?m)^set_option maxRecDepth [0-9]+\r?$")]
     private static partial Regex ExtractionRecursionDepth { get; }
 
+    /// <summary>The first whole-program declaration of an extraction: its local or specialized method table.</summary>
+    [GeneratedRegex(@"(?m)^def (?:localMethods|specializedMethods) :")]
+    private static partial Regex AggregateStart();
+
     // Components keep the extraction's own recursion depth, which follows its longest method;
     // a fixed depth would reject bodies the complete extraction compiles.
     static string ExtractionComponentContext(string source) =>
@@ -1012,9 +1016,8 @@ partial class Program
     static ExtractionComponents SplitExtractionComponents(string source)
     {
         var methods = Regex.Matches(source, @"(?m)^def method[0-9]+Signature : String := ");
-        // A bound package's whole-program data starts at its local methods, before its specialized methods.
-        var aggregate = source.IndexOf("def localMethods :", StringComparison.Ordinal) is var local and >= 0
-            ? local : source.IndexOf("def specializedMethods :", StringComparison.Ordinal);
+        // A bound package's whole-program data starts at its local methods, which precede its specialized methods.
+        var aggregate = AggregateStart().Match(source) is { Success: true } start ? start.Index : -1;
         var context = ExtractionComponentContext(source);
         if (methods.Count < 2 || aggregate <= methods[^1].Index)
             return new(ContentKey(source), source, new(StringComparer.Ordinal));
