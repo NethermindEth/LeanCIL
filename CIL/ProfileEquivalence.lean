@@ -70,14 +70,6 @@ theorem reprofile_eq_of_uniform (program : Program) (p : FeatureProfile)
     intro child hc
     exact h child (List.mem_cons_of_mem body hc)
 
-theorem uniform_of_profile_map (program : Program) (p : FeatureProfile)
-    (h : program.map (·.profile) = List.replicate program.length p) :
-    ∀ body ∈ program, body.profile = p := by
-  intro body hb
-  have hm : body.profile ∈ program.map (·.profile) := List.mem_map.mpr ⟨body, hb, rfl⟩
-  rw [h] at hm
-  exact (List.mem_replicate.mp hm).2
-
 /-- The features an intrinsic needs; `available_of_required` shows they suffice. -/
 def Intrinsic.requiredFeatures : Intrinsic → List Feature
   | .scalar _ => []

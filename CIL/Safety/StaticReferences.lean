@@ -1,4 +1,4 @@
-import CIL.Safety.InstructionReferences
+import CIL.Safety.ExecutionLifetime
 import CIL.Safety.StaticInitialization
 
 /-!

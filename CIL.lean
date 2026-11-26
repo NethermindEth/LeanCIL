@@ -35,7 +35,6 @@ import CIL.SIMD.BMI1
 import CIL.SIMD.BMI2
 import CIL.SIMD.Evaluation256Lemmas
 import CIL.SIMD.EvaluationLemmas
-import CIL.SIMD.Incoming128
 import CIL.SIMD.Intrinsics
 import CIL.SIMD.LaneCarry
 import CIL.SIMD.PackedLanes
@@ -49,7 +48,6 @@ import CIL.Safety.AccessBelow
 import CIL.Safety.AccessRequirements
 import CIL.Safety.AccessSlices
 import CIL.Safety.AllocationExtension
-import CIL.Safety.ArgumentEquivalence
 import CIL.Safety.AggregateHomeValues
 import CIL.Safety.AggregateLocals
 import CIL.Safety.ValueBitCasts
@@ -84,7 +82,6 @@ import CIL.Safety.HandlerSteps
 import CIL.Safety.ExecutionAllocations
 import CIL.Safety.ExecutionFrameOwnership
 import CIL.Safety.ExecutionInvariants
-import CIL.Safety.ExecutionLemmas
 import CIL.Safety.ExecutionLifetime
 import CIL.Safety.ExecutionPrefixes
 import CIL.Safety.ExecutionStaticWorld
@@ -110,7 +107,6 @@ import CIL.Safety.ObjectFields
 import CIL.Safety.ReferenceSegments
 import CIL.Safety.ReferenceArrayElements
 import CIL.Safety.InstructionMemoryLemmas
-import CIL.Safety.InstructionReferences
 import CIL.Safety.LiveState
 import CIL.Safety.LocalReferences
 import CIL.Safety.Memory
@@ -124,7 +120,6 @@ import CIL.Safety.Linking
 import CIL.Safety.ProgramClosure
 import CIL.Safety.StepFlow
 import CIL.Safety.RegionRun
-import CIL.Safety.NegationReturn
 import CIL.Safety.LocalSnapshots
 import CIL.Safety.LocalSnapshotSteps
 import CIL.Safety.NumericHomes
@@ -134,7 +129,6 @@ import CIL.Safety.NumericLocals
 import CIL.Safety.ProfileCertificate
 import CIL.Safety.ProfileContract
 import CIL.Safety.ProfileEquivalence
-import CIL.Safety.ReadCoverage
 import CIL.Safety.Relocation
 import CIL.Safety.RelocationAddress
 import CIL.Safety.RelocationExecution
@@ -142,7 +136,6 @@ import CIL.Safety.ReturnArity
 import CIL.Safety.ReturnMemory
 import CIL.Safety.ReturnReferences
 import CIL.Safety.RunningPrefixes
-import CIL.Safety.ScalarBranch
 import CIL.Safety.SpanContents
 import CIL.Safety.StaticInitialization
 import CIL.Safety.StaticInstructionWorld
@@ -162,16 +155,10 @@ import CIL.Safety.ObjectSteps
 import CIL.Safety.InstructionSteps
 import CIL.Safety.StepLiveState
 import CIL.Safety.StepLocalReferences
-import CIL.Safety.StepValues
 import CIL.Safety.UnknownHomes
 import CIL.Safety.WordFootprint
-import CIL.Safety.WordFrameSetup
 import CIL.Safety.WordHomes
-import CIL.Safety.WordLocals
 import CIL.Safety.WordMemory
-import CIL.Safety.WordPrefix
-import CIL.Safety.WordRoots
-import CIL.Safety.WordSnapshotPreservation
 import CIL.Safety.WordSnapshots
 import CIL.Safety.IndexedWriteLemmas
 import CIL.Safety.WriteEffects

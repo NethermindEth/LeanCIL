@@ -139,16 +139,6 @@ theorem allocation_lookup (m : Memory) (a : Allocation) (id : AllocationId) (res
     · cases h
       simp
 
-theorem write_other_allocation (m result : Memory) (r : Reference) (bytes : List (BitVec 8))
-    (alignment id offset : Nat) (h : write m r bytes alignment = .ok result)
-    (hne : id ≠ r.allocation) : result.cells id offset = m.cells id offset := by
-  simp only [write] at h
-  cases ha : access m r bytes.length alignment true <;>
-    simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  · cases h
-  · cases h
-    simp [hne]
-
 theorem write_initializes (m result : Memory) (r : Reference) (bytes : List (BitVec 8))
     (alignment i : Nat) (h : write m r bytes alignment = .ok result)
     (hi : i < bytes.length) :

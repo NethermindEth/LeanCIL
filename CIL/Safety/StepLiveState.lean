@@ -1,5 +1,6 @@
 import CIL.Safety.LiveState
-import CIL.Safety.StepValues
+import CIL.Safety.StaticReferences
+import CIL.Safety.LocalReferences
 import CIL.Safety.StepLocalReferences
 
 /-!
