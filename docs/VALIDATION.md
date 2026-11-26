@@ -20,6 +20,11 @@ dotnet run --file scripts/Test.cs -- --suite outlines-objects
 - A suite builds its own prerequisites, checks every Lean proof fresh and writes
   `artifacts/test-results-<suite>.json`; a full run writes `artifacts/test-results.json`.
 - Suites build and mutate `artifacts/`, so run concurrent suites in separate checkouts.
+- The `cli` suite runs its independent deep CLI checks at once. Their child processes run one
+  per processor while their reservations fit in nine tenths of the machine's memory. A process
+  reserves 3 GiB unless its check reserves a measured peak: 20 GiB for a verify whose joint
+  kernel replay is rejected, which therefore runs alone on a 16 GB runner. Larger reservations
+  start first.
 - In CI one job builds the extractor and example assembly with `--build-tools`, and suite jobs set
   `LEANCIL_PREBUILT_TOOLS=true` to use them.
 - `lake build` builds only `CIL`. A change under `CIL/` requires building every library target in

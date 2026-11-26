@@ -161,6 +161,142 @@ partial class Program : IDisposable
         return PreparedFixtureCommand(Path.GetFullPath(command[3], cwd), arguments) ??
             (options.Length == 0 ? FixtureCommand(command[3], arguments, prepared: false) : command);
     }
+
+    /// <summary>Memory a child process of a concurrent check reserves unless its check reserves more.</summary>
+    const long CheckProcessMemory = 3L << 30;
+
+    /// <summary>The memory the child processes of concurrent checks reserve together, a tenth below the machine's.
+    /// </summary>
+    static readonly long CheckMemory = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 10 * 9;
+
+    /// <summary>Guards the admission state below; a check waiting for a slot waits on it.</summary>
+    static readonly object CheckAdmission = new();
+
+    /// <summary>The reservations of the child processes of concurrent checks that run now.</summary>
+    static readonly List<long> runningReservations = [];
+
+    /// <summary>The child processes of concurrent checks that wait for a slot, in the order they asked.</summary>
+    static readonly List<CheckRequest> waitingRequests = [];
+
+    /// <summary>Whether this thread runs a check that <see cref="Concurrently{TItem, TResult}"/> started.</summary>
+    [ThreadStatic] static bool concurrentCheck;
+
+    /// <summary>The memory each child process of this thread's check reserves; 0 reserves the default.</summary>
+    [ThreadStatic] static long checkMemory;
+
+    /// <summary>
+    /// Runs `check` on every item at once, each on its own thread, and returns the results in item order. Each
+    /// thread keeps the caller's reservation; every failure is rethrown together.
+    /// </summary>
+    static TResult[] Concurrently<TItem, TResult>(IReadOnlyList<TItem> items, Func<TItem, TResult> check)
+    {
+        var results = new TResult[items.Count];
+        var failures = new ExceptionDispatchInfo?[items.Count];
+        var memory = checkMemory;
+        var threads = items.Select((item, index) => new Thread(() =>
+        {
+            concurrentCheck = true;
+            checkMemory = memory;
+            try { results[index] = check(item); }
+            catch (Exception error) { failures[index] = ExceptionDispatchInfo.Capture(error); }
+        })).ToArray();
+        foreach (var thread in threads) thread.Start();
+        foreach (var thread in threads) thread.Join();
+        var failed = failures.OfType<ExceptionDispatchInfo>().ToArray();
+        if (failed.Length == 1) failed[0].Throw();
+        if (failed.Length > 1) throw new AggregateException(failed.Select(failure => failure.SourceException));
+        return results;
+    }
+
+    /// <summary>Runs `check` on every item at once, as <see cref="Concurrently{TItem, TResult}"/> runs it.</summary>
+    static void Concurrently<TItem>(IReadOnlyList<TItem> items, Action<TItem> check) => Concurrently(items, item =>
+    {
+        check(item);
+        return true;
+    });
+
+    /// <summary>Runs independent checks at once, as <see cref="Concurrently{TItem, TResult}"/> runs them.</summary>
+    static void Concurrently(params Action[] checks) => Concurrently(checks, check => check());
+
+    /// <summary>Runs `check` with each child process it starts reserving `memory` bytes; 0 keeps the default.
+    /// </summary>
+    static TResult ReservingMemory<TResult>(long memory, Func<TResult> check)
+    {
+        var outer = checkMemory;
+        checkMemory = memory;
+        try { return check(); }
+        finally { checkMemory = outer; }
+    }
+
+    /// <summary>Runs `check` as <see cref="ReservingMemory{TResult}"/> runs it.</summary>
+    static void ReservingMemory(long memory, Action check) => ReservingMemory(memory, () =>
+    {
+        check();
+        return true;
+    });
+
+    /// <summary>
+    /// Admits a child process of a concurrent check once a processor and its reservation are free; null on other
+    /// threads. A reservation larger than <see cref="CheckMemory"/> runs alone.
+    /// </summary>
+    static IDisposable? CheckSlot()
+    {
+        if (!concurrentCheck) return null;
+        var request = new CheckRequest(Math.Min(checkMemory == 0 ? CheckProcessMemory : checkMemory, CheckMemory));
+        lock (CheckAdmission)
+        {
+            waitingRequests.Add(request);
+            AdmitRequests();
+            while (!request.Admitted) Monitor.Wait(CheckAdmission);
+        }
+        return new CheckSlotLease(request.Memory);
+    }
+
+    /// <summary>
+    /// Admits waiting processes, larger reservations first and each size in the order it asked. A process that does
+    /// not fit holds back smaller ones unless a running process reserves as much, so draining smaller ones makes room
+    /// for it within the longest of their runs.
+    /// </summary>
+    static void AdmitRequests()
+    {
+        var reserved = runningReservations.Sum();
+        foreach (var request in waitingRequests.OrderByDescending(request => request.Memory).ToList())
+        {
+            if (runningReservations.Count < Environment.ProcessorCount && reserved + request.Memory <= CheckMemory)
+            {
+                waitingRequests.Remove(request);
+                runningReservations.Add(request.Memory);
+                reserved += request.Memory;
+                request.Admitted = true;
+            }
+            else if (runningReservations.Count == 0 || runningReservations.Max() < request.Memory)
+                break;
+        }
+        Monitor.PulseAll(CheckAdmission);
+    }
+
+    /// <summary>A child process of a concurrent check that asks for a slot and `Memory` bytes.</summary>
+    sealed class CheckRequest(long memory)
+    {
+        internal long Memory { get; } = memory;
+        internal bool Admitted { get; set; }
+    }
+
+    /// <summary>Returns its process slot and reservation once, and admits the processes that then fit.</summary>
+    sealed class CheckSlotLease(long memory) : IDisposable
+    {
+        int released;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref released, 1) != 0) return;
+            lock (CheckAdmission)
+            {
+                runningReservations.Remove(memory);
+                AdmitRequests();
+            }
+        }
+    }
 #endif
 
     static string[] FixtureCommand(string script, string[] arguments, bool prepared)
@@ -1198,6 +1334,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         if (ChecksLeanEnvironment(args, leanPath is not null))
             RequireLeanEnvironmentFits(args, start.WorkingDirectory, start.Environment);
 
+#if !LEANCIL_TOOL
+        using var slot = CheckSlot();
+#endif
         if (progress is not null) Console.WriteLine("START " + progress);
         var startedAtUtc = DateTimeOffset.UtcNow;
         var elapsed = Stopwatch.StartNew();

@@ -8,6 +8,10 @@ partial class Program
 
         internal string[] Cli { get; } = ["dotnet", ExtractorPath];
 
+        /// <summary>Held by each build: a project reference builds the referenced project too, and two builds
+        /// writing its output at once fail.</summary>
+        static readonly object BuildLock = new();
+
         /// <summary>Writes a Release net11.0 project and returns its directory.</summary>
         internal string Project(string name, string assembly, string properties = "", string references = "")
         {
@@ -27,7 +31,7 @@ partial class Program
         {
             string directory = Project(name, assembly, properties, references);
             File.WriteAllText(Path.Combine(directory, name + ".cs"), source);
-            Run(["dotnet", "build", Path.Combine(directory, name + ".csproj"), "-c", "Release"]);
+            lock (BuildLock) Run(["dotnet", "build", Path.Combine(directory, name + ".csproj"), "-c", "Release"]);
             return Path.Combine(directory, "bin", assembly + ".dll");
         }
 

@@ -19,6 +19,11 @@ using System.Text.Json;
 using Program preparation = new();
 preparation.EnsureExtractorBuilt();
 MultiAssemblyFixture fixture = new("DeepCli");
+var checkoutBuild = new object();
+// Reservations of verifies that run beside other checks, from peak private working sets measured on Windows: a
+// rejected joint kernel replay replays each module separately (up to 19.1 GiB), a platform deep audit 4.8 GiB.
+const long SeparateReplayMemory = 20L << 30;
+const long PlatformAuditMemory = 6L << 30;
 var cli = args is [var executable] && !executable.StartsWith("--", StringComparison.Ordinal)
     ? new[] { Path.GetFullPath(executable) } : fixture.Cli;
 if (args is ["--constraints"])
@@ -140,7 +145,8 @@ void CheckPlatformObject()
         var extra = File.Exists(previous) ? Sha(previous) + "  " + Path.GetFileName(previous) + "\n" : "";
         File.WriteAllText(digestFile, digests + extra + string.Concat(platforms.Select(p =>
             Sha(p.File) + "  " + Path.GetFileName(p.File) + "\n")));
-        var result = Execute([.. verify, "--deep-checks", digestFile, "--format", "json"]);
+        var result = ReservingMemory(expected == "failed" ? SeparateReplayMemory : PlatformAuditMemory,
+            () => Execute([.. verify, "--deep-checks", digestFile, "--format", "json"]));
         if (expected == "failed")
         {
             if (result.Code == 0 || File.Exists(Path.Combine(output, "verified.json")))
@@ -217,8 +223,9 @@ void CheckPlatformPair()
     void Check(string expected, string[] images, bool wrongMathKind = false)
     {
         File.WriteAllLines(pairPins, images.Prepend(pairApp).Select(path => Sha(path) + "  " + path));
-        var result = Execute([.. cli, "verify", pairOutput, "--proof", pairProof, "--deep-checks", pairPins,
-            "--format", "json"]);
+        var result = ReservingMemory(expected == "failed" ? SeparateReplayMemory : PlatformAuditMemory,
+            () => Execute([.. cli, "verify", pairOutput, "--proof", pairProof, "--deep-checks", pairPins,
+                "--format", "json"]));
         var certificate = Path.Combine(pairOutput, "verified.json");
         if (expected == "failed" ? result.Code == 0 || File.Exists(certificate) : result.Code != 0)
             throw new InvalidOperationException("Unexpected pair verification outcome: " + result.Output);
@@ -325,60 +332,63 @@ void CheckGenericConstraints()
         throw new InvalidOperationException("Generic layouts incorrectly reconfirmed: " + layout);
 }
 
-void CheckDispatchCatalogs()
+// Each assembly's checks, and the class tests beside its Total checks, verify separate extractions.
+void CheckDispatchCatalogs() => Concurrently(() => CheckDispatchCatalog(changed: false),
+    () => CheckDispatchCatalog(changed: true), CheckTwoAssemblyCatalogs);
+
+void CheckDispatchCatalog(bool changed)
 {
-    foreach (bool changed in new[] { false, true })
+    var build = changed ? "FiveFaces" : "SixFaces";
+    var assembly = fixture.Build(build, "DeepCli.Dispatch", $$"""
+        namespace Geometry;
+        public interface IShapeTag { int Tag(); int OtherTag(); }
+        public interface IScale<T, U> { }
+        public interface IColour { }
+        public abstract class Shape { public abstract int Sides(); }
+        public class Triangle : Shape, IShapeTag, IColour {
+            public override int Sides() => 3;
+            public int ReadScale(ref int scale) => scale;
+            public T Load<T>(ref T value) => value;
+            public static U Pick<T, U>(T first, U second)
+                where T : class, IScale<U, T>, new() where U : struct => second;
+            int IShapeTag.Tag() => 1;
+            int IShapeTag.OtherTag() => 2;
+        }
+        public static class Polygons { public sealed class Equilateral : Triangle { } }
+        public abstract class Solid { public abstract int Faces(); }
+        public sealed class Cube : Solid, IColour { public override int Faces() => {{(changed ? 5 : 6)}}; }
+        public sealed class TagOnly : IShapeTag { public int Tag() => 1; public int OtherTag() => 2; }
+        public sealed class UnrelatedResource : System.IDisposable { void System.IDisposable.Dispose() { } }
+        public static class Reader {
+            public static int Total(Shape shape, Solid solid) => shape.Sides() + solid.Faces() + shape.Sides();
+            public static Triangle Select(Shape shape, bool strict) =>
+                strict ? ({{(changed ? "Polygons.Equilateral" : "Triangle")}})shape :
+                    shape as {{(changed ? "Polygons.Equilateral" : "Triangle")}};
+        }
+        """);
+    var pins = Path.Combine(fixture.Root, build + ".sha256");
+    var output = fixture.Artifact(build + "Total");
+    const string selector = "Geometry.Reader::Total(Geometry.Shape,Geometry.Solid)";
+    var neighbour = changed ? null : fixture.Build("LocalParent", "DeepCli.Neighbour", """
+        namespace Neighbours;
+        public class LocalBase { }
+        public sealed class LocalChild : LocalBase { }
+        """);
+    string[] images = neighbour is null ? [assembly] : [assembly, neighbour];
+    File.WriteAllLines(pins, images.Select(path => Sha(path) + "  " + path));
+    string[] references = neighbour is null ? [] : MultiAssemblyFixture.Reference(neighbour);
+    Run([.. cli, "extract", assembly, selector, output, .. references]);
+    var proof = Path.Combine(output, "Proof.lean");
+    var template = File.ReadAllText(At("Tests/StrictBinding/DispatchTotal.lean.in"));
+    var claim = changed ? "Refuted" : "Holds";
+    var evidence = changed ? "refuted rfl" : "holds (by intro shape; cases shape <;> rfl)";
+    File.WriteAllText(proof, template +
+        $"\ntheorem correctness : contract.{claim} Extracted.program 0 := {evidence}\n" +
+        "#print axioms correctness\nend DispatchGate\n");
+    string[] binding = changed ? [] : ["--deep-checks", pins];
+    Concurrently(() => CheckClassTests(assembly, build, changed), () =>
     {
-        var build = changed ? "FiveFaces" : "SixFaces";
-        var assembly = fixture.Build(build, "DeepCli.Dispatch", $$"""
-            namespace Geometry;
-            public interface IShapeTag { int Tag(); int OtherTag(); }
-            public interface IScale<T, U> { }
-            public interface IColour { }
-            public abstract class Shape { public abstract int Sides(); }
-            public class Triangle : Shape, IShapeTag, IColour {
-                public override int Sides() => 3;
-                public int ReadScale(ref int scale) => scale;
-                public T Load<T>(ref T value) => value;
-                public static U Pick<T, U>(T first, U second)
-                    where T : class, IScale<U, T>, new() where U : struct => second;
-                int IShapeTag.Tag() => 1;
-                int IShapeTag.OtherTag() => 2;
-            }
-            public static class Polygons { public sealed class Equilateral : Triangle { } }
-            public abstract class Solid { public abstract int Faces(); }
-            public sealed class Cube : Solid, IColour { public override int Faces() => {{(changed ? 5 : 6)}}; }
-            public sealed class TagOnly : IShapeTag { public int Tag() => 1; public int OtherTag() => 2; }
-            public sealed class UnrelatedResource : System.IDisposable { void System.IDisposable.Dispose() { } }
-            public static class Reader {
-                public static int Total(Shape shape, Solid solid) => shape.Sides() + solid.Faces() + shape.Sides();
-                public static Triangle Select(Shape shape, bool strict) =>
-                    strict ? ({{(changed ? "Polygons.Equilateral" : "Triangle")}})shape :
-                        shape as {{(changed ? "Polygons.Equilateral" : "Triangle")}};
-            }
-            """);
-        var pins = Path.Combine(fixture.Root, build + ".sha256");
-        var output = fixture.Artifact(build + "Total");
-        const string selector = "Geometry.Reader::Total(Geometry.Shape,Geometry.Solid)";
-        var neighbour = changed ? null : fixture.Build("LocalParent", "DeepCli.Neighbour", """
-            namespace Neighbours;
-            public class LocalBase { }
-            public sealed class LocalChild : LocalBase { }
-            """);
-        string[] images = neighbour is null ? [assembly] : [assembly, neighbour];
-        File.WriteAllLines(pins, images.Select(path => Sha(path) + "  " + path));
-        string[] references = neighbour is null ? [] : MultiAssemblyFixture.Reference(neighbour);
-        Run([.. cli, "extract", assembly, selector, output, .. references]);
-        var proof = Path.Combine(output, "Proof.lean");
-        var template = File.ReadAllText(At("Tests/StrictBinding/DispatchTotal.lean.in"));
-        var claim = changed ? "Refuted" : "Holds";
-        var evidence = changed ? "refuted rfl" : "holds (by intro shape; cases shape <;> rfl)";
-        File.WriteAllText(proof, template +
-            $"\ntheorem correctness : contract.{claim} Extracted.program 0 := {evidence}\n" +
-            "#print axioms correctness\nend DispatchGate\n");
-        string[] binding = changed ? [] : ["--deep-checks", pins];
         Run([.. cli, "verify", output, "--proof", proof, "--theorem", "DispatchGate.correctness", .. binding]);
-        CheckClassTests(assembly, build, changed);
         using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "verified.json")));
         if (changed)
         {
@@ -386,21 +396,21 @@ void CheckDispatchCatalogs()
             if (method.GetProperty("assemblySha256").GetString() != Sha(assembly) ||
                 !method.GetProperty("signature").GetString()!.Contains(selector, StringComparison.Ordinal))
                 throw new InvalidOperationException("Wrong dispatch counterexample: " + method);
-            continue;
+            return;
         }
         var fact = report.RootElement.GetProperty("binding").GetProperty("facts").EnumerateArray()
             .Single(item => item.GetProperty("id").GetString() == "dispatch-catalogs");
         if (fact.GetProperty("status").GetString() != "reconfirmed" ||
             fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
             throw new InvalidOperationException("Incorrect dispatch binding report: " + fact);
-        var derived = CheckForeignOverride(assembly, selector, changed: false);
-        CheckForeignOverride(assembly, selector, changed: true);
+        var derived = "";
+        Concurrently(() => derived = CheckForeignOverride(assembly, selector, changed: false),
+            () => CheckForeignOverride(assembly, selector, changed: true));
         ReplayImageCases(output, assembly, "DispatchImage", At("Tests/StrictBinding/DispatchOverrideCases.lean"),
             ["StrictBinding.DispatchCatalogs", "Tests.StrictBinding.Mutation"],
             ("NeighbourImage", neighbour!), ("DerivedImage", derived));
         Console.WriteLine("PASS physical dispatch binds nested owners, byrefs and other pinned images");
-    }
-    CheckTwoAssemblyCatalogs();
+    });
 }
 
 string CheckForeignOverride(string assembly, string selector, bool changed)
@@ -745,7 +755,10 @@ void CheckPublisherKey()
         assemblySha256 = Sha(app),
         assemblyIdentity = AssemblyName.GetAssemblyName(app).FullName
     });
-    var inputs = DeepCheckInputs.Read(digestFile);
+    // The platform checks rewrite the shared digest file meanwhile, so this check reads its own copy.
+    var keyDigests = Path.Combine(fixture.Root, "keys.sha256");
+    File.WriteAllText(keyDigests, digests);
+    var inputs = DeepCheckInputs.Read(keyDigests);
     var planned = inputs.MatchPins(identity);
     if (planned.Count != 2 || planned[0].KeyCoverage != false || !planned[1].Reference ||
         planned[1].Platform || planned[1].Identity != AssemblyName.GetAssemblyName(lib).FullName)
@@ -779,8 +792,8 @@ void CheckPublisherKey()
     var digestPath = Path.Combine(fixture.Root, "short-token.sha256");
     File.WriteAllText(digestPath, $"{Sha(app)}  {Path.GetRelativePath(fixture.Root, app)}\n" +
         $"{Sha(changed)}  {Path.GetFileName(changed)}\n");
-    var result = Execute([.. cli, "verify", extraction, "--proof", proof, "--theorem",
-        "MultiAssemblyProof.correctness", "--deep-checks", digestPath, "--format", "json"]);
+    var result = ReservingMemory(SeparateReplayMemory, () => Execute([.. cli, "verify", extraction, "--proof", proof,
+        "--theorem", "MultiAssemblyProof.correctness", "--deep-checks", digestPath, "--format", "json"]));
     if (result.Code == 0 || File.Exists(Path.Combine(extraction, "verified.json")))
         throw new InvalidOperationException("A malformed token in a supplied assembly was certified.");
     var failure = JsonSerializer.Deserialize<JsonElement>(result.Stdout).GetProperty("binding");
@@ -894,12 +907,25 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
     File.Delete(Path.Combine(output, "verification.json"));
     if (args is ["--arguments"]) return;
 
+    // The binding text, platform image and consumer checks share the digest file and the Direct extraction.
+    Concurrently(() =>
+        {
+            CheckBindingText();
+            CheckPlatformObject();
+            if (args is not ["--text"]) CheckConsumerRoot();
+        },
+        CheckPackageEvidence, CheckPlatformPair, CheckDispatchCatalogs, CheckPublisherKey, CheckLayoutContent,
+        CheckGenericConstraints, CheckEnumStorage, CheckStaticTable);
+}
+
+void CheckBindingText()
+{
     var ordinary = Execute(verify);
     if (ordinary.Code != 0 || !ordinary.Stdout.Contains("Binding: default", StringComparison.Ordinal) ||
         ordinary.Stdout.Split(": trusted", StringSplitOptions.None).Length != 15 ||
         ordinary.Output.Contains("BindingAudit", StringComparison.Ordinal))
         throw new InvalidOperationException("Default binding output or work changed: " + ordinary.Output);
-    var deep = Execute([.. verify, "--deep-checks", digestFile]);
+    var deep = ReservingMemory(PlatformAuditMemory, () => Execute([.. verify, "--deep-checks", digestFile]));
     string[] reconfirmed = ["body-bytes", "metadata-rows", "member-links", "static-data"];
     if (deep.Code != 0 || !deep.Stdout.Contains("StrictBinding sources:", StringComparison.Ordinal) ||
         deep.Stdout.Split(": not covered", StringSplitOptions.None).Length != 11)
@@ -916,15 +942,10 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
                 StringComparison.Ordinal))
             throw new InvalidOperationException("Binding text omitted wire name " + fact);
     Console.WriteLine("PASS default and deep binding text");
-    CheckPlatformObject();
-    CheckPlatformPair();
-    CheckPublisherKey();
-    CheckEnumStorage();
-    CheckGenericConstraints();
-    CheckLayoutContent();
-    CheckDispatchCatalogs();
-    CheckPackageEvidence();
+}
 
+void CheckStaticTable()
+{
     var tables = fixture.Build("Table", "DeepCli.Table", """
         public static class Table {
             static System.ReadOnlySpan<uint> Words => [11, 13, 17, 19, 23, 29, 31, 37];
@@ -970,7 +991,8 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
 void ReplayImageCases(string directory, string assembly, string imageModule, string casesFile, string[] dependencies,
     params (string Module, string Assembly)[] otherImages)
 {
-    Run(["lake", "build", .. dependencies], preparation.CheckoutPackage());
+    // Concurrent checks share the checkout package, which one lake build writes at a time.
+    lock (checkoutBuild) Run(["lake", "build", .. dependencies], preparation.CheckoutPackage());
     var leanPath = directory + Path.PathSeparator + preparation.CheckoutLeanPath();
     (string Module, string Assembly)[] images = [(imageModule, assembly), .. otherImages];
     foreach (var (module, path) in images)
@@ -997,7 +1019,9 @@ if (args is ["--controls"])
     CheckDeepBinding(fixture.Root, cli, output, app, lib, libName, verify, controlsOnly: true);
 if (args is ["--final-mutations"])
     CheckDeepBinding(fixture.Root, cli, output, app, lib, libName, verify, finalOnly: true);
-if (args is not (["--mutations"] or ["--controls"] or ["--final-mutations"]))
+if (args is ["--consumer"]) CheckConsumerRoot();
+
+void CheckConsumerRoot()
 {
     var package = Path.Combine(fixture.Root, "Consumer");
     Directory.CreateDirectory(package);
