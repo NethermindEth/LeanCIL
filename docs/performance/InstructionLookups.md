@@ -329,7 +329,8 @@ times from one size to the next. With body facts alone, the measured costs were 
 
 The suite decides with `decide +kernel` the closure of method 0 in four shapes of program: a chain
 of 8, 32 and 128 methods each calling the next, whose closure is the whole program; the same chain
-at 128, 256 and 512 methods, the scale of the largest closures of the corpus; one method whose
+at 128, 256 and 512 methods, the scale of the largest closures of the corpus, which reuses the
+chain's program and measurement at 128; one method whose
 link table enters seven others 32, 128 and 512 times; and a closure of four methods at the start
 of a program of 128, 512 and 2,048 methods. Each program states its index with `program_index%`,
 as an extraction does, and the closure is decided as `closureWith` over that index. A search over
@@ -343,7 +344,7 @@ in a growing whole-program closure. For the three shapes measured through the li
 | Shape | Sizes | Through the index | Through the list |
 | --- | --- | --- | --- |
 | chain | 8 / 32 / 128 | 87,300 / 335,424 / 1,423,146 | 90,411 / 437,548 / 3,533,801 |
-| long chain | 128 / 256 / 512 | 1,422,768 / 3,013,631 / 6,569,794 | not measured |
+| long chain | 128 / 256 / 512 | 1,423,146 / 3,013,631 / 6,569,794 | not measured |
 | fan | 32 / 128 / 512 | 140,789 / 367,239 / 1,272,991 | 144,007 / 370,505 / 1,276,294 |
 | tail | 128 / 512 / 2,048 | 55,798 / 58,520 / 61,171 | 81,738 / 179,808 / 571,770 |
 

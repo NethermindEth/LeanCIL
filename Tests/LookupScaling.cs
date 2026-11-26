@@ -1373,8 +1373,12 @@ void ClosureCosts()
     ];
     // The list form of the long chain costs tens of millions of heartbeats at 512, so only the others measure it.
     bool ListMeasured(ClosureShape shape) => shape.Name != "longchain";
+    // A program two shapes share at one size is stated and measured once, by the first shape that lists it.
+    ClosureShape Measuring(ClosureShape shape, int size) =>
+        shapes.First(other => other.Program == shape.Program && other.Sizes.Contains(size));
     string Statement(ClosureShape shape, int size)
     {
+        if (Measuring(shape, size) != shape) return "";
         var program = shape.Program(size);
         var name = $"{shape.Name}{size}";
         var expected = $"some [{string.Join(", ", Enumerable.Range(0, shape.Methods(size)))}]";
@@ -1463,11 +1467,14 @@ void ClosureCosts()
         match => (int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture), match.Groups[2].Value),
         match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
     var tail = shapes.Single(shape => shape.Name == "tail");
-    if (costs.Count != shapes.Sum(shape => shape.Sizes.Length * (ListMeasured(shape) ? 2 : 1)) ||
+    var measuredCosts = shapes.Sum(shape => shape.Sizes.Count(size => Measuring(shape, size) == shape) *
+        (ListMeasured(shape) ? 2 : 1));
+    if (costs.Count != measuredCosts ||
         costs.Values.Min() < KernelDecisionFloor || marks.Count != 2 * tail.Sizes.Length)
         throw new InvalidOperationException($"Missing closure costs:\n{output}");
+    long Cost(bool list, ClosureShape shape, int size) => costs[(list, Measuring(shape, size).Name, size)];
     string Measured(ClosureShape shape, bool list) => string.Join(", ", shape.Sizes.Select(size =>
-        string.Create(CultureInfo.InvariantCulture, $"{costs[(list, shape.Name, size)]} at {size}")));
+        string.Create(CultureInfo.InvariantCulture, $"{Cost(list, shape, size)} at {size}")));
     foreach (var shape in shapes)
     {
         var units = shape.Sizes.Select(size => shape.Methods(size) *
@@ -1484,7 +1491,7 @@ void ClosureCosts()
             throw new InvalidOperationException($"The {shape.Name} bound accepts list reads of its methods");
         void CheckGrowth(bool list, double[] work, string unit)
         {
-            var samples = shape.Sizes.Select(size => (double)costs[(list, shape.Name, size)]).ToArray();
+            var samples = shape.Sizes.Select(size => (double)Cost(list, shape, size)).ToArray();
             var growth = ClosureGrowth(work, samples);
             var route = list ? "list" : "index";
             var measured = string.Create(CultureInfo.InvariantCulture, $$"""
