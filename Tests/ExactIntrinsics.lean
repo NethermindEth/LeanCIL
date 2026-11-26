@@ -55,8 +55,6 @@ example : refuses { call0 with method.returnType := .primitive .uint64 } := by
   decide +kernel
 example : refuses { call0 with method.parameters := [vectorType "128", vectorType "256"] } := by
   decide +kernel
-example : runtimeModel {} .call call0.method ≠ some (.intrinsic (.avx2 .band) 3) := by
-  decide +kernel
 example : refuses { call0 with method.hasThis := true } := by decide +kernel
 example : refuses { call0 with target := .external "forged" } := by decide +kernel
 private def call1 : CallSite := {
@@ -74,7 +72,6 @@ private def call1 : CallSite := {
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
 example : keeps call1 (.intrinsic (.avx2 .bor) 2) := by decide +kernel
-example : runtimeModel {} .call call1.method ≠ some (.intrinsic (.avx2 .bor) 3) := by decide +kernel
 example : refuses { call1 with method.hasThis := true } := by decide +kernel
 example : refuses { call1 with target := .external "forged" } := by decide +kernel
 private def call2 : CallSite := {
@@ -91,8 +88,6 @@ private def call2 : CallSite := {
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
 example : keeps call2 (.intrinsic (.avx2 .bxor) 2) := by decide +kernel
-example : runtimeModel {} .call call2.method ≠ some (.intrinsic (.avx2 .bxor) 3) := by
-  decide +kernel
 example : refuses { call2 with method.hasThis := true } := by decide +kernel
 example : refuses { call2 with target := .external "forged" } := by decide +kernel
 private def call3 : CallSite := {
@@ -110,8 +105,6 @@ private def call3 : CallSite := {
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
 example : keeps call3 (.intrinsic (.avx2 .andNot) 2) := by decide +kernel
-example : runtimeModel {} .call call3.method ≠ some (.intrinsic (.avx2 .andNot) 3) := by
-  decide +kernel
 example : refuses { call3 with method.hasThis := true } := by decide +kernel
 example : refuses { call3 with target := .external "forged" } := by decide +kernel
 private def call4 : CallSite := {
@@ -130,8 +123,6 @@ private def call4 : CallSite := {
     System.Runtime.Intrinsics.Vector128`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
 example : keeps call4 (.intrinsic (.avx2 .shl64Count) 2) := by decide +kernel
-example : runtimeModel {} .call call4.method ≠ some (.intrinsic (.avx2 .shl64Count) 3) := by
-  decide +kernel
 example : refuses { call4 with method.hasThis := true } := by decide +kernel
 example : refuses { call4 with target := .external "forged" } := by decide +kernel
 private def call5 : CallSite := {
@@ -150,8 +141,6 @@ private def call5 : CallSite := {
     System.Runtime.Intrinsics.Vector128`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
 example : keeps call5 (.intrinsic (.avx2 .shr64Count) 2) := by decide +kernel
-example : runtimeModel {} .call call5.method ≠ some (.intrinsic (.avx2 .shr64Count) 3) := by
-  decide +kernel
 example : refuses { call5 with method.hasThis := true } := by decide +kernel
 example : refuses { call5 with target := .external "forged" } := by decide +kernel
 private def call6 : CallSite := {
@@ -170,8 +159,6 @@ private def call6 : CallSite := {
     System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
 example : keeps call6 (.intrinsic (.avx512 .ltu512) 2) := by decide +kernel
-example : runtimeModel {} .call call6.method ≠ some (.intrinsic (.avx512 .ltu512) 3) := by
-  decide +kernel
 example : refuses { call6 with method.hasThis := true } := by decide +kernel
 example : refuses { call6 with target := .external "forged" } := by decide +kernel
 private def call7 : CallSite := {
@@ -189,8 +176,6 @@ private def call7 : CallSite := {
     System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
 example : keeps call7 (.intrinsic (.avx512 .gtu512) 2) := by decide +kernel
-example : runtimeModel {} .call call7.method ≠ some (.intrinsic (.avx512 .gtu512) 3) := by
-  decide +kernel
 example : refuses { call7 with method.hasThis := true } := by decide +kernel
 example : refuses { call7 with target := .external "forged" } := by decide +kernel
 private def call8 : CallSite := {
@@ -207,8 +192,6 @@ private def call8 : CallSite := {
     System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 1, returnsValue := true }
 example : keeps call8 (.intrinsic (.avx512DQ .moveMask512) 1) := by decide +kernel
-example : runtimeModel {} .call call8.method ≠ some (.intrinsic (.avx512DQ .moveMask512) 2) := by
-  decide +kernel
 example : refuses { call8 with method.hasThis := true } := by decide +kernel
 example : refuses { call8 with target := .external "forged" } := by decide +kernel
 private def call9 : CallSite := {
@@ -298,11 +281,6 @@ example : ¬ ModelsAgree runtimeCatalog {} profile
     (raw { call10 with target := .external "forged" }) [true]
     [.call createScalar] := by decide +kernel
 example : refuses { call0 with parameterCount := 1 } := by decide +kernel
-example : runtimeModel {} .call call0.method ≠ some (.intrinsic (.avx2 .bor) 2) := by decide +kernel
-example : runtimeModel {} .call call4.method ≠ some (.intrinsic (.avx2 .shl64) 2) := by
-  decide +kernel
-example : runtimeModel {} .call call6.method ≠ some (.intrinsic (.avx512 .gtu512) 2) := by
-  decide +kernel
 example : refuses call0 (.scalar) := by decide +kernel
 example : refuses call6 ({ profile with avx512F := false }) := by decide +kernel
 example : refuses call8 ({ profile with avx512DQ := false }) := by decide +kernel

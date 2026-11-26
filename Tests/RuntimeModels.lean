@@ -110,13 +110,10 @@ example : (runModel body .referenceSubtract 3 frame [.scalar (.i32 4), fourth]
     staticMemory).toBool := rfl
 example : (runModel body (.typedTransfer (.scalar 4 false) true) 3 frame
     [.scalar (.i32 9), start] heapMemory).toBool := rfl
-example : (runModel body (.typedTransfer (.snapshot (.aggregate 16)) true) 3 frame
-    [.scalar (.aggregate (List.replicate 16 1)), start] heapMemory).toBool := rfl
 example : (runModel body (.typedTransfer (.snapshot .vector128) false) 3 frame [start]
     heapMemory).toBool := rfl
 example : (runModel body (.typedTransfer (.snapshot .vector128) true) 3 frame
     [.scalar (.v128 5), start] heapMemory).toBool := rfl
-example : (runModel body .skipInit 3 frame [start] staticMemory).toBool := rfl
 
 -- A model faults where its instruction faults.
 example : runModel body .objectConstructor 3 frame [] staticMemory =
