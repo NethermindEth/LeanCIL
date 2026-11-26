@@ -527,7 +527,7 @@ void StaticIdentityCosts()
               code := [{{code}}], locals := [], returnsValue := false, declared := {},
               staticSites := [{{sites}}] }
             def evidence : BodyEvidence :=
-              { bytes := [], tokens := { operands := [] }, metadata := {}, identities := [bytesOf "Fixture"],
+              { bytes := [], tokens := { operands := [] }, metadata := {}, identities := [⟨name!"Fixture", ⟨1, 0, 0, 0⟩, name!"", none⟩],
                 tables := [], names := {}, pinned := PinnedIndex.ofIdentities [], statics := [{{statics}}] }
             #identity_cost
             theorem identities_valid : StaticIdentitiesValid [body] [evidence] := by decide +kernel
@@ -893,7 +893,7 @@ void CallCheckCosts()
         var code = string.Join(", ", pcs.Select(_ => ".call callMethod, .nop"));
         var links = string.Join(", ", pcs.Select(pc => $"({pc}, .direct 0)"));
         var statement =
-            $"ManagedCallsValid [⟨[], callee, ⟨\"Tests\"⟩⟩] [] (fun _ => false) raw (List.replicate {2 * sites} true) body";
+            $"ManagedCallsValid [⟨[], callee, ⟨⟨name!\"Tests\", ⟨1, 0, 0, 0⟩, name!\"\", none⟩⟩⟩] [] (fun _ => false) raw (List.replicate {2 * sites} true) body";
         var source = $$"""
             import CIL.Extraction.Generics
             open CIL CIL.Extraction Lean Elab Command
@@ -906,13 +906,13 @@ void CallCheckCosts()
               let after <- IO.getNumHeartbeats
               logInfo m!"call check {after - before} heartbeats"
             def callee : RawMethod := {
-              token := 1, owner := "Tests::Scaling", hasThis := false, explicitThis := false,
+              token := 1, owner := "Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::Scaling", hasThis := false, explicitThis := false,
               callingConvention := 0, attributes := 0, implementation := 0,
               returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
               genericParameters := [], code := [] }
             def callMethod : MethodRef := {
-              owner := .atom "Tests" "Scaling", name := name!"", hasThis := false, genericArity := 0,
-              returnType := .void, parameters := [] }
+              owner := .atom "Tests, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Scaling", name := name!"", hasThis := false,
+              genericArity := 0, returnType := .void, parameters := [] }
             def site : RawInstruction := ⟨0, 40, .call {
               method := callMethod, declared := { convention := 0 }, target := .managed 1,
               typeArguments := [], parameterCount := 0,
@@ -2096,7 +2096,7 @@ void PlatformTableCosts()
               name := bytesOf "Item2", declared := .var 1, definition := none }
             (.primitive 10) false false).isOk = true)
         #kernel_cost "platform chain {{size}}"
-          ((env{{size}}.chainRoot 0 0 runtimeScopeBytes {{Parts("System", "Object")}} true).isOk = true)
+          ((env{{size}}.chainRoot 0 0 runtimeAssembly {{Parts("System", "Object")}} true).isOk = true)
         #kernel_cost "platform constant {{size}}"
           ((env{{size}}.platformConstant 0
             { owner := .named (named "System.BitConverter" {{Parts("System", "BitConverter")}}),
@@ -2131,7 +2131,7 @@ void PlatformTableCosts()
         /-- A runtime type outside the carried slices, as a reference resolves it. -/
         def named (name : String) (parts : List (List Nat)) : NamedType :=
           { scope := runtimeScopeBytes, name := bytesOf name, parts, kind := .external (some false),
-            pinned := false }
+            pinned := false, assembly := some runtimeAssembly }
         {{string.Join("\n", sizes.Select(Table))}}
         """);
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
