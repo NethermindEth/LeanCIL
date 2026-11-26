@@ -176,14 +176,19 @@ Reject(0, "altered-opcode", source => ChangeDefinition(source, "method1Closed",
     line => line.Replace("opcode := 2,", "opcode := 3,")));
 Reject(4, "altered-branch", source => ChangeDefinition(source, "method1Closed",
     line => line.Replace("operand := .target 4", "operand := .target 3")));
-// A failed kernel decision prints this text; a mutation that only breaks parsing does not.
-const string decisionFailed = "proved that the proposition";
 // A theorem proved by `rfl` prints this text when its two sides differ.
 const string rflRefused = "not definitionally equal";
+// A forged call obligation must fail its kernel decision, and the kernel must prove its negation; the failed
+// decision alone can print "failed to reduce" when its diagnostic stops at a well-founded name codec.
+void RejectCall(int sample, string name, string theorem, Func<string, string> mutate)
+{
+    Reject(sample, name, mutate, theorem, "Tactic `decide`");
+    RefuteMutation(sample, name, theorem, mutate);
+}
 // A call names the method its raw operand names, so the binding check rejects a call naming another method.
-Reject(0, "wrong-call-operand", source => ForgeDecodedMethod(source, 0, "code := method.code.map fun " +
-    "| .call callee prefixes => .call { callee with name := name!\"Other\" } prefixes | other => other"),
-    "method0_calls_validated", decisionFailed);
+RejectCall(0, "wrong-call-operand", "method0_calls_validated", source => ForgeDecodedMethod(source, 0,
+    "code := method.code.map fun " +
+    "| .call callee prefixes => .call { callee with name := name!\"Other\" } prefixes | other => other"));
 Console.WriteLine("PASS original-metadata generic substitution, complete managed-call binding and malformed evidence rejection");
 // Each mutation changes one fact of the first sample's body evidence, so only the decoding check can reject it;
 // the unmutated obligation is checked as the positive control.
@@ -322,8 +327,8 @@ RejectDeclared(14, "missing-declared-receiver", 1,
     source => ForgeDecodedMethod(source, 1, "declared := { method.declared with receiver := none }"));
 RejectDeclared(14, "wrong-declared-receiver-kind", 1,
     source => ForgeDecodedMethod(source, 1, "declared := { method.declared with receiver := some .object }"));
-Reject(0, "wrong-link-callee", source => ChangeDefinition(source, "method0Link1", line =>
-    line.Replace(".direct 1", ".direct 0")), "method0_calls_validated", decisionFailed);
+RejectCall(0, "wrong-link-callee", "method0_calls_validated", source => ChangeDefinition(source, "method0Link1",
+    line => line.Replace(".direct 1", ".direct 0")));
 // A missing link at the live call produces the call hole before a method can be defined.
 const string missingCallLink = "CIL.Extraction.MethodDecodeError.liveHole 1 40";
 Reject(0, "dropped-link", source => ChangeDefinition(source, "method0Links", line =>
@@ -335,12 +340,11 @@ Reject(0, "link-at-wrong-pc", source => ChangeDefinition(source, "method0Links",
 foreach (var (name, links) in new[] { ("dropped-link", "[]"), ("link-at-wrong-pc", "[(0, .direct 1)]") })
 {
     const string prefix = "method0DispatchTypes method0Closed) method0Reachable";
-    Reject(0, $"emitted-{name}", source => Replaced(source, $"{prefix} method0 :=",
-        $$"""{{prefix}} { method0 with links := {{links}} } :="""), "method0_calls_validated", decisionFailed);
+    RejectCall(0, $"emitted-{name}", "method0_calls_validated", source => Replaced(source, $"{prefix} method0 :=",
+        $$"""{{prefix}} { method0 with links := {{links}} } :="""));
 }
-Reject(0, "link-at-non-call", source => ChangeDefinition(source, "method1Links", line =>
-    Replaced(line, ":= []", ":= [(0, method0Link1)]")),
-    "method1_calls_validated", decisionFailed);
+RejectCall(0, "link-at-non-call", "method1_calls_validated", source => ChangeDefinition(source, "method1Links",
+    line => Replaced(line, ":= []", ":= [(0, method0Link1)]")));
 Reject(0, "wrong-environment", source => ChangeDefinition(source, "environment", line =>
     line.Replace("layouts := computedLayouts", "layouts := #[⟨⟨4, []⟩, 4⟩]")), "method0_environment_validated",
     rflRefused);
