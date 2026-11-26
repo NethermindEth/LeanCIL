@@ -932,50 +932,6 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     step_relabel_fallback (fun absent => absurd rfl absent)
       (fun _ _ ran => ⟨ran, context.next rfl⟩)
 
--- Preserve the named specializations for callers of the existing API.
-theorem step_relabel_nop : StepRelabel .nop := step_relabel _
-theorem step_relabel_neg : StepRelabel .neg := step_relabel _
-theorem step_relabel_cgt : StepRelabel .cgt := step_relabel _
-theorem step_relabel_bgt (target : Nat) : StepRelabel (.bgt target) := step_relabel _
-theorem step_relabel_ble (target : Nat) : StepRelabel (.ble target) := step_relabel _
-
-theorem step_relabel_ldc_i4 (value : W32) : StepRelabel (.ldc_i4 value) := step_relabel _
-theorem step_relabel_ldc_i8 (value : W64) : StepRelabel (.ldc_i8 value) := step_relabel _
-theorem step_relabel_conv_i1 : StepRelabel .conv_i1 := step_relabel _
-theorem step_relabel_conv_i2 : StepRelabel .conv_i2 := step_relabel _
-theorem step_relabel_conv_u2 : StepRelabel .conv_u2 := step_relabel _
-theorem step_relabel_conv_i8 : StepRelabel .conv_i8 := step_relabel _
-theorem step_relabel_conv_i4 : StepRelabel .conv_i4 := step_relabel _
-theorem step_relabel_conv_u1 : StepRelabel .conv_u1 := step_relabel _
-theorem step_relabel_conv_u4 : StepRelabel .conv_u4 := step_relabel _
-theorem step_relabel_conv_u8 : StepRelabel .conv_u8 := step_relabel _
-theorem step_relabel_conv_u : StepRelabel .conv_u := step_relabel _
-/-- A successful `conv_i` step is matched by the relabeled step at the renamed pc. -/
-theorem step_relabel_conv_i : StepRelabel .conv_i := step_relabel _
-#print axioms step_relabel_conv_i
-theorem step_relabel_not : StepRelabel .not := step_relabel _
-theorem step_relabel_mul : StepRelabel .mul := step_relabel _
-theorem step_relabel_and : StepRelabel .and := step_relabel _
-theorem step_relabel_or : StepRelabel .or := step_relabel _
-theorem step_relabel_xor : StepRelabel .xor := step_relabel _
-theorem step_relabel_shl : StepRelabel .shl := step_relabel _
-theorem step_relabel_shr : StepRelabel .shr := step_relabel _
-theorem step_relabel_shr_un : StepRelabel .shr_un := step_relabel _
-theorem step_relabel_clt : StepRelabel .clt := step_relabel _
-theorem step_relabel_ldind (kind : CIL.NumericKind) : StepRelabel (.ldind kind) := step_relabel _
-theorem step_relabel_stind (kind : CIL.NumericKind) : StepRelabel (.stind kind) := step_relabel _
-theorem step_relabel_ldlen : StepRelabel .ldlen := step_relabel _
-theorem step_relabel_ldelem (kind : CIL.NumericKind) : StepRelabel (.ldelem kind) := step_relabel _
-theorem step_relabel_ldelem_ref : StepRelabel .ldelem_ref := step_relabel _
-theorem step_relabel_stelem (kind : CIL.NumericKind) : StepRelabel (.stelem kind) := step_relabel _
-theorem step_relabel_stelem_ref : StepRelabel .stelem_ref := step_relabel _
-theorem step_relabel_dup : StepRelabel .dup := step_relabel _
-theorem step_relabel_pop : StepRelabel .pop := step_relabel _
-theorem step_relabel_br (target : Nat) : StepRelabel (.br target) := step_relabel _
-theorem step_relabel_switch (targets : List Nat) : StepRelabel (.switch targets) := step_relabel _
-theorem step_relabel_bge (target : Nat) : StepRelabel (.bge target) := step_relabel _
-theorem step_relabel_blt (target : Nat) : StepRelabel (.blt target) := step_relabel _
-
 #print axioms step_relabel
 
 /-- An expected step that throws is matched by the same throw from the relabeled step at the
