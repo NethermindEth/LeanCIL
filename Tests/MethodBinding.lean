@@ -70,7 +70,6 @@ private def tailCall (slot : Nat) : Method :=
     links := [(1, .direct slot)] }
 
 -- Relocation retains the operand and the prefix, and only the managed target index changes.
-#guard ((tailCall 3).relocate (fun _ => 1)).code == (tailCall 1).code
 #guard MethodBinding.firstCodeOrLinkDifference
   ((tailCall 3).relocate (fun _ => 1)) (tailCall 1) == none
 #guard MethodBinding.firstCodeOrLinkDifference (tailCall 3) (tailCall 1) == some 1

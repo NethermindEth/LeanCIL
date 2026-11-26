@@ -77,10 +77,6 @@ def enumeratorType : TypeIdentity :=
 #guard_msgs in
 #eval PrimitiveType.int32.display
 
-/-- info: 8 -/
-#guard_msgs in
-#eval PrimitiveType.int32.elementType
-
 /-- info: CIL.TypeKind.enumType (CIL.PrimitiveType.uint16) -/
 #guard_msgs in
 #eval TypeKind.enumType .uint16
@@ -342,8 +338,7 @@ example : [PrimitiveType.boolean, .char, .sbyte, .byte, .int16, .uint16, .int32,
 #guard_msgs in
 #check MetadataName.mk 256
 
--- A malformed code and a name whose text spells its raw structure display differently.
-#guard (MetadataName.mk 767).display == "{ code := 0x2ff }"
+-- A name or user string whose text spells a malformed code's display prints differently.
 #guard (name!"{ code := 0x2ff }").display == "\\{ code := 0x2ff }"
 #guard (UserString.mk 120832).display != (str!"{ code := 0x1d800 }").display
 

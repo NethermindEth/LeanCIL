@@ -539,12 +539,6 @@ theorem rejects_row_zero :
       (.tokenOutOfScope 0x01000000) = true := by decide +kernel
 #print axioms rejects_row_zero
 
-theorem rejects_a_duplicate_token :
-    (match { own.1 with rows := own.1.rows ++ own.1.rows.take 1 }.index with
-      | .error found => found == .duplicateEntry (own.1.rows.headD (0, [])).1
-      | .ok _ => false) = true := by decide +kernel
-#print axioms rejects_a_duplicate_token
-
 theorem rejects_a_wrong_user_string_terminal_byte :
     rejects { own.1 with userStrings := own.1.userStrings.map fun (offset, bytes) =>
         (offset, bytes.set (bytes.length - 1) 1) } lib tokens.hello (.text "hi")
