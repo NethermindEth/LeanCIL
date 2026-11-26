@@ -241,9 +241,9 @@ internal static class VerificationSelection
             .SelectMany(block => Documentation.CommandLines(block))
             .SelectMany(entry => Matches(entry.Command, @"(Examples/[\w./-]+\.(?:lean|cs))"));
 
-    internal static string[] Select(IEnumerable<string> paths, string eventName = "pull_request", string? root = null)
+    internal static string[] Select(IReadOnlyDictionary<string, HashSet<string>> inputs,
+        IEnumerable<string> paths, string eventName = "pull_request")
     {
-        var inputs = SuiteInputs(root);
         var all = inputs.Keys.Order(StringComparer.Ordinal).ToArray();
         if (eventName != "pull_request") return all;
         var selected = new HashSet<string>(StringComparer.Ordinal);

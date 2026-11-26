@@ -10,7 +10,10 @@ using System.Text.RegularExpressions;
 
 var checks = 0;
 var root = VerificationSelection.Root;
-string[] All() => VerificationSelection.SuiteInputs().Keys.Order(StringComparer.Ordinal).ToArray();
+var suiteInputs = VerificationSelection.SuiteInputs();
+var allSuites = suiteInputs.Keys.Order(StringComparer.Ordinal).ToArray();
+string[] Select(IEnumerable<string> paths, string eventName = "pull_request") =>
+    VerificationSelection.Select(suiteInputs, paths, eventName);
 void Require(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException(message);
@@ -29,9 +32,9 @@ void Test(string name, Action action)
 
 Test("longest-first preserves selection", () =>
 {
-    var selected = VerificationSelection.Select(["Tests/Loops.cs", "Tests/UnsafeLayouts.cs", "Tests/IntegerMath.cs"]);
+    var selected = Select(["Tests/Loops.cs", "Tests/UnsafeLayouts.cs", "Tests/IntegerMath.cs"]);
     Equal(VerificationSelection.Schedule(selected), ["unsafe", "loops", "math"]);
-    Equal(VerificationSelection.Schedule(All()).Order(StringComparer.Ordinal), All());
+    Equal(VerificationSelection.Schedule(allSuites).Order(StringComparer.Ordinal), allSuites);
     Equal(VerificationSelection.Schedule(["loops", "newlongsuite"]), ["newlongsuite", "loops"]);
     Equal(VerificationSelection.Schedule([]), []);
 });
@@ -49,20 +52,20 @@ Test("measured schedule reduces estimated tail without skipping jobs", () =>
         }
         return available.UnorderedItems.Max(item => item.Element);
     }
-    Require(Makespan(VerificationSelection.Schedule(All()), 8) < Makespan(All(), 4),
+    Require(Makespan(VerificationSelection.Schedule(allSuites), 8) < Makespan(allSuites, 4),
         "Measured scheduling did not improve the simulated tail");
 });
 Test("short groups preserve selection, isolation and bounded duration", () =>
 {
     var durations = VerificationSelection.ReadDurations();
-    var groups = VerificationSelection.Groups(All());
-    Equal(groups.SelectMany(group => group.Suites).Order(StringComparer.Ordinal), All());
+    var groups = VerificationSelection.Groups(allSuites);
+    Equal(groups.SelectMany(group => group.Suites).Order(StringComparer.Ordinal), allSuites);
     // Every job repeats setup and restores, so a full run must not go back to one job per suite.
     double Seconds(VerificationSelection.Group group) => group.Suites.Sum(suite => durations[suite]) +
         (group.Libraries ? VerificationSelection.LibraryMeasurementSeconds : 0);
     var target = VerificationSelection.GroupSeconds(durations);
     var longest = durations.MaxBy(suite => suite.Value);
-    Require(groups.Length <= All().Length / 3, "Suites were not packed: " + groups.Length + " jobs");
+    Require(groups.Length <= allSuites.Length / 3, "Suites were not packed: " + groups.Length + " jobs");
     Require(target == Math.Min(longest.Value, durations.Values.Sum() / VerificationSelection.Runners),
         "Packed jobs must fit under the longest suite and one runner's share");
     // A refreshed table moves the target; the longest suites may then swap places without unbalancing a run.
@@ -123,14 +126,14 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
 });
 Test("docs only", () =>
 {
-    Equal(VerificationSelection.Select(["README.md", "docs/design.md"]), ["docs"]);
-    Equal(VerificationSelection.Select(["skills/leancil/SKILL.md"]), ["docs"]);
-    Equal(VerificationSelection.Select(["AGENTS.md", "LICENSE"]), []);
+    Equal(Select(["README.md", "docs/design.md"]), ["docs"]);
+    Equal(Select(["skills/leancil/SKILL.md"]), ["docs"]);
+    Equal(Select(["AGENTS.md", "LICENSE"]), []);
 });
 Test("main and manual always full", () =>
 {
     foreach (var eventName in new[] { "push", "workflow_dispatch" })
-        Equal(VerificationSelection.Select(["README.md"], eventName), All());
+        Equal(Select(["README.md"], eventName), allSuites);
 });
 Test("test entry points", () =>
 {
@@ -139,72 +142,71 @@ Test("test entry points", () =>
         "Tests/BindingFamilies/Binding.lean.in", "Tests/BindingFamilies/Methods.cs",
         "Tests/BindingFamilies/Support.lean", "Tests/GatePlans.cs", "Tests/PublicProofSurface.lean" })
     {
-        var selected = VerificationSelection.Select([path]);
+        var selected = Select([path]);
         Require(selected.Contains("core") && selected.All(suite => suite is "core" or "docs"),
             "Binding and public-surface fixtures must select core without unrelated suites: " + path);
     }
-    Equal(VerificationSelection.Select(["Tests/Loops.cs"]), ["loops"]);
-    Equal(VerificationSelection.Select(["Tests/LoopVariants/CountCallsDiscarded.lean.in"]), ["loops"]);
+    Equal(Select(["Tests/Loops.cs"]), ["loops"]);
+    Equal(Select(["Tests/LoopVariants/CountCallsDiscarded.lean.in"]), ["loops"]);
     foreach (var path in new[] { "Tests/ProofCostFrontend.cs", "Tests/ProofCostDiscovery.lean" })
-        Equal(VerificationSelection.Select([path]), ["core"]);
-    Equal(VerificationSelection.Select(["Tests/SteppingScaling.cs"]), ["stepping"]);
+        Equal(Select([path]), ["core"]);
+    Equal(Select(["Tests/SteppingScaling.cs"]), ["stepping"]);
     foreach (var module in new[] { "OperationFacts", "VectorLocalCalls", "SimdCarryCalls" })
-        Equal(VerificationSelection.Select([$"Tests/{module}.lean"]), ["core"]);
-    Equal(VerificationSelection.Select(["Tests/ProofOutlines.cs"]),
+        Equal(Select([$"Tests/{module}.lean"]), ["core"]);
+    Equal(Select(["Tests/ProofOutlines.cs"]),
         ["outlines-buffers", "outlines-control", "outlines-objects"]);
-    Equal(VerificationSelection.Select(["Tests/StructOutlines.cs"]), ["structoutlines"]);
-    Equal(VerificationSelection.Select(["Tests/ReceiverLoopOutlines.cs"]), ["receiveroutlines"]);
-    Equal(VerificationSelection.Select(["Tests/WordReaderOutlines.cs"]), ["wordreader"]);
-    Equal(VerificationSelection.Select(["Tests/SavedWordReaderOutlines.cs"]), ["savedwordreader"]);
-    Equal(VerificationSelection.Select(["Tests/WordReaderOutlineSupport.cs"]), ["savedwordreader", "wordreader"]);
-    Equal(VerificationSelection.Select(["Tests/ProgramClosures/Proof.lean"]), ["closures"]);
-    Equal(VerificationSelection.Select(["Tests/SkipInitialization.cs"]), ["unsafe"]);
-    Equal(VerificationSelection.Select(["Tests/NullReferences.cs"]), ["unsafe"]);
+    Equal(Select(["Tests/StructOutlines.cs"]), ["structoutlines"]);
+    Equal(Select(["Tests/ReceiverLoopOutlines.cs"]), ["receiveroutlines"]);
+    Equal(Select(["Tests/WordReaderOutlines.cs"]), ["wordreader"]);
+    Equal(Select(["Tests/SavedWordReaderOutlines.cs"]), ["savedwordreader"]);
+    Equal(Select(["Tests/WordReaderOutlineSupport.cs"]), ["savedwordreader", "wordreader"]);
+    Equal(Select(["Tests/ProgramClosures/Proof.lean"]), ["closures"]);
+    Equal(Select(["Tests/SkipInitialization.cs"]), ["unsafe"]);
+    Equal(Select(["Tests/NullReferences.cs"]), ["unsafe"]);
     foreach (var name in new[] { "BatchVerification", "VerificationCache", "VerificationReuse" })
-        Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["core"]);
-    Equal(VerificationSelection.Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
-    Equal(VerificationSelection.Select(["Tests/MetadataDifferential.cs"]), ["evidence"]);
-    Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]),
+        Equal(Select([$"Tests/{name}.cs"]), ["core"]);
+    Equal(Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
+    Equal(Select(["Tests/MetadataDifferential.cs"]), ["evidence"]);
+    Equal(Select(["Tests/GeneratedEvidence.cs"]),
         ["assemblies", "core", "dispatch", "enums", "evidence", "excluded", "generics", "imports", "intrinsics",
             "lookups", "scaling", "unsafe"]);
-    Equal(VerificationSelection.Select(["Tests/GenericOwners.cs"]), ["generics"]);
-    Equal(VerificationSelection.Select(["Tests/MultiAssemblyGenerics.cs"]), ["assemblies"]);
-    Equal(VerificationSelection.Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies", "audit", "cli"]);
-    Equal(VerificationSelection.Select(["Tests/DeepVerify.cs"]), ["audit"]);
-    Equal(VerificationSelection.Select(["Tests/GenericLayouts.cs"]), ["generics"]);
-    Equal(VerificationSelection.Select(["Tests/NativeManagedDispatch.cs"]), ["dispatch"]);
-    Equal(VerificationSelection.Select(["Tests/NativeMethodTables.lean"]), ["dispatch"]);
-    Equal(VerificationSelection.Select(["Tests/ConstrainedEvidence.lean"]), ["dispatch"]);
-    Equal(VerificationSelection.Select(["Tests/StackAllocationEvidence.lean"]), ["dispatch"]);
-    Equal(VerificationSelection.Select(["Tests/ManagedPointerValues.lean"]), ["evidence"]);
-    Equal(VerificationSelection.Select(["Tests/CompilerCorpusCoverage.cs"]), ["dispatch"]);
+    Equal(Select(["Tests/GenericOwners.cs"]), ["generics"]);
+    Equal(Select(["Tests/MultiAssemblyGenerics.cs"]), ["assemblies"]);
+    Equal(Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies", "audit", "cli"]);
+    Equal(Select(["Tests/DeepVerify.cs"]), ["audit"]);
+    Equal(Select(["Tests/GenericLayouts.cs"]), ["generics"]);
+    Equal(Select(["Tests/NativeManagedDispatch.cs"]), ["dispatch"]);
+    Equal(Select(["Tests/NativeMethodTables.lean"]), ["dispatch"]);
+    Equal(Select(["Tests/ConstrainedEvidence.lean"]), ["dispatch"]);
+    Equal(Select(["Tests/StackAllocationEvidence.lean"]), ["dispatch"]);
+    Equal(Select(["Tests/ManagedPointerValues.lean"]), ["evidence"]);
+    Equal(Select(["Tests/CompilerCorpusCoverage.cs"]), ["dispatch"]);
     foreach (var name in new[]
         { "AggregateSpans", "ViewAccessors", "BinarySpans", "SpanConstructors", "AggregateSpanFill", "AggregateArrays" })
-        Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["unsafe"]);
-    Equal(VerificationSelection.Select(["Tests/VectorStorage.cs"]), ["unsafe"]);
-    Equal(VerificationSelection.Select(["Tests/VectorStorage.lean"]), ["unsafe"]);
+        Equal(Select([$"Tests/{name}.cs"]), ["unsafe"]);
+    Equal(Select(["Tests/VectorStorage.cs"]), ["unsafe"]);
+    Equal(Select(["Tests/VectorStorage.lean"]), ["unsafe"]);
     // Sources compiled into the extractor change the self-admission scan, as does its baseline.
-    Equal(VerificationSelection.Select(["Tests/SelfAdmissionBaseline.txt"]), ["blockers"]);
-    Equal(VerificationSelection.Select(["Tests/ExampleAdmissionBaseline.txt"]), ["blockers"]);
+    Equal(Select(["Tests/SelfAdmissionBaseline.txt"]), ["blockers"]);
+    Equal(Select(["Tests/ExampleAdmissionBaseline.txt"]), ["blockers"]);
     // Suites run the built command, so a script compiled into it selects every suite; `leancil workspace`,
     // `watch`, contract export and verify reports are reached by no include edge.
-    var everySuite = VerificationSelection.SuiteInputs().Keys.Order(StringComparer.Ordinal).ToArray();
     foreach (var script in new[]
         { "scripts/ContractExport.cs", "scripts/ProofWorkspace.cs", "scripts/ProofWatch.cs", "scripts/VerifyReports.cs" })
-        Equal(VerificationSelection.Select([script]), everySuite);
+        Equal(Select([script]), allSuites);
 });
 Test("proof and transitive imports", () =>
 {
-    Equal(VerificationSelection.Select(["Examples/Proofs/Countdown.lean"]), ["cli", "contracts", "fsharp", "loops"]);
-    Equal(VerificationSelection.Select(["Tests/Support.lean"]), All());
-    Equal(VerificationSelection.Select(["Tests/UnsafeCallEvidence.lean"]), ["unsafe"]);
+    Equal(Select(["Examples/Proofs/Countdown.lean"]), ["cli", "contracts", "fsharp", "loops"]);
+    Equal(Select(["Tests/Support.lean"]), allSuites);
+    Equal(Select(["Tests/UnsafeCallEvidence.lean"]), ["unsafe"]);
     // A proof a documented command verifies changes what that command prints.
-    Require(VerificationSelection.Select(["Examples/Proofs/PastEnd.lean"]).Contains("docs"),
+    Require(Select(["Examples/Proofs/PastEnd.lean"]).Contains("docs"),
         "A proof the getting-started walkthrough verifies does not select the docs suite");
 });
 Test("dynamic proof paths", () =>
 {
-    bool Owns(string path, string suite) => VerificationSelection.Select([path]).Contains(suite);
+    bool Owns(string path, string suite) => Select([path]).Contains(suite);
     Require(Owns("Examples/Proofs/Negate64.lean", "integer"), "Missing integer proof owner");
     Require(Owns("Examples/Proofs/GenericIdentity.lean", "contracts"), "Missing generic proof owner");
     Require(Owns("Examples/Proofs/ConstructorValue.lean", "fsharp"), "Missing F# proof owner");
@@ -214,28 +216,28 @@ Test("shared unknown and workflow inputs", () =>
     foreach (var path in new[] { "CIL/Safety/Memory.lean", "Extractor/UnsafeModels.cs", "global.json",
         "Examples/Assembly/SkipInitialization.cs", "Tests/NewTest.cs", ".github/workflows/verification.yml",
         "scripts/SelectVerification.cs" })
-        Equal(VerificationSelection.Select([path]), All());
+        Equal(Select([path]), allSuites);
 });
 Test("other workflows do not rerun suites", () =>
 {
-    Equal(VerificationSelection.Select([".github/workflows/arm64-aes.yml", ".github/workflows/runtime-profiles.yml"]),
+    Equal(Select([".github/workflows/arm64-aes.yml", ".github/workflows/runtime-profiles.yml"]),
         []);
-    Equal(VerificationSelection.Select([".github/workflows/arm64-aes.yml", "Tests/Loops.cs"]), ["loops"]);
+    Equal(Select([".github/workflows/arm64-aes.yml", "Tests/Loops.cs"]), ["loops"]);
 });
 Test("multiple changes and deleted paths", () =>
 {
-    Equal(VerificationSelection.Select(["README.md", "Tests/Loops.cs", "Tests/Division.cs"]),
+    Equal(Select(["README.md", "Tests/Loops.cs", "Tests/Division.cs"]),
         ["division", "docs", "loops"]);
-    Equal(VerificationSelection.Select(["Tests/Deleted.cs"]), All());
+    Equal(Select(["Tests/Deleted.cs"]), allSuites);
 });
 Test("every registered suite has its entry point", () =>
 {
-    Equal(VerificationSuites.Names().Order(StringComparer.Ordinal), All());
+    Equal(VerificationSuites.Names().Order(StringComparer.Ordinal), allSuites);
     Require(VerificationSuites.Names().Distinct(StringComparer.Ordinal).Count() == VerificationSuites.Names().Length,
         "A suite name is registered twice");
     foreach (IndependentSuite suite in VerificationSuites.Independent)
         Require(File.Exists(Path.Combine(root, suite.Script)), "No entry point: " + suite.Name);
-    foreach (var (suite, inputs) in VerificationSelection.SuiteInputs())
+    foreach (var (suite, inputs) in suiteInputs)
         Require(inputs.Count > 0, "No entry point: " + suite);
 });
 void MustReject(Action action)
@@ -403,39 +405,39 @@ Test("export leaf selection, strict files and shared inputs", () =>
         .Where(entry => !entry.Standalone && entry.Cohort != "resolution")
         .Select(entry => entry.Name).Order(StringComparer.Ordinal).ToArray();
     bool Selects(string path, string suite) =>
-        VerificationSelection.Select([path]).Contains(suite, StringComparer.Ordinal);
+        Select([path]).Contains(suite, StringComparer.Ordinal);
     foreach (string name in exports)
-        Require(All().Contains(name, StringComparer.Ordinal), "Missing selected export leaf: " + name);
+        Require(allSuites.Contains(name, StringComparer.Ordinal), "Missing selected export leaf: " + name);
     foreach (string name in bootstrap)
         Require(Selects("Tests/ContractExport.cs", name), "Bootstrap change lost " + name);
     foreach (ExportSuite entry in ExportVerificationSuites.FullPlan())
         Require(Selects("Tests/FullImportVerification.cs", entry.Name), "Full change lost " + entry.Name);
-    Equal(VerificationSelection.Select(["scripts/ExportVerificationSuites.cs"]), All());
-    Equal(VerificationSelection.Select(["scripts/VerificationSuites.cs"]), All());
-    Equal(VerificationSelection.Select(["Tests/ModularStaticExports.cs"]).Order(StringComparer.Ordinal),
+    Equal(Select(["scripts/ExportVerificationSuites.cs"]), allSuites);
+    Equal(Select(["scripts/VerificationSuites.cs"]), allSuites);
+    Equal(Select(["Tests/ModularStaticExports.cs"]).Order(StringComparer.Ordinal),
         ["exportsfullstatics", "exportsstatics"]);
-    Equal(VerificationSelection.Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
-    Equal(VerificationSelection.Select(["Tests/ContractDiscovery.cs"]), ["exportsdiscovery"]);
-    Equal(VerificationSelection.Select(["Tests/GenericLayoutImports.cs"]), ["exportstyped"]);
+    Equal(Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
+    Equal(Select(["Tests/ContractDiscovery.cs"]), ["exportsdiscovery"]);
+    Equal(Select(["Tests/GenericLayoutImports.cs"]), ["exportstyped"]);
     string[] typedFixtures =
         ["TypedImportInterface", "TypedIdentityProof", "TypedCopyProof", "TypedIdentityCaller", "TypedCopyCaller",
             "TypedChainCaller"];
     foreach (string name in typedFixtures)
-        Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]), ["exportstyped"]);
-    Equal(VerificationSelection.Select(["Tests/DerivedContractExports.cs"]), ["exportsderived"]);
-    Equal(VerificationSelection.Select(["Tests/InitializedExports.cs"]), ["exportsinitialized"]);
-    Equal(VerificationSelection.Select(["Tests/ProfileFamilies.cs"]), ["exportsprofiles"]);
+        Equal(Select(["Tests/ContractImports/" + name + ".lean"]), ["exportstyped"]);
+    Equal(Select(["Tests/DerivedContractExports.cs"]), ["exportsderived"]);
+    Equal(Select(["Tests/InitializedExports.cs"]), ["exportsinitialized"]);
+    Equal(Select(["Tests/ProfileFamilies.cs"]), ["exportsprofiles"]);
     foreach (var name in new[] { "ProfileFamilyContract", "ProfileFamilyProof", "ProfileFamilyCaller" })
-        Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]), ["exportsprofiles"]);
+        Equal(Select(["Tests/ContractImports/" + name + ".lean"]), ["exportsprofiles"]);
     string[] derivedFixtures =
         ["DerivedInterface", "DerivedPercentProof", "DerivedAddProof", "DerivedShiftCaller", "DerivedSumCaller"];
     foreach (string name in derivedFixtures)
-        Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]),
+        Equal(Select(["Tests/ContractImports/" + name + ".lean"]),
             name is "DerivedInterface" or "DerivedPercentProof"
                 ? ["exportsderived", "exportstransitiveoutcomes"] : ["exportsderived"]);
-    Equal(VerificationSelection.Select(["Tests/TransitiveOutcomes.cs"]), ["exportstransitiveoutcomes"]);
-    Equal(VerificationSelection.Select(["Tests/StagedBundleMutation.cs"]), ["exportstransitive"]);
-    Require(VerificationSelection.Select(["Tests/ImportedLayouts.lean"]).Contains("evidence", StringComparer.Ordinal),
+    Equal(Select(["Tests/TransitiveOutcomes.cs"]), ["exportstransitiveoutcomes"]);
+    Equal(Select(["Tests/StagedBundleMutation.cs"]), ["exportstransitive"]);
+    Require(Select(["Tests/ImportedLayouts.lean"]).Contains("evidence", StringComparer.Ordinal),
         "Imported-layout model evidence lost its existing suite owner");
     Equal(VerificationSelection.Schedule(exports).Order(StringComparer.Ordinal), exports);
     string runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
