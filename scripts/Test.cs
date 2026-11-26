@@ -123,7 +123,7 @@ if (suite is "all" or "evidence")
         "Tests/TranslationAudit.cs", "Tests/MetadataDifferential.cs", "Tests/CallSiteAgreement.cs"]);
 if (suite is "all" or "identity") projects.Add("Tests/Identities.cs");
 if (suite is "all" or "primitive") projects.Add("Tests/Strings.cs");
-if (suite is "all" or "blockers") projects.AddRange(["Tests/SelfAdmission.cs", "Tests/CanonicalMethods.cs"]);
+if (suite is "all" or "blockers") projects.AddRange(["Tests/SelfAdmission.cs", "Tests/ExampleAdmission.cs"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "generics") projects.AddRange(["Tests/GenericOwners.cs", "Tests/GenericLayouts.cs"]);
 if (suite is "all" or "unsafe")

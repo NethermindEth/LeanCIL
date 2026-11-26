@@ -154,7 +154,10 @@ string[] expected = ["admitted", "blocked", "blocked", "admitted", "blocked", "n
     "admitted", "notChecked", "notChecked", "blocked", "blocked", "admitted", "blocked", "blocked", "blocked"];
 Require(entries.Select(e => e.GetProperty("status").GetString()).SequenceEqual(expected), "Wrong entry classification");
 Require(entries[0].GetProperty("method").GetString() == "System.UInt64 Fixture::Admitted(System.UInt64,System.UInt64)" &&
-    entries[0].GetProperty("reachableMethods").GetInt32() == 1, "Admitted entry lost its resolved method");
+    entries[0].GetProperty("reachableMethods").GetInt32() == 1 &&
+    entries[0].GetProperty("decodedMethods").EnumerateArray().Select(method => method.GetString())
+        .SequenceEqual([entries[0].GetProperty("method").GetString()]),
+    "Admitted entry lost its resolved or extracted method");
 
 
 // Validation continues past the first construct, and each construct is one blocker however many sites and entries reach it.
@@ -393,7 +396,7 @@ Require(sites.Count == 2 && reaches.Count == 2 && chains.Count == 2 &&
 // LeanCIL's own assembly against its checked-in baseline, then the gate's decisions on altered baselines.
 const string selfAdmission = "Tests/SelfAdmission.cs";
 Run(["dotnet", "run", "--file", selfAdmission], streamOutput: true, progress: "Self-admission");
-Run(["dotnet", "run", "--file", "Tests/CanonicalMethods.cs"], streamOutput: true, progress: "Canonical methods");
+Run(["dotnet", "run", "--file", "Tests/ExampleAdmission.cs"], streamOutput: true, progress: "Example admission");
 Run(holeCommand, streamOutput: true, progress: "Hole corpus");
 var selfReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(At("artifacts/SelfAdmission/blockers.json")))
     .GetProperty("entries").EnumerateArray().ToArray();
@@ -411,6 +414,21 @@ string? Existing(string status) => selfReport.FirstOrDefault(e => e.GetProperty(
 // The exact admitted set passes; a lost admission, a removed method or an unrecorded gain each fail.
 var admittedMethods = selfReport.Where(e => e.GetProperty("status").GetString() == "admitted")
     .Select(e => e.GetProperty("signature").GetString()!).ToArray();
+// Each admitted method is extracted, and every method extracted for an admitted entry is itself admitted.
+string[] Unmatched(IEnumerable<string> admitted, IEnumerable<string> extracted)
+{
+    var difference = admitted.ToHashSet(StringComparer.Ordinal);
+    difference.SymmetricExceptWith(extracted);
+    return [.. difference.Order(StringComparer.Ordinal)];
+}
+var extractedMethods = selfReport.Where(e => e.GetProperty("status").GetString() == "admitted")
+    .SelectMany(e => e.GetProperty("decodedMethods").EnumerateArray()).Select(method => method.GetString()!);
+var unmatched = Unmatched(admittedMethods, extractedMethods);
+Require(unmatched.Length == 0,
+    "Extracted and admitted self-admission methods differ:\n" + string.Join('\n', unmatched));
+const string unadmitted = "System.Int32 Unadmitted::Extracted()";
+Require(Unmatched(admittedMethods, [.. extractedMethods, unadmitted]).SequenceEqual([unadmitted]),
+    "An extracted method that is not admitted went unreported");
 var exact = Gate(admittedMethods);
 Require(exact.Code == 0 && exact.Output.Contains("matching the baseline"),
     "The scan's own admitted set failed the gate:\n" + exact.Output);

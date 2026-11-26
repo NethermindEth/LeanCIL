@@ -194,7 +194,7 @@ internal static class VerificationSuites
             "they reject, and shared templates binding Rent's CoreLib constructor rows in two profiles"),
         new("blockers", "Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains, " +
             "profile-excluded branches, runtime-async refusal, self-admission, the admitted hole corpus and the " +
-            "self-admitted, example and fixture methods defined from their decoder"),
+            "methods extracted for the examples' admitted entries under each profile"),
         new("audit", "Tests/OleanAudit.cs",
             "theorem audits of replayed oleans, deep certificate reuse, and rejection of changed images, " +
             "proofs, replay inputs and auditors"),

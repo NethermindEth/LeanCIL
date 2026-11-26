@@ -182,7 +182,7 @@ Test("test entry points", () =>
     Equal(VerificationSelection.Select(["Tests/VectorStorage.lean"]), ["unsafe"]);
     // Sources compiled into the extractor change the self-admission scan, as does its baseline.
     Equal(VerificationSelection.Select(["Tests/SelfAdmissionBaseline.txt"]), ["blockers"]);
-    Equal(VerificationSelection.Select(["Tests/canonical-examples.txt"]), ["blockers"]);
+    Equal(VerificationSelection.Select(["Tests/ExampleAdmissionBaseline.txt"]), ["blockers"]);
     // Suites run the built command, so a script compiled into it selects every suite; `leancil workspace`,
     // `watch`, contract export and verify reports are reached by no include edge.
     var everySuite = VerificationSelection.SuiteInputs().Keys.Order(StringComparer.Ordinal).ToArray();

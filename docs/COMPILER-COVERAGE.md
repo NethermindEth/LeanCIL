@@ -98,17 +98,16 @@ positions that unrelated edits shift. Gaining or losing one still changes its so
 count and fails the gate. Any change to a source compiled into the extractor, or to the baseline,
 selects the suite.
 
-[CanonicalMethods.cs](../Tests/CanonicalMethods.cs) then reads the same report and lists the
-admitted methods the extraction defines from their decoder by `cil_decoded_method` rather than as
-a literal. It prints how many of the methods extracted for admitted entries that is, and a table
-that counts the other methods by their first live refusal: an opcode family that decodes to a hole
-or a call translated to another instruction. It compares the list with the
-checked-in [list](../Tests/canonical-methods.txt), named as the baseline names methods. A method
-that leaves the list fails the scan; a method that joins it fails until
-`dotnet run --file Tests/CanonicalMethods.cs -- --update` records it, so the list only grows.
+The suite also requires the methods the report extracts for admitted entries, its
+`decodedMethods`, to be exactly the admitted methods: each admitted method is extracted, and
+every method extracted for an admitted entry is itself admitted.
 
-The same script runs `leancil blockers` over every method `leancil list` prints for the examples
-assembly, under the `scalar`, `x64-sse42`, `x64-v3`, `x64-v4` and `arm64-advsimd` profiles at once,
-and compares the methods each defines from its decoder, as `<profile> <name>` lines, with a second checked-in
-[list](../Tests/canonical-examples.txt), by the same rules. The runs only read the built extractor, and the check fails
-if its hash changes while they run.
+[ExampleAdmission.cs](../Tests/ExampleAdmission.cs) runs `leancil blockers` over every method
+`leancil list` prints for the examples assembly, under the `scalar`, `x64-sse42`, `x64-v3`,
+`x64-v4` and `arm64-advsimd` profiles at once, and compares the methods each extracts for its
+admitted entries, as `<profile> <name>` lines named as the baseline names methods, with the
+checked-in [baseline](../Tests/ExampleAdmissionBaseline.txt). A closed generic instantiation an
+admitted entry calls is listed with it. A method that leaves the baseline fails the scan; a method
+that joins it fails until `dotnet run --file Tests/ExampleAdmission.cs -- --update` records it,
+so the baseline only grows. The runs only read the built extractor, and the check fails if its
+hash changes while they run.
