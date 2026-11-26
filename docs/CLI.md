@@ -259,8 +259,8 @@ whatever the entries' status. Each entry has one status:
 An admitted entry lists its extracted methods in `decodedMethods`; the extraction defines each
 from its decoder. A reachable method whose decoder refuses a live pc blocks its entry: the
 blocker's site names that method, the IL offset and instruction, and its message the pc and why
-the decoder refuses it (an unsupported opcode, or a call or construction whose translation differs
-from the decoder's instruction). Dead pcs decode to holes carrying their raw opcodes.
+the decoder refuses it (an opcode the decoder has no form for, or a call or construction whose
+operand and prefixes the decoder cannot bind). Dead pcs decode to holes carrying their raw opcodes.
 
 Each blocker is one unsupported construct (instruction, call, type, layout, method metadata or
 static constructor). It lists every site, with method, IL offset, instruction and the PDB source
