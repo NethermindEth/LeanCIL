@@ -112,7 +112,6 @@ import CIL.Safety.ReferenceArrayElements
 import CIL.Safety.InstructionMemoryLemmas
 import CIL.Safety.InstructionReferences
 import CIL.Safety.LiveState
-import CIL.Safety.LiveValues
 import CIL.Safety.LocalReferences
 import CIL.Safety.Memory
 import CIL.Safety.MemoryBelow

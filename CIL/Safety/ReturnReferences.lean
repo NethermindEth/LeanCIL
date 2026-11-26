@@ -1,4 +1,4 @@
-import CIL.Safety.LiveValues
+import CIL.Safety.ExecutionLifetime
 
 /-!
 # Returned references are valid
