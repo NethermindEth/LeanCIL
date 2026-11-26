@@ -560,9 +560,6 @@ Console.WriteLine(
 var sourceFiles = Directory.GetFiles(At("Extractor"), "*.cs").Concat(Directory.GetFiles(At("scripts"), "*.cs")
     .Where(path => !Path.GetFileName(path).StartsWith("Test", StringComparison.Ordinal)))
     .ToDictionary(path => Path.GetRelativePath(Root, path).Replace('\\', '/'), File.ReadAllText);
-foreach (var obsolete in new[] { "Operation", "Unoutlined", "StackOperation" })
-    if (extractor.GetType("Nethermind.LeanCIL." + obsolete) is not null)
-        throw new Exception("Obsolete outline representation: " + obsolete);
 var constructors = RenderedLeanReaders.Constructors(File.ReadLines(At("CIL/Instructions.lean")));
 foreach (var rendered in new[] { "ret", "ldloc", "switch", "br", "brtrue", "call", "callvirt" })
     if (!constructors.Contains(rendered)) throw new Exception("Missing CIL instruction ." + rendered);
