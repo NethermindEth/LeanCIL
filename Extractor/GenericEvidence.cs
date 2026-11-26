@@ -185,8 +185,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         ? $".spelledModified {Scope(type)} {Quote(type.FullName)}"
         : $".atom {Scope(type)} {Quote(type.FullName)} {HeadKind(type).ToLean()}";
 
-    /// <summary>The head kind of a named type: its definition's kind when it resolves, otherwise the
-    /// value-or-class marker its signature carries.</summary>
+    /// <summary>The head kind of a named type: its definition's kind when a pinned, platform or verified import
+    /// assembly defines it, otherwise the value-or-class marker its signature carries.</summary>
     internal static TypeHead HeadKind(TypeReference type) => Definition(type) switch
     {
         { IsInterface: true } => TypeHead.Interface,
@@ -195,11 +195,11 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         null => type.IsValueType ? TypeHead.Value : TypeHead.Class,
     };
 
-    // An unpinned assembly has no definition to read; Cecil sets IsValueType from the signature's marker. Lean
-    // refuses the atom whatever its head, since its platform table has no entry for a non-platform assembly.
+    // An unpinned assembly is read only from a verified import; Lean compares an imported owner's head with its
+    // typed export. Lean refuses any other unpinned atom whatever its head, as no platform entry names it.
     static TypeDefinition? Definition(TypeReference type) =>
         type.Scope is AssemblyNameReference name && PinnedAssemblies.Active is { } pins && !pins.Resolves(name)
-            ? null : type.Resolve();
+            ? pins.ImportedDefinition(type) : type.Resolve();
 
     // The head says whether the instances are values or references, as the signature's marker does.
     static string Head(GenericInstanceType generic) =>

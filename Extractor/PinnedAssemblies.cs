@@ -63,6 +63,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     readonly Dictionary<byte[], PEReader> readers = [];
     readonly Dictionary<PEReader, MetadataImage> metadata = [];
     readonly Dictionary<ModuleDefinition, (PEReader Reader, MetadataImage Metadata)> identityImages = [];
+    readonly Dictionary<AssemblyName, ModuleDefinition> importsByIdentity = [];
     readonly List<(Pin Pin, string Path, ModuleDefinition Module)> references = [];
 
     internal ModuleDefinition Selected { get; }
@@ -235,6 +236,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
             RegisterRows(module, image);
             registered = true;
             identityImages.Add(module, (reader, image));
+            importsByIdentity.Add(IdentityOf(module.Assembly.Name), module);
         }
         catch
         {
@@ -250,6 +252,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     {
         if (identityImages.Remove(module, out var image))
         {
+            importsByIdentity.Remove(IdentityOf(module.Assembly.Name));
             UnregisterRows(module);
             rowsByImage.Remove(image.Metadata);
             image.Reader.Dispose();
@@ -297,6 +300,12 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         AssemblyName identity = IdentityOf(name);
         return Platform(identity) && !byName.ContainsKey(identity.Name);
     }
+
+    /// <summary>The definition of <paramref name="type"/> in the verified import whose assembly its scope names, or
+    /// null when no registered import defines it.</summary>
+    internal TypeDefinition? ImportedDefinition(TypeReference type) =>
+        type.Scope is AssemblyNameReference name && importsByIdentity.TryGetValue(IdentityOf(name), out var module)
+            ? module.GetType(type.FullName) : null;
 
     /// <summary>Whether <see cref="Resolve(AssemblyNameReference)"/> answers the reference rather than rejecting it.
     /// </summary>
