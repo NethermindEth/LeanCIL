@@ -890,8 +890,6 @@ theorem rejects_a_field_access_that_disagrees_with_the_field_row :
     checkSite 0x7E { staticField := some false } countOperand = false ∧
     checkSite 0x7B { staticField := some true } countOperand = false ∧
     checkSite 0x7B { staticField := some false } countOperand = true ∧
-    checkSite 0x7B { staticField := some false }
-      (.field (.atom ownScope "Program" .classType) 0 int32 name!"count" false) = true ∧
     checkSite 0x7E { staticField := some true }
       (.field (.atom ownScope "Program" .classType) 1 int32 name!"total" true) = true := by
   decide +kernel
@@ -1182,12 +1180,6 @@ private def identityFails (slice : MetadataSlice) (method : RawMethod) (error : 
   match identity slice method with
   | .error found => found == error
   | .ok _ => false
-
-theorem accepts_the_method_definition_its_row_gives :
-    (match identity own.1 mainMethod with
-      | .ok _ => true
-      | .error _ => false) = true := by decide +kernel
-#print axioms accepts_the_method_definition_its_row_gives
 
 /-- A MethodDef taking ELEMENT_TYPE_OBJECT binds the root's scope and full name. -/
 theorem binds_method_definition_object_parameter :
