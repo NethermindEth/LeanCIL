@@ -414,21 +414,17 @@ string? Existing(string status) => selfReport.FirstOrDefault(e => e.GetProperty(
 // The exact admitted set passes; a lost admission, a removed method or an unrecorded gain each fail.
 var admittedMethods = selfReport.Where(e => e.GetProperty("status").GetString() == "admitted")
     .Select(e => e.GetProperty("signature").GetString()!).ToArray();
-// Each admitted method is extracted, and every method extracted for an admitted entry is itself admitted.
-string[] Unmatched(IEnumerable<string> admitted, IEnumerable<string> extracted)
-{
-    var difference = admitted.ToHashSet(StringComparer.Ordinal);
-    difference.SymmetricExceptWith(extracted);
-    return [.. difference.Order(StringComparer.Ordinal)];
-}
+// Each admitted method is extracted; an admitted entry may also extract closed generic callees it reaches.
+string[] Unextracted(IEnumerable<string> admitted, IEnumerable<string> extracted) =>
+    [.. admitted.Except(extracted, StringComparer.Ordinal).Order(StringComparer.Ordinal)];
 var extractedMethods = selfReport.Where(e => e.GetProperty("status").GetString() == "admitted")
     .SelectMany(e => e.GetProperty("decodedMethods").EnumerateArray()).Select(method => method.GetString()!);
-var unmatched = Unmatched(admittedMethods, extractedMethods);
-Require(unmatched.Length == 0,
-    "Extracted and admitted self-admission methods differ:\n" + string.Join('\n', unmatched));
-const string unadmitted = "System.Int32 Unadmitted::Extracted()";
-Require(Unmatched(admittedMethods, [.. extractedMethods, unadmitted]).SequenceEqual([unadmitted]),
-    "An extracted method that is not admitted went unreported");
+var unextracted = Unextracted(admittedMethods, extractedMethods);
+Require(unextracted.Length == 0,
+    "Admitted self-admission methods were not extracted:\n" + string.Join('\n', unextracted));
+Require(Unextracted(admittedMethods, extractedMethods.Where(method => method != admittedMethods[0]))
+        .SequenceEqual([admittedMethods[0]]),
+    "An admitted method that was not extracted went unreported");
 var exact = Gate(admittedMethods);
 Require(exact.Code == 0 && exact.Output.Contains("matching the baseline"),
     "The scan's own admitted set failed the gate:\n" + exact.Output);
