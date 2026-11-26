@@ -39,25 +39,6 @@ theorem instructions_append (first second : List CIL.Instruction) (stack : List 
       rcases result with ⟨memory, values⟩
       exact ih values memory
 
-/-- A fault in a prefix of straight-line code is the fault of the whole sequence. -/
-theorem instruction_fault_cannot_be_erased (first second : List CIL.Instruction)
-    (stack : List Value)
-    (m : Memory) (fault : ExecutionFault) (h : instructions first stack m = .error fault) :
-    instructions (first ++ second) stack m = .error fault := by
-  rw [instructions_append, h]
-  rfl
-
-theorem successful_instruction_prefix (first second : List CIL.Instruction) (stack : List Value)
-    (m final : Memory) (values : List Value)
-    (h : instructions (first ++ second) stack m = .ok (final, values)) :
-    ∃ intermediate stack', instructions first stack m = .ok (intermediate, stack') := by
-  rw [instructions_append] at h
-  cases hi : instructions first stack m with
-  | error fault => simp [hi, Except.bind] at h
-  | ok result =>
-    rcases result with ⟨memory, stack'⟩
-    exact ⟨memory, stack', rfl⟩
-
 /-- Reference validity is independent of readable initialization and access
     width. A span's accessible bytes are checked by the memory operation. -/
 def Value.Valid (m : Memory) : Value → Prop
@@ -1514,13 +1495,6 @@ theorem instruction_effect (operation : CIL.Instruction) (stack values : List Va
     (m result : Memory)
     (h : instruction operation stack m = .ok (result, values)) : InstructionEffect m result :=
   (instruction_contract _ _ _ _ _ h).effect
-
-theorem checked_write_preserves_wellFormed (m result : Memory) (r : Reference)
-    (bytes : List (BitVec 8)) (alignment : Nat) (reference : ManagedReference) (width : Nat)
-    (hm : m.WellFormed)
-    (h : checkedAt reference width (write m r bytes alignment) = .ok result) :
-    result.WellFormed := by
-  exact write_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok h)
 
 theorem storeValue_preserves_wellFormed (m result : Memory) (reference : ManagedReference)
     (value : CIL.Value) (hm : m.WellFormed)

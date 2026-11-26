@@ -182,11 +182,6 @@ def form (m : Memory) (r : Reference) : Checked Reference := do
   let a ← liveAllocation m r.allocation
   if validPosition a r.offset then return r else .error .invalidReference
 
-/-- `null` or an address that forms. -/
-def validManagedReference (m : Memory) : ManagedReference → Bool
-  | .null => true
-  | .address r => match form m r with | .ok _ => true | .error _ => false
-
 /-- Offset multiplication and addition wrap at native width. A wrapped result
     retains its allocation identity and must pass formation validity anew. -/
 def add (m : Memory) (r : Reference) (elementSize : Nat) (offset : BitVec 64) :

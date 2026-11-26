@@ -4,44 +4,16 @@ import CIL.Safety.FrameOwnership
 /-!
 # Steps only extend the allocation table
 
-Checked writes, value stores, instructions and whole steps each yield an
-`AllocationExtension`: no existing allocation changes its lifetime or layout, and identities
-are never reused. `ExecutionLifetime` handles teardown, which can end an allocation. The
-watermark predicates `OwnedAbove` record that a frame owns only allocations made after a
-given identity, which `ExecutionLifetime` uses to protect a caller's storage.
+Every successful step yields an `AllocationExtension`: no existing allocation changes its
+lifetime or layout, and identities are never reused. `ExecutionLifetime` handles teardown,
+which can end an allocation. The watermark predicates `OwnedAbove` record that a frame owns
+only allocations made after a given identity, which `ExecutionLifetime` uses to protect a
+caller's storage.
 -/
 
 namespace CIL.Safety
 
 set_option maxHeartbeats 800000
-
-theorem checked_write_extends_allocations (m result : Memory) (r : Reference)
-    (bytes : List (BitVec 8)) (alignment : Nat) (reference : ManagedReference) (width : Nat)
-    (h : checkedAt reference width (write m r bytes alignment) = .ok result) :
-    AllocationExtension m result := by
-  exact write_extends_allocations _ _ _ _ _ (checkedAt_ok h)
-
-theorem storeValue_extends_allocations (m result : Memory) (reference : ManagedReference)
-    (value : CIL.Value) (h : storeValue m reference value = .ok result) :
-    AllocationExtension m result := by
-  exact (storeValue_effect _ _ _ _ h).allocations
-
-theorem memoryInstruction_extends_allocations (operation : CIL.MemoryOp)
-    (stack values : List Value) (m result : Memory)
-    (h : memoryInstruction operation stack m = .ok (result, values)) :
-    AllocationExtension m result := by
-  exact (memoryInstruction_effect _ _ _ _ _ h).allocations
-
-theorem instruction_extends_allocations (operation : CIL.Instruction) (stack values : List Value)
-    (m result : Memory) (h : instruction operation stack m = .ok (result, values)) :
-    AllocationExtension m result := by
-  exact (instruction_effect _ _ _ _ _ h).allocations
-
-theorem staticInstruction_extends_allocations (body : CIL.Method) (pc : Nat)
-    (operation : CIL.MemoryOp) (stack values : List Value) (m result : Memory)
-    (h : staticInstruction body pc operation stack m = .ok (result, values)) :
-    AllocationExtension m result := by
-  exact (staticInstruction_effect _ _ _ _ _ _ _ h).allocations
 
 theorem step_extends_allocations (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)

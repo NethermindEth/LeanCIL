@@ -4,9 +4,9 @@ import CIL.Safety.ViewReuse
 # Memory lemmas
 
 Basic facts about the checked memory operations of `CIL/Safety/Memory.lean`: formation and
-pointer arithmetic keep the allocation identity, successful accesses imply liveness, bounds
-and authority, allocation hands out a fresh uninitialized identity, writes touch only their
-target and grant read-back authority, and well-formedness is preserved.
+pointer arithmetic keep the allocation identity, successful accesses stay within a live
+allocation, allocation hands out a fresh identity, writes initialize their bytes and grant
+read-back authority, reads require initialized bytes, and well-formedness is preserved.
 -/
 
 namespace CIL.Safety
@@ -71,39 +71,6 @@ theorem access_within_allocation (m : Memory) (r : Reference) (width alignment :
             by assumption⟩
         · simp at h
 
-theorem access_requires_permission (m : Memory) (r : Reference) (width alignment : Nat)
-    (writing : Bool) (h : access m r width alignment writing = .ok ()) :
-    ∀ i ∈ List.range width, permitted m writing { r with offset := r.offset + i } = true := by
-  unfold access at h
-  cases hf : form m r <;> simp only [hf, Bind.bind, Except.bind] at h
-  · cases h
-  · cases ha : liveAllocation m r.allocation <;> simp only [ha] at h
-    · cases h
-    · split at h
-      · simp at h
-      · simp only [Pure.pure, Except.pure] at h
-        split at h
-        · split at h
-          · split at h
-            · simp at h
-            · split at h
-              · rename_i hall
-                simpa using hall
-              · cases h
-          · simp at h
-        · simp at h
-
-theorem expired_reference (m : Memory) (id : AllocationId) (a : Allocation)
-    (h : m.allocations id = some a) (offset : Nat) :
-    form (expire m id) { allocation := id, offset } = .error .expiredLifetime := by
-  simp [form, liveAllocation, expire, h, Bind.bind, Except.bind]
-
-theorem skipInit_preserves_memory (m result : Memory) (r : Reference)
-    (h : skipInit m r = .ok result) : result = m := by
-  simp only [skipInit] at h
-  cases ha : form m r <;> simp [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  exact h.symm
-
 /-- Allocation returns the next identity and advances the counter, so identities are
     never reused. -/
 theorem allocation_identity_fresh (m : Memory) (a : Allocation) (id : AllocationId)
@@ -116,18 +83,6 @@ theorem allocation_identity_fresh (m : Memory) (a : Allocation) (id : Allocation
     · cases h
     · cases h
       exact ⟨rfl, rfl⟩
-
-theorem allocation_bytes_uninitialized (m : Memory) (a : Allocation) (id : AllocationId)
-    (result : Memory)
-    (h : allocate m a = .ok (id, result)) (offset : Nat) :
-    (result.cells id offset).initialized = false := by
-  simp only [allocate] at h
-  split at h
-  · cases h
-  · split at h
-    · cases h
-    · cases h
-      simp
 
 theorem allocation_lookup (m : Memory) (a : Allocation) (id : AllocationId) (result : Memory)
     (h : allocate m a = .ok (id, result)) : result.allocations id = some a := by

@@ -10,15 +10,6 @@ memory the caller receives and none of them is a home.
 
 namespace CIL.Safety
 
-/-- Values that pass the result check, under any fault relocation, are valid in that memory. -/
-theorem checkedValues_mapError_valid (m : Memory) (values result : List Value)
-    (locate : ExecutionFault → α)
-    (h : (values.mapM (checkedValue m)).mapError locate = .ok result) : ValuesValid m result := by
-  cases hc : values.mapM (checkedValue m) <;> simp only [hc, Except.mapError] at h
-  · cases h
-  · cases h
-    exact (checkedValues_valid _ _ _ hc).2
-
 /-- Normal results have passed the reference check after frame expiration.
     This includes results returning through arbitrary nested call chains. -/
 theorem run_result_valid (program : CIL.Program) (fuel method pc : Nat)

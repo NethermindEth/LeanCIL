@@ -21,19 +21,6 @@ theorem makeLocal_fresh (m result : Memory) (activation : Nat) (kind : CIL.Local
 
 #print axioms makeLocal_fresh
 
-theorem makeLocals_fresh (m result : Memory) (activation : Nat) (kinds : List CIL.LocalKind)
-    (initializers : List CIL.Value) (slots : List LocalSlot) (owned : List AllocationId)
-    (h : makeLocals activation kinds initializers m = .ok (slots, owned, result)) :
-    FreshOwned m result owned := by
-  exact (makeLocals_setup _ _ _ _ _ _ _ h).fresh
-
-theorem makeParameterHomes_fresh (m result : Memory) (activation : Nat)
-    (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
-    (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
-    (h : makeParameterHomes activation parameters args m = .ok (homes, owned, result)) :
-    FreshOwned m result owned := by
-  exact (makeParameterHomes_setup _ _ _ _ _ _ _ h).fresh
-
 theorem enterFrame_fresh (body : CIL.Method) (args : List Value) (m result : Memory)
     (frame : Frame)
     (h : enterFrame body args m = .ok (frame, result)) : FreshOwned m result frame.owned := by

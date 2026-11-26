@@ -11,13 +11,6 @@ what lets a caller's facts about its own memory survive a call.
 
 namespace CIL.Safety
 
-theorem store_numeric_local_preserves_memory_below (m result : Memory) (kind : CIL.LocalKind)
-    (r : Reference) (value : CIL.Value) (slot : LocalSlot) (watermark : Nat)
-    (fresh : watermark ≤ r.allocation)
-    (h : storeLocal m (.bytes kind r) (.scalar value) = .ok (slot, result)) :
-    MemoryBelow watermark m result := by
-  exact storeLocal_memory_below (slot := .bytes kind r) fresh h
-
 theorem makeLocal_preserves_caller_memory (m result : Memory) (activation : Nat)
     (kind : CIL.LocalKind) (initial : CIL.Value) (slot : LocalSlot) (owned : List AllocationId)
     (h : makeLocal activation kind initial m = .ok (slot, owned, result)) :
@@ -31,20 +24,6 @@ theorem makeLocals_preserves_caller_memory (m result : Memory) (activation : Nat
     MemoryBelow m.nextIdentity m result := by
   exact (makeLocals_setup _ _ _ _ _ _ _ h).below
 
-theorem initialize_parameter_preserves_caller_memory (m home result : Memory) (activation : Nat)
-    (kind : CIL.LocalKind) (slot final : LocalSlot) (owned : List AllocationId) (value : Value)
-    (made : makeLocal activation kind .unmodeled m = .ok (slot, owned, home))
-    (stored : storeLocal home slot value = .ok (final, result)) :
-    MemoryBelow m.nextIdentity m result := by
-  exact ((makeLocal_setup _ _ _ _ _ _ _ made).store stored).below
-
-theorem makeParameterHomes_preserves_caller_memory (m result : Memory) (activation : Nat)
-    (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
-    (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
-    (h : makeParameterHomes activation parameters args m = .ok (homes, owned, result)) :
-    MemoryBelow m.nextIdentity m result := by
-  exact (makeParameterHomes_setup _ _ _ _ _ _ _ h).below
-
 theorem enterFrame_preserves_caller_memory (body : CIL.Method) (args : List Value)
     (m result : Memory) (frame : Frame)
     (h : enterFrame body args m = .ok (frame, result)) : MemoryBelow m.nextIdentity m result := by
@@ -54,7 +33,6 @@ theorem enterFrame_preserves_caller_memory (body : CIL.Method) (args : List Valu
 #print axioms makeLocal_preserves_caller_memory
 #print axioms makeLocals_preserves_caller_memory
 #print axioms enterFrame_preserves_caller_memory
-
 
 /-- A valid view of well-formed memory addresses an existing allocation, so it stays valid in any
     memory that keeps everything below the watermark, such as a callee frame's memory. -/

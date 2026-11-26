@@ -48,30 +48,6 @@ theorem storeLocal_preserves_static_world (descriptors : List CIL.StaticDescript
       | cases h
       | split at h
 
-theorem makeLocal_preserves_static_world (descriptors : List CIL.StaticDescriptor)
-    (m result : Memory) (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value)
-    (slot : LocalSlot) (owned : List AllocationId) (hm : m.WellFormed)
-    (world : StaticWorldValid descriptors m)
-    (h : makeLocal activation kind initial m = .ok (slot, owned, result)) :
-    StaticWorldValid descriptors result := by
-  exact (makeLocal_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
-
-theorem makeLocals_preserves_static_world (descriptors : List CIL.StaticDescriptor)
-    (m result : Memory) (activation : Nat) (kinds : List CIL.LocalKind)
-    (initializers : List CIL.Value) (slots : List LocalSlot) (owned : List AllocationId)
-    (hm : m.WellFormed) (world : StaticWorldValid descriptors m)
-    (h : makeLocals activation kinds initializers m = .ok (slots, owned, result)) :
-    StaticWorldValid descriptors result := by
-  exact (makeLocals_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
-
-theorem makeParameterHomes_preserves_static_world (descriptors : List CIL.StaticDescriptor)
-    (m result : Memory) (activation : Nat) (parameters : List (Nat × CIL.LocalKind))
-    (args : List Value) (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
-    (hm : m.WellFormed) (world : StaticWorldValid descriptors m)
-    (h : makeParameterHomes activation parameters args m = .ok (homes, owned, result)) :
-    StaticWorldValid descriptors result := by
-  exact (makeParameterHomes_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
-
 theorem enterFrame_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (body : CIL.Method) (args : List Value) (m result : Memory) (frame : Frame)
     (hm : m.WellFormed) (world : StaticWorldValid descriptors m)

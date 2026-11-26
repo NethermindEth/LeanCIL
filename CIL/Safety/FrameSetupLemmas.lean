@@ -818,13 +818,6 @@ theorem makeLocals_preserves_wellFormed (m result : Memory) (activation : Nat)
 #print axioms makeLocal_preserves_wellFormed
 #print axioms makeLocals_preserves_wellFormed
 
-theorem makeParameterHomes_preserves_wellFormed (m result : Memory) (activation : Nat)
-    (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
-    (homes : List (Nat × LocalSlot)) (owned : List AllocationId) (hm : m.WellFormed)
-    (h : makeParameterHomes activation parameters args m = .ok (homes, owned, result)) :
-    result.WellFormed := by
-  exact (makeParameterHomes_setup _ _ _ _ _ _ _ h).wellFormed hm
-
 theorem enterFrame_preserves_wellFormed (body : CIL.Method) (args : List Value)
     (m result : Memory) (frame : Frame) (hm : m.WellFormed)
     (h : enterFrame body args m = .ok (frame, result)) : result.WellFormed := by

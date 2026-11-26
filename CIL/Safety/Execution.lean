@@ -1193,13 +1193,6 @@ def invoke (program : CIL.Program) (fuel method : Nat) (args : List Value) (m : 
     Except LocatedFault (Memory × List Value) :=
   invokeWith (program[·]?) fuel method args m
 
-private theorem errorMap_bind (f : α → β) (x : Except α γ) (k : γ → Except α δ) :
-    (x >>= k).mapError f = (x.mapError f >>= fun a => (k a).mapError f) := by
-  cases x <;> rfl
-
-private theorem errorMap_comp (f : β → γ) (g : α → β) (x : Except α δ) :
-    (x.mapError g).mapError f = x.mapError (fun a => f (g a)) := by cases x <;> rfl
-
 /-- Projecting a fault state to its location recovers ordinary invocation for every program. -/
 theorem invokeWithFaultState_location (program : CIL.Program) (fuel method : Nat)
     (args : List Value) (memory : Memory) :

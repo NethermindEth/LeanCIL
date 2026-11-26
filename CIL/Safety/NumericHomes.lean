@@ -142,14 +142,6 @@ theorem NumericHomes.ordered {memory : Memory} {lower : Nat} {specs slots}
 #print axioms make_numeric_locals
 #print axioms NumericHomes.home_at
 
-/-- Propose numeric recipes from metadata. Callers must prove both metadata
-    lists equal the resulting recipe, so rejected pairs or truncation cannot pass. -/
-def numericSpecs (body : CIL.Method) : List NumericLocalSpec :=
-  (body.localKinds.zip body.locals).filterMap fun (kind, value) =>
-    match h : localNumber kind value with
-    | .ok number => some ⟨kind, value, number, h⟩
-    | .error _ => none
-
 /-- Actual extracted local metadata must match the validated recipe exactly. -/
 theorem numeric_frame_setup (body : CIL.Method) (specs : List NumericLocalSpec)
     (kinds : body.localKinds = specs.map NumericLocalSpec.kind)
