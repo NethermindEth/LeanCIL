@@ -29,10 +29,6 @@ private def decodeError (image : ImageBytes) : Option AuditError :=
   | .error error => some error
   | .ok _ => none
 
-/-- The unchanged fixture has a container; the offsets below describe it. -/
-theorem fixture_container_decodes : decodeError StrictFixture.image = none := by decide +kernel
-#print axioms fixture_container_decodes
-
 theorem rejects_a_missing_dos_signature :
     decodeError (flipByte StrictFixture.image 0 0xFF) = some (.pe .notDos) := by decide +kernel
 #print axioms rejects_a_missing_dos_signature

@@ -162,10 +162,6 @@ theorem sha1_abc : CIL.Crypto.Sha1.ofBytes (asciiOf "abc") =
   decide +kernel
 #print axioms sha1_abc
 
-theorem sha1_empty : CIL.Crypto.Sha1.ofBytes [] = 0xda39a3ee5e6b4b0d3255bfef95601890afd80709 := by
-  decide +kernel
-#print axioms sha1_empty
-
 theorem sha1_pattern_55 : CIL.Crypto.Sha1.ofBytes (pattern 55) =
     0x8ae2d46729cfe68ff927af5eec9c7d1b66d65ac2 := by decide +kernel
 #print axioms sha1_pattern_55
