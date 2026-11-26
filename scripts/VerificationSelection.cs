@@ -192,46 +192,56 @@ internal static class VerificationSelection
         inputs["blockers"].UnionWith(Matches(File.ReadAllText(Path.Combine(root, "Extractor/Extractor.csproj")),
             @"<Compile Include=""\.\./([^""]+\.cs)""").Select(path => path.Replace('\\', '/')));
 
-        // Follow literal source paths, file-based includes and Lean imports.
-        // Dynamic/new paths absent from this graph still fall back to the full matrix.
+        // Each suite owns its transitive inputs. Shared files have the same direct references in this checkout.
+        var referencesByPath = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (var paths in inputs.Values)
         {
             var pending = new Stack<string>(paths);
             while (pending.TryPop(out var path))
             {
-                // Registries name every fixture; including their types does not execute those fixtures.
-                if (path is "scripts/ExportVerificationSuites.cs" or "scripts/VerificationSuites.cs") continue;
-                var source = Path.Combine(root, path);
-                if (!File.Exists(source)) continue;
-                var text = File.ReadAllText(source);
-                var references = new HashSet<string>(
-                    Matches(text, @"""((?:Tests|Examples)/[^""{}\n]+\.(?:cs|lean(?:\.in)?))"""), StringComparer.Ordinal);
-                foreach (var pattern in Matches(text, @"""(Examples/Proofs/[^""\n]*\{[^""\n]+\.lean)"""))
+                if (!referencesByPath.TryGetValue(path, out var references))
                 {
-                    var glob = Regex.Replace(pattern, @"\{[^}]+\}", "*");
-                    var matcher = new Regex(@"\A" + Regex.Escape(glob).Replace(@"\*", "[^/]*") + @"\z");
-                    foreach (var file in Directory.EnumerateFiles(Path.Combine(root, "Examples/Proofs"), "*.lean", SearchOption.AllDirectories))
-                    {
-                        var relative = Relative(root, file);
-                        if (matcher.IsMatch(relative)) references.Add(relative);
-                    }
-                }
-                references.UnionWith(Matches(text, @"^import\s+([\w.]+)", RegexOptions.Multiline)
-                    .Select(name => name.Replace('.', '/') + ".lean"));
-                references.UnionWith(Matches(text, @"""(Tests\.[\w.]+)""")
-                    .Select(name => name.Replace('.', '/') + ".lean"));
-                foreach (var include in Matches(text, @"^#:include\s+(\S+)", RegexOptions.Multiline))
-                {
-                    var relative = Relative(root, Path.GetFullPath(include, Path.GetDirectoryName(source)!));
-                    if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith("../", StringComparison.Ordinal))
-                        throw new InvalidDataException("Source include escapes the repository: " + include);
-                    references.Add(relative);
+                    references = DirectReferences(root, path);
+                    referencesByPath.Add(path, references);
                 }
                 foreach (var reference in references)
                     if (paths.Add(reference)) pending.Push(reference);
             }
         }
         return inputs;
+    }
+
+    static HashSet<string> DirectReferences(string root, string path)
+    {
+        // Registries name every fixture; including their types does not execute those fixtures.
+        if (path is "scripts/ExportVerificationSuites.cs" or "scripts/VerificationSuites.cs") return [];
+        var source = Path.Combine(root, path);
+        if (!File.Exists(source)) return [];
+        var text = File.ReadAllText(source);
+        var references = new HashSet<string>(
+            Matches(text, @"""((?:Tests|Examples)/[^""{}\n]+\.(?:cs|lean(?:\.in)?))"""), StringComparer.Ordinal);
+        foreach (var pattern in Matches(text, @"""(Examples/Proofs/[^""\n]*\{[^""\n]+\.lean)"""))
+        {
+            var glob = Regex.Replace(pattern, @"\{[^}]+\}", "*");
+            var matcher = new Regex(@"\A" + Regex.Escape(glob).Replace(@"\*", "[^/]*") + @"\z");
+            foreach (var file in Directory.EnumerateFiles(Path.Combine(root, "Examples/Proofs"), "*.lean", SearchOption.AllDirectories))
+            {
+                var relative = Relative(root, file);
+                if (matcher.IsMatch(relative)) references.Add(relative);
+            }
+        }
+        references.UnionWith(Matches(text, @"^import\s+([\w.]+)", RegexOptions.Multiline)
+            .Select(name => name.Replace('.', '/') + ".lean"));
+        references.UnionWith(Matches(text, @"""(Tests\.[\w.]+)""")
+            .Select(name => name.Replace('.', '/') + ".lean"));
+        foreach (var include in Matches(text, @"^#:include\s+(\S+)", RegexOptions.Multiline))
+        {
+            var relative = Relative(root, Path.GetFullPath(include, Path.GetDirectoryName(source)!));
+            if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith("../", StringComparison.Ordinal))
+                throw new InvalidDataException("Source include escapes the repository: " + include);
+            references.Add(relative);
+        }
+        return references;
     }
 
     // The docs suite runs the commands its documents mark `sh run`, so the example files they name are its inputs.
