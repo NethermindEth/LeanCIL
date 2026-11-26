@@ -91,9 +91,9 @@ Reference figures for `Examples.Throws::Percent(uint)` on one Windows x64 workst
 
 | Declaration | Kernel time |
 | --- | --- |
-| `boundPackage_eq` | 7.6 s |
-| `translation_valid` | 8.6 s |
-| All of `Extracted.lean` | 17.5 s |
-| All of `BoundaryProof.lean` (four `translation_valid.invoke` goals and one program lookup) | 1.1 s |
+| `boundPackage_eq` | 6.3 s |
+| `translation_valid` | 7.6 s |
+| All of `Extracted.lean` | 14.5 s |
+| All of `BoundaryProof.lean` (four `translation_valid.invoke` goals and one program lookup) | 0.9 s |
 
-Checking the eight rows, the caller and seven CoreLib methods, takes 7.6 s of `translation_valid`.
+Checking the eight rows, the caller and seven CoreLib methods, takes 6.3 s of `translation_valid`.
