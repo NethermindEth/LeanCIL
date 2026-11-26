@@ -25,7 +25,7 @@ if (args.Contains("--object-admission-only", StringComparer.Ordinal))
 }
 if (args.Contains("--layout-identities-only", StringComparer.Ordinal))
 {
-    LayoutIdentityCosts();
+    LayoutIdentityCosts().Invoke();
     return;
 }
 if (args.Contains("--exception-types-only", StringComparer.Ordinal))
@@ -1723,42 +1723,47 @@ static double ClosureGrowth(double[] units, double[] costs) =>
     (costs[2] - costs[1]) / (units[2] - units[1]) / ((costs[1] - costs[0]) / (units[1] - units[0]));
 
 // Four times the rows allow logarithmic index growth but rule out repeated scans of the table.
-void LayoutIdentityCosts()
+// Builds the fixture before returning the measurement, so no dotnet build runs beside a concurrent check.
+Action LayoutIdentityCosts()
 {
     var directory = At("artifacts/LookupScaling/LayoutIdentities");
     Directory.CreateDirectory(directory);
-    double previousPerRow = 0;
-    foreach (int count in new[] { 32, 128, 512 })
+    var sharedLayoutCost = SharedLayoutCost(directory);
+    return () =>
     {
-        var names = Enumerable.Range(0, count).Select(index => $"row \"Scope::Layout{index:D4}\"");
-        var header = $$"""
-            import CIL.Extraction.Layout
-            /-! Cost of validating distinct layouts with fixed-width type identities. -/
-            set_option maxRecDepth 65536
-            set_option maxHeartbeats 0
-            namespace LayoutIdentityCost
-            open CIL CIL.Extraction
-            /-- An empty sequential struct with the given identity. -/
-            def row (name : String) : RawLayout :=
-              { identity := name, explicit := false, packing := 0, declaredSize := 0, fields := [] }
-            /-- The rows compared by identity. -/
-            def raw := [{{string.Join(", ", names)}}]
-            /-- Each empty struct occupies one byte. -/
-            def layouts : Array ComputedLayout := Array.replicate {{count}} ⟨⟨1, []⟩, 1⟩
+        double previousPerRow = 0;
+        foreach (int count in new[] { 32, 128, 512 })
+        {
+            var names = Enumerable.Range(0, count).Select(index => $"row \"Scope::Layout{index:D4}\"");
+            var header = $$"""
+                import CIL.Extraction.Layout
+                /-! Cost of validating distinct layouts with fixed-width type identities. -/
+                set_option maxRecDepth 65536
+                set_option maxHeartbeats 0
+                namespace LayoutIdentityCost
+                open CIL CIL.Extraction
+                /-- An empty sequential struct with the given identity. -/
+                def row (name : String) : RawLayout :=
+                  { identity := name, explicit := false, packing := 0, declaredSize := 0, fields := [] }
+                /-- The rows compared by identity. -/
+                def raw := [{{string.Join(", ", names)}}]
+                /-- Each empty struct occupies one byte. -/
+                def layouts : Array ComputedLayout := Array.replicate {{count}} ⟨⟨1, []⟩, 1⟩
 
-            """;
-        var path = Path.Combine(directory, $"Rows{count}.lean");
-        long cost = DecideCost(path, header, "LayoutsValid raw layouts", "LayoutIdentityCost");
-        double perRow = (double)cost / count;
-        Console.WriteLine($"Layout identities at {count} rows cost {cost} heartbeats ({perRow:F1} per row)");
-        if (cost < KernelDecisionFloor || previousPerRow > 0 && perRow > 1.5 * previousPerRow)
-            throw new InvalidOperationException($"Layout validation exceeds its growth bound at {count} rows.");
-        previousPerRow = perRow;
-    }
-    SharedLayoutCost(directory);
+                """;
+            var path = Path.Combine(directory, $"Rows{count}.lean");
+            long cost = DecideCost(path, header, "LayoutsValid raw layouts", "LayoutIdentityCost");
+            double perRow = (double)cost / count;
+            Console.WriteLine($"Layout identities at {count} rows cost {cost} heartbeats ({perRow:F1} per row)");
+            if (cost < KernelDecisionFloor || previousPerRow > 0 && perRow > 1.5 * previousPerRow)
+                throw new InvalidOperationException($"Layout validation exceeds its growth bound at {count} rows.");
+            previousPerRow = perRow;
+        }
+        sharedLayoutCost();
+    };
 }
 
-void SharedLayoutCost(string directory)
+Action SharedLayoutCost(string directory)
 {
     const int rowCount = 8;
     var assembly = Path.Combine(directory, "Assembly");
@@ -1786,19 +1791,23 @@ void SharedLayoutCost(string directory)
         }
         """);
     Run(["dotnet", "build", project, "-c", "Release"]);
-    var output = Path.Combine(directory, "Read");
-    Run(Extract("extract", Path.Combine(assembly, "bin/SharedLayouts.dll"), "SharedLayouts",
-        "SharedLayouts::Read(Row7)", output));
-    using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "identity.json")));
-    var extraction = manifest.RootElement;
-    if (extraction.GetProperty("methods").GetArrayLength() != 4 ||
-        extraction.GetProperty("layoutIdentities").GetArrayLength() != rowCount)
-        throw new InvalidOperationException("Expected four methods and eight layout rows in the cost fixture.");
-    var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    var (cost, _) = CountHeartbeats(Path.Combine(directory, "SharedLayouts.lean"), source);
-    const long limit = 45_000_000;
-    Console.WriteLine($"Four methods sharing {rowCount} layouts cost {cost} whole-file heartbeats (limit {limit})");
-    if (cost > limit) throw new InvalidOperationException("Shared layout extraction exceeds its whole-file bound.");
+    return () =>
+    {
+        var output = Path.Combine(directory, "Read");
+        Run(Extract("extract", Path.Combine(assembly, "bin/SharedLayouts.dll"), "SharedLayouts",
+            "SharedLayouts::Read(Row7)", output));
+        using var manifest =
+            System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "identity.json")));
+        var extraction = manifest.RootElement;
+        if (extraction.GetProperty("methods").GetArrayLength() != 4 ||
+            extraction.GetProperty("layoutIdentities").GetArrayLength() != rowCount)
+            throw new InvalidOperationException("Expected four methods and eight layout rows in the cost fixture.");
+        var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+        var (cost, _) = CountHeartbeats(Path.Combine(directory, "SharedLayouts.lean"), source);
+        const long limit = 45_000_000;
+        Console.WriteLine($"Four methods sharing {rowCount} layouts cost {cost} whole-file heartbeats (limit {limit})");
+        if (cost > limit) throw new InvalidOperationException("Shared layout extraction exceeds its whole-file bound.");
+    };
 }
 
 // Primitive argument storage costs at most 150,000 heartbeats per parameter, independently of unused layouts.
@@ -2601,9 +2610,10 @@ string WithEvidenceCosts(string extracted)
 var imports = Path.Combine(directory, "Imports.lean");
 var floor = Heartbeats(imports, "import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\n" +
     "import CIL.Safety.Execution\nimport CIL.InstructionEquations\n", equations: false);
+var templateChoiceCosts = TemplateChoiceCosts();
 if (instructionEquationsOnly)
 {
-    Concurrently(() => InstructionEquationCosts(), TemplateChoiceCosts);
+    Concurrently(() => InstructionEquationCosts(), templateChoiceCosts);
     return;
 }
 
@@ -2635,7 +2645,8 @@ if (instructionEquationsOnly)
 }
 
 // Each body has eight feature branches. Vary the number of distinct getters and inputs independently.
-void TemplateChoiceCosts()
+// Builds the fixture before returning the measurement, so no dotnet build runs beside a concurrent check.
+Action TemplateChoiceCosts()
 {
     var root = Path.Combine(directory, "TemplateChoices");
     var project = Path.Combine(root, "Assembly");
@@ -2671,78 +2682,83 @@ void TemplateChoiceCosts()
         var json = System.Text.Json.JsonSerializer.Serialize(profile);
         File.WriteAllText(Path.Combine(root, $"profile{mask}.json"), json);
     }
-    var samples = new Dictionary<(bool VaryInputs, int Size), (long Total, long Selection)>();
-    var extracted = new HashSet<string>(StringComparer.Ordinal);
-    var pcs = 0;
-    foreach (var varyInputs in new[] { true, false })
-        foreach (var size in sizes)
-        {
-            var flags = varyInputs ? 4 : size;
-            // Two pairs of profiles agree on all observed getters as the number of distinct getters grows.
-            string[] profiles = varyInputs ? [.. masks.Take(size).Select(mask => $"profile{mask}")] :
-                ["scalar", "arm64-advsimd", "profile7", "profile15"];
-            var paths = new List<string>();
-            foreach (var profile in profiles)
+    return () =>
+    {
+        var samples = new Dictionary<(bool VaryInputs, int Size), (long Total, long Selection)>();
+        var extracted = new HashSet<string>(StringComparer.Ordinal);
+        var pcs = 0;
+        foreach (var varyInputs in new[] { true, false })
+            foreach (var size in sizes)
             {
-                var path = Path.Combine(root, $"Read{flags}-{profile}");
-                if (extracted.Add(path))
+                var flags = varyInputs ? 4 : size;
+                // Two pairs of profiles agree on all observed getters as the number of distinct getters grows.
+                string[] profiles = varyInputs ? [.. masks.Take(size).Select(mask => $"profile{mask}")] :
+                    ["scalar", "arm64-advsimd", "profile7", "profile15"];
+                var paths = new List<string>();
+                foreach (var profile in profiles)
                 {
-                    var specification = profile.StartsWith("profile", StringComparison.Ordinal)
-                        ? $"@{Path.Combine(root, $"{profile}.json")}" : profile;
-                    Run(Extract("extract", image, "Flags", $"Flags::Read{flags}(int)", path, specification));
+                    var path = Path.Combine(root, $"Read{flags}-{profile}");
+                    if (extracted.Add(path))
+                    {
+                        var specification = profile.StartsWith("profile", StringComparison.Ordinal)
+                            ? $"@{Path.Combine(root, $"{profile}.json")}" : profile;
+                        Run(Extract("extract", image, "Flags", $"Flags::Read{flags}(int)", path, specification));
+                    }
+                    paths.Add(path);
                 }
-                paths.Add(path);
+                var shared = Path.Combine(root, varyInputs ? $"Inputs{size}" : $"Flags{size}");
+                Run(["dotnet", ExtractorPath, "templates", shared, .. paths]);
+                var module = File.ReadAllText(Path.Combine(shared, "Templates.lean")).ReplaceLineEndings("\n");
+                var start = module.IndexOf("/-- The stable managed identity", StringComparison.Ordinal);
+                var last = module.LastIndexOf("#print axioms method0_instruction", StringComparison.Ordinal);
+                using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(shared,
+                    "templates.json")));
+                var features = manifest.RootElement.GetProperty("methods")[0].GetProperty("flags").EnumerateArray()
+                    .Select(flag => flag.GetString()!)
+                    .Select(flag => $"{char.ToUpperInvariant(flag[0])}{flag[1..]}").ToArray();
+                var bindings = manifest.RootElement.GetProperty("profiles");
+                int ObservedFlags(System.Text.Json.JsonElement binding)
+                {
+                    var profile = binding.GetProperty("profile");
+                    return features.Aggregate(0, (bits, flag) =>
+                        2 * bits + (profile.GetProperty(flag).GetBoolean() ? 1 : 0));
+                }
+                var leaves = bindings.EnumerateArray().Select(ObservedFlags).Distinct().Count();
+                if (features.Length != flags || bindings.GetArrayLength() != paths.Count ||
+                    leaves != (varyInputs ? size : 2) || start < 0 || last < 0)
+                    throw new InvalidOperationException(
+                        $"Unexpected dimensions at {paths.Count} inputs, {flags} flags.");
+                var number = module[(last + "#print axioms method0_instruction".Length)..].Split('\n')[0];
+                var count = int.Parse(number, CultureInfo.InvariantCulture) + 1;
+                if (pcs != 0 && count != pcs)
+                    throw new InvalidOperationException("Template instruction counts differ.");
+                pcs = count;
+                var header = module.IndexOf("/-!", StringComparison.Ordinal);
+                var parts = new[] { module[..header], module[header..start], module[start..] };
+                var costs = PartHeartbeats(Path.Combine(shared, "Costs.lean"), parts);
+                samples.Add((varyInputs, size), (costs.Sum(), costs[1]));
+                Console.WriteLine($"""
+                    Template {Path.GetFileName(shared)}, {paths.Count} inputs, {flags} flags, {pcs} pcs:
+                      {costs.Sum()} total heartbeats, {costs[1]} for selection, leaf proofs and equations
+                    """);
             }
-            var shared = Path.Combine(root, varyInputs ? $"Inputs{size}" : $"Flags{size}");
-            Run(["dotnet", ExtractorPath, "templates", shared, .. paths]);
-            var module = File.ReadAllText(Path.Combine(shared, "Templates.lean")).ReplaceLineEndings("\n");
-            var start = module.IndexOf("/-- The stable managed identity", StringComparison.Ordinal);
-            var last = module.LastIndexOf("#print axioms method0_instruction", StringComparison.Ordinal);
-            using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(shared,
-                "templates.json")));
-            var features = manifest.RootElement.GetProperty("methods")[0].GetProperty("flags").EnumerateArray()
-                .Select(flag => flag.GetString()!)
-                .Select(flag => $"{char.ToUpperInvariant(flag[0])}{flag[1..]}").ToArray();
-            var bindings = manifest.RootElement.GetProperty("profiles");
-            int ObservedFlags(System.Text.Json.JsonElement binding)
+        foreach (var varyInputs in new[] { true, false })
+            foreach (var selectionOnly in new[] { true, false })
             {
-                var profile = binding.GetProperty("profile");
-                return features.Aggregate(0, (bits, flag) =>
-                    2 * bits + (profile.GetProperty(flag).GetBoolean() ? 1 : 0));
+                double PerUnit(int size)
+                {
+                    var cost = samples[(varyInputs, size)];
+                    return (double)(selectionOnly ? cost.Selection : cost.Total) / (size * pcs);
+                }
+                foreach (var (smaller, larger) in sizes.Zip(sizes.Skip(1)))
+                    if (PerUnit(larger) > AllowedGrowth * PerUnit(smaller))
+                        throw new InvalidOperationException($"""
+                            Template cost from {smaller} to {larger} exceeds {AllowedGrowth} per unit per pc.
+                            Inputs varying: {varyInputs}. Selection only: {selectionOnly}.
+                            Measured {PerUnit(smaller):F0} and {PerUnit(larger):F0} heartbeats.
+                            """);
             }
-            var leaves = bindings.EnumerateArray().Select(ObservedFlags).Distinct().Count();
-            if (features.Length != flags || bindings.GetArrayLength() != paths.Count ||
-                leaves != (varyInputs ? size : 2) || start < 0 || last < 0)
-                throw new InvalidOperationException($"Unexpected dimensions at {paths.Count} inputs, {flags} flags.");
-            var number = module[(last + "#print axioms method0_instruction".Length)..].Split('\n')[0];
-            var count = int.Parse(number, CultureInfo.InvariantCulture) + 1;
-            if (pcs != 0 && count != pcs) throw new InvalidOperationException("Template instruction counts differ.");
-            pcs = count;
-            var header = module.IndexOf("/-!", StringComparison.Ordinal);
-            var parts = new[] { module[..header], module[header..start], module[start..] };
-            var costs = PartHeartbeats(Path.Combine(shared, "Costs.lean"), parts);
-            samples.Add((varyInputs, size), (costs.Sum(), costs[1]));
-            Console.WriteLine($"""
-                Template {Path.GetFileName(shared)}, {paths.Count} inputs, {flags} flags, {pcs} pcs:
-                  {costs.Sum()} total heartbeats, {costs[1]} for selection, leaf proofs and equations
-                """);
-        }
-    foreach (var varyInputs in new[] { true, false })
-        foreach (var selectionOnly in new[] { true, false })
-        {
-            double PerUnit(int size)
-            {
-                var cost = samples[(varyInputs, size)];
-                return (double)(selectionOnly ? cost.Selection : cost.Total) / (size * pcs);
-            }
-            foreach (var (smaller, larger) in sizes.Zip(sizes.Skip(1)))
-                if (PerUnit(larger) > AllowedGrowth * PerUnit(smaller))
-                    throw new InvalidOperationException($"""
-                        Template cost from {smaller} to {larger} exceeds {AllowedGrowth} per unit per pc.
-                        Inputs varying: {varyInputs}. Selection only: {selectionOnly}.
-                        Measured {PerUnit(smaller):F0} and {PerUnit(larger):F0} heartbeats.
-                        """);
-        }
+    };
 }
 
 // A body with no call at three lengths. Its call check reads every pc's link by one walk, so it costs the same per
@@ -3823,15 +3839,17 @@ void KnownFactCosts()
         $"PASS checking the feature certificate of {KnownFactRounds} rounds of known facts costs {factsMeasured}");
 }
 
+var layoutIdentityCosts = LayoutIdentityCosts();
 // The longest checks come first, so their processes ask for a slot first.
 Concurrently(BodyCheckCosts, TokenCosts, SparseLinkCosts, () => NoCallEvidenceCosts(InstructionEquationCosts()),
     IndirectAccessCosts, CallingCosts, ArrayAddressCosts, LocalSlotCosts, KnownFactCosts, FeatureLocalCosts,
     () => ReservingMemory(MediumLeanProcess, LocalAccessCosts),
     () => ReservingMemory(LargeLeanProcess, DecodedDefinitionCosts),
-    () => ReservingMemory(LargeLeanProcess, MethodDecodeCosts), TemplateChoiceCosts, EmbeddingCosts, BaseDepthCosts, ComputedLookupCosts, SpellingCosts, StoredNameCosts, IndirectTargetCosts, NativeTableCosts,
+    () => ReservingMemory(LargeLeanProcess, MethodDecodeCosts), templateChoiceCosts, EmbeddingCosts, BaseDepthCosts,
+    ComputedLookupCosts, SpellingCosts, StoredNameCosts, IndirectTargetCosts, NativeTableCosts,
     ExceptionDecisionCosts, CheckNarrowedResolution, () => ReturnResolutionCosts(), ArgumentResolutionCosts,
     ElementShapeCosts, () => ShapeResolutionCosts(), LineageCosts, CallCheckCosts, StaticFactCosts,
-    StaticIdentityCosts, DecodedProgramCosts, PrefixEntryCosts, RunCosts, ClosedArgumentsCosts, LayoutIdentityCosts,
+    StaticIdentityCosts, DecodedProgramCosts, PrefixEntryCosts, RunCosts, ClosedArgumentsCosts, layoutIdentityCosts,
     TypeIdentityCosts, MetadataNameCosts, PlatformTableCosts, ImportLinkCosts);
 
 /// <summary>How the generated bodies of the local slot checks use each local.</summary>
