@@ -63,7 +63,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     readonly Dictionary<byte[], PEReader> readers = [];
     readonly Dictionary<PEReader, MetadataImage> metadata = [];
     readonly Dictionary<ModuleDefinition, (PEReader Reader, MetadataImage Metadata)> identityImages = [];
-    readonly Dictionary<AssemblyName, ModuleDefinition> importsByIdentity = [];
+    readonly Dictionary<AssemblyName, List<ModuleDefinition>> importsByIdentity = [];
     readonly List<(Pin Pin, string Path, ModuleDefinition Module)> references = [];
 
     internal ModuleDefinition Selected { get; }
@@ -236,7 +236,9 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
             RegisterRows(module, image);
             registered = true;
             identityImages.Add(module, (reader, image));
-            importsByIdentity.Add(IdentityOf(module.Assembly.Name), module);
+            var identity = IdentityOf(module.Assembly.Name);
+            if (!importsByIdentity.TryGetValue(identity, out var modules)) importsByIdentity[identity] = modules = [];
+            modules.Add(module);
         }
         catch
         {
@@ -252,7 +254,10 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     {
         if (identityImages.Remove(module, out var image))
         {
-            importsByIdentity.Remove(IdentityOf(module.Assembly.Name));
+            var identity = IdentityOf(module.Assembly.Name);
+            if (importsByIdentity.TryGetValue(identity, out var modules) && modules.Remove(module) &&
+                modules.Count == 0)
+                importsByIdentity.Remove(identity);
             UnregisterRows(module);
             rowsByImage.Remove(image.Metadata);
             image.Reader.Dispose();
@@ -301,11 +306,11 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         return Platform(identity) && !byName.ContainsKey(identity.Name);
     }
 
-    /// <summary>The definition of <paramref name="type"/> in the verified import whose assembly its scope names, or
-    /// null when no registered import defines it.</summary>
+    /// <summary>The definition of <paramref name="type"/> in the one verified import whose assembly its scope names,
+    /// or null when no registered import, or more than one, has that identity.</summary>
     internal TypeDefinition? ImportedDefinition(TypeReference type) =>
-        type.Scope is AssemblyNameReference name && importsByIdentity.TryGetValue(IdentityOf(name), out var module)
-            ? module.GetType(type.FullName) : null;
+        type.Scope is AssemblyNameReference name && importsByIdentity.TryGetValue(IdentityOf(name), out var modules) &&
+            modules is [var module] ? module.GetType(type.FullName) : null;
 
     /// <summary>Whether <see cref="Resolve(AssemblyNameReference)"/> answers the reference rather than rejecting it.
     /// </summary>
