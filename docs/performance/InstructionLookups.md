@@ -47,6 +47,9 @@ default, the checks of the 4,006-instruction body run out.
 dotnet run --file scripts/Test.cs -- --suite lookups
 ```
 
+The suite runs the model table, closure and opcode decoding checks, which time Lean, alone first,
+then every other check at once, as [running suites](../VALIDATION.md#running-suites) describes.
+
 The suite (`Tests/LookupScaling.cs`) extracts one method, `word = word * y + x;` repeated, at
 about 500 and about 2,000 instructions, and compiles three files at each length: the
 extraction, its code as a body with a parameter under `cil_instruction_equations`, and its

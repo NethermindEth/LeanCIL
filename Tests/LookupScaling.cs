@@ -140,7 +140,10 @@ if (args.Contains("--prefix-entry-only", StringComparer.Ordinal))
     return;
 }
 var instructionEquationsOnly = args.Contains("--instruction-equations-only", StringComparer.Ordinal);
-if (!instructionEquationsOnly)
+// Each of these options runs the leading checks in order and stops after the ones it names.
+if (args.Contains("--native-table-only", StringComparer.Ordinal) ||
+    args.Contains("--return-evidence-only", StringComparer.Ordinal) ||
+    args.Contains("--return-resolution-only", StringComparer.Ordinal))
 {
     NativeTableCosts();
     if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
@@ -152,24 +155,7 @@ if (!instructionEquationsOnly)
     ElementShapeCosts();
     ShapeResolutionCosts();
     LineageCosts();
-    if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
-    CallCheckCosts();
-    DecodeCosts();
-    MethodDecodeCosts();
-    StaticFactCosts();
-    StaticIdentityCosts();
-    DecodedDefinitionCosts();
-    DecodedProgramCosts();
-    PrefixEntryCosts();
-    ClosureCosts();
-    RunCosts();
-    ClosedArgumentsCosts();
-
-    LayoutIdentityCosts();
-    Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
-    BuildLeanTestLibraries("Certificate index, feature getter, layout projection and home index libraries",
-        "Tests.FlowIndex", "Tests.CertificateFlow", "Tests.FeatureGetter", "Tests.ExtractionHomeIndexes",
-        "Tests.LayoutProjectionIndexes");
+    return;
 }
 
 // `cil_instruction_equations` proves each equation from the code suffix that starts its block. Proved
@@ -239,8 +225,28 @@ const int KnownFactRounds = 128;
 // fact, a quadratic term of one heartbeat per fact pair in each state exceeds this ratio.
 const double AllowedFactIncrementRatio = 4.5;
 
+// Lean processes reserve these while concurrent checks run: the measured peak working sets reach 8.8 GiB for the
+// largest inputs and 4.8 GiB for the next size down.
+const long LargeLeanProcess = 9L << 30;
+const long MediumLeanProcess = 5L << 30;
+
+// The reservation of the address checks: their two larger sizes are the only ones above the default.
+static long AddressMemory(int sites) =>
+    sites == ManyAddresses ? LargeLeanProcess : sites == MoreAddresses ? MediumLeanProcess : 0;
+
 var directory = At("artifacts/LookupScaling");
 Directory.CreateDirectory(directory);
+if (!instructionEquationsOnly)
+{
+    // Checks that time Lean run alone, and the libraries the other checks import are built first.
+    ModelTableCosts();
+    ClosureCosts();
+    DecodeCosts();
+    Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
+    BuildLeanTestLibraries("Certificate index, feature getter, layout projection and home index libraries",
+        "Tests.FlowIndex", "Tests.CertificateFlow", "Tests.FeatureGetter", "Tests.ExtractionHomeIndexes",
+        "Tests.LayoutProjectionIndexes");
+}
 
 // Signature facts inspect a return head; code and unrelated layout entries stay outside that inspection.
 void ReturnResolutionCosts(bool stepOnly = false)
@@ -1980,7 +1986,7 @@ Dictionary<string, long> TypeDecisionCosts()
     if (costs.Count != 4) throw new InvalidOperationException("Missing type identity decision costs:\n" + output);
     return costs;
 }
-if (!instructionEquationsOnly)
+void TypeIdentityCosts()
 {
     var decisions = TypeDecisionCosts();
     foreach (var outcome in new[] { "equal", "unequal" })
@@ -1996,10 +2002,6 @@ if (!instructionEquationsOnly)
                 """).ReplaceLineEndings(" "));
         Console.WriteLine($"PASS deciding {outcome} type identities costs {measured}");
     }
-    MetadataNameCosts();
-    ModelTableCosts();
-    PlatformTableCosts();
-    ImportLinkCosts();
 }
 
 // Each input quadruples the number of distinct exports, links and call instructions together.
@@ -2599,29 +2601,38 @@ string WithEvidenceCosts(string extracted)
 var imports = Path.Combine(directory, "Imports.lean");
 var floor = Heartbeats(imports, "import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\n" +
     "import CIL.Safety.Execution\nimport CIL.InstructionEquations\n", equations: false);
-var brief = Measure("Short");
-var extended = Measure("Long");
-if (brief.Instructions < 500 || extended.Instructions < 4 * brief.Instructions - 8)
-    throw new InvalidOperationException(
-        $"Expected about 500 and 2,000 instructions; found {brief.Instructions} and {extended.Instructions}.");
-Console.WriteLine($"PASS {extended.Instructions} instructions compile at the emitted recursion depth");
-string[] producers = ["an extracted method", "a cil_instruction_equations body", "a generated template"];
-for (var producer = 0; producer < producers.Length; producer++)
+if (instructionEquationsOnly)
 {
-    double Cost((int Instructions, long[] Heartbeats, (long, long) Evidence) run) =>
-        (double)(run.Heartbeats[producer] - floor) / run.Instructions;
-    var growth = Cost(extended) / Cost(brief);
-    var measured = string.Create(CultureInfo.InvariantCulture,
-        $"{Cost(brief):F0} heartbeats per instruction at {brief.Instructions} instructions and " +
-        $"{Cost(extended):F0} at {extended.Instructions}, {growth:F2} times as many");
-    if (growth > AllowedGrowth)
-        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-            $"Compiling {producers[producer]} costs {measured}; the limit is {AllowedGrowth}."));
-    Console.WriteLine($"PASS compiling {producers[producer]} costs {measured}");
+    Concurrently(() => InstructionEquationCosts(), TemplateChoiceCosts);
+    return;
 }
 
-TemplateChoiceCosts();
-if (instructionEquationsOnly) return;
+// The compile costs of the Short and Long methods, which the evidence check of a body with no call reads too.
+(int Instructions, long[] Heartbeats, (long Calls, long Assembly) Evidence)[] InstructionEquationCosts()
+{
+    var runs = Concurrently(new[] { (Name: "Short", Memory: 0L), (Name: "Long", Memory: MediumLeanProcess) },
+        run => ReservingMemory(run.Memory, () => Measure(run.Name)));
+    var (brief, extended) = (runs[0], runs[1]);
+    if (brief.Instructions < 500 || extended.Instructions < 4 * brief.Instructions - 8)
+        throw new InvalidOperationException(
+            $"Expected about 500 and 2,000 instructions; found {brief.Instructions} and {extended.Instructions}.");
+    Console.WriteLine($"PASS {extended.Instructions} instructions compile at the emitted recursion depth");
+    string[] producers = ["an extracted method", "a cil_instruction_equations body", "a generated template"];
+    for (var producer = 0; producer < producers.Length; producer++)
+    {
+        double Cost((int Instructions, long[] Heartbeats, (long, long) Evidence) run) =>
+            (double)(run.Heartbeats[producer] - floor) / run.Instructions;
+        var growth = Cost(extended) / Cost(brief);
+        var measured = string.Create(CultureInfo.InvariantCulture,
+            $"{Cost(brief):F0} heartbeats per instruction at {brief.Instructions} instructions and " +
+            $"{Cost(extended):F0} at {extended.Instructions}, {growth:F2} times as many");
+        if (growth > AllowedGrowth)
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"Compiling {producers[producer]} costs {measured}; the limit is {AllowedGrowth}."));
+        Console.WriteLine($"PASS compiling {producers[producer]} costs {measured}");
+    }
+    return runs;
+}
 
 // Each body has eight feature branches. Vary the number of distinct getters and inputs independently.
 void TemplateChoiceCosts()
@@ -2737,27 +2748,33 @@ void TemplateChoiceCosts()
 // A body with no call at three lengths. Its call check reads every pc's link by one walk, so it costs the same per
 // instruction; its evidence theorem is assembled from the conjuncts' theorems and costs the same at every length.
 // A conjunct stated through another term than `MethodEvidenceValid` states makes the assembly reduce the whole body.
-var middleOutput = Path.Combine(directory, "Middle");
-Run(Extract("extract", assembly, "Lookups", "Lookups::Middle(ulong,ulong)", middleOutput));
-var middle = EvidenceCosts(Reported(Path.Combine(middleOutput, "Measured.lean"),
-    WithEvidenceCosts(File.ReadAllText(Path.Combine(middleOutput, "Extracted.lean"))), equations: false).Output);
-(int Statements, long Calls, long Assembly)[] evidenceSamples = [
-    (ShortStatements, brief.Evidence.Calls, brief.Evidence.Assembly),
-    (MiddleStatements, middle.Calls, middle.Assembly),
-    (LongStatements, extended.Evidence.Calls, extended.Evidence.Assembly)];
-var evidenceMeasured = string.Join("; ", evidenceSamples.Select(sample => string.Create(CultureInfo.InvariantCulture,
-    $"{sample.Statements} statements = {(double)sample.Calls / sample.Statements:F0} per statement for the call " +
-    $"check and {sample.Assembly} for the evidence theorem")));
-if (evidenceSamples.Any(sample => sample.Calls < KernelDecisionFloor || sample.Assembly < KernelDecisionFloor) ||
-    evidenceSamples.Skip(1).Zip(evidenceSamples).Any(pair =>
-        (double)pair.First.Calls / pair.First.Statements >
-            (double)pair.Second.Calls / pair.Second.Statements * AllowedGrowth ||
-        pair.First.Assembly > pair.Second.Assembly * AllowedGrowth))
-    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-        $"Checking the evidence of a body with no call costs {evidenceMeasured} heartbeats; the limit is " +
-        $"{AllowedGrowth} times the cost per statement of the call check and the cost of the evidence theorem at " +
-        $"the length before."));
-Console.WriteLine($"PASS checking the evidence of a body with no call costs {evidenceMeasured} heartbeats");
+void NoCallEvidenceCosts(
+    IReadOnlyList<(int Instructions, long[] Heartbeats, (long Calls, long Assembly) Evidence)> runs)
+{
+    var (brief, extended) = (runs[0], runs[1]);
+    var middleOutput = Path.Combine(directory, "Middle");
+    Run(Extract("extract", assembly, "Lookups", "Lookups::Middle(ulong,ulong)", middleOutput));
+    var middle = EvidenceCosts(Reported(Path.Combine(middleOutput, "Measured.lean"),
+        WithEvidenceCosts(File.ReadAllText(Path.Combine(middleOutput, "Extracted.lean"))), equations: false).Output);
+    (int Statements, long Calls, long Assembly)[] evidenceSamples = [
+        (ShortStatements, brief.Evidence.Calls, brief.Evidence.Assembly),
+        (MiddleStatements, middle.Calls, middle.Assembly),
+        (LongStatements, extended.Evidence.Calls, extended.Evidence.Assembly)];
+    var evidenceMeasured = string.Join("; ", evidenceSamples.Select(sample => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{sample.Statements} statements = {(double)sample.Calls / sample.Statements:F0} per statement for the call " +
+        $"check and {sample.Assembly} for the evidence theorem")));
+    if (evidenceSamples.Any(sample => sample.Calls < KernelDecisionFloor || sample.Assembly < KernelDecisionFloor) ||
+        evidenceSamples.Skip(1).Zip(evidenceSamples).Any(pair =>
+            (double)pair.First.Calls / pair.First.Statements >
+                (double)pair.Second.Calls / pair.Second.Statements * AllowedGrowth ||
+            pair.First.Assembly > pair.Second.Assembly * AllowedGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Checking the evidence of a body with no call costs {evidenceMeasured} heartbeats; the limit is " +
+            $"{AllowedGrowth} times the cost per statement of the call check and the cost of the evidence theorem at " +
+            $"the length before."));
+    Console.WriteLine($"PASS checking the evidence of a body with no call costs {evidenceMeasured} heartbeats");
+}
 
 // The extraction of a body with many calls: its link table, key check, per-site facts and the checks that
 // tie them together must each cost the same per call site at four times the size.
@@ -2768,16 +2785,19 @@ long CallingCost(string name)
     return Heartbeats(Path.Combine(output, "Measured.lean"), File.ReadAllText(Path.Combine(output, "Extracted.lean")),
         equations: false);
 }
-var fewCost = (double)(CallingCost("Few") - floor) / FewCalls;
-var manyCost = (double)(CallingCost("Many") - floor) / ManyCalls;
-var callGrowth = manyCost / fewCost;
-var callsMeasured = string.Create(CultureInfo.InvariantCulture,
-    $"{fewCost:F0} heartbeats per call at {FewCalls} calls and {manyCost:F0} at {ManyCalls}, " +
-    $"{callGrowth:F2} times as many");
-if (callGrowth > AllowedCallGrowth)
-    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-        $"Extracting a body with many calls costs {callsMeasured}; the limit is {AllowedCallGrowth}."));
-Console.WriteLine($"PASS extracting a body with many calls costs {callsMeasured}");
+void CallingCosts()
+{
+    var fewCost = (double)(CallingCost("Few") - floor) / FewCalls;
+    var manyCost = (double)(CallingCost("Many") - floor) / ManyCalls;
+    var callGrowth = manyCost / fewCost;
+    var callsMeasured = string.Create(CultureInfo.InvariantCulture,
+        $"{fewCost:F0} heartbeats per call at {FewCalls} calls and {manyCost:F0} at {ManyCalls}, " +
+        $"{callGrowth:F2} times as many");
+    if (callGrowth > AllowedCallGrowth)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Extracting a body with many calls costs {callsMeasured}; the limit is {AllowedCallGrowth}."));
+    Console.WriteLine($"PASS extracting a body with many calls costs {callsMeasured}");
+}
 
 // The kernel heartbeats to recheck the proof that `written` embeds into `extraction`, both defined by
 // `definitions`. The two link tables differ and their call sites sit at different pcs, so the kernel cannot close
@@ -2886,9 +2906,10 @@ void CheckEmbeddingGrowth(string fixture, string description, Func<int, string> 
             $"Embedding {description} costs {measured}; the limit is {AllowedEmbedGrowth}."));
     Console.WriteLine($"PASS embedding {description} costs {measured}");
 }
-CheckEmbeddingGrowth("Embedding", "a body with many calls", DeadBlocks, 1, EmbedFewCalls, EmbedManyCalls);
-CheckEmbeddingGrowth("Reordered", "a body whose blocks the extraction reorders", Reordered, 2,
-    ReorderFewSegments, ReorderManySegments);
+void EmbeddingCosts() => Concurrently(
+    () => CheckEmbeddingGrowth("Embedding", "a body with many calls", DeadBlocks, 1, EmbedFewCalls, EmbedManyCalls),
+    () => CheckEmbeddingGrowth("Reordered", "a body whose blocks the extraction reorders", Reordered, 2,
+        ReorderFewSegments, ReorderManySegments));
 
 // The text a method emits for its links and the kernel heartbeats to recheck that its table keys ascend, for a body
 // with two calls: both depend on the calls, not on the length of the body.
@@ -2920,14 +2941,21 @@ CheckEmbeddingGrowth("Reordered", "a body whose blocks the extraction reorders",
     if (!beats.Success) throw new InvalidOperationException("Missing the link key recheck cost:\n" + report);
     return (linkLines, long.Parse(beats.Groups[1].Value, CultureInfo.InvariantCulture));
 }
-var sparseShort = SparseLinkCost("SparseShort");
-var sparseLong = SparseLinkCost("SparseLong");
-var sparseMeasured = $"{sparseShort.Bytes} link bytes and {sparseShort.Heartbeats} kernel heartbeats at " +
-    $"{SparseShortStatements} statements, {sparseLong.Bytes} and {sparseLong.Heartbeats} at {SparseLongStatements}";
-if (sparseLong.Bytes > sparseShort.Bytes * 1.1 || sparseLong.Heartbeats > sparseShort.Heartbeats * AllowedCallGrowth)
-    throw new InvalidOperationException("A longer body with the same calls emits more link output: " + sparseMeasured);
-Console.WriteLine("PASS link output and key check of a body with two calls do not grow with the body: " +
-    sparseMeasured);
+void SparseLinkCosts()
+{
+    var sparse = Concurrently(
+        new[] { (Name: "SparseLong", Memory: LargeLeanProcess), (Name: "SparseShort", Memory: 0L) },
+        run => ReservingMemory(run.Memory, () => SparseLinkCost(run.Name)));
+    var (sparseLong, sparseShort) = (sparse[0], sparse[1]);
+    var sparseMeasured = $"{sparseShort.Bytes} link bytes and {sparseShort.Heartbeats} kernel heartbeats at " +
+        $"{SparseShortStatements} statements, {sparseLong.Bytes} and {sparseLong.Heartbeats} at {SparseLongStatements}";
+    if (sparseLong.Bytes > sparseShort.Bytes * 1.1 ||
+        sparseLong.Heartbeats > sparseShort.Heartbeats * AllowedCallGrowth)
+        throw new InvalidOperationException(
+            "A longer body with the same calls emits more link output: " + sparseMeasured);
+    Console.WriteLine("PASS link output and key check of a body with two calls do not grow with the body: " +
+        sparseMeasured);
+}
 
 // Subtract the same generated body's cost to isolate computed lookup from equation generation.
 long ComputedLookupCost(int cases)
@@ -2950,12 +2978,15 @@ long ComputedLookupCost(int cases)
         #print axioms fetched
         """ + "\n"])[0];
 }
-var fourCaseCost = ComputedLookupCost(4) / 4.0;
-var sixteenCaseCost = ComputedLookupCost(16) / 16.0;
-Console.WriteLine(FormattableString.Invariant(
-    $"PASS computed lookup: {fourCaseCost:F0} heartbeats/case at 4; {sixteenCaseCost:F0} at 16"));
-if (sixteenCaseCost > fourCaseCost * AllowedGrowth)
-    throw new Exception("Computed lookup cost per case grows with the segment count.");
+void ComputedLookupCosts()
+{
+    var fourCaseCost = ComputedLookupCost(4) / 4.0;
+    var sixteenCaseCost = ComputedLookupCost(16) / 16.0;
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS computed lookup: {fourCaseCost:F0} heartbeats/case at 4; {sixteenCaseCost:F0} at 16"));
+    if (sixteenCaseCost > fourCaseCost * AllowedGrowth)
+        throw new Exception("Computed lookup cost per case grows with the segment count.");
+}
 
 // Each distinct metadata token of a body adds a row lookup and a decode to the kernel's metadata check, so the cost
 // per token may not grow with the number of tokens, whichever table the token names: user strings, instance fields
@@ -3003,7 +3034,7 @@ var tokenAssembly = Path.Combine(tokenSource, "bin/Tokens.dll");
     var report = Reported(Path.Combine(output, "Measured.lean"), WithEvidenceCosts(extracted), equations: false);
     return ((double)(report.Count - floor) / count, (double)EvidenceCosts(report.Output).Calls / count);
 }
-foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
+void TokenCosts() => Concurrently(new[]
 {
     ("Strings", "Tokens::StringsFew(ulong)", "Tokens::StringsMany(ulong)",
         LookupPatterns.StringToken, FewTokens, ManyTokens),
@@ -3011,10 +3042,14 @@ foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
         LookupPatterns.FieldToken, FewTokens, ManyTokens),
     ("Calls", "Tokens::CallsFew(ulong)", "Tokens::CallsMany(ulong)", LookupPatterns.CallToken, FewCalledMethods,
         ManyCalledMethods)
-})
+}, row =>
 {
-    var manyTokens = TokenCost(kind + "Many", many, manyCount, pattern);
-    var fewTokens = TokenCost(kind + "Few", few, fewCount, pattern);
+    var (kind, few, many, pattern, fewCount, manyCount) = row;
+    var costs = Concurrently(new[] { (Name: kind + "Many", Selector: many, Count: manyCount),
+        (Name: kind + "Few", Selector: few, Count: fewCount) },
+        run => ReservingMemory(run.Name.EndsWith("Many", StringComparison.Ordinal) ? MediumLeanProcess : 0,
+            () => TokenCost(run.Name, run.Selector, run.Count, pattern)));
+    var (manyTokens, fewTokens) = (costs[0], costs[1]);
     var tokenGrowth = manyTokens.Total / fewTokens.Total;
     var callCheckGrowth = manyTokens.Calls / fewTokens.Calls;
     var tokensMeasured = string.Create(CultureInfo.InvariantCulture,
@@ -3025,7 +3060,7 @@ foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
             $"{AllowedGrowth}."));
     Console.WriteLine(
         $"PASS metadata check of {manyCount} distinct {kind.ToLowerInvariant()} tokens costs {tokensMeasured}");
-}
+});
 
 // One method's body check reads the literal lookup tables of its own metadata slice by name, so its kernel cost is its
 // own slice and tokens times a logarithm: independent of the number of methods in the extraction and of the rows
@@ -3071,10 +3106,11 @@ string MethodNumber(string extracted, string method, string name)
 // The heartbeats of the method's `method{n}_body_validated` and, for `tablesMethod`, of that method's
 // `tables_valid`, read in one file of the extraction narrowed to the body obligation. Each is read after the same
 // statement closed with `sorry`, which is subtracted.
-(long Body, long Tables) BodyChecks(string name, string entry, string method, string? tablesMethod = null)
+(long Body, long Tables) BodyChecks(string image, string name, string entry, string method,
+    string? tablesMethod = null)
 {
     var output = Path.Combine(directory, "Body" + name);
-    Run(Extract("extract", bodyAssembly, "Bodies", entry.Contains('(') ? entry : $"Bodies::{entry}(ulong)", output));
+    Run(Extract("extract", image, "Bodies", entry.Contains('(') ? entry : $"Bodies::{entry}(ulong)", output));
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     var body = $"method{MethodNumber(extracted, method, name)}_body_validated";
     var narrowed = NarrowEvidence(extracted, body);
@@ -3107,91 +3143,106 @@ static Match Obligation(string narrowed, string theorem, bool decided) =>
     LookupPatterns.ProvedObligation.Matches(narrowed).FirstOrDefault(match =>
         match.Groups["name"].Value == theorem && match.Groups["decision"].Success == decided)
     ?? throw new InvalidOperationException("Missing obligation " + theorem);
-long BodyCheck(string name, string entry, string method) => BodyChecks(name, entry, method).Body;
-var chainCosts = chainLengths.Select(count => (double)BodyCheck("Chain" + count, "Chain" + count,
-    $"Chain{count}_{count - 1}")).ToArray();
-var rowChecks = bulkSizes.Select(count =>
-    BodyChecks("Rows" + count, "Rows" + count, $"Small{count}", $"Bulk{count}")).ToArray();
-var rowCosts = rowChecks.Select(check => (double)check.Body).ToArray();
-for (var step = 1; step < chainCosts.Length; step++)
+long BodyCheck(string image, string name, string entry, string method) =>
+    BodyChecks(image, name, entry, method).Body;
+void BodyCheckCosts()
 {
-    var growth = chainCosts[step] / chainCosts[step - 1];
+    double[] chainCosts = [], stringCosts = [];
+    (long Body, long Tables)[] rowChecks = [], fieldChecks = [];
+    // Every body is measured at once, before any check below reads the costs.
+    Concurrently(
+        () => stringCosts = Concurrently(stringTokenCounts, count => ReservingMemory(
+            count == stringTokenCounts[^1] ? LargeLeanProcess : count == stringTokenCounts[^2] ? MediumLeanProcess : 0,
+            () => BodyCheck(bodyAssembly, "Strings" + count, "Strings" + count, "Strings" + count)) /
+            (2.0 * count + 2)),
+        () => rowChecks = Concurrently(bulkSizes, count =>
+            BodyChecks(bodyAssembly, "Rows" + count, "Rows" + count, $"Small{count}", $"Bulk{count}")),
+        () => chainCosts = Concurrently(chainLengths, count =>
+            (double)BodyCheck(bodyAssembly, "Chain" + count, "Chain" + count, $"Chain{count}_{count - 1}")),
+        () => fieldChecks = Concurrently(fieldCounts, count => BodyChecks(bodyAssembly, "Fields" + count,
+            $"Bodies::Read{count}(Bodies/Wide{count})", $"Read{count}", $"Read{count}")));
+    var rowCosts = rowChecks.Select(check => (double)check.Body).ToArray();
+    for (var step = 1; step < chainCosts.Length; step++)
+    {
+        var growth = chainCosts[step] / chainCosts[step - 1];
+        Console.WriteLine(FormattableString.Invariant(
+            $"PASS body check of one method in {chainLengths[step - 1]} and {chainLengths[step]} methods: ") +
+            FormattableString.Invariant($"{chainCosts[step - 1]:F0} and {chainCosts[step]:F0} heartbeats, ") +
+            FormattableString.Invariant($"{growth:F2} times"));
+        if (growth > AllowedBodyGrowth)
+            throw new Exception(FormattableString.Invariant(
+                $"One body check costs {growth:F2} times as much at {chainLengths[step]} methods ") +
+                FormattableString.Invariant($"as at {chainLengths[step - 1]}; the limit is {AllowedBodyGrowth}."));
+    }
+    var rowGrowth = rowCosts[1] / rowCosts[0];
     Console.WriteLine(FormattableString.Invariant(
-        $"PASS body check of one method in {chainLengths[step - 1]} and {chainLengths[step]} methods: ") +
-        FormattableString.Invariant($"{chainCosts[step - 1]:F0} and {chainCosts[step]:F0} heartbeats, ") +
-        FormattableString.Invariant($"{growth:F2} times"));
-    if (growth > AllowedBodyGrowth)
+        $"PASS body check of one method against {bulkSizes[0]} and {bulkSizes[1]} metadata rows: ") +
+        FormattableString.Invariant($"{rowGrowth:F2} times"));
+    if (rowGrowth > AllowedBodyGrowth)
         throw new Exception(FormattableString.Invariant(
-            $"One body check costs {growth:F2} times as much at {chainLengths[step]} methods ") +
-            FormattableString.Invariant($"as at {chainLengths[step - 1]}; the limit is {AllowedBodyGrowth}."));
-}
-var rowGrowth = rowCosts[1] / rowCosts[0];
-Console.WriteLine(FormattableString.Invariant(
-    $"PASS body check of one method against {bulkSizes[0]} and {bulkSizes[1]} metadata rows: {rowGrowth:F2} times"));
-if (rowGrowth > AllowedBodyGrowth)
-    throw new Exception(FormattableString.Invariant(
-        $"One body check costs {rowGrowth:F2} times as much against {bulkSizes[1]} rows ") +
-        FormattableString.Invariant($"as against {bulkSizes[0]}; the limit is {AllowedBodyGrowth}."));
-// The body check of a method of many string tokens costs the same per instruction at every size: numerals of its
-// byte literal with equal low bytes would collide in the kernel's caches unless the literal is one joined code.
-var stringCosts = stringTokenCounts.Select(count =>
-    BodyCheck("Strings" + count, "Strings" + count, "Strings" + count) / (2.0 * count + 2)).ToArray();
-for (var step = 1; step < stringCosts.Length; step++)
-{
-    var growth = stringCosts[step] / stringCosts[step - 1];
+            $"One body check costs {rowGrowth:F2} times as much against {bulkSizes[1]} rows ") +
+            FormattableString.Invariant($"as against {bulkSizes[0]}; the limit is {AllowedBodyGrowth}."));
+    // The body check of a method of many string tokens costs the same per instruction at every size: numerals of its
+    // byte literal with equal low bytes would collide in the kernel's caches unless the literal is one joined code.
+    for (var step = 1; step < stringCosts.Length; step++)
+    {
+        var growth = stringCosts[step] / stringCosts[step - 1];
+        Console.WriteLine(FormattableString.Invariant(
+            $"PASS body check of a method of {stringTokenCounts[step - 1]} and {stringTokenCounts[step]} ") +
+            FormattableString.Invariant($"string tokens: {stringCosts[step - 1]:F0} and {stringCosts[step]:F0} ") +
+            FormattableString.Invariant($"heartbeats per instruction, {growth:F2} times"));
+        if (growth > AllowedBodyGrowth)
+            throw new Exception(FormattableString.Invariant(
+                $"One body check costs {growth:F2} times as much per instruction at ") +
+                FormattableString.Invariant($"{stringTokenCounts[step]} string ") +
+                FormattableString.Invariant(
+                    $"tokens as at {stringTokenCounts[step - 1]}; the limit is {AllowedBodyGrowth}."));
+    }
+    // The kernel's decision that a method's literal tables are the decoder's costs the rows that method carries,
+    // times a logarithm, and is made once per method.
+    var tablesFew = rowChecks[0].Tables;
+    var tablesMany = rowChecks[1].Tables;
+    var tablesGrowth = tablesMany / (double)tablesFew;
     Console.WriteLine(FormattableString.Invariant(
-        $"PASS body check of a method of {stringTokenCounts[step - 1]} and {stringTokenCounts[step]} ") +
-        FormattableString.Invariant($"string tokens: {stringCosts[step - 1]:F0} and {stringCosts[step]:F0} ") +
-        FormattableString.Invariant($"heartbeats per instruction, {growth:F2} times"));
-    if (growth > AllowedBodyGrowth)
-        throw new Exception(FormattableString.Invariant(
-            $"One body check costs {growth:F2} times as much per instruction at {stringTokenCounts[step]} string ") +
-            FormattableString.Invariant(
-                $"tokens as at {stringTokenCounts[step - 1]}; the limit is {AllowedBodyGrowth}."));
-}
-// The kernel's decision that a method's literal tables are the decoder's costs the rows that method carries, times a
-// logarithm, and is made once per method.
-var tablesFew = rowChecks[0].Tables;
-var tablesMany = rowChecks[1].Tables;
-var tablesGrowth = tablesMany / (double)tablesFew;
-Console.WriteLine(FormattableString.Invariant(
-    $"PASS tables check of a method carrying {bulkSizes[0]} and {bulkSizes[1]} user string rows: ") +
-    FormattableString.Invariant($"{tablesFew} and {tablesMany} heartbeats, ") +
-    FormattableString.Invariant($"{tablesGrowth / (bulkSizes[1] / (double)bulkSizes[0]):F2} times the cost per row"));
-if (tablesGrowth > AllowedBodyGrowth * bulkSizes[1] / bulkSizes[0])
-    throw new Exception(FormattableString.Invariant(
-        $"The tables check costs {tablesGrowth:F2} times as much for {bulkSizes[1]} rows ") +
-        FormattableString.Invariant($"as for {bulkSizes[0]}."));
-
-// A method reading one field of a class with 10, 100 and 200 fields carries those field rows. Its body check does one
-// lookup of the field's index, so it stays flat. Its tables check is a fixed part plus a part linear in the rows
-// carried: the increment from 100 to 200 fields is 100/90 of the increment from 10 to 100, and a quadratic walk of the
-// rows makes it more than three times as large.
-const double AllowedFieldIncrementRatio = 1.5;
-var fieldChecks = fieldCounts.Select(count => BodyChecks("Fields" + count,
-    $"Bodies::Read{count}(Bodies/Wide{count})", $"Read{count}", $"Read{count}")).ToArray();
-var fieldBody = fieldChecks.Select(check => (double)check.Body).ToArray();
-var fieldTables = fieldChecks.Select(check => (double)check.Tables).ToArray();
-var fieldBodyGrowth = fieldBody[^1] / fieldBody[0];
-Console.WriteLine(FormattableString.Invariant(
-    $"PASS body check of a method reading one of {fieldCounts[0]}, {fieldCounts[1]} and {fieldCounts[2]} fields: ") +
-    FormattableString.Invariant($"{fieldBody[0]:F0}, {fieldBody[1]:F0} and {fieldBody[2]:F0} heartbeats, ") +
-    FormattableString.Invariant($"{fieldBodyGrowth:F2} times"));
-if (fieldBodyGrowth > AllowedBodyGrowth)
-    throw new Exception(FormattableString.Invariant(
-        $"The body check costs {fieldBodyGrowth:F2} times as much with {fieldCounts[2]} fields ") +
-        FormattableString.Invariant($"as with {fieldCounts[0]}; the limit is {AllowedBodyGrowth}."));
-var fieldIncrementRatio = (fieldTables[2] - fieldTables[1]) / (fieldTables[1] - fieldTables[0]);
-Console.WriteLine(FormattableString.Invariant(
-    $"PASS tables check of a method reading one of {fieldCounts[0]}, {fieldCounts[1]} and {fieldCounts[2]} fields: ") +
-    FormattableString.Invariant($"{fieldTables[0]:F0}, {fieldTables[1]:F0} and {fieldTables[2]:F0} heartbeats, ") +
-    FormattableString.Invariant($"increments in the ratio {fieldIncrementRatio:F2}"));
-if (fieldIncrementRatio > AllowedFieldIncrementRatio)
-    throw new Exception(FormattableString.Invariant(
-        $"The tables check grows by {fieldIncrementRatio:F2} times as much from {fieldCounts[1]} to ") +
+        $"PASS tables check of a method carrying {bulkSizes[0]} and {bulkSizes[1]} user string rows: ") +
+        FormattableString.Invariant($"{tablesFew} and {tablesMany} heartbeats, ") +
         FormattableString.Invariant(
-            $"{fieldCounts[2]} fields as from {fieldCounts[0]} to {fieldCounts[1]}; ") +
-        FormattableString.Invariant($"the limit is {AllowedFieldIncrementRatio}."));
+            $"{tablesGrowth / (bulkSizes[1] / (double)bulkSizes[0]):F2} times the cost per row"));
+    if (tablesGrowth > AllowedBodyGrowth * bulkSizes[1] / bulkSizes[0])
+        throw new Exception(FormattableString.Invariant(
+            $"The tables check costs {tablesGrowth:F2} times as much for {bulkSizes[1]} rows ") +
+            FormattableString.Invariant($"as for {bulkSizes[0]}."));
+
+    // A method reading one field of a class with 10, 100 and 200 fields carries those field rows. Its body check does
+    // one lookup of the field's index, so it stays flat. Its tables check is a fixed part plus a part linear in the
+    // rows carried: the increment from 100 to 200 fields is 100/90 of the increment from 10 to 100, and a quadratic
+    // walk of the rows makes it more than three times as large.
+    const double AllowedFieldIncrementRatio = 1.5;
+    var fieldBody = fieldChecks.Select(check => (double)check.Body).ToArray();
+    var fieldTables = fieldChecks.Select(check => (double)check.Tables).ToArray();
+    var fieldBodyGrowth = fieldBody[^1] / fieldBody[0];
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS body check of a method reading one of {fieldCounts[0]}, {fieldCounts[1]} and ") +
+        FormattableString.Invariant($"{fieldCounts[2]} fields: ") +
+        FormattableString.Invariant($"{fieldBody[0]:F0}, {fieldBody[1]:F0} and {fieldBody[2]:F0} heartbeats, ") +
+        FormattableString.Invariant($"{fieldBodyGrowth:F2} times"));
+    if (fieldBodyGrowth > AllowedBodyGrowth)
+        throw new Exception(FormattableString.Invariant(
+            $"The body check costs {fieldBodyGrowth:F2} times as much with {fieldCounts[2]} fields ") +
+            FormattableString.Invariant($"as with {fieldCounts[0]}; the limit is {AllowedBodyGrowth}."));
+    var fieldIncrementRatio = (fieldTables[2] - fieldTables[1]) / (fieldTables[1] - fieldTables[0]);
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS tables check of a method reading one of {fieldCounts[0]}, {fieldCounts[1]} and ") +
+        FormattableString.Invariant($"{fieldCounts[2]} fields: ") +
+        FormattableString.Invariant($"{fieldTables[0]:F0}, {fieldTables[1]:F0} and {fieldTables[2]:F0} heartbeats, ") +
+        FormattableString.Invariant($"increments in the ratio {fieldIncrementRatio:F2}"));
+    if (fieldIncrementRatio > AllowedFieldIncrementRatio)
+        throw new Exception(FormattableString.Invariant(
+            $"The tables check grows by {fieldIncrementRatio:F2} times as much from {fieldCounts[1]} to ") +
+            FormattableString.Invariant(
+                $"{fieldCounts[2]} fields as from {fieldCounts[0]} to {fieldCounts[1]}; ") +
+            FormattableString.Invariant($"the limit is {AllowedFieldIncrementRatio}."));
+}
 
 // `spelled?` reads a name's bytes in one pass, and `cil_kernel_rfl` equates the result with the name's literal:
 // the cost grows with the length of the name and no faster. Each proof is read after the same statement closed with
@@ -3208,20 +3259,23 @@ long SpellingCheck(int length)
             $"theorem spells : {statement} := by cil_kernel_rfl\n"]);
     return costs[1] - costs[0];
 }
-var spellingCosts = spellingLengths.Select(length => (double)SpellingCheck(length)).ToArray();
-for (var step = 1; step < spellingLengths.Length; step++)
+void SpellingCosts()
 {
-    var lengthRatio = spellingLengths[step] / (double)spellingLengths[step - 1];
-    var growth = spellingCosts[step] / spellingCosts[step - 1];
-    Console.WriteLine(FormattableString.Invariant(
-        $"PASS spelling a name of {spellingLengths[step - 1]} and {spellingLengths[step]} bytes: ") +
-        FormattableString.Invariant($"{spellingCosts[step - 1]:F0} and {spellingCosts[step]:F0} heartbeats, ") +
-        FormattableString.Invariant($"{growth / lengthRatio:F2} times the cost per byte"));
-    if (growth > AllowedSpellingGrowth * lengthRatio)
-        throw new Exception(FormattableString.Invariant(
-            $"Spelling {spellingLengths[step]} bytes costs {growth:F2} times as much as ") +
-            FormattableString.Invariant($"{spellingLengths[step - 1]}; ") +
-            FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
+    var spellingCosts = spellingLengths.Select(length => (double)SpellingCheck(length)).ToArray();
+    for (var step = 1; step < spellingLengths.Length; step++)
+    {
+        var lengthRatio = spellingLengths[step] / (double)spellingLengths[step - 1];
+        var growth = spellingCosts[step] / spellingCosts[step - 1];
+        Console.WriteLine(FormattableString.Invariant(
+            $"PASS spelling a name of {spellingLengths[step - 1]} and {spellingLengths[step]} bytes: ") +
+            FormattableString.Invariant($"{spellingCosts[step - 1]:F0} and {spellingCosts[step]:F0} heartbeats, ") +
+            FormattableString.Invariant($"{growth / lengthRatio:F2} times the cost per byte"));
+        if (growth > AllowedSpellingGrowth * lengthRatio)
+            throw new Exception(FormattableString.Invariant(
+                $"Spelling {spellingLengths[step]} bytes costs {growth:F2} times as much as ") +
+                FormattableString.Invariant($"{spellingLengths[step - 1]}; ") +
+                FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
+    }
 }
 
 // A name stored as its bytes (`byteString`) gives `bytesOf` those bytes without encoding the name, so reading them
@@ -3244,25 +3298,28 @@ long[] StoredCosts(int length)
             $"theorem reads_literal : {Read(literal)} := by decide +kernel\n"]);
     return [costs[0], costs[2] - costs[1], costs[4] - costs[3]];
 }
-var storedCosts = spellingLengths.Select(StoredCosts).ToArray();
-for (var step = 0; step < spellingLengths.Length; step++)
+void StoredNameCosts()
 {
-    var (definition, stored, literal) = (storedCosts[step][0], storedCosts[step][1], storedCosts[step][2]);
-    Console.WriteLine(FormattableString.Invariant(
-        $"PASS reading the bytes of a stored name of {spellingLengths[step]} bytes: {stored} heartbeats, ") +
-        FormattableString.Invariant($"{definition} to define it, {literal} for its literal"));
-    if (definition + stored >= literal)
-        throw new Exception(FormattableString.Invariant(
-            $"Defining and reading a stored name of {spellingLengths[step]} bytes costs {definition + stored} ") +
-            FormattableString.Invariant($"heartbeats, not below the {literal} of reading its literal."));
-    if (step == 0) continue;
-    var lengthRatio = spellingLengths[step] / (double)spellingLengths[step - 1];
-    var growth = stored / (double)storedCosts[step - 1][1];
-    if (growth > AllowedStoredGrowth * lengthRatio)
-        throw new Exception(FormattableString.Invariant(
-            $"Reading a stored name of {spellingLengths[step]} bytes costs {growth:F2} times as much as ") +
-            FormattableString.Invariant($"{spellingLengths[step - 1]}; ") +
-            FormattableString.Invariant($"the limit is {AllowedStoredGrowth * lengthRatio:F1}."));
+    var storedCosts = spellingLengths.Select(StoredCosts).ToArray();
+    for (var step = 0; step < spellingLengths.Length; step++)
+    {
+        var (definition, stored, literal) = (storedCosts[step][0], storedCosts[step][1], storedCosts[step][2]);
+        Console.WriteLine(FormattableString.Invariant(
+            $"PASS reading the bytes of a stored name of {spellingLengths[step]} bytes: {stored} heartbeats, ") +
+            FormattableString.Invariant($"{definition} to define it, {literal} for its literal"));
+        if (definition + stored >= literal)
+            throw new Exception(FormattableString.Invariant(
+                $"Defining and reading a stored name of {spellingLengths[step]} bytes costs {definition + stored} ") +
+                FormattableString.Invariant($"heartbeats, not below the {literal} of reading its literal."));
+        if (step == 0) continue;
+        var lengthRatio = spellingLengths[step] / (double)spellingLengths[step - 1];
+        var growth = stored / (double)storedCosts[step - 1][1];
+        if (growth > AllowedStoredGrowth * lengthRatio)
+            throw new Exception(FormattableString.Invariant(
+                $"Reading a stored name of {spellingLengths[step]} bytes costs {growth:F2} times as much as ") +
+                FormattableString.Invariant($"{spellingLengths[step - 1]}; ") +
+                FormattableString.Invariant($"the limit is {AllowedStoredGrowth * lengthRatio:F1}."));
+    }
 }
 
 // `indirectTarget` selects the body of a `calli` by comparing the pointer's owner with each catalog entry's, and a
@@ -3308,7 +3365,6 @@ void IndirectTargetCosts()
                 FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
     }
 }
-IndirectTargetCosts();
 
 // A method reading a field declared `depth` base classes up carries one row and one link per class of the chain, and
 // its body check walks the chain once. The cost is a fixed part plus a part linear in the depth, so the increment from
@@ -3330,19 +3386,24 @@ string Deep(int depth) =>
 File.WriteAllText(Path.Combine(deepSource, "Deep.cs"),
     "public static class Bodies { " + string.Concat(baseDepths.Select(Deep)) + "}");
 Run(["dotnet", "build", Path.Combine(deepSource, "Deep.csproj"), "-c", "Release"]);
-bodyAssembly = Path.Combine(deepSource, "bin/Bodies.dll");
-var depthCosts = baseDepths.Select(depth => (double)BodyCheck("Deep" + depth,
-    $"Bodies::ReadDeep{depth}(Bodies/Deep{depth}_{depth})", $"ReadDeep{depth}")).ToArray();
-var incrementRatio = (depthCosts[2] - depthCosts[1]) / (depthCosts[1] - depthCosts[0]);
-Console.WriteLine(FormattableString.Invariant(
-    $"PASS body check of a field read through {baseDepths[0]}, {baseDepths[1]} and {baseDepths[2]} base classes: ") +
-    FormattableString.Invariant($"{depthCosts[0]:F0}, {depthCosts[1]:F0} and {depthCosts[2]:F0} heartbeats, ") +
-    FormattableString.Invariant($"increments in the ratio {incrementRatio:F2} (linear 2, quadratic 4)"));
-if (incrementRatio > AllowedChainIncrementRatio)
-    throw new Exception(FormattableString.Invariant(
-        $"The body check grows by {incrementRatio:F2} times as much from depth {baseDepths[1]} to {baseDepths[2]} ") +
-        FormattableString.Invariant(
-            $"as from {baseDepths[0]} to {baseDepths[1]}; the limit is {AllowedChainIncrementRatio}."));
+var deepAssembly = Path.Combine(deepSource, "bin/Bodies.dll");
+void BaseDepthCosts()
+{
+    var depthCosts = Concurrently(baseDepths, depth => (double)BodyCheck(deepAssembly, "Deep" + depth,
+        $"Bodies::ReadDeep{depth}(Bodies/Deep{depth}_{depth})", $"ReadDeep{depth}"));
+    var incrementRatio = (depthCosts[2] - depthCosts[1]) / (depthCosts[1] - depthCosts[0]);
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS body check of a field read through {baseDepths[0]}, {baseDepths[1]} and ") +
+        FormattableString.Invariant($"{baseDepths[2]} base classes: ") +
+        FormattableString.Invariant($"{depthCosts[0]:F0}, {depthCosts[1]:F0} and {depthCosts[2]:F0} heartbeats, ") +
+        FormattableString.Invariant($"increments in the ratio {incrementRatio:F2} (linear 2, quadratic 4)"));
+    if (incrementRatio > AllowedChainIncrementRatio)
+        throw new Exception(FormattableString.Invariant(
+            $"The body check grows by {incrementRatio:F2} times as much from depth {baseDepths[1]} to ") +
+            FormattableString.Invariant($"{baseDepths[2]} ") +
+            FormattableString.Invariant(
+                $"as from {baseDepths[0]} to {baseDepths[1]}; the limit is {AllowedChainIncrementRatio}."));
+}
 
 // The kernel heartbeats of the scalar certificate of a body whose segments each address an array element, with
 // or without a `readonly.` prefix, and branch to the next segment, less those of stating the same certificate.
@@ -3395,11 +3456,12 @@ long ArrayAddressCost(bool prefixed, int sites)
     var path = Path.Combine(directory, $"ArrayAddresses{(prefixed ? "Prefixed" : "")}{sites}.lean");
     return DecideCost(path, header, statement, "ArrayAddresses");
 }
-foreach (var prefixed in new[] { false, true })
+void ArrayAddressCosts() => Concurrently(new[] { false, true }, prefixed =>
 {
     var label = prefixed ? "readonly element addresses" : "element addresses";
     var perSite = new[] { FewAddresses, MoreAddresses, ManyAddresses }
-        .Select(sites => (Sites: sites, Cost: (double)ArrayAddressCost(prefixed, sites) / sites)).ToArray();
+        .Select(sites => (Sites: sites, Cost: (double)ReservingMemory(AddressMemory(sites), () =>
+            ArrayAddressCost(prefixed, sites)) / sites)).ToArray();
     var addressesMeasured = string.Join("; ", perSite.Select(run =>
         string.Create(CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per address at {run.Sites}")));
     if (perSite.Skip(1).Any(run => run.Cost > perSite[0].Cost * AllowedGrowth))
@@ -3407,8 +3469,7 @@ foreach (var prefixed in new[] { false, true })
             $"Checking the scalar certificate of {label} costs {addressesMeasured}; the limit is {AllowedGrowth} " +
             $"times the cost per address at {FewAddresses}."));
     Console.WriteLine($"PASS checking the scalar certificate of {label} costs {addressesMeasured}");
-}
-IndirectAccessCosts();
+});
 
 // The kernel heartbeats of the feature and scalar certificates of a body whose segments each copy a block, with or
 // without an `unaligned.` prefix, and branch to the next segment, less those of stating them. The indirect access
@@ -3467,11 +3528,12 @@ void IndirectAccessCosts()
         var path = Path.Combine(accessDirectory, $"Blocks{(prefixed ? "Prefixed" : "")}{sites}.lean");
         return DecideCost(path, header, statement, "IndirectAccesses");
     }
-    foreach (var prefixed in new[] { false, true })
+    Concurrently(new[] { false, true }, prefixed =>
     {
         var label = prefixed ? "unaligned block copies" : "block copies";
         var perSite = new[] { FewAddresses, MoreAddresses, ManyAddresses }
-            .Select(sites => (Sites: sites, Cost: (double)Cost(prefixed, sites) / sites)).ToArray();
+            .Select(sites => (Sites: sites, Cost: (double)ReservingMemory(AddressMemory(sites), () =>
+                Cost(prefixed, sites)) / sites)).ToArray();
         var measured = string.Join("; ", perSite.Select(run =>
             string.Create(CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per copy at {run.Sites}")));
         if (perSite.Skip(1).Any(run => run.Cost > perSite[0].Cost * AllowedGrowth))
@@ -3479,7 +3541,7 @@ void IndirectAccessCosts()
                 $"Checking the feature and scalar certificates of {label} costs {measured}; the limit is " +
                 $"{AllowedGrowth} times the cost per copy at {FewAddresses}."));
         Console.WriteLine($"PASS checking the feature and scalar certificates of {label} costs {measured}");
-    }
+    });
 }
 
 // The kernel heartbeats of the feature certificate of a body that loads, stores and addresses four int32 locals in
@@ -3519,17 +3581,20 @@ long LocalAccessCost(int accesses)
     var path = Path.Combine(directory, $"LocalAccesses{accesses}.lean");
     return DecideCost(path, header, statement, "LocalAccesses");
 }
-var perAccess = new[] { FewLocalAccesses, MoreLocalAccesses, ManyLocalAccesses }
-    .Select(accesses => (Accesses: accesses, Cost: (double)LocalAccessCost(accesses) / accesses)).ToArray();
-var accessesMeasured = string.Join("; ", perAccess.Select(run =>
-    string.Create(CultureInfo.InvariantCulture,
-        $"{run.Cost:F0} kernel heartbeats per instruction at {run.Accesses}")));
-if (perAccess.Skip(1).Any(run => run.Cost > perAccess[0].Cost * AllowedGrowth))
-    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-        $"Checking the feature certificate of local loads, stores and addresses costs {accessesMeasured}; " +
-        $"the limit is {AllowedGrowth} times the cost per instruction at {FewLocalAccesses}."));
-Console.WriteLine(
-    $"PASS checking the feature certificate of local loads, stores and addresses costs {accessesMeasured}");
+void LocalAccessCosts()
+{
+    var perAccess = new[] { FewLocalAccesses, MoreLocalAccesses, ManyLocalAccesses }
+        .Select(accesses => (Accesses: accesses, Cost: (double)LocalAccessCost(accesses) / accesses)).ToArray();
+    var accessesMeasured = string.Join("; ", perAccess.Select(run =>
+        string.Create(CultureInfo.InvariantCulture,
+            $"{run.Cost:F0} kernel heartbeats per instruction at {run.Accesses}")));
+    if (perAccess.Skip(1).Any(run => run.Cost > perAccess[0].Cost * AllowedGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Checking the feature certificate of local loads, stores and addresses costs {accessesMeasured}; " +
+            $"the limit is {AllowedGrowth} times the cost per instruction at {FewLocalAccesses}."));
+    Console.WriteLine(
+        $"PASS checking the feature certificate of local loads, stores and addresses costs {accessesMeasured}");
+}
 // The kernel heartbeats of a check over a body that stores each of its locals once and then loads or addresses
 // it, less those of stating the same check. Integer locals take a constant and are popped after a load or after
 // `ldloca`; native-int locals take a method address and are
@@ -3591,26 +3656,32 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
     var path = Path.Combine(directory, $"{slots}{(storage ? "Storage" : "Locals")}{count}.lean");
     return DecideCost(path, header, statement, "LocalSlots");
 }
-(LocalSlots Slots, bool Storage, string Label)[] localChecks =
-[
-    (LocalSlots.Integer, false, "the scalar certificate of integer locals"),
-    (LocalSlots.Addressed, false, "the scalar certificate of addressed integer locals"),
-    (LocalSlots.Pointer, false, "the scalar certificate of native-int locals consumed by calli"),
-    (LocalSlots.Pointer, true, "the closed argument storage of native-int locals consumed by calli"),
-];
-foreach (var (slots, storage, label) in localChecks)
+void LocalSlotCosts()
 {
-    // Each local is stored once and loaded or addressed once, between a push and a pop or call; `ret` ends the body.
-    var perInstruction = new[] { FewLocals, MoreLocals, ManyLocals }
-        .Select(count => (Count: count, Cost: (double)LocalSlotCost(slots, count, storage) / (4 * count + 1)))
-        .ToArray();
-    var localsMeasured = string.Join("; ", perInstruction.Select(run => string.Create(CultureInfo.InvariantCulture,
-        $"{run.Cost:F0} kernel heartbeats per instruction at {run.Count} locals")));
-    if (perInstruction.Skip(1).Any(run => run.Cost > perInstruction[0].Cost * AllowedLocalGrowth))
-        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-            $"Checking {label} costs {localsMeasured}; the limit is {AllowedLocalGrowth} " +
-            $"times the cost per instruction at {FewLocals} locals."));
-    Console.WriteLine($"PASS checking {label} costs {localsMeasured}");
+    (LocalSlots Slots, bool Storage, string Label)[] localChecks =
+    [
+        (LocalSlots.Integer, false, "the scalar certificate of integer locals"),
+        (LocalSlots.Addressed, false, "the scalar certificate of addressed integer locals"),
+        (LocalSlots.Pointer, false, "the scalar certificate of native-int locals consumed by calli"),
+        (LocalSlots.Pointer, true, "the closed argument storage of native-int locals consumed by calli"),
+    ];
+    foreach (var (slots, storage, label) in localChecks)
+    {
+        // Each local is stored once and loaded or addressed once, between a push and a pop or call; `ret` ends
+        // the body.
+        var perInstruction = new[] { FewLocals, MoreLocals, ManyLocals }
+            .Select(count => (Count: count, Cost: (double)ReservingMemory(
+                count == ManyLocals ? MediumLeanProcess : 0, () => LocalSlotCost(slots, count, storage)) /
+                (4 * count + 1)))
+            .ToArray();
+        var localsMeasured = string.Join("; ", perInstruction.Select(run => string.Create(CultureInfo.InvariantCulture,
+            $"{run.Cost:F0} kernel heartbeats per instruction at {run.Count} locals")));
+        if (perInstruction.Skip(1).Any(run => run.Cost > perInstruction[0].Cost * AllowedLocalGrowth))
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"Checking {label} costs {localsMeasured}; the limit is {AllowedLocalGrowth} " +
+                $"times the cost per instruction at {FewLocals} locals."));
+        Console.WriteLine($"PASS checking {label} costs {localsMeasured}");
+    }
 }
 
 // The kernel heartbeats of the feature certificate of a body of fixed length over `count` int32 locals, less those of
@@ -3652,17 +3723,20 @@ long FeatureLocalCost(int count)
     var path = Path.Combine(directory, $"FeatureLocals{count}.lean");
     return DecideCost(path, header, statement, "FeatureLocals");
 }
-var perFeatureInstruction = new[] { FewFeatureLocals, MoreFeatureLocals, ManyFeatureLocals }
-    .Select(count => (Count: count, Cost: (double)FeatureLocalCost(count) / FeatureLocalInstructions)).ToArray();
-var featureLocalsMeasured = string.Join("; ", perFeatureInstruction.Select(run => string.Create(
-    CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per instruction at {run.Count} locals")));
-if (perFeatureInstruction.Skip(1).Any(run => run.Cost > perFeatureInstruction[0].Cost * AllowedLocalGrowth))
-    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-        $"Checking the feature certificate of {FeatureLocalInstructions} instructions costs " +
-        $"{featureLocalsMeasured}; the limit is {AllowedLocalGrowth} times the cost per instruction at " +
-        $"{FewFeatureLocals} locals."));
-Console.WriteLine($"PASS checking the feature certificate of {FeatureLocalInstructions} instructions costs " +
-    featureLocalsMeasured);
+void FeatureLocalCosts()
+{
+    var perFeatureInstruction = new[] { FewFeatureLocals, MoreFeatureLocals, ManyFeatureLocals }
+        .Select(count => (Count: count, Cost: (double)FeatureLocalCost(count) / FeatureLocalInstructions)).ToArray();
+    var featureLocalsMeasured = string.Join("; ", perFeatureInstruction.Select(run => string.Create(
+        CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per instruction at {run.Count} locals")));
+    if (perFeatureInstruction.Skip(1).Any(run => run.Cost > perFeatureInstruction[0].Cost * AllowedLocalGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Checking the feature certificate of {FeatureLocalInstructions} instructions costs " +
+            $"{featureLocalsMeasured}; the limit is {AllowedLocalGrowth} times the cost per instruction at " +
+            $"{FewFeatureLocals} locals."));
+    Console.WriteLine($"PASS checking the feature certificate of {FeatureLocalInstructions} instructions costs " +
+        featureLocalsMeasured);
+}
 
 // One literal certificate state, written as the extractor writes states, so a fact costs only what the check costs.
 static string KnownFactState(IEnumerable<int> stack, IEnumerable<int> words) =>
@@ -3727,24 +3801,38 @@ long KnownFactCost(int facts, int rounds)
     var path = Path.Combine(directory, $"KnownFacts{facts}-{rounds}.lean");
     return DecideCost(path, header, statement, "KnownFacts");
 }
-// Subtract the stores alone, whose states together hold about the square of the facts.
-int[] factCounts = [FewKnownFacts, MoreKnownFacts, ManyKnownFacts];
-var factCosts = factCounts
-    .Select(facts => (double)(KnownFactCost(facts, KnownFactRounds) - KnownFactCost(facts, 0))).ToArray();
-var factIncrementRatio = (factCosts[2] - factCosts[1]) / (factCosts[1] - factCosts[0]);
-var perFactState = (factCosts[2] - factCosts[1]) / ((ManyKnownFacts - MoreKnownFacts) * 4.0 * KnownFactRounds);
-var factsMeasured = string.Join("; ", factCounts.Zip(factCosts, (facts, cost) =>
-    string.Create(CultureInfo.InvariantCulture, $"{cost:F0} kernel heartbeats at {facts} facts"))) +
-    string.Create(CultureInfo.InvariantCulture,
-        $"; increments in the ratio {factIncrementRatio:F2} (linear 4, quadratic 16); {perFactState:F0} per fact " +
-        $"per state, {perFactState * ManyKnownFacts * 4 * KnownFactRounds:F0} for {ManyKnownFacts} facts in " +
-        $"{4 * KnownFactRounds} states");
-if (factIncrementRatio > AllowedFactIncrementRatio)
-    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-        $"Checking the feature certificate of {KnownFactRounds} rounds of known facts costs {factsMeasured}; the " +
-        $"limit on the ratio is {AllowedFactIncrementRatio}."));
-Console.WriteLine(
-    $"PASS checking the feature certificate of {KnownFactRounds} rounds of known facts costs {factsMeasured}");
+void KnownFactCosts()
+{
+    // Subtract the stores alone, whose states together hold about the square of the facts.
+    int[] factCounts = [FewKnownFacts, MoreKnownFacts, ManyKnownFacts];
+    var factCosts = factCounts
+        .Select(facts => (double)(KnownFactCost(facts, KnownFactRounds) - KnownFactCost(facts, 0))).ToArray();
+    var factIncrementRatio = (factCosts[2] - factCosts[1]) / (factCosts[1] - factCosts[0]);
+    var perFactState = (factCosts[2] - factCosts[1]) / ((ManyKnownFacts - MoreKnownFacts) * 4.0 * KnownFactRounds);
+    var factsMeasured = string.Join("; ", factCounts.Zip(factCosts, (facts, cost) =>
+        string.Create(CultureInfo.InvariantCulture, $"{cost:F0} kernel heartbeats at {facts} facts"))) +
+        string.Create(CultureInfo.InvariantCulture,
+            $"; increments in the ratio {factIncrementRatio:F2} (linear 4, quadratic 16); {perFactState:F0} per fact " +
+            $"per state, {perFactState * ManyKnownFacts * 4 * KnownFactRounds:F0} for {ManyKnownFacts} facts in " +
+            $"{4 * KnownFactRounds} states");
+    if (factIncrementRatio > AllowedFactIncrementRatio)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Checking the feature certificate of {KnownFactRounds} rounds of known facts costs {factsMeasured}; the " +
+            $"limit on the ratio is {AllowedFactIncrementRatio}."));
+    Console.WriteLine(
+        $"PASS checking the feature certificate of {KnownFactRounds} rounds of known facts costs {factsMeasured}");
+}
+
+// The longest checks come first, so their processes ask for a slot first.
+Concurrently(BodyCheckCosts, TokenCosts, SparseLinkCosts, () => NoCallEvidenceCosts(InstructionEquationCosts()),
+    IndirectAccessCosts, CallingCosts, ArrayAddressCosts, LocalSlotCosts, KnownFactCosts, FeatureLocalCosts,
+    () => ReservingMemory(MediumLeanProcess, LocalAccessCosts),
+    () => ReservingMemory(LargeLeanProcess, DecodedDefinitionCosts),
+    () => ReservingMemory(LargeLeanProcess, MethodDecodeCosts), TemplateChoiceCosts, EmbeddingCosts, BaseDepthCosts, ComputedLookupCosts, SpellingCosts, StoredNameCosts, IndirectTargetCosts, NativeTableCosts,
+    ExceptionDecisionCosts, CheckNarrowedResolution, () => ReturnResolutionCosts(), ArgumentResolutionCosts,
+    ElementShapeCosts, () => ShapeResolutionCosts(), LineageCosts, CallCheckCosts, StaticFactCosts,
+    StaticIdentityCosts, DecodedProgramCosts, PrefixEntryCosts, RunCosts, ClosedArgumentsCosts, LayoutIdentityCosts,
+    TypeIdentityCosts, MetadataNameCosts, PlatformTableCosts, ImportLinkCosts);
 
 /// <summary>How the generated bodies of the local slot checks use each local.</summary>
 enum LocalSlots
