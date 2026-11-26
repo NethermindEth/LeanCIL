@@ -14,6 +14,7 @@ changing before and after the change.
 | Packing or restoring the certified library | Archive bytes, pack and restore time | [Library distribution](LibraryDistribution.md) |
 | Packing or restoring the Lean toolchain in CI | Archive bytes, compression and restore time | [Toolchain distribution](ToolchainDistribution.md) |
 | Fold discovery in `CIL/Extraction/Folds.lean` | Kernel time of role discovery | [Fold discovery](#fold-discovery) |
+| Constructor binding in `CIL/Runtime/Net11WinX64`, or how `cil_evaluated` writes a package | Kernel time of one bound extraction and its consumer proof | [Bound constructor packages](#bound-constructor-packages) |
 | A test suite or its harness | Suite seconds | [Suite times](#suite-times) |
 
 ## Reading a measurement
@@ -68,3 +69,31 @@ To check scaling, double the size (`4096`, at each occurrence in the file) in a 
 and compare. The time should about double; a fourfold increase indicates an unbounded scan per
 load. There are no reference figures for this file. The `lookups` suite checks addressed locals
 with a failing limit.
+
+## Bound constructor packages
+
+A single caller whose throw is bound to a CoreLib constructor defines `boundPackage` with
+`cil_evaluated` (see [proof binding](../PROOFS-BINDING.md)). The kernel evaluates the binding
+once, in `boundPackage_eq`, and checks the package rows once, in `translation_valid`. Every
+later check, in the extraction or in a consumer proof, reads the literal. A proof that reduces
+`managedPackage` rather than `boundPackage` evaluates the binding again, about 6 s per check.
+
+After the `evidence` suite has written `artifacts/Throws/Percent`, time the extraction and its
+boundary proof:
+
+```sh
+dir=artifacts/Throws/Percent
+lake env lean -Dprofiler=true -Dprofiler.threshold=100 -o $dir/Extracted.olean $dir/Extracted.lean
+lake env sh -c "LEAN_PATH=\$LEAN_PATH:$dir lean -Dprofiler=true $dir/BoundaryProof.lean"
+```
+
+Reference figures for `Examples.Throws::Percent(uint)` on one Windows x64 workstation:
+
+| Declaration | Kernel time |
+| --- | --- |
+| `boundPackage_eq` | 7.6 s |
+| `translation_valid` | 8.6 s |
+| All of `Extracted.lean` | 17.5 s |
+| All of `BoundaryProof.lean` (four `translation_valid.invoke` goals and one program lookup) | 1.1 s |
+
+Checking the eight rows, the caller and seven CoreLib methods, takes 7.6 s of `translation_valid`.
