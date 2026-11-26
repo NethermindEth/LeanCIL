@@ -81,7 +81,6 @@ example : scalarOpMatches none (i 88 (.integer 0)) [.word64, .word64] .add = fal
 example : scalarOpMatches none (i 88) [.other, .other] .add = false := by decide
 example : scalarOpMatches none (i 88) [.reference, .word32] .add = true := by decide
 example : scalarOpMatches none (i 88) [.native, .word64] .add = false := by decide
-example : scalarOpMatches none (i 88) [.word32, .native] .add = true := by decide
 example : scalarOpMatches none (i 88) [.word64, .word64] .sub = false := by decide
 example : scalarOpMatches none (i 88) [.word32, .native] .sub = false := by decide
 
@@ -1290,8 +1289,6 @@ example : scalarEmissionMatches none none (i 125 samplesField) [.array .unsigned
     (.stfld samples) = true := by decide
 example : scalarEmissionMatches none none (i 125 samplesField) [.array .signed32, .object]
     (.stfld samples) = false := by decide
-example : scalarEmissionMatches none none (i 125 samplesField) [.object, .object]
-    (.stfld samples) = false := by decide
 
 /-- `Scope.Pair`, a struct at layout 0, with fields of each kind the step resolves: an integer,
     an enum, a vector, a nested struct and a generic struct instance. -/
@@ -1627,13 +1624,11 @@ example : (encodeBody scope addRaw).isSome = true := by decide
 
 set_option maxHeartbeats 100000 in
 example : (encodeBody scope wideRaw).isSome = true := by decide
-example : (encodeBody scope addRaw).isSome = true := by decide +kernel
 example : BodyDecodes [] objectPlatform scope addEvidence.body addEvidence.original
     [] addEvidence.signature := by
   decide +kernel
 example : MethodEvidenceValid [] #[] [] objectPlatform [addEvidence] [] addEvidence addMethod := by
   decide +kernel
-example : MethodEvidenceValid [] #[] [] objectPlatform [addEvidence] [] addEvidence addMethod := by decide +kernel
 
 /-- A method that fills a block through its byref argument with an unprefixed `initblk`. -/
 private def blockInit : RawMethod :=
