@@ -160,13 +160,24 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
 
     if (!boundConstructor)
     {
-        // A forged type must fail the feature certificate, independently of the instruction lemma.
+        // The decoder fixes the raised type, so a forged one fails the kernel's comparison with the decoding; a
+        // `throw` outside a fold also fails the feature certificate, independently of the instruction lemma.
         var forgedLabel = label == "invalidOperation" ? "divideByZero" : "invalidOperation";
         var forged = ForgeDecodedInstruction(source, method, pc, $"fun _ => .throw (some .{forgedLabel})");
-        var mutated = Path.Combine(root, name + "-forged.lean");
-        File.WriteAllText(mutated, forged);
-        rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
-            "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
+        var decodedControl = Path.Combine(root, name + "-decoded-code.lean");
+        File.WriteAllText(decodedControl, DecodedCode(source, method));
+        controls.Add(decodedControl, $"PASS {name}: decoded code control", $"method{method}_decoded_code");
+        var decoded = Path.Combine(root, name + "-forged-decoded.lean");
+        File.WriteAllText(decoded, DecodedCode(forged, method));
+        rejected.Add(decoded, $"PASS {name}: forged raised type rejected by the decoded code",
+            DecodedCodeEquation(method), "is false");
+        if (name == "Null")
+        {
+            var mutated = Path.Combine(root, name + "-forged.lean");
+            File.WriteAllText(mutated, forged);
+            rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
+                "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
+        }
     }
     if (boundConstructor)
     {

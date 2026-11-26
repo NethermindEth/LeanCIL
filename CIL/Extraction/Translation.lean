@@ -496,6 +496,61 @@ theorem MethodEvidenceValid.code_eq {rawLayouts : List RawLayout}
 
 #print axioms MethodEvidenceValid.code_eq
 
+/-- At a reachable pc, a validated record's instruction matches its fold role after the raw
+    instruction before it, as the feature check compares it. -/
+theorem MethodEvidenceValid.feature_checked
+    {rawLayouts layouts pins platform all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method)
+    {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {state : FeatureState}
+    {emitted : Instruction}
+    (rawAt : item.closed.code[pc]? = some instruction)
+    (roleAt : (foldRoles item.closed.code)[pc]? = some role)
+    (stateAt : item.featureStates[pc]? = some (some state))
+    (codeAt : method.code[pc]? = some emitted) :
+    featureOpMatchesAt rawLayouts.toArray item.closed role instruction emitted
+      (rawBefore (item.closed.code[·]?) pc) = true :=
+  valid.2.2.2.1.instruction_checked (valid.code_eq.trans (methodCode_eq ..)) rawAt roleAt stateAt
+    codeAt
+
+#print axioms MethodEvidenceValid.feature_checked
+
+/-- At a reachable pc, a validated record's instruction is the scalar encoding the raw one implies
+    after the raw instruction before it. -/
+theorem MethodEvidenceValid.scalar_checked
+    {rawLayouts layouts pins platform all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method)
+    {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
+    {stack : List ScalarKind} {emitted : Instruction}
+    (rawAt : item.closed.code[pc]? = some instruction)
+    (roleAt : (foldRoles item.closed.code)[pc]? = some role)
+    (featureAt : item.featureStates[pc]? = some (some feature))
+    (stackAt : item.scalarStates[pc]? = some (some stack))
+    (codeAt : method.code[pc]? = some emitted) :
+    scalarEmissionMatches role (rawBefore (item.closed.code[·]?) pc) instruction stack emitted =
+      true :=
+  valid.2.2.2.2.2.2.2.2.2.2.2.1.instruction_checked (valid.code_eq.trans (methodCode_eq ..)) rawAt
+    roleAt featureAt stackAt codeAt
+
+#print axioms MethodEvidenceValid.scalar_checked
+
+/-- At a reachable pc, a validated record's instruction meets the indirect access rule with the
+    raw value comparison. -/
+theorem MethodEvidenceValid.indirect_checked
+    {rawLayouts layouts pins platform all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method)
+    {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
+    {stack : List ScalarKind} {emitted : Instruction}
+    (rawAt : item.closed.code[pc]? = some instruction)
+    (roleAt : (foldRoles item.closed.code)[pc]? = some role)
+    (featureAt : item.featureStates[pc]? = some (some feature))
+    (stackAt : item.scalarStates[pc]? = some (some stack))
+    (codeAt : method.code[pc]? = some emitted) :
+    indirectSiteWindow (item.closed.code[·]?) pc instruction emitted = true :=
+  valid.2.2.2.2.2.2.2.2.2.2.2.1.indirect_checked (valid.code_eq.trans (methodCode_eq ..)) rawAt
+    roleAt featureAt stackAt codeAt
+
+#print axioms MethodEvidenceValid.indirect_checked
+
 /-- The runtime catalog agrees with every call of a validated method. -/
 theorem MethodEvidenceValid.modelsAgree {rawLayouts layouts pins platform all imports item method}
     (valid : MethodEvidenceValid rawLayouts layouts pins platform all imports item method) :

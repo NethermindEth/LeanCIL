@@ -116,6 +116,25 @@ partial class Program
     static string ForgeDecodedInstruction(string source, int method, int pc, string change) =>
         ForgeDecodedMethod(source, method, $"code := method.code.modify {pc} ({change})");
 
+    /// <summary>The start of method `method`'s code equation, which a refusal of its decoded code names.</summary>
+    static string DecodedCodeEquation(int method) => $"method{method}.code = Extraction.methodCode";
+
+    // The code equation decided by the kernel instead of read from the decoder's own proof, so a forged emitted
+    // instruction is refused by the comparison with the decoding.
+    static string DecodedCode(string source, int method)
+    {
+        var obligation = $"method{method}_decoded_code";
+        var narrowed = NarrowEvidence(source, obligation);
+        var statement = $"theorem {obligation} : {DecodedCodeEquation(method)} ";
+        const string proof = " := @Method.ofClosed?_code ";
+        var start = narrowed.IndexOf(statement, StringComparison.Ordinal);
+        var at = start < 0 ? -1 : narrowed.IndexOf(proof, start, StringComparison.Ordinal);
+        var end = at < 0 ? -1 : narrowed.IndexOf('\n', at);
+        if (end < 0 || narrowed.IndexOf('\n', start, at - start) >= 0)
+            throw new InvalidOperationException($"Missing decoded code obligation of method{method}");
+        return narrowed[..at] + " := by decide +kernel" + narrowed[end..];
+    }
+
     // The decoder keeps the genuine closed body. Every obligation reads the changed evidence record.
     static string ForgeClosedCode(string source, int method, string code)
     {

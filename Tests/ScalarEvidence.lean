@@ -1687,11 +1687,8 @@ theorem checked_method_encodings {rawLayouts : List RawLayout} {layouts : Array 
     (stackAt : item.scalarStates[pc]? = some (some stack))
     (emittedAt : method.code[pc]? = some emitted) :
     scalarEmissionMatches role (rawBefore (item.closed.code[·]?) pc) instruction stack emitted =
-      true := by
-  have binding := valid.code_eq
-  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, flow, _⟩ := valid
-  exact flow.instruction_checked (binding.trans (methodCode_eq ..)) rawAt roleAt featureAt stackAt
-    emittedAt
+      true :=
+  valid.scalar_checked rawAt roleAt featureAt stackAt emittedAt
 
 #print axioms checked_method_encodings
 
