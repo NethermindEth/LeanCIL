@@ -53,17 +53,18 @@ individual matrix jobs may be absent on a PR.
 ## Suite jobs
 
 Selection assigns the longest remaining suite to the runner with the least estimated work. It
-charges 52 seconds for each job's setup. When the change selects library measurement, it reserves
-that step's 20-minute limit with the shortest selected suite. Each job holds up to eight suites.
+charges each job for setup and adds the measured library time to the shortest selected suite
+when the change calls for library measurement. The library step has a 20-minute timeout.
+Each job holds up to eight suites.
 Its target duration is the smaller of the longest suite and one eighth of the full run's suite time.
 Small selections use fewer runners. Jobs start longest first, with up to eight running at once.
 
 - The duration table `scripts/verification-durations.json` includes each suite's full elapsed
   time from its log group and the time to measure its verified outputs from the proof-cost log.
-  The table identifies substitutions for missing measurements. A suite without a measured time
-  runs alone.
+  The same file records the source run, per-job setup and library measurement. A suite without a
+  measured time runs alone.
 - `dotnet run --file scripts/EstimateVerificationSchedule.cs -- --jobs` prints the jobs of a full
-  run with their estimated minutes, including the full allowance for library proof cost.
+  run with their estimated minutes, including the library measurement.
 - A job's time limit is the largest of its members' (90 minutes for `imports`, 120 for each
   `exports` partition and 30 for any other suite) and at least twice the job's measured time,
   rounded up to ten minutes.

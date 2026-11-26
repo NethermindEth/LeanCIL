@@ -40,7 +40,7 @@ Test("longest-first preserves selection", () =>
 });
 Test("measured schedule reduces estimated tail without skipping jobs", () =>
 {
-    var durations = VerificationSelection.ReadDurations();
+    var durations = VerificationSelection.ReadDurations().Suites;
     double Makespan(IEnumerable<string> order, int workers)
     {
         var available = new PriorityQueue<double, double>();
@@ -57,12 +57,13 @@ Test("measured schedule reduces estimated tail without skipping jobs", () =>
 });
 Test("short groups preserve selection, isolation and bounded duration", () =>
 {
-    var durations = VerificationSelection.ReadDurations();
+    var measured = VerificationSelection.ReadDurations();
+    var durations = measured.Suites;
     var groups = VerificationSelection.Groups(allSuites);
     Equal(groups.SelectMany(group => group.Suites).Order(StringComparer.Ordinal), allSuites);
     // Every job repeats setup and restores, so a full run must not go back to one job per suite.
     double Seconds(VerificationSelection.Group group) => group.Suites.Sum(suite => durations[suite]) +
-        (group.Libraries ? VerificationSelection.LibraryMeasurementSeconds : 0);
+        (group.Libraries ? measured.LibrarySeconds : 0);
     var target = VerificationSelection.GroupSeconds(durations);
     var longest = durations.MaxBy(suite => suite.Value);
     Require(groups.Length <= allSuites.Length / 3, "Suites were not packed: " + groups.Length + " jobs");
@@ -89,7 +90,7 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
         groups.All(group => group.Suite.StartsWith(group.Suites[0], StringComparison.Ordinal) &&
             WorkflowPatterns.JobName.IsMatch(group.Suite)), "A job name is ambiguous or not its first suite");
     // Eight runners, with the setup every job repeats: packing must cost neither wall time nor jobs.
-    const double setupSeconds = VerificationSelection.SetupSeconds;
+    var setupSeconds = measured.SetupSeconds;
     double Wall(IEnumerable<double> jobs)
     {
         var runners = new PriorityQueue<double, double>();
@@ -103,7 +104,7 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     }
     var shortest = durations.MinBy(suite => suite.Value).Key;
     var single = durations.Select(pair => pair.Value +
-        (pair.Key == shortest ? VerificationSelection.LibraryMeasurementSeconds : 0)).OrderDescending().ToArray();
+        (pair.Key == shortest ? measured.LibrarySeconds : 0)).OrderDescending().ToArray();
     Require(Wall(groups.Select(Seconds)) <= Wall(single), "Packing lengthened the simulated run");
     Require((single.Length - groups.Length) * setupSeconds >= 30 * 60, "Packing saves under thirty job-minutes");
     // A job measures proof cost exactly when it runs a proof suite, alone or grouped with others.

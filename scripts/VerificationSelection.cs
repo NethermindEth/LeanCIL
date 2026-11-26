@@ -11,7 +11,10 @@ internal static class VerificationSelection
         Regex.Matches(text, pattern, options).Select(match => match.Groups[1].Value);
     static string Relative(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
 
-    internal static Dictionary<string, double> ReadDurations(string? root = null)
+    internal sealed record RunDurations(string WorkflowRun, Dictionary<string, double> Suites,
+        int SetupSeconds, int LibrarySeconds);
+
+    internal static RunDurations ReadDurations(string? root = null)
     {
         using var data = JsonDocument.Parse(File.ReadAllText(Path.Combine(root ?? Root, "scripts/verification-durations.json")));
         var durations = new Dictionary<string, double>(StringComparer.Ordinal);
@@ -23,12 +26,15 @@ internal static class VerificationSelection
             durations[property.Name] = seconds;
         }
         if (durations.Count == 0) throw new InvalidDataException("Suite durations must be positive numbers");
-        return durations;
+        var setup = data.RootElement.GetProperty("setupSeconds").GetInt32();
+        var library = data.RootElement.GetProperty("librarySeconds").GetInt32();
+        if (setup <= 0 || library <= 0) throw new InvalidDataException("Job and library durations must be positive");
+        return new(data.RootElement.GetProperty("workflowRun").GetString()!, durations, setup, library);
     }
 
     internal static string[] Schedule(IEnumerable<string> suites, string? root = null)
     {
-        var durations = ReadDurations(root);
+        var durations = ReadDurations(root).Suites;
         // Unknown suites start first rather than leaving a potentially long job at the tail.
         var unknown = durations.Values.Max() + 1;
         return suites.OrderByDescending(name => durations.GetValueOrDefault(name, unknown))
@@ -41,10 +47,6 @@ internal static class VerificationSelection
 
     // The suite jobs that run at once, which the workflow's `max-parallel` sets.
     internal const int Runners = 8;
-
-    // Reserve the full workflow step budget until a hosted run measures the library to completion.
-    internal const int LibraryMeasurementSeconds = 20 * 60;
-    internal const int SetupSeconds = 52;
 
     // More members than this make a job's summary long and its name useless for finding a failure.
     internal const int GroupMembers = 8;
@@ -61,14 +63,15 @@ internal static class VerificationSelection
     // Short selections share a job. Unknown suites start first and run alone.
     internal static Group[] Groups(IEnumerable<string> suites, string? root = null, bool planLibraries = true)
     {
-        var durations = ReadDurations(root);
+        var run = ReadDurations(root);
+        var durations = run.Suites;
         var target = GroupSeconds(durations);
         var selected = suites.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         if (selected.Length == 0) return [];
         double Seconds(string suite) => durations.GetValueOrDefault(suite, double.PositiveInfinity);
         var carrier = selected.MinBy(Seconds)!;
         double Work(string suite) =>
-            Seconds(suite) + (planLibraries && suite == carrier ? LibraryMeasurementSeconds : 0);
+            Seconds(suite) + (planLibraries && suite == carrier ? run.LibrarySeconds : 0);
         var measured = selected.Where(durations.ContainsKey).OrderByDescending(Work).ToArray();
         var workers = (int)Math.Clamp(Math.Ceiling(measured.Sum(Work) / target), 1, Runners);
         var loads = new double[workers];
@@ -80,14 +83,14 @@ internal static class VerificationSelection
             bool Fits(List<string> group) => group.Count < GroupMembers &&
                 group.Sum(Work) + Work(suite) <= target;
             var worker = Enumerable.Range(0, workers).MinBy(i =>
-                loads[i] + (assigned[i].Any(Fits) ? 0 : SetupSeconds));
+                loads[i] + (assigned[i].Any(Fits) ? 0 : run.SetupSeconds));
             var group = assigned[worker].LastOrDefault(Fits);
             if (group is null)
             {
                 group = [];
                 assigned[worker].Add(group);
                 groups.Add(group);
-                loads[worker] += SetupSeconds;
+                loads[worker] += run.SetupSeconds;
             }
             group.Add(suite);
             loads[worker] += Work(suite);
@@ -96,7 +99,7 @@ internal static class VerificationSelection
             .Select(group => group.OrderByDescending(Seconds).ToList()).Select(group =>
             {
                 var libraries = group.Contains(carrier);
-                var budget = group.Sum(Seconds) + (libraries ? LibraryMeasurementSeconds : 0);
+                var budget = group.Sum(Seconds) + (libraries ? run.LibrarySeconds : 0);
                 return new Group(Name(group), group.ToArray(), Timeout(group, budget),
                     group.Any(VerificationSuites.ProofSuites.Contains), libraries);
             }).ToArray();
