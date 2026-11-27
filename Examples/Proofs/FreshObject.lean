@@ -29,6 +29,8 @@ def tallySize : Nat := 16
 
 bind_method fresh freshBody := "System.UInt64 Examples.Objects::Fresh(System.UInt32)"
 
+-- Stepping uses the two proved writes without unfolding the bytes of the symbolic step.
+attribute [local irreducible] CIL.Safety.write in
 /-- With 16 bytes of heap budget, `Fresh(step)` returns `5 + step` for every `step`, and every
     allocation, byte and authority the caller held is unchanged. -/
 theorem correctness (memory : Memory) (formed : memory.WellFormed)
