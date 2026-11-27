@@ -266,7 +266,7 @@ theorem writeSnapshot_initialized (memory : Memory) (reference : Reference)
   | error => rfl
   | ok =>
     simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
-      snapshotCellAt_eq, List.getElem?_map]
+      snapshotCellAt_eq, initializedCellAt_eq, List.getElem?_map]
     congr 2
     funext allocation position
     split <;> try rfl
