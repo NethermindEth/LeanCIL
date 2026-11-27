@@ -230,15 +230,6 @@ macro "step_relabel_fallback" base:term:max plain:term:max : tactic => `(tactic|
   · exact $base
   · exact $plain))
 
-/-- A successful bind succeeded at its first computation. -/
-theorem except_bind_ok {x : Except ε α} {f : α → Except ε β} {y : β}
-    (h : (x >>= f) = .ok y) : ∃ a, x = .ok a ∧ f a = .ok y := by
-  cases x with
-  | error _ => cases h
-  | ok a => exact ⟨a, rfl, h⟩
-
-@[simp] theorem ok_bind_eq (a : α) (f : α → Except ε β) : (Except.ok a >>= f) = f a := rfl
-
 set_option hygiene false in
 /-- Replays the shared monadic prefix of both steps, then matches the final action. -/
 macro "lockstep" : tactic => `(tactic| (
@@ -929,16 +920,6 @@ def StepRaise (op : CIL.Instruction) : Prop :=
     StepContext expected actual r op pc q →
     step expected op pc args frame stack m = .error (.thrown exception) →
     step actual (op.relabel r) q args frame stack m = .error (.thrown exception)
-
-/-- A failed bind failed either at its first computation or in its continuation. -/
-theorem except_bind_error {x : Except ε α} {f : α → Except ε β} {e : ε}
-    (h : (x >>= f) = .error e) : x = .error e ∨ ∃ a, x = .ok a ∧ f a = .error e := by
-  cases x with
-  | error _ => cases h; exact Or.inl rfl
-  | ok a => exact Or.inr ⟨a, rfl, h⟩
-
-@[simp] theorem error_bind_eq (e : ε) (f : α → Except ε β) :
-    (Except.error e >>= f) = .error e := rfl
 
 /-- The shared tail of `step` throws only from `instruction`, which both steps share. -/
 theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}

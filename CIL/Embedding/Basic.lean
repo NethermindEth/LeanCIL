@@ -29,13 +29,6 @@ def Instruction.relabel (r : Nat → Nat) : Instruction → Instruction
   | .bne_un t => .bne_un (r t) | .leave t => .leave (r t)
   | op => op
 
-/-- Every code target of an instruction, in operand order. -/
-def Instruction.targets : Instruction → List Nat
-  | .bgt t | .ble t | .ble_un t | .br t | .brfalse t | .brtrue t
-  | .blt_un t | .bge_un t | .bgt_un t | .bge t | .blt t | .beq t | .bne_un t | .leave t => [t]
-  | .switch ts => ts
-  | _ => []
-
 -- Together these fail if a branch constructor is added to one of `relabel` and `targets` only.
 theorem Instruction.targets_relabel (r : Nat → Nat) (op : Instruction) :
     (op.relabel r).targets = op.targets.map r := by
@@ -46,13 +39,6 @@ theorem Instruction.relabel_eq_self (r : Nat → Nat) (op : Instruction)
     op.relabel r = op := by
   induction op <;> simp_all [Instruction.relabel, Instruction.targets]
   exact (List.map_congr_left fixed).trans (List.map_id _)
-
-/-- False only for instructions that never resume at the next pc, including after a call. -/
-def Instruction.continues : Instruction → Bool
-  | .calli _ true => false
-  | .call _ prefixes => !prefixes.tail
-  | .br _ | .ret | .throw _ | .leave _ | .endfinally | .unadmitted _ => false
-  | _ => true
 
 /-- A hole (`.unadmitted`) faults whenever it executes, so it constrains nothing. -/
 def Instruction.live : Instruction → Bool

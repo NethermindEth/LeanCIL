@@ -22,6 +22,29 @@ named functions as the instructions emitted for its call.
 
 namespace CIL.Safety
 
+/-- A successful bind succeeded at its first computation. -/
+theorem except_bind_ok {x : Except ε α} {f : α → Except ε β} {y : β}
+    (h : (x >>= f) = .ok y) : ∃ a, x = .ok a ∧ f a = .ok y := by
+  cases x with
+  | error _ => cases h
+  | ok a => exact ⟨a, rfl, h⟩
+
+#print axioms except_bind_ok
+
+@[simp] theorem ok_bind_eq (a : α) (f : α → Except ε β) : (Except.ok a >>= f) = f a := rfl
+
+/-- A failed bind failed either at its first computation or in its continuation. -/
+theorem except_bind_error {x : Except ε α} {f : α → Except ε β} {e : ε}
+    (h : (x >>= f) = .error e) : x = .error e ∨ ∃ a, x = .ok a ∧ f a = .error e := by
+  cases x with
+  | error _ => cases h; exact Or.inl rfl
+  | ok a => exact Or.inr ⟨a, rfl, h⟩
+
+#print axioms except_bind_error
+
+@[simp] theorem error_bind_eq (e : ε) (f : α → Except ε β) :
+    (Except.error e >>= f) = .error e := rfl
+
 /-- Whether a value has a well-formed numeric representation; a snapshot must hold
     exactly as many bytes as its shape. -/
 def numericValue : CIL.Value → Bool

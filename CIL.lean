@@ -1,12 +1,9 @@
 -- Keep this order: it sets the order in which simp lemmas and instances from different
 -- modules are tried in every consumer, so regrouping could change proof behaviour.
 
--- Reference semantics, feature profiles, method embeddings and extraction metadata
+-- Reference semantics, feature profiles and extraction metadata
 import CIL.CodeSuffix
 import CIL.ExecutionLemmas
-import CIL.Embedding.Basic
-import CIL.Embedding.BaseStep
-import CIL.Embedding.Tactic
 import CIL.Features
 import CIL.Identity
 import CIL.ExceptionType
@@ -55,12 +52,6 @@ import CIL.Safety.ByteEncoding
 import CIL.Safety.ByteRoundTrip
 import CIL.Safety.BufferContents
 import CIL.Safety.CallComposition
-import CIL.Safety.Embedding.DeadLocals
-import CIL.Safety.Embedding.Outcomes
-import CIL.Safety.Embedding.Simulation
-import CIL.Safety.Embedding.Contracts
-import CIL.Safety.Embedding.Suffix
-import CIL.Safety.Embedding.Step
 import CIL.Safety.Calling
 import CIL.Safety.CallingTransport
 import CIL.Safety.CallingFields
@@ -208,7 +199,10 @@ import CIL.Runtime.EntryContract
 # LeanCIL
 
 The root of the `CIL` library; importing `CIL` brings in every module listed above.
-Allocation-renaming proofs are optional: import `CIL.Safety.AllocationRefinement` explicitly.
+Method-embedding tactics and transports (`CIL.Embedding.Tactic`, `CIL.Safety.Embedding.*`),
+loop scaffolding (`CIL.Safety.LoopScaffold`), the observer (`CIL.Observe`) and allocation-renaming
+proofs (`CIL.Safety.AllocationRefinement`) are opt-in: import them explicitly when a proof uses
+them.
 
 * `CIL.Types`, `CIL.Instructions`, `CIL.Layout` and `CIL.Memory`: values, opcodes, aggregate
   layouts and byte memory.

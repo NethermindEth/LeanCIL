@@ -1,4 +1,4 @@
-import CIL.Safety.Embedding.Step
+import CIL.Safety.HandlerSteps
 
 /-!
 # Step control flow
@@ -110,6 +110,7 @@ theorem step_managed_tail_action {body : CIL.Method} {signature : CIL.ManagedSig
   all_goals simp_all
 #print axioms step_managed_tail_action
 
+set_option maxHeartbeats 800000 in
 /-- A step that stays in the frame resumes at the fallthrough of a continuing instruction or
     at one of its targets. -/
 theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args : List Value}
@@ -119,20 +120,37 @@ theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {
     (free : op.readsClauses = true → body.handlers = [] := by
       first | assumption | (intro reads; cases reads)) :
     (op.continues = true ∧ target = pc + 1) ∨ target ∈ op.targets := by
-  refine Decidable.byContradiction fun outside => ?_
-  -- Moving only `target` fixes `op` and its fallthrough, so the same step would also resume
-  -- at `target + 1`.
-  let r : Nat → Nat := fun t => if t = target then target + 1 else t
-  have same : op.relabel r = op := op.relabel_eq_self r fun t member =>
-    ite_eq_right fun e => outside (.inr (by rw [← e]; exact member))
-  have moved := step_relabel op body body r pc pc args frame stack m _
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl,
-      fun continues => ite_eq_right fun e => outside (.inl ⟨continues, e.symm⟩),
-      fun reads => ⟨free reads, free reads⟩⟩ h
-  rw [same, h] at moved
-  simp only [FrameAction.relabel, Except.ok.injEq, FrameAction.next.injEq] at moved
-  have : r target = target + 1 := ite_eq_left rfl
-  omega
+  unfold step observedCall referenceCompareCall referenceSubtractCall newobjStep
+    constructAggregate constructObject at h
+  dsimp only at h
+  split at h
+  · cases h
+  · split at h
+    all_goals repeat' first
+      | (rw [leaveStep_of_handlers_nil (free rfl)] at h; cases h
+         exact .inr (List.mem_singleton.mpr rfl))
+      | (rw [endFinallyStep_of_handlers_nil (free rfl)] at h; cases h)
+      | (unfold calliStep at h; simp only [Pure.pure, Except.pure] at h)
+      | (unfold returnFrom at h)
+      | (unfold localAllocation at h)
+      | (unfold initializeSpanHome at h)
+      | solve |
+        (obtain ⟨_, _, _, nextEq, _⟩ := modelStep_frame h
+         cases nextEq
+         exact .inl ⟨by simp_all [CIL.Instruction.continues], rfl⟩)
+      | solve |
+        cases h
+        first
+        | exact .inl ⟨rfl, rfl⟩
+        | (split <;> first | exact .inl ⟨rfl, rfl⟩ | exact .inr (List.mem_singleton.mpr rfl))
+        | exact CIL.step_next_target ‹_›
+      | solve | cases h
+      | contradiction
+      | (obtain ⟨_, found, h⟩ := except_bind_ok h
+         try (have := instruction_continues found; cases h; exact .inl ⟨this, rfl⟩))
+      | split at h
+
+#print axioms step_next_target
 
 /-- A `call` only ever enters the method its link names, never as a construction: under a `tail.`
     prefix it retires the frame, and otherwise it calls and continues. A call whose pc states no

@@ -231,4 +231,46 @@ def step (op : Instruction) (returns : Bool)
   | .ret, _ => returnFromStack narrow returns stack memory
   | _, _ => none
 
+/-- `returnFromStack` only returns a value, never continuing at a pc. -/
+private theorem returnFromStack_ne_next {narrow : Option NarrowKind} {returns : Bool}
+    {stack : List Value} {memory : Memory} {target : Nat} {result : List Value}
+    {memory' : Memory}
+    (ran : returnFromStack narrow returns stack memory = some (.next target result memory')) :
+    False := by
+  unfold returnFromStack at ran
+  simp only [Bind.bind, Option.bind, Pure.pure] at ran
+  repeat' first | cases ran | (split at ran <;> try dsimp only at ran)
+
+/-- A base step that continues stays at the fallthrough of a continuing instruction or jumps to
+    one of its targets. -/
+theorem step_next_target {op : Instruction} {returns : Bool} {narrow : Option NarrowKind}
+    {pc : Nat} {stack : List Value} {memory : Memory} {profile : FeatureProfile} {target : Nat}
+    {result : List Value} {memory' : Memory}
+    (ran : step op returns narrow pc stack memory profile =
+      some (.next target result memory')) :
+    (op.continues = true ∧ target = pc + 1) ∨ target ∈ op.targets := by
+  unfold step at ran
+  dsimp only at ran
+  split at ran
+  all_goals
+    try simp only [Bind.bind, Option.bind, Pure.pure] at ran
+    repeat' first
+      | exact (returnFromStack_ne_next ran).elim
+      | solve | cases ran; exact .inl ⟨rfl, rfl⟩
+      | solve | cases ran; exact .inr (List.mem_singleton.mpr rfl)
+      | solve |
+        cases ran
+        split <;> first | exact .inl ⟨rfl, rfl⟩ | exact .inr (List.mem_singleton.mpr rfl)
+      | solve |
+        cases ran
+        rename_i targets index _
+        cases found : targets[index.toNat]? with
+        | none => exact .inl ⟨rfl, by simp⟩
+        | some destination =>
+          exact .inr (by simp [Instruction.targets, List.mem_of_getElem? found])
+      | cases ran
+      | (split at ran <;> try dsimp only at ran)
+
+#print axioms step_next_target
+
 end CIL
