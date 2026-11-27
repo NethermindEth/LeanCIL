@@ -329,37 +329,147 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
   Lean.initSearchPath (← Lean.findSysroot)
   withReplayedModules args fun _ _ _ _ => pure ()
 
-/-- Replays one module with the pinned toolchain's `LeanChecker.replayFromImports` semantics.
-Its imported environment is private to this module, including when another target fails. -/
-unsafe def replayModuleSeparately (name : String) : IO Nat := do
-  let started ← IO.monoMsNow
-  let (exported, complete) ← readReplayParts name.toName
-  let (_, state) ← Lean.importModulesCore exported.imports |>.run
+/-- The prefix with the most repeated direct import entries across these targets. -/
+private def repeatedImportPrefix (imports : Array (Array Lean.Import)) : Array Lean.Import :=
+  Id.run do
+    let mut edges : Std.HashMap (Nat × Lean.Import) (Nat × Nat) := {}
+    let mut best := #[]
+    let mut bestLength := 0
+    let mut bestSavings := 0
+    for entries in imports do
+      let mut parent := 0
+      for entry in entries, depth in [1:entries.size + 1] do
+        let key := (parent, entry)
+        let (child, previous) := edges[key]?.getD (edges.size + 1, 0)
+        edges := edges.insert key (child, previous + 1)
+        let savings := depth * previous
+        if bestSavings < savings then
+          best := entries
+          bestLength := depth
+          bestSavings := savings
+        parent := child
+    return best.extract 0 bestLength
+
+/-- Loaded imports shared by precisely those targets whose first import records match. -/
+private unsafe structure SharedImports where
+  entries : Array Lean.Import
+  state : Lean.ImportState
+  regions : Lean.PtrSet Lean.CompactedRegion
+  milliseconds : Nat
+
+/-- Checks every target declaration against its own ordered imports. -/
+@[noinline] private unsafe def replayPartsSeparately (exported complete : Lean.ModuleData)
+    (common : Option SharedImports) : IO (Except IO.Error Unit × Array Lean.CompactedRegion) := do
+  let (_, state) ← match common with
+    | some group =>
+      let rest := exported.imports.extract group.entries.size exported.imports.size
+      (Lean.importModulesCore rest).run group.state
+    | none => (Lean.importModulesCore exported.imports).run
   let env ← Lean.finalizeImport state exported.imports {} 0 false false (isModule := true)
-  try
+  let check : IO Unit := do
     let mut constants := {}
     for name in complete.constNames, ci in complete.constants do
       constants := constants.insert name ci
     discard <| env.toKernelEnv.replay constants
-  finally env.freeRegions
+  let result ← check.toBaseIO
+  -- The prefix owner releases its mappings after every sibling has returned.
+  let regions := match common with
+    | some group => env.header.regions.filter (!group.regions.contains ·)
+    | none => env.header.regions
+  return (result, regions)
+
+/-- Releases the module's private imports after its dependent environment has gone out of scope. -/
+private unsafe def checkSeparateParts (exported complete : Lean.ModuleData)
+    (common : Option SharedImports) : IO Unit := do
+  let (verdict, regions) ← replayPartsSeparately exported complete common
+  regions.forM Lean.CompactedRegion.free
+  if let .error error := verdict then throw error
+
+/-- Replays one module with the pinned toolchain's exact ordered imports and declarations. -/
+unsafe def replayModuleSeparately (name : String) : IO Nat := do
+  let started ← IO.monoMsNow
+  let (exported, complete) ← readReplayParts name.toName
+  checkSeparateParts exported complete none
   return (← IO.monoMsNow) - started
 
-/-- Reports every independent module's kernel verdict without elaborating a runner source.
-This uses sequential toolchain replay within each module, with independent modules in tasks. -/
-unsafe def replayModulesSeparately (args : List String) : IO UInt32 := do
-  Lean.initSearchPath (← Lean.findSysroot)
-  let tasks ← args.toArray.mapM fun name => do
-    return (name, ← IO.asTask (replayModuleSeparately name))
+/-- Retains a read failure for the corresponding verdict in the original request order. -/
+private structure SeparateTarget where
+  name : String
+  parts : Except IO.Error (Lean.ModuleData × Lean.ModuleData)
+  readMilliseconds : Nat
+
+/-- Checks one group and retains each verdict at its request index. -/
+private unsafe def checkGroup (targets : Array (Nat × SeparateTarget))
+    (common : Option SharedImports) (results : Array (Option (Except IO.Error Nat))) :
+    IO (Array (Option (Except IO.Error Nat))) := do
+  let tasks ← IO.mkRef #[]
+  try
+    for (index, target) in targets do
+      let check : IO Nat := do
+        let started ← IO.monoMsNow
+        let (exported, complete) ← match target.parts with
+          | .ok data => pure data
+          | .error error => throw error
+        checkSeparateParts exported complete common
+        let checkMs := (← IO.monoMsNow) - started
+        return target.readMilliseconds + (common.map (·.milliseconds)).getD 0 + checkMs
+      let task ← IO.asTask check
+      tasks.modify (·.push (index, task))
+    let mut results := results
+    for (index, task) in ← tasks.get do
+      results := results.set! index (some (← IO.wait task))
+    return results
+  finally
+    -- A failed launch must leave the shared regions alive until every check ends.
+    for (_, task) in ← tasks.get do discard <| IO.wait task
+
+/-- Emits each independent kernel result in its original request position. -/
+private def writeSeparateResults (targets : Array SeparateTarget)
+    (results : Array (Option (Except IO.Error Nat))) : IO UInt32 := do
   let mut failed := false
-  for (name, task) in tasks do
+  for target in targets, result in results do
+    let name := target.name
     let fields := [("module", Lean.toJson name)]
-    match ← IO.wait task with
-    | .ok elapsed =>
+    match result with
+    | some (.ok elapsed) =>
       IO.println (Lean.Json.mkObj (fields ++ [("milliseconds", Lean.toJson elapsed)])).compress
-    | .error error =>
+    | some (.error error) =>
       IO.println (Lean.Json.mkObj (fields ++ [("error", Lean.toJson (toString error))])).compress
       failed := true
+    | none => throw <| IO.userError s!"Missing replay result for {name}"
   return if failed then 1 else 0
+
+/-- Fully loads an exact prefix through the same toolchain importer used for every target. -/
+private unsafe def loadSharedImports (entries : Array Lean.Import) :
+    IO (SharedImports × Lean.Environment) := do
+  let started ← IO.monoMsNow
+  let (_, state) ← (Lean.importModulesCore entries).run
+  let owner ← Lean.finalizeImport state entries {} 0 false false (isModule := true)
+  let regions := owner.header.regions.foldl (·.insert ·) Lean.mkPtrSet
+  return (⟨entries, state, regions, (← IO.monoMsNow) - started⟩, owner)
+
+/-- Reports every independent module's kernel verdict in request order. -/
+unsafe def replayModulesSeparately (args : List String) : IO UInt32 := do
+  Lean.initSearchPath (← Lean.findSysroot)
+  let targets : Array SeparateTarget ← args.toArray.mapM fun name => do
+    let started ← IO.monoMsNow
+    let parts ← (readReplayParts name.toName).toBaseIO
+    return ⟨name, parts, (← IO.monoMsNow) - started⟩
+  let common := repeatedImportPrefix <| targets.filterMap fun target =>
+    target.parts.toOption.map fun (exported, _) => exported.imports
+  let (members, others) := (targets.mapIdx (fun index target => (index, target))).partition
+    fun (_, target) => !common.isEmpty && target.parts.toOption.any fun (exported, _) =>
+      common == exported.imports.extract 0 common.size
+  -- Finish independent imports before reserving the common regions.
+  let results ← checkGroup others none (.replicate targets.size none)
+  if members.isEmpty then return ← writeSeparateResults targets results
+  let shared ← (loadSharedImports common).toBaseIO
+  let results ← match shared with
+    | .ok (group, owner) =>
+      try checkGroup members (some group) results
+      finally owner.freeRegions
+    | .error _ => checkGroup members none results
+  writeSeparateResults targets results
 
 /-- Stable protocol spellings for checking-boundary rejection kinds. -/
 def RejectionKind.protocolName : RejectionKind → String

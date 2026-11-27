@@ -264,12 +264,44 @@ Compile("JointForgedDefinitionUse", "import JointForgedDefinition\n" +
     "theorem JointForgedDefinitionUse.same : JointForgedDefinition.value = JointForgedDefinition.value := rfl\n");
 Compile("JointForgedChain", "import JointForged\ntheorem JointForgedChain.use : False := JointForged.false\n");
 
+void CheckOrderedReplay(string executable, (string Module, string? Rejection)[] cases)
+{
+    var targets = cases.Select(item => item.Module).ToArray();
+    var request = Path.Combine(root, "ordered-targets.json");
+    File.WriteAllText(request, JsonSerializer.Serialize(targets));
+    var run = Execute([executable, "--replay-separately", request], root, root, environment: environment);
+    var failures = ParseSeparateReplayResults(targets, run.Code, run.Stdout);
+    var order = run.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("module").GetString());
+    if (!order.SequenceEqual(targets))
+        throw new InvalidOperationException("Separate replay changed the request order: " + run.Output);
+    foreach (var (module, rejection) in cases)
+    {
+        failures.TryGetValue(module, out var error);
+        if (rejection is null ? error is not null : error?.Contains(rejection, StringComparison.Ordinal) != true)
+            throw new InvalidOperationException($"Unexpected separate replay result for {module}: {run.Output}");
+    }
+}
+
 void CheckIsolatedDiagnostics()
 {
     if (args is not ["--diagnostics-only"]) verification.Library(Inputs(At("CIL.lean")));
     var executable = args is ["--diagnostics-only"]
         ? At(".lake/build/bin/leancil-audit" + (OperatingSystem.IsWindows() ? ".exe" : ""))
         : verification.CheckedAuditExecutable();
+    CheckOrderedReplay(executable, [("JointForged", "JointForged.false"), ("JointMalformed", "JointMalformed"),
+        ("JointHidden", "JointVisible.correctness"), ("JointForgedDefinition", "JointForgedDefinition.value"),
+        ("JointVisible", null)]);
+    var dependency = Path.Combine(root, "JointA.olean");
+    File.Move(dependency, dependency + ".hidden");
+    try
+    {
+        // Both otherwise readable targets import JointA. The malformed target keeps its own read failure.
+        CheckOrderedReplay(executable, [("JointB", "JointA"), ("JointMalformed", "JointMalformed"),
+            ("JointMissingImport", "JointA")]);
+    }
+    finally { File.Move(dependency + ".hidden", dependency); }
+    Console.WriteLine("PASS isolated replay preserves ordered rejections when shared imports load or fail");
     string[] targets = ["JointA", "JointForged", "JointForgedDefinition", "JointForgedChain",
         "JointHidden", "JointMalformed"];
     var input = Path.Combine(root, "diagnostic-targets.json");
