@@ -2684,9 +2684,8 @@ Action TemplateChoiceCosts()
     }
     return () =>
     {
-        var samples = new Dictionary<(bool VaryInputs, int Size), (long Total, long Selection)>();
-        var extracted = new HashSet<string>(StringComparer.Ordinal);
-        var pcs = 0;
+        var cases = new List<(bool VaryInputs, int Size, int Flags, List<string> Paths)>();
+        var extractions = new Dictionary<string, GeneratedExtraction>(StringComparer.Ordinal);
         foreach (var varyInputs in new[] { true, false })
             foreach (var size in sizes)
             {
@@ -2698,50 +2697,54 @@ Action TemplateChoiceCosts()
                 foreach (var profile in profiles)
                 {
                     var path = Path.Combine(root, $"Read{flags}-{profile}");
-                    if (extracted.Add(path))
-                    {
-                        var specification = profile.StartsWith("profile", StringComparison.Ordinal)
-                            ? $"@{Path.Combine(root, $"{profile}.json")}" : profile;
-                        Run(Extract("extract", image, "Flags", $"Flags::Read{flags}(int)", path, specification));
-                    }
+                    var specification = profile.StartsWith("profile", StringComparison.Ordinal)
+                        ? $"@{Path.Combine(root, $"{profile}.json")}" : profile;
+                    extractions.TryAdd(path, new(image, $"Flags::Read{flags}(int)", path, specification));
                     paths.Add(path);
                 }
-                var shared = Path.Combine(root, varyInputs ? $"Inputs{size}" : $"Flags{size}");
-                Run(["dotnet", ExtractorPath, "templates", shared, .. paths]);
-                var module = File.ReadAllText(Path.Combine(shared, "Templates.lean")).ReplaceLineEndings("\n");
-                var start = module.IndexOf("/-- The stable managed identity", StringComparison.Ordinal);
-                var last = module.LastIndexOf("#print axioms method0_instruction", StringComparison.Ordinal);
-                using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(shared,
-                    "templates.json")));
-                var features = manifest.RootElement.GetProperty("methods")[0].GetProperty("flags").EnumerateArray()
-                    .Select(flag => flag.GetString()!)
-                    .Select(flag => $"{char.ToUpperInvariant(flag[0])}{flag[1..]}").ToArray();
-                var bindings = manifest.RootElement.GetProperty("profiles");
-                int ObservedFlags(System.Text.Json.JsonElement binding)
-                {
-                    var profile = binding.GetProperty("profile");
-                    return features.Aggregate(0, (bits, flag) =>
-                        2 * bits + (profile.GetProperty(flag).GetBoolean() ? 1 : 0));
-                }
-                var leaves = bindings.EnumerateArray().Select(ObservedFlags).Distinct().Count();
-                if (features.Length != flags || bindings.GetArrayLength() != paths.Count ||
-                    leaves != (varyInputs ? size : 2) || start < 0 || last < 0)
-                    throw new InvalidOperationException(
-                        $"Unexpected dimensions at {paths.Count} inputs, {flags} flags.");
-                var number = module[(last + "#print axioms method0_instruction".Length)..].Split('\n')[0];
-                var count = int.Parse(number, CultureInfo.InvariantCulture) + 1;
-                if (pcs != 0 && count != pcs)
-                    throw new InvalidOperationException("Template instruction counts differ.");
-                pcs = count;
-                var header = module.IndexOf("/-!", StringComparison.Ordinal);
-                var parts = new[] { module[..header], module[header..start], module[start..] };
-                var costs = PartHeartbeats(Path.Combine(shared, "Costs.lean"), parts);
-                samples.Add((varyInputs, size), (costs.Sum(), costs[1]));
-                Console.WriteLine($"""
-                    Template {Path.GetFileName(shared)}, {paths.Count} inputs, {flags} flags, {pcs} pcs:
-                      {costs.Sum()} total heartbeats, {costs[1]} for selection, leaf proofs and equations
-                    """);
+                cases.Add((varyInputs, size, flags, paths));
             }
+        ExtractBatch("extract", "Flags", extractions.Values);
+        var measured = Concurrently(cases, test =>
+        {
+            var (varyInputs, size, flags, paths) = test;
+            var shared = Path.Combine(root, varyInputs ? $"Inputs{size}" : $"Flags{size}");
+            Run(["dotnet", ExtractorPath, "templates", shared, .. paths]);
+            var module = File.ReadAllText(Path.Combine(shared, "Templates.lean")).ReplaceLineEndings("\n");
+            var start = module.IndexOf("/-- The stable managed identity", StringComparison.Ordinal);
+            var last = module.LastIndexOf("#print axioms method0_instruction", StringComparison.Ordinal);
+            using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(shared,
+                "templates.json")));
+            var features = manifest.RootElement.GetProperty("methods")[0].GetProperty("flags").EnumerateArray()
+                .Select(flag => flag.GetString()!)
+                .Select(flag => $"{char.ToUpperInvariant(flag[0])}{flag[1..]}").ToArray();
+            var bindings = manifest.RootElement.GetProperty("profiles");
+            int ObservedFlags(System.Text.Json.JsonElement binding)
+            {
+                var profile = binding.GetProperty("profile");
+                return features.Aggregate(0, (bits, flag) =>
+                    2 * bits + (profile.GetProperty(flag).GetBoolean() ? 1 : 0));
+            }
+            var leaves = bindings.EnumerateArray().Select(ObservedFlags).Distinct().Count();
+            if (features.Length != flags || bindings.GetArrayLength() != paths.Count ||
+                leaves != (varyInputs ? size : 2) || start < 0 || last < 0)
+                throw new InvalidOperationException(
+                    $"Unexpected dimensions at {paths.Count} inputs, {flags} flags.");
+            var number = module[(last + "#print axioms method0_instruction".Length)..].Split('\n')[0];
+            var count = int.Parse(number, CultureInfo.InvariantCulture) + 1;
+            var header = module.IndexOf("/-!", StringComparison.Ordinal);
+            var parts = new[] { module[..header], module[header..start], module[start..] };
+            var costs = PartHeartbeats(Path.Combine(shared, "Costs.lean"), parts);
+            Console.WriteLine($"""
+                Template {Path.GetFileName(shared)}, {paths.Count} inputs, {flags} flags, {count} pcs:
+                  {costs.Sum()} total heartbeats, {costs[1]} for selection, leaf proofs and equations
+                """);
+            return (test.VaryInputs, test.Size, Instructions: count, Total: costs.Sum(), Selection: costs[1]);
+        });
+        var pcs = measured[0].Instructions;
+        if (measured.Any(row => row.Instructions != pcs))
+            throw new InvalidOperationException("Template instruction counts differ.");
+        var samples = measured.ToDictionary(row => (row.VaryInputs, row.Size));
         foreach (var varyInputs in new[] { true, false })
             foreach (var selectionOnly in new[] { true, false })
             {
