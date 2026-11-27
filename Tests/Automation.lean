@@ -1358,6 +1358,43 @@ def recordIsEmpty : TacticM Unit := do
     .ldarg 1, .call (Tests.callee 1) {}, .ret],
   links := [(1, .direct 1), (4, .direct 1)], locals := [], returnsValue := true }
 
+attribute [-cil_step] step_call_eq in
+/-- A supplied instruction equation keeps priority over specialization of a direct call. -/
+theorem directCallInstructionPriority (frame : Frame) (memory final : Memory) (value : CIL.W64)
+    (_instructionFact : instruction (.call (Tests.callee 1) {}) [.scalar (.i64 value)] memory =
+      .ok (final, [])) :
+    step twoCallInputs (.call (Tests.callee 1) {}) 1 [] frame [.scalar (.i64 value)] memory =
+      .ok (.call 1 [.scalar (.i64 value)] [] memory) := by
+  -- Only the specialized route can close the step with the generic call equation disabled.
+  fail_if_success cil_checked_step [_instructionFact]
+  cil_checked_step []
+
+#print axioms directCallInstructionPriority
+
+section
+
+/-- A body whose link is known only through its supplied site fact. -/
+private structure DirectCallSite where
+  /-- The method containing the call. -/
+  body : CIL.Method
+  /-- The call at pc zero enters method one. -/
+  target : body.linkAt 0 = some (.direct 1)
+
+attribute [local cil_code] DirectCallSite.target
+
+attribute [-cil_step] step_call_eq in
+/-- The same site fact that selects the callee can determine the argument passed to it. -/
+private theorem directLinkInOperand (site : DirectCallSite) (frame : Frame) (memory : Memory)
+    (left right : CIL.W64) :
+    step site.body (.call (Tests.callee 1) {}) 0 [] frame
+      [.scalar (.i64 (match site.body.linkAt 0 with | some (.direct _) => left | _ => right))]
+      memory = .ok (.call 1 [.scalar (.i64 left)] [] memory) := by
+  cil_checked_step []
+
+#print axioms directLinkInOperand
+
+end
+
 /-- Reusing a caller's simplification record preserves the second child's argument. -/
 theorem childCallsKeepInputs (memory : Memory) (frame : Frame) (left right : CIL.W64) :
     run [twoCallInputs, identityCallee] 9 0 0

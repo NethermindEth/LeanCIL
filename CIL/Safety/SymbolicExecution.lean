@@ -1559,18 +1559,25 @@ elab_rules : tactic
         stepLinkFact? (← entryAt "cil_checked_step_normalized" args 0)
           (← entryAt "cil_checked_step_normalized" args 2) facts.getElems
       else pure none
-    if let (true, some proof) := (operation == ``CIL.Instruction.call, linkProof) then
-      let link := (← inferType proof).eq?.map (·.2.2)
-      if link.any (fun value => (argumentsOf? value ``Option.some 2).any
-          (fun arguments => arguments[1]!.isAppOf ``CIL.Link.direct)) then
-        -- The direct equation consumes the pc-specific proof. Its remaining simplification
-        -- needs only the caller's facts and can reuse their contexts across call sites.
+    -- Field reads and writes have their own fact selection. Other instructions prefer a supplied
+    -- instruction equation to reducing the operation to its shape.
+    let instructionFacts ← if operation == ``CIL.Instruction.ldfld ||
+        operation == ``CIL.Instruction.stfld then pure #[]
+      else dispatchFacts lhs ``CIL.Safety.instruction facts.getElems
+    if let (true, some proof) := (operation == ``CIL.Instruction.call &&
+        instructionFacts.isEmpty, linkProof) then
+      unless ← statesNone proof do
+        -- The direct equation consumes the site proof. Reuse the caller's simplification
+        -- context unless an operand also needs this site's link rewritten.
         let saved ← saveState
         try
           let link ← Term.exprToSyntax proof
           evalTactic (← `(tactic| cil_strict (
             refine Eq.trans (CIL.Safety.step_call_direct _ _ _ _ _ $link _) ?_
-            cil_checked_linked_step_by_equations [] [$facts,*])))
+            first
+            | cil_checked_linked_step_by_equations [] [$facts,*]
+            | (have atSite := $link
+               cil_checked_linked_step_by_equations [] [$[$facts:term],*, atSite]))))
           return
         catch _ => saved.restore
     -- A link or model used as a simp rule belongs to this pc's local context.
@@ -1618,9 +1625,7 @@ elab_rules : tactic
                (by first | assumption | cil_step_shape) _) ?_
              simp only [storeValueField, cil_guard, cil_checked, checkedAt, ordinaryAccessAlignment,
                Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, $[$stepFacts:term],*] <;> rfl))
-      -- A fact about `instruction` keeps its abstraction only if tried before a per-shape
-      -- equation rewrites past it.
-      else if !(← dispatchFacts lhs ``CIL.Safety.instruction facts.getElems).isEmpty then
+      else if !instructionFacts.isEmpty then
         `(tactic| cil_strict (cil_checked_instruction_from_fact [$facts:term,*]))
       else if let #[link, model] := linkFacts then
         let evaluate ← `(tactic| (
@@ -1662,12 +1667,6 @@ elab_rules : tactic
              | cil_checked_step_normalized [$facts:term,*]
              | cil_checked_memory_by_equations [$facts:term,*])
           | cil_checked_linked_step_by_equations [$link, $model] [$[$stepFacts:term],*]))
-      else if let (true, #[link]) := (operation == ``CIL.Instruction.call, linkFacts) then
-        -- A directly linked call rewrites by one equation that never mentions the model.
-        `(tactic| cil_strict (first
-          | (refine Eq.trans (CIL.Safety.step_call_direct _ _ _ _ _ $link _) ?_
-             cil_checked_linked_step_by_equations [] [$[$stepFacts:term],*])
-          | cil_checked_linked_step_by_equations [$link] [$[$stepFacts:term],*]))
       else if linkedOpcodes.contains operation then
         `(tactic| cil_strict
           (cil_checked_linked_step_by_equations [$[$linkFacts:term],*] [$[$stepFacts:term],*]))
