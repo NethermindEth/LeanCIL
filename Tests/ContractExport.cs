@@ -74,7 +74,7 @@ if (cohort == "protected")
         }
         """);
 }
-Run(["dotnet", "build", cohort == "discovery" ? Path.Combine(libraryRoot, "Lib.csproj") : Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
+Run(["dotnet", "build", Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
 string library = Path.Combine(libraryRoot, "bin", "ImportFixture.Lib.dll");
 string app = Path.Combine(appRoot, "bin", "ImportFixture.App.dll");
 string sidecar = Path.Combine(libraryRoot, "bin", "ImportFixture.Lib.leancil.contracts");
@@ -211,17 +211,7 @@ string CallerVerify()
 
 if (cohort != "core")
 {
-    if (cohort == "discovery")
-    {
-        ExportSuite discovery = ExportVerificationSuites.Plan().Single(entry => entry.Cohort == cohort);
-        string child = discovery.ChildScript ?? throw new InvalidDataException("Missing discovery child script.");
-        Run(["dotnet", "run", "--file", child, "--", .. ExportVerificationSuites.DiscoveryArguments(
-            sidecar, callerProof, callerPackage, package, proof, contractSource)],
-            streamOutput: true, progress: "Contract discovery through SDK assets and carriers");
-        completed.CompleteCase("discovery.fixture");
-        completed.Finish();
-    }
-    else if (cohort == "protected")
+    if (cohort == "protected")
     {
         using var producerModule = ModuleDefinition.ReadModule(library);
         using var callerModule = ModuleDefinition.ReadModule(app);
@@ -283,11 +273,6 @@ if (cohort != "core")
         completed.Finish();
         Console.WriteLine("PASS protected static export, separately compiled derived caller and visibility rejection");
     }
-    else if (cohort == "audit")
-    {
-        RejectPostAuditMutations(library, artifact, package, proof, contractSource, sidecar, completed);
-        completed.Finish();
-    }
     else
         Run(["dotnet", "run", "--file", "Tests/FullImportVerification.cs", "--", app, library, sidecar, publishedBundle,
             callerPackage, callerProof, package, proof, "--cohort", cohort], streamOutput: true,
@@ -301,6 +286,15 @@ if (initialCaller.GetProperty("schema").GetInt32() != CertificateSchema)
     throw new InvalidOperationException("Imported contract verification did not produce the current trust report.");
 completed.CompleteCase("core.caller");
 Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
+
+// Run post-callback audit and SDK contract discovery against the same producer export bootstrap.
+RejectPostAuditMutations(library, artifact, package, proof, contractSource, sidecar, completed);
+ExportSuite coreSuite = ExportVerificationSuites.Plan().Single(entry => entry.Cohort == "core");
+string discoveryChild = coreSuite.ChildScript ?? throw new InvalidDataException("Missing discovery child script.");
+Run(["dotnet", "run", "--file", discoveryChild, "--", .. ExportVerificationSuites.DiscoveryArguments(
+    sidecar, callerProof, callerPackage, package, proof, contractSource)],
+    streamOutput: true, progress: "Contract discovery through SDK assets and carriers");
+completed.CompleteCase("discovery.fixture");
 
 string restricted = Sha(sidecar);
 string Restriction(string name, string assembly, string method, params string[] options)

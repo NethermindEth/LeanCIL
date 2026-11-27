@@ -256,37 +256,30 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves 23 leaves, 51 base cases and one discovery completion", () =>
+Test("independent export cohort map preserves 13 leaves, 51 base cases and one discovery completion", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
         ["exports"] = ("core", ["core.unrelated", "core.definition", "core.wrapper-true", "core.publication",
-            "core.caller", "core.internal", "core.instance", "core.generic", "core.virtual", "core.static-values",
+            "core.caller", "audit.proof-source", "audit.wrapper-artifact", "discovery.fixture",
+            "core.internal", "core.instance", "core.generic", "core.virtual", "core.static-values",
             "core.initialized", "core.imports", "core.profile", "core.reference",
             "core.bundle-location", "core.framework-change", "core.interface-text", "core.duplicate",
-            "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post", "core.revised-contract"]),
-        ["exportsaudit"] = ("audit", ["audit.proof-source", "audit.wrapper-artifact"]),
+            "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post",
+            "core.revised-contract"]),
         ["exportsprotected"] = ("protected", ["protected.publication", "protected.caller", "protected.visibility"]),
         ["exportsresolution"] = ("resolution", ["resolution.same-files", "resolution.changed-file",
             "resolution.rewritten-artifact"]),
-        ["exportsfullconsumer"] =
-            ("consumer", ["full.consumer-explicit", "full.consumer-repeat", "full.artifact-mode"]),
-        ["exportsfullordinary"] = ("ordinary", ["full.ordinary"]),
-        ["exportsfullpair"] = ("pair", ["full.pair"]),
-        ["exportsfullchecks"] = ("checks", ["full.missing-bundle", "full.inventory-bytes", "full.producer-bytes",
+        ["exportsfull"] = ("full", ["full.consumer-explicit", "full.consumer-repeat", "full.artifact-mode",
+            "full.ordinary", "full.pair", "full.missing-bundle", "full.inventory-bytes", "full.producer-bytes",
             "full.unrecorded-olean", "full.deployed-dll", "full.stale-closure", "full.statement-digest",
-            "full.extra-premise"]),
-        ["exportsfulltheorems"] = ("theorems", ["full.producer-true", "full.producer-definition"]),
-        ["exportsfullcomposition"] = ("composition", ["full.composition-true"]),
-        ["exportsmutationordinary"] = ("ordinary-artifact", ["full.ordinary-artifact"]),
-        ["exportsmutationconsumer"] = ("consumer-artifact", ["full.consumer-artifact"]),
-        ["exportsmutationsource"] = ("consumer-source", ["full.consumer-source"]),
-        ["exportsmutationshadow"] = ("consumer-shadow", ["full.consumer-shadow"]),
+            "full.extra-premise", "full.producer-true", "full.producer-definition", "full.composition-true"]),
+        ["exportsmutations"] = ("mutations", ["full.ordinary-artifact", "full.consumer-artifact",
+            "full.consumer-source", "full.consumer-shadow"]),
         ["exportsstatics"] = ("statics", []),
         ["exportsfullstatics"] = ("fullstatics", []),
         ["exportstransitive"] = ("transitive", []),
         ["exportstransitiveoutcomes"] = ("transitiveoutcomes", []),
-        ["exportsdiscovery"] = ("discovery", ["discovery.fixture"]),
         ["exportstyped"] = ("typed", []),
         ["exportsderived"] = ("derived", []),
         ["exportsinitialized"] = ("initialized", []),
@@ -306,7 +299,7 @@ Test("independent export cohort map preserves 23 leaves, 51 base cases and one d
                     "derived" or "initialized" or "profiles";
 
             Require(entry.Standalone == standalone, "Wrong standalone fixture kind: " + entry.Name);
-            Require(entry.ChildScript == (entry.Cohort == "discovery" ? "Tests/ContractDiscovery.cs" : null),
+            Require(entry.ChildScript == (entry.Cohort == "core" ? "Tests/ContractDiscovery.cs" : null),
                 "Wrong bootstrapped child fixture: " + entry.Name);
             string script = entry.Cohort switch
             {
@@ -333,7 +326,7 @@ Test("independent export cohort map preserves 23 leaves, 51 base cases and one d
     }
     ExportSuite[] all = ExportVerificationSuites.Plan();
     ExactPlan(all);
-    string[] baseCases = all.Where(entry => entry.Cohort != "discovery").SelectMany(entry => entry.Cases).ToArray();
+    string[] baseCases = all.SelectMany(entry => entry.Cases).Where(id => id != "discovery.fixture").ToArray();
     Require(baseCases.Length == 51 && baseCases.Distinct(StringComparer.Ordinal).Count() == 51,
         "Lost or duplicate base behavior");
     Require(all.SelectMany(entry => entry.Cases).Count() == 52 &&
@@ -349,9 +342,7 @@ Test("independent export cohort map preserves 23 leaves, 51 base cases and one d
     Equal(ExportVerificationSuites.FullPlan().Select(entry => entry.Name),
         all.Where(OnlyFullCases).Select(entry => entry.Name));
     Equal(ExportVerificationSuites.FullPlan().Select(entry => entry.Cohort).Order(StringComparer.Ordinal),
-        new[] { "composition", "consumer", "ordinary", "pair", "checks", "theorems",
-            "ordinary-artifact", "consumer-artifact", "consumer-source", "consumer-shadow" }
-            .Order(StringComparer.Ordinal));
+        new[] { "full", "mutations" }.Order(StringComparer.Ordinal));
     foreach (ExportSuite entry in all)
     {
         if (!entry.Standalone && entry.Cohort != "resolution")
@@ -371,8 +362,8 @@ Test("export coverage detects each omitted completion and invalid selection", ()
         ["--cohort", "transitiveoutcomes"], ["--cohort", "typed"], ["--cohort", "derived"] })
         MustReject(() => ExportVerificationSuites.Select(invalid));
     string[] nonFullCohorts =
-        ["core", "audit", "protected", "resolution", "statics", "fullstatics", "transitive", "transitiveoutcomes",
-            "discovery", "typed", "derived", "unknown"];
+        ["core", "protected", "resolution", "statics", "fullstatics", "transitive", "transitiveoutcomes",
+            "typed", "derived", "unknown"];
 
     foreach (string cohort in nonFullCohorts)
     {
@@ -425,7 +416,7 @@ Test("export leaf selection, strict files and shared inputs", () =>
     Equal(Select(["Tests/ModularStaticExports.cs"]).Order(StringComparer.Ordinal),
         ["exportsfullstatics", "exportsstatics"]);
     Equal(Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
-    Equal(Select(["Tests/ContractDiscovery.cs"]), ["exportsdiscovery"]);
+    Equal(Select(["Tests/ContractDiscovery.cs"]), ["exports"]);
     Equal(Select(["Tests/GenericLayoutImports.cs"]), ["exportstyped"]);
     string[] typedFixtures =
         ["TypedImportInterface", "TypedIdentityProof", "TypedCopyProof", "TypedIdentityCaller", "TypedCopyCaller",
@@ -465,7 +456,6 @@ Test("export leaf selection, strict files and shared inputs", () =>
     Require(!Has("\"Tests/TransitiveImports.cs\""), "Old nested transitive suite remains");
     Require(!Has("\"Tests/GenericLayoutImports.cs\""), "Old nested typed suite remains");
     Require(!Has("\"Tests/ContractDiscovery.cs\"") &&
-        Has("if (cohort == \"discovery\")") &&
         Has("ExportVerificationSuites.DiscoveryArguments(") &&
         Has("sidecar, callerProof, callerPackage, package, proof, contractSource)"),
         "Discovery lost its selected six-argument child dispatch");
@@ -480,11 +470,11 @@ Test("a missing registered export fixture fails selection", () =>
         // Each fixture in registration order must be reported missing before the next one is checked.
         (string Fixture, string Kind)[] fixtures =
         [
+            ("Tests/ContractDiscovery.cs", "discovery child"),
             ("Tests/FullModuleResolution.cs", "resolution"),
             ("Tests/ModularStaticExports.cs", "standalone static"),
             ("Tests/TransitiveImports.cs", "standalone transitive"),
             ("Tests/TransitiveOutcomes.cs", "standalone transitive outcomes"),
-            ("Tests/ContractDiscovery.cs", "discovery child"),
             ("Tests/GenericLayoutImports.cs", "standalone typed"),
             ("Tests/DerivedContractExports.cs", "standalone derived"),
             ("Tests/InitializedExports.cs", "standalone initialized")

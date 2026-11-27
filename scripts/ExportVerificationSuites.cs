@@ -5,33 +5,31 @@ internal static class ExportVerificationSuites
 {
     internal static readonly ExportSuite[] Entries =
     [
-        Entry("exports", "core", "contract production, restrictions and caller reuse",
+        new("exports", "core", "Tests/ContractExport.cs", ["--cohort", "core"],
+            "contract production, post-callback audit, discovery, restrictions and caller reuse",
             ["core.unrelated", "core.definition", "core.wrapper-true", "core.publication", "core.caller",
+             "audit.proof-source", "audit.wrapper-artifact", "discovery.fixture",
              "core.internal", "core.instance", "core.generic", "core.virtual", "core.static-values",
              "core.initialized", "core.imports", "core.profile", "core.reference",
              "core.bundle-location", "core.framework-change", "core.interface-text", "core.duplicate",
-             "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post", "core.revised-contract"]),
-        Entry("exportsaudit", "audit", "post-callback export integrity",
-            ["audit.proof-source", "audit.wrapper-artifact"]),
+             "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post",
+             "core.revised-contract"],
+            ["Tests/ContractExport.cs", "Tests/ContractDiscovery.cs"], ChildScript: "Tests/ContractDiscovery.cs"),
         Entry("exportsprotected", "protected", "protected static export and separately compiled derived caller",
             ["protected.publication", "protected.caller", "protected.visibility"]),
         new("exportsresolution", "resolution", "Tests/FullModuleResolution.cs", [], "full module resolution",
             ["resolution.same-files", "resolution.changed-file", "resolution.rewritten-artifact"],
             ["Tests/FullModuleResolution.cs"]),
-        Entry("exportsfullcomposition", "composition", "transferred composition statement integrity", ["full.composition-true"]),
-        Entry("exportsfullconsumer", "consumer", "fresh and repeated full consumer verification",
-            ["full.consumer-explicit", "full.consumer-repeat", "full.artifact-mode"]),
-        Entry("exportsfullordinary", "ordinary", "ordinary full caller verification", ["full.ordinary"]),
-        Entry("exportsfullpair", "pair", "two imported slots from one bundle", ["full.pair"]),
-        Entry("exportsfullchecks", "checks", "full input and caller rejection",
-            ["full.missing-bundle", "full.inventory-bytes", "full.producer-bytes",
-             "full.unrecorded-olean", "full.deployed-dll", "full.stale-closure", "full.statement-digest", "full.extra-premise"]),
-        Entry("exportsfulltheorems", "theorems", "producer theorem kind and statement rejection",
-            ["full.producer-true", "full.producer-definition"]),
-        Entry("exportsmutationordinary", "ordinary-artifact", "ordinary caller artifact mutation", ["full.ordinary-artifact"]),
-        Entry("exportsmutationconsumer", "consumer-artifact", "consumer caller artifact mutation", ["full.consumer-artifact"]),
-        Entry("exportsmutationsource", "consumer-source", "consumer caller source mutation", ["full.consumer-source"]),
-        Entry("exportsmutationshadow", "consumer-shadow", "original caller root shadow mutation", ["full.consumer-shadow"]),
+        Entry("exportsfull", "full",
+            "independent full caller verification, pair bundle sharing, rejection checks, producer theorem checks and composition integrity",
+            ["full.consumer-explicit", "full.consumer-repeat", "full.artifact-mode",
+             "full.ordinary", "full.pair",
+             "full.missing-bundle", "full.inventory-bytes", "full.producer-bytes",
+             "full.unrecorded-olean", "full.deployed-dll", "full.stale-closure", "full.statement-digest",
+             "full.extra-premise", "full.producer-true", "full.producer-definition", "full.composition-true"]),
+        Entry("exportsmutations", "mutations",
+            "ordinary and consumer caller artifact, source and shadow mutations during full verification",
+            ["full.ordinary-artifact", "full.consumer-artifact", "full.consumer-source", "full.consumer-shadow"]),
         new("exportsstatics", "statics", "Tests/ModularStaticExports.cs", [], "independent modular static exports",
             [], ["Tests/ModularStaticExports.cs"], Standalone: true),
         new("exportsfullstatics", "fullstatics", "Tests/ModularStaticExports.cs", ["--full-composition"],
@@ -45,8 +43,6 @@ internal static class ExportVerificationSuites
             [], ["Tests/TransitiveOutcomes.cs", "Tests/ContractImports/DerivedInterface.lean",
                 "Tests/ContractImports/DerivedPercentProof.lean"],
             Standalone: true),
-        new("exportsdiscovery", "discovery", "Tests/ContractExport.cs", ["--cohort", "discovery"], "contract discovery with real export bootstrap",
-            ["discovery.fixture"], ["Tests/ContractExport.cs", "Tests/ContractDiscovery.cs"], ChildScript: "Tests/ContractDiscovery.cs"),
         new("exportstyped", "typed", "Tests/GenericLayoutImports.cs", [], "independent typed generic and layout imports", [],
             ["Tests/GenericLayoutImports.cs", "Tests/GenericImportIdentities.cs",
              "Tests/ContractImports/TypedImportInterface.lean",
@@ -72,7 +68,7 @@ internal static class ExportVerificationSuites
 
     static ExportSuite Entry(string name, string cohort, string description, string[] cases) =>
         new(name, cohort, "Tests/ContractExport.cs", ["--cohort", cohort], description, cases,
-            cohort is "core" or "audit" or "protected" ? ["Tests/ContractExport.cs"] :
+            cohort is "core" or "protected" ? ["Tests/ContractExport.cs"] :
                 ["Tests/ContractExport.cs", "Tests/FullImportVerification.cs"]);
 
     internal static ExportSuite[] Plan()
@@ -82,8 +78,7 @@ internal static class ExportVerificationSuites
     }
 
     internal static ExportSuite[] FullPlan() => Plan().Where(entry => IsFull(entry.Cohort)).ToArray();
-    internal static bool IsFull(string cohort) => cohort is "composition" or "consumer" or "ordinary" or "pair" or
-        "checks" or "theorems" or "ordinary-artifact" or "consumer-artifact" or "consumer-source" or "consumer-shadow";
+    internal static bool IsFull(string cohort) => cohort is "full" or "mutations";
 
     internal static string[] DiscoveryArguments(string sidecar, string callerProof, string callerPackage,
         string producerPackage, string producerProof, string contractSource) =>

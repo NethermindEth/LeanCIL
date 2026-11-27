@@ -133,25 +133,15 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal, self-admission, the admitted hole corpus and the methods extracted for the examples' admitted entries under each profile |
 | `audit` | theorem audits of replayed oleans, deep certificate reuse, and rejection of changed images, proofs, replay inputs and auditors |
 | `docs` | documentation Lean snippets, cited library names and documented commands against the library and tool |
-| `exports` | contract production, restrictions and caller reuse |
-| `exportsaudit` | post-callback export integrity |
+| `exports` | contract production, post-callback audit, SDK discovery, restrictions and caller reuse |
 | `exportsprotected` | protected static export and separately compiled derived caller |
 | `exportsresolution` | full module resolution |
-| `exportsfullcomposition` | transferred composition statement integrity |
-| `exportsfullconsumer` | fresh and repeated full consumer verification |
-| `exportsfullordinary` | ordinary full caller verification |
-| `exportsfullpair` | two imported slots from one bundle |
-| `exportsfullchecks` | full input and caller rejection |
-| `exportsfulltheorems` | producer theorem kind and statement rejection |
-| `exportsmutationordinary` | ordinary caller artifact mutation |
-| `exportsmutationconsumer` | consumer caller artifact mutation |
-| `exportsmutationsource` | consumer caller source mutation |
-| `exportsmutationshadow` | original caller root shadow mutation |
+| `exportsfull` | independent full consumer, ordinary and pair caller verification, input/theorem rejection checks and composition statement integrity |
+| `exportsmutations` | ordinary and consumer caller artifact, source and shadow mutations during full verification |
 | `exportsstatics` | independent modular static exports |
 | `exportsfullstatics` | independent full composition of shared and changed static tables |
 | `exportstransitive` | independent transitive contract imports |
 | `exportstransitiveoutcomes` | independent deep transitive named outcome contracts |
-| `exportsdiscovery` | contract discovery with real export bootstrap |
 | `exportstyped` | independent typed generic and layout imports |
 | `exportsderived` | derived public contracts through DLL export and import |
 | `exportsinitialized` | scoped initialization assumptions in exported and imported contracts |

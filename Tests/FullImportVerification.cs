@@ -69,58 +69,61 @@ void AssertIndependent(string output)
 }
 
 string? previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
-if (cohort is "consumer" or "checks" or "theorems" or "composition") ExtractApp();
-if (cohort is "consumer" or "ordinary")
+if (cohort == "full")
 {
-    string hiddenProof = producerProof + ".hidden";
-    File.Move(producerProof, hiddenProof);
-    string trace = Path.Combine(root, "trace");
-    try
+    ExtractApp();
+    foreach (bool consumerMode in new[] { true, false })
     {
-        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
-        if (cohort == "consumer")
+        string hiddenProof = producerProof + ".hidden";
+        File.Move(producerProof, hiddenProof);
+        string trace = Path.Combine(root, consumerMode ? "trace-consumer" : "trace-ordinary");
+        try
         {
-            Run(FullCommand("--full-artifact", "ImportFixture.Lib=" + bundle));
-            AssertIndependent(artifact);
-            completed.CompleteCase("full.consumer-explicit");
-            Run(FullCommand());
-            AssertIndependent(artifact);
-            completed.CompleteCase("full.consumer-repeat");
+            Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+            if (consumerMode)
+            {
+                Run(FullCommand("--full-artifact", "ImportFixture.Lib=" + bundle));
+                AssertIndependent(artifact);
+                completed.CompleteCase("full.consumer-explicit");
+                Run(FullCommand());
+                AssertIndependent(artifact);
+                completed.CompleteCase("full.consumer-repeat");
+            }
+            else
+            {
+                string ordinary = Path.Combine(root, "OrdinaryApp");
+                ExtractApp(ordinary);
+                Run([.. cli, "verify", ordinary, "--proof", caller, "--force-full-verify"]);
+                AssertIndependent(ordinary);
+                completed.CompleteCase("full.ordinary");
+            }
         }
-        else
+        finally
         {
-            string ordinary = Path.Combine(root, "OrdinaryApp");
-            ExtractApp(ordinary);
-            Run([.. cli, "verify", ordinary, "--proof", caller, "--force-full-verify"]);
-            AssertIndependent(ordinary);
-            completed.CompleteCase("full.ordinary");
+            Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace);
+            File.Move(hiddenProof, producerProof);
         }
+        JsonElement[] stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+            .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+        var expectedRuns = consumerMode ? 2 : 1;
+        var proofRuns = stages.GroupBy(stage => stage.GetProperty("processId").GetInt32())
+            .Select(group => group.Select(stage => stage.GetProperty("stage").GetString()!).ToArray())
+            .Where(group => group.Contains("Fresh extraction of the current imported library DLL",
+                StringComparer.Ordinal)).ToArray();
+        if (stages.Count(stage => stage.GetProperty("stage").GetString() == "Fresh extraction of the current imported library DLL") != expectedRuns ||
+            stages.Count(stage => stage.GetProperty("stage").GetString() == "Capturing actual checked author and extraction kernel terms") != expectedRuns ||
+            stages.Count(stage => stage.GetProperty("stage").GetString() == "Independent kernel replay of the composed caller theorem") != expectedRuns ||
+            proofRuns.Length != expectedRuns || proofRuns.Any(run =>
+                run.Count(stage => stage == "Building fresh consumer proof and dependencies") !=
+                    (consumerMode ? 2 : 1) ||
+                run.Count(stage => stage.StartsWith("Checking Proof:", StringComparison.Ordinal)) !=
+                    (consumerMode ? 0 : 1)))
+            throw new InvalidOperationException("Repeated full verification did not re-extract, audit and replay each actual library and composition.");
+        Console.WriteLine("PASS " + (consumerMode ? "consumer" : "ordinary") + " full verification without original library proof paths");
     }
-    finally
-    {
-        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace);
-        File.Move(hiddenProof, producerProof);
-    }
-    JsonElement[] stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
-        .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
-    var expectedRuns = cohort == "consumer" ? 2 : 1;
-    var proofRuns = stages.GroupBy(stage => stage.GetProperty("processId").GetInt32())
-        .Select(group => group.Select(stage => stage.GetProperty("stage").GetString()!).ToArray())
-        .Where(group => group.Contains("Fresh extraction of the current imported library DLL",
-            StringComparer.Ordinal)).ToArray();
-    if (stages.Count(stage => stage.GetProperty("stage").GetString() == "Fresh extraction of the current imported library DLL") != expectedRuns ||
-        stages.Count(stage => stage.GetProperty("stage").GetString() == "Capturing actual checked author and extraction kernel terms") != expectedRuns ||
-        stages.Count(stage => stage.GetProperty("stage").GetString() == "Independent kernel replay of the composed caller theorem") != expectedRuns ||
-        proofRuns.Length != expectedRuns || proofRuns.Any(run =>
-            run.Count(stage => stage == "Building fresh consumer proof and dependencies") !=
-                (cohort == "consumer" ? 2 : 1) ||
-            run.Count(stage => stage.StartsWith("Checking Proof:", StringComparison.Ordinal)) !=
-                (cohort == "consumer" ? 0 : 1)))
-        throw new InvalidOperationException("Repeated full verification did not re-extract, audit and replay each actual library and composition.");
-    Console.WriteLine("PASS " + cohort + " full verification without original library proof paths");
 }
 
-if (cohort == "pair")
+if (cohort == "full")
 {
     string[] TraceStages(string directory) => Directory.EnumerateFiles(directory, "*.jsonl").SelectMany(File.ReadLines)
         .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!).ToArray();
@@ -191,7 +194,7 @@ if (cohort == "pair")
 
 }
 
-if (cohort == "consumer")
+if (cohort == "full")
 {
     (int Code, string Output, string Stdout, string Stderr) artifactWithoutFull = Execute([.. cli, "verify", artifact,
         "--proof", caller, "--proof-root", callerPackage, "--full-artifact", "ImportFixture.Lib=" + bundle]);
@@ -199,10 +202,7 @@ if (cohort == "consumer")
         File.Exists(Path.Combine(artifact, "verified.json")))
         throw new InvalidOperationException("A full artifact without full mode was accepted or retained a stale report: " + artifactWithoutFull.Output);
     completed.CompleteCase("full.artifact-mode");
-}
 
-if (cohort == "checks")
-{
     Reject("Full verification source bundle is missing", "--full-artifact", "ImportFixture.Lib=" + Path.Combine(root, "missing", Path.GetFileName(bundle)));
     completed.CompleteCase("full.missing-bundle");
     string inventoryPath = Path.Combine(bundle, "bundle.json");
@@ -379,26 +379,18 @@ run_cmd do
     }
 }
 
-switch (cohort)
+if (cohort == "mutations")
 {
-    case "consumer-artifact":
-        RejectCallerMutation(consumer: true, sourceOnly: false);
-        completed.CompleteCase("full.consumer-artifact");
-        break;
-    case "ordinary-artifact":
-        RejectCallerMutation(consumer: false, sourceOnly: false);
-        completed.CompleteCase("full.ordinary-artifact");
-        break;
-    case "consumer-source":
-        RejectCallerMutation(consumer: true, sourceOnly: true);
-        completed.CompleteCase("full.consumer-source");
-        break;
-    case "consumer-shadow":
-        RejectCallerMutation(consumer: true, sourceOnly: false, shadow: true);
-        completed.CompleteCase("full.consumer-shadow");
-        break;
+    RejectCallerMutation(consumer: false, sourceOnly: false);
+    completed.CompleteCase("full.ordinary-artifact");
+    RejectCallerMutation(consumer: true, sourceOnly: false);
+    completed.CompleteCase("full.consumer-artifact");
+    RejectCallerMutation(consumer: true, sourceOnly: true);
+    completed.CompleteCase("full.consumer-source");
+    RejectCallerMutation(consumer: true, sourceOnly: false, shadow: true);
+    completed.CompleteCase("full.consumer-shadow");
 }
-if (cohort == "checks")
+if (cohort == "full")
 {
     try
     {
@@ -432,9 +424,7 @@ if (cohort == "checks")
         completed.CompleteCase("full.extra-premise");
     }
     finally { File.WriteAllText(caller, originalCaller); }
-}
-if (cohort == "theorems")
-{
+
     try
     {
         Rebundle("import Extracted\nimport PublishedArithmetic\nnamespace LibProof\ntheorem correctness : True := True.intro\nend LibProof\n");
@@ -449,10 +439,7 @@ if (cohort == "theorems")
         File.WriteAllText(sidecar, originalSidecar);
         ExtractApp();
     }
-}
 
-if (cohort == "composition")
-{
     try
     {
         string forgedTransfer = """
