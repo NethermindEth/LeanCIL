@@ -1555,12 +1555,27 @@ elab_rules : tactic
           replaceMainGoal [goal]
           let factTerm ← goal.withContext (Term.exprToSyntax (mkFVar fact))
           pure (.ofElems (facts.getElems.push factTerm))
-    -- A call-family step's arm matches on its link; the read's fact lets that match reduce. It
-    -- enters as a hypothesis, so the run's record, whose simp contexts are keyed by fact text and
-    -- would hand a later pc this pc's fact, is not consulted for this step.
-    let linkFacts : Array Term ← if linkedOpcodes.contains operation then
-        match (← stepLinkFact? (← entryAt "cil_checked_step_normalized" args 0)
-            (← entryAt "cil_checked_step_normalized" args 2) facts.getElems) with
+    let linkProof ← if linkedOpcodes.contains operation then
+        stepLinkFact? (← entryAt "cil_checked_step_normalized" args 0)
+          (← entryAt "cil_checked_step_normalized" args 2) facts.getElems
+      else pure none
+    if let (true, some proof) := (operation == ``CIL.Instruction.call, linkProof) then
+      let link := (← inferType proof).eq?.map (·.2.2)
+      if link.any (fun value => (argumentsOf? value ``Option.some 2).any
+          (fun arguments => arguments[1]!.isAppOf ``CIL.Link.direct)) then
+        -- The direct equation consumes the pc-specific proof. Its remaining simplification
+        -- needs only the caller's facts and can reuse their contexts across call sites.
+        let saved ← saveState
+        try
+          let link ← Term.exprToSyntax proof
+          evalTactic (← `(tactic| cil_strict (
+            refine Eq.trans (CIL.Safety.step_call_direct _ _ _ _ _ $link _) ?_
+            cil_checked_linked_step_by_equations [] [$facts,*])))
+          return
+        catch _ => saved.restore
+    -- A link or model used as a simp rule belongs to this pc's local context.
+    let linkFacts : Array Term ←
+        match linkProof with
         | some proof =>
           let (link, goal) ← (← (← getMainGoal).assert (← mkFreshUserName `link)
             (← inferType proof) proof).intro1P
@@ -1583,7 +1598,6 @@ elab_rules : tactic
             replaceMainGoal [goal]
             pure #[linkFact, ← goal.withContext (Term.exprToSyntax (mkFVar fact))]
         | none => pure #[]
-      else pure #[]
     let stepFacts := facts.getElems ++ linkFacts
     -- A checked field can also step from the byte-level read selected by its shape.
     let strategy ← if operation == ``CIL.Instruction.ldfld then
@@ -1872,10 +1886,10 @@ def prepareStepFacts (facts : Array Term) : TacticM (Array Term) := do
   normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
     (← prepareOperationFacts (← gatherEvidenceFacts facts))
 
-/-- `cil_checked_steps` with facts already normalised: enters an `invoke` goal through
-    `cil_checked_entry`, then takes checked `run` steps until the goal closes or a step fails,
-    leaving that goal. Fails if it takes no step. -/
-syntax "cil_checked_steps_normalized" "[" term,* "]" : tactic
+/-- Enters an invocation and steps with normalised facts until the goal closes or a step fails.
+    A child invocation uses its caller's simplification record while the facts and context match.
+    Fails if it takes no step. -/
+syntax "cil_checked_steps_normalized" (&"child")? "[" term,* "]" : tactic
 
 /-- Takes a fetched `ret` through `run_return`, given the method and instruction lookups, and
     leaves the equation between the returned state and the stated result unless frame cleanup,
@@ -1971,7 +1985,7 @@ macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max
     cil_strict cil_refine_by CIL.Safety.run_call_of_invoke $methodFound $instructionFound
       (by cil_checked_step_normalized [$[$facts:term],*])
       (by first | cil_checked_child [$[$facts:term],*]
-                | (cil_checked_steps_normalized [$[$facts:term],*]; done)) ?_
+                | (cil_checked_steps_normalized child [$[$facts:term],*]; done)) ?_
     try (conv => lhs; arg 4; cil_literal_nat)
     cil_stack_cleanup))
 
@@ -2262,15 +2276,17 @@ syntax "cil_checked_run_step" "[" term,* "]" : tactic
 elab_rules : tactic
   | `(tactic| cil_checked_run_step [$facts:term,*]) => cilRunStep facts.getElems
 
-macro_rules
-  | `(tactic| cil_checked_steps_normalized [$facts:term,*]) =>
-  `(tactic| (
-    try (conv => lhs; arg 2; cil_reduce_fuel)
-    cil_checked_entry [$[$facts:term],*]
-    cil_normal_run
+open Lean Elab Tactic in
+elab_rules : tactic
+  | `(tactic| cil_checked_steps_normalized $[child%$child]? [$facts:term,*]) => do
+    evalTactic (← `(tactic| (
+      try (conv => lhs; arg 2; cil_reduce_fuel)
+      cil_checked_entry [$facts,*])))
+    let walk := evalTactic (← `(tactic|
       cil_steps_from "cil_checked_steps took no step: the method or instruction lookup, or the \
         first step, did not close; pass the lookup hypothesis, feature facts or step facts"
-        cil_checked_run_step [$[$facts:term],*]))
+        cil_checked_run_step [$facts,*]))
+    if child.isSome && (← getNormalNodes).active then walk else withNormalRun walk
 
 /-- Proves an `invoke` or `run` goal, returning or stating a located fault, by checked
     stepping with `facts` and the object evidence facts of the context, such as `live.formed` of

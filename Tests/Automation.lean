@@ -1352,6 +1352,33 @@ open Lean Elab Tactic in
 def recordIsEmpty : TacticM Unit := do
   if ← recordIsLeft then throwError "a stepping record outlived its run"
 
+/-- Each call passes a different argument to the identity method. -/
+@[cil_code] def twoCallInputs : CIL.Method := {
+  code := [.ldarg 0, .call (Tests.callee 1) {}, .pop,
+    .ldarg 1, .call (Tests.callee 1) {}, .ret],
+  links := [(1, .direct 1), (4, .direct 1)], locals := [], returnsValue := true }
+
+/-- Reusing a caller's simplification record preserves the second child's argument. -/
+theorem childCallsKeepInputs (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run [twoCallInputs, identityCallee] 9 0 0
+      [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+        .ok (leaveFrame frame memory, [.scalar (.i64 right)]) := by
+  run_tac sameGoal (← `(tactic| cil_checked_steps 5 []))
+  cil_checked_steps
+
+#print axioms childCallsKeepInputs
+
+/-- The first child returns. The second child runs out of fuel at its return instruction. -/
+theorem secondChildExhausted (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run [twoCallInputs, identityCallee] 6 0 0
+      [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+        .error ⟨1, 1, .fuelExhausted⟩ := by
+  cil_checked_steps 4 []
+  fail_if_success cil_checked_steps 1 []
+  rfl
+
+#print axioms secondChildExhausted
+
 /-- Adds two arguments. -/
 @[cil_code] def recordBody : CIL.Method := {
   code := [.ldarg 0, .ldarg 1, .add, .ret], locals := [], returnsValue := true }
