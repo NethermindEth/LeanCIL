@@ -101,15 +101,17 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                 $"The carried {heap} rank {rank} reaches its reserved omitted-entry offset.");
     }
 
-    static readonly IComparer<byte[]> ByteOrder = Comparer<byte[]>.Create((left, right) =>
-        left.AsSpan().SequenceCompareTo(right));
-
     /// <summary>Numbers carried entries by byte content, returning the rank for each image offset.</summary>
     static Dictionary<int, int> RankHeap(SortedDictionary<int, byte[]> heap, int width, string name)
     {
         var numbers = new Dictionary<int, int>(heap.Count + 1) { [0] = 0 };
-        var ranked = heap.Where(entry => entry.Key != 0).OrderBy(entry => entry.Value, ByteOrder).ToArray();
+        var ranked = heap.Where(entry => entry.Key != 0).ToArray();
         RequireHeapRank((uint)ranked.Length, width, name);
+        Array.Sort(ranked, static (left, right) =>
+        {
+            var order = left.Value.AsSpan().SequenceCompareTo(right.Value);
+            return order == 0 ? left.Key.CompareTo(right.Key) : order;
+        });
         heap.TryGetValue(0, out var empty);
         heap.Clear();
         if (empty is not null) heap.Add(0, empty);

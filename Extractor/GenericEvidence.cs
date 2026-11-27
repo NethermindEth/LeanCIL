@@ -863,8 +863,6 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             identified, $"""method{number}_tables_valid""");
     }
 
-    static string Utf8(string text) => ByteLiterals.Of(Encoding.UTF8.GetBytes(text));
-
     /// <summary>
     /// The owner and base class names the method's metadata spells and the signature the extraction selects it by,
     /// as UTF-8 bytes: Lean reads the same names from the carried rows and proves by <c>cil_kernel_rfl</c> that they
@@ -874,11 +872,11 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     {
         var bases = classOwner
             ? ObjectTypes.Bases(original.DeclaringType)
-                .Select(type => $"({Utf8(LayoutEvidence.Scope(type))}, {ClassName(type)})")
+                .Select(type => $"({ByteLiterals.Utf8(LayoutEvidence.Scope(type))}, {ClassName(type)})")
             : [];
         return $"{{ assembly := some assembly{assembly}Identity, " +
-            $"owner := {Utf8(LayoutEvidence.Identity(original.DeclaringType))}, bases := {List(bases)}, " +
-            $"signature := {Utf8(signature)} }}";
+            $"owner := {ByteLiterals.Utf8(LayoutEvidence.Identity(original.DeclaringType))}, bases := {List(bases)}, " +
+            $"signature := {ByteLiterals.Utf8(signature)} }}";
     }
 
     // Closed arguments name a carried definition row or a platform entry. Lean resolves their kinds.
@@ -914,7 +912,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         if (type.Scope is AssemblyNameReference reference && Pinned.IsPlatform(reference))
         {
             statedTypes.Add(type);
-            var parts = PlatformDefinitions.NameParts(type).Select(Utf8);
+            var parts = PlatformDefinitions.NameParts(type).Select(ByteLiterals.Utf8);
             return $"(.platform {ArgumentScope(reference, type.Module)} {List(parts)})";
         }
         var definition = type.Resolve() ?? throw new InvalidDataException($"Unresolved type argument {type.FullName}");

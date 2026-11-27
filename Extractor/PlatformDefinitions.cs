@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
-using System.Text;
 using Mono.Cecil;
 using ModuleDefinition = Mono.Cecil.ModuleDefinition;
 using TypeDefinition = Mono.Cecil.TypeDefinition;
@@ -33,7 +32,7 @@ internal sealed record PlatformDefinition(ImmutableArray<string> Parts, Platform
     /// <c>CIL.AssemblyName</c> term is <paramref name="assembly"/>.</summary>
     internal string Lean(string assembly)
     {
-        var parts = string.Join(", ", Parts.Select(part => ByteLiterals.Of(Encoding.UTF8.GetBytes(part))));
+        var parts = string.Join(", ", Parts.Select(ByteLiterals.Utf8));
         return $$"""{ assembly := {{assembly}}, parts := [{{parts}}], kind := {{LeanKind}} }""";
     }
 
