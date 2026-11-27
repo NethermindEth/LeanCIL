@@ -623,8 +623,8 @@ Reuse is authenticated and local to the machine:
   whose Lake traces depend on those compiled imports.
 - Modified or unsigned cache files fall back to rebuilding and kernel replay, and a corrupt
   entry is replaced.
-- Concurrent verifiers publish through an atomic rename, and republishing the same module set
-  is a no-op.
+- Concurrent verifiers publish through an atomic rename. On Windows, publication retries for
+  up to one second when a reader blocks the rename. Republishing the same module set is a no-op.
 - [`--fresh`](CLI.md#verify) disables both consumer caches.
 - On another machine, `LEANCIL_CERTIFIED_LIBRARY` can supply the base library; see
   [library cache](CLI.md#library-cache).
