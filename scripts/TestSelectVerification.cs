@@ -12,7 +12,9 @@ using System.Text.RegularExpressions;
 var checks = 0;
 var root = VerificationSelection.Root;
 var suiteInputs = VerificationSelection.SuiteInputs();
-var allSuites = suiteInputs.Keys.Order(StringComparer.Ordinal).ToArray();
+var registeredSuites = suiteInputs.Keys.Order(StringComparer.Ordinal).ToArray();
+var allSuites = registeredSuites.Except(VerificationSuites.ManualSuites, StringComparer.Ordinal)
+    .Order(StringComparer.Ordinal).ToArray();
 string[] Select(IEnumerable<string> paths, string eventName = "pull_request") =>
     VerificationSelection.Select(suiteInputs, paths, eventName);
 void Require(bool condition, string message)
@@ -152,7 +154,10 @@ Test("test entry points", () =>
     Equal(Select(["Tests/LoopVariants/CountCallsDiscarded.lean.in"]), ["loops"]);
     foreach (var path in new[] { "Tests/ProofCostFrontend.cs", "Tests/ProofCostDiscovery.lean" })
         Equal(Select([path]), ["core"]);
-    Equal(Select(["Tests/SteppingScaling.cs"]), ["stepping"]);
+    Equal(Select(["Tests/SteppingScaling.cs"]), []);
+    Equal(Select(["Tests/LookupScaling.cs"]), []);
+    Equal(Select(["Tests/TranslationScaling.cs"]), []);
+    Equal(Select(["Tests/ExcludedBranchScaling.cs"]), []);
     foreach (var module in new[] { "OperationFacts", "VectorLocalCalls", "SimdCarryCalls" })
         Equal(Select([$"Tests/{module}.lean"]), ["core"]);
     Equal(Select(["Tests/ProofOutlines.cs"]),
@@ -171,8 +176,7 @@ Test("test entry points", () =>
     Equal(Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
     Equal(Select(["Tests/MetadataDifferential.cs"]), ["evidence"]);
     Equal(Select(["Tests/GeneratedEvidence.cs"]),
-        ["assemblies", "core", "dispatch", "enums", "evidence", "excluded", "generics", "imports", "intrinsics",
-            "lookups", "scaling", "unsafe"]);
+        ["assemblies", "core", "dispatch", "enums", "evidence", "generics", "imports", "intrinsics", "unsafe"]);
     Equal(Select(["Tests/GenericOwners.cs"]), ["generics"]);
     Equal(Select(["Tests/MultiAssemblyGenerics.cs"]), ["assemblies"]);
     Equal(Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies", "audit", "cli"]);
@@ -235,7 +239,7 @@ Test("multiple changes and deleted paths", () =>
 });
 Test("every registered suite has its entry point", () =>
 {
-    Equal(VerificationSuites.Names().Order(StringComparer.Ordinal), allSuites);
+    Equal(VerificationSuites.Names().Order(StringComparer.Ordinal), registeredSuites);
     Require(VerificationSuites.Names().Distinct(StringComparer.Ordinal).Count() == VerificationSuites.Names().Length,
         "A suite name is registered twice");
     foreach (IndependentSuite suite in VerificationSuites.Independent)

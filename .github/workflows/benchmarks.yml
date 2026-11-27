@@ -1,0 +1,78 @@
+name: Scaling benchmarks (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Benchmark suite to run
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - lookups
+          - stepping
+          - scaling
+          - excluded
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Benchmark (${{ matrix.suite }})
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(inputs.suite == 'all' && '["lookups","stepping","scaling","excluded"]' || format('["{0}"]', inputs.suite)) }}
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Install pinned elan
+        timeout-minutes: 6
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/elan.tar.gz"
+          curl --fail --location --retry 1 --retry-all-errors --retry-delay 30 --max-time 150 \
+            https://github.com/leanprover/elan/releases/download/v4.2.4/elan-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$archive"
+          echo "42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63  $archive" | sha256sum --check --status
+          mkdir -p "$RUNNER_TEMP/elan-installer"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/elan-installer"
+          "$RUNNER_TEMP/elan-installer/elan-init" -y --default-toolchain none --no-modify-path
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Install Lean toolchain
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          lean --version
+          lake --version
+      - name: Prepare certified Lean library
+        run: dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library
+      - name: Run benchmark suite
+        env:
+          LEANCIL_CERTIFIED_LIBRARY: ${{ github.workspace }}/artifacts/certified-library
+        run: dotnet run --file scripts/Test.cs -- --suite "${{ matrix.suite }}"
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: benchmark-${{ matrix.suite }}-${{ github.run_attempt }}
+          path: |
+            artifacts/test-results-*.json
+            artifacts/SteppingScaling/*.json
+          if-no-files-found: ignore
+          retention-days: 14

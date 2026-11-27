@@ -26,9 +26,12 @@ the suite helper tests run in `select`.
 
 ## Suite selection
 
-Pushes to `main` and manual runs execute every suite. A pull request runs the suites that own a
-changed file. A suite owns its entry script and, transitively, the `Tests/` and `Examples/` sources
-that script names, its file-based includes and the Lean modules those import.
+Pushes to `main` and manual runs execute every automatic verification suite (the scaling
+microbenchmark suites `lookups`, `stepping`, `scaling` and `excluded` run in their own manual
+workflow `.github/workflows/benchmarks.yml` instead of on PRs or `main`). A pull request runs the
+automatic suites that own a changed file. A suite owns its entry script and, transitively, the
+`Tests/` and `Examples/` sources that script names, its file-based includes and the Lean modules
+those import.
 
 | Changed path | Suites selected |
 | --- | --- |

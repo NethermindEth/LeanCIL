@@ -10,6 +10,11 @@ internal static class VerificationSuites
     /// <summary>The runner's own in-process checks, which also run when no suite is named.</summary>
     internal const string Core = "core";
 
+    /// <summary>
+    /// Suites excluded from automatic PR and main verification runs and invoked through manual workflows or locally.
+    /// </summary>
+    internal static readonly string[] ManualSuites = ["lookups", "stepping", "scaling", "excluded"];
+
     /// <summary>Inputs that select the test libraries for proof-cost measurement.</summary>
     internal static bool MeasureLibraries(IEnumerable<string> paths) => paths.Any(path =>
         path.EndsWith(".lean", StringComparison.Ordinal) ||

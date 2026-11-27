@@ -259,7 +259,8 @@ internal static class VerificationSelection
     internal static string[] Select(IReadOnlyDictionary<string, HashSet<string>> inputs,
         IEnumerable<string> paths, string eventName = "pull_request")
     {
-        var all = inputs.Keys.Order(StringComparer.Ordinal).ToArray();
+        var manual = new HashSet<string>(VerificationSuites.ManualSuites, StringComparer.Ordinal);
+        var all = inputs.Keys.Where(name => !manual.Contains(name)).Order(StringComparer.Ordinal).ToArray();
         if (eventName != "pull_request") return all;
         var selected = new HashSet<string>(StringComparer.Ordinal);
         foreach (var path in paths)
@@ -283,7 +284,7 @@ internal static class VerificationSelection
                 return all;
             var owners = inputs.Where(pair => pair.Value.Contains(path)).Select(pair => pair.Key).ToArray();
             if (owners.Length == 0) return all;
-            selected.UnionWith(owners);
+            selected.UnionWith(owners.Where(name => !manual.Contains(name)));
         }
         return selected.Order(StringComparer.Ordinal).ToArray();
     }
