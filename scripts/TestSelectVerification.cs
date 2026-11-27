@@ -6,6 +6,7 @@
 #:include VerificationSuites.cs
 
 using System.Diagnostics;
+using System.Text;
 using System.Text.RegularExpressions;
 
 var checks = 0;
@@ -494,7 +495,7 @@ Test("a missing registered export fixture fails selection", () =>
     }
     finally { Directory.Delete(isolated, recursive: true); }
 });
-Test("required gate, all 192 actual Bash status combinations", () =>
+Test("required gate, all 768 actual Bash status combinations", () =>
 {
     var bash = OperatingSystem.IsWindows() ? "C:/Program Files/Git/bin/bash.exe" :
         (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
@@ -506,6 +507,9 @@ Test("required gate, all 192 actual Bash status combinations", () =>
     var start = workflow.LastIndexOf(marker, StringComparison.Ordinal);
     Require(start >= 0, "Missing workflow gate");
     var gate = WorkflowPatterns.StepIndent.Replace(workflow[(start + marker.Length)..], "");
+    // Each case runs in its own errexit subshell. Invoking it inside an if would disable errexit.
+    var script = new StringBuilder("check_gate() (\nset -e\n").Append(gate).Append("\n)\n");
+    var cases = new List<(string Name, bool Expected)>();
     string[] statuses = ["success", "failure", "cancelled", "skipped"];
     foreach (var planned in statuses)
     foreach (var selected in new[] { "true", "false", "" })
@@ -513,27 +517,29 @@ Test("required gate, all 192 actual Bash status combinations", () =>
     foreach (var tools in statuses)
     foreach (var result in statuses)
     {
-        var command = new ProcessStartInfo(bash)
-        {
-            UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true
-        };
-        foreach (var arg in new[] { "-e", "-c", gate }) command.ArgumentList.Add(arg);
-        command.Environment["SELECT_RESULT"] = planned;
-        command.Environment["HAS_SUITES"] = selected;
-        command.Environment["PREPARE_RESULT"] = prepared;
-        command.Environment["TOOLS_RESULT"] = tools;
-        command.Environment["SUITES_RESULT"] = result;
-        using var process = Process.Start(command) ?? throw new InvalidOperationException("Could not start Bash");
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
         var expected = planned == "success" && ((selected, prepared, tools, result) is
             ("true", "success", "success", "success") or ("false", "skipped", "skipped", "skipped"));
-        string transcript = stdout.GetAwaiter().GetResult() + stderr.GetAwaiter().GetResult();
-        Require((process.ExitCode == 0) == expected,
-            $"Unexpected gate result: {planned}/{selected}/{prepared}/{tools}/{result}\n{transcript}");
+        cases.Add(($"{planned}/{selected}/{prepared}/{tools}/{result}", expected));
+        script.Append($"SELECT_RESULT={planned} HAS_SUITES={selected} PREPARE_RESULT={prepared} ")
+            .Append($"TOOLS_RESULT={tools} SUITES_RESULT={result} check_gate >&2\nprintf '%d\\n' \"$?\"\n");
     }
+    var command = new ProcessStartInfo(bash, "-s")
+    {
+        UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true,
+        RedirectStandardOutput = true, RedirectStandardError = true
+    };
+    using var process = Process.Start(command) ?? throw new InvalidOperationException("Could not start Bash");
+    var stdout = process.StandardOutput.ReadToEndAsync();
+    var stderr = process.StandardError.ReadToEndAsync();
+    process.StandardInput.Write(script.ToString());
+    process.StandardInput.Close();
+    process.WaitForExit();
+    var results = stdout.GetAwaiter().GetResult().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    var diagnostics = stderr.GetAwaiter().GetResult();
+    Require(process.ExitCode == 0 && results.Length == cases.Count, $"Incomplete Bash gate results\n{diagnostics}");
+    for (var i = 0; i < cases.Count; i++)
+        Require(int.TryParse(results[i], out int status) && (status == 0) == cases[i].Expected,
+            $"Unexpected gate result for {cases[i].Name}: {results[i]}\n{diagnostics}");
 });
 Test("certified library binding, main republication and observability", () =>
 {
