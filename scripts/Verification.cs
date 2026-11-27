@@ -888,6 +888,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 continue;
             }
             var next = Path.Join(resolved, component);
+            var directory = new DirectoryInfo(next);
+            if (directory.Exists && (directory.Attributes & FileAttributes.ReparsePoint) == 0)
+            {
+                resolved = next;
+                continue;
+            }
             // A dangling link is still a link: where it points is where a write through it lands.
             if (new FileInfo(next).LinkTarget is { } target)
             {

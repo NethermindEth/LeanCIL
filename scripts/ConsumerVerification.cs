@@ -529,9 +529,10 @@ partial class Program
             LocationComparer.Equals(Path.GetFullPath(root), Path.GetFullPath(excludedDirectory))) yield break;
         foreach (var path in Directory.EnumerateFileSystemEntries(root).Order(StringComparer.Ordinal))
         {
-            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            var attributes = File.GetAttributes(path);
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
                 throw new InvalidDataException("Consumer sources must not contain symbolic links: " + path);
-            if (Directory.Exists(path))
+            if ((attributes & FileAttributes.Directory) != 0)
             {
                 if (ExcludedConsumerDirectory(Path.GetFileName(path))) continue;
                 foreach (var source in ConsumerSources(path, excludedDirectory)) yield return source;

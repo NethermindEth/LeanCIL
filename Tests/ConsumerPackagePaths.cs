@@ -31,6 +31,21 @@ partial class Program
                 Within(package, ".") == package, "A path inside its package was not returned as spelled under it.");
             Console.WriteLine("PASS a package path that leaves through .. or an absolute path is rejected");
 
+            if (!OperatingSystem.IsWindows())
+            {
+                var restricted = Path.Combine(work, "restricted");
+                Directory.CreateDirectory(restricted);
+                var mode = File.GetUnixFileMode(restricted);
+                try
+                {
+                    File.SetUnixFileMode(restricted, UnixFileMode.None);
+                    var leaf = Path.Combine(restricted, "Missing.lean");
+                    Require(ResolvedPath(leaf) == Path.Combine(ResolvedPath(work), "restricted", "Missing.lean"),
+                        "An inaccessible child lost its spelling below the resolved directory.");
+                }
+                finally { File.SetUnixFileMode(restricted, mode); }
+            }
+
             // A case variant is one location only where the file system says so; no sibling exists to confuse it.
             var variant = Path.Combine(real, "PACKAGE");
             var sameUnderCase = Directory.Exists(variant);
