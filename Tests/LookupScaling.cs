@@ -3124,24 +3124,14 @@ string MethodNumber(string extracted, string method, string name)
 }
 // Measure the body proof net of its statement, and the full cost of materializing and certifying the lookup trees.
 (long Body, long Tables) BodyChecks(string image, string name, string entry, string method,
-    string? tablesMethod = null)
+    string? tablesMethod = null, int? receiverBases = null)
 {
     var output = Path.Combine(directory, "Body" + name);
     Run(Extract("extract", image, "Bodies", entry.Contains('(') ? entry : $"Bodies::{entry}(ulong)", output));
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    var body = $"method{MethodNumber(extracted, method, name)}_body_validated";
-    // The body proof reads the original method. When the closed raw literal has the same value,
-    // its definition can reference the first literal while setting up the benchmark.
-    var literals = new Dictionary<string, string>(StringComparer.Ordinal);
-    var narrowed = LookupPatterns.RawMethodLiteral.Replace(NarrowEvidence(extracted, body), match =>
-    {
-        var literal = match.Groups["literal"].Value;
-        var name = match.Groups["name"].Value;
-        if (literals.TryGetValue(literal, out var previous))
-            return $"def {name} : Extraction.RawMethod := {previous}";
-        literals.Add(literal, name);
-        return match.Value;
-    });
+    var prefix = "method" + MethodNumber(extracted, method, name);
+    var body = prefix + "_body_validated";
+    var narrowed = NarrowEvidence(extracted, body);
     var bodyProof = LookupPatterns.BodyObligation.Matches(narrowed).Single(match => match.Groups["name"].Value == body);
     var commands = new List<(Match Command, string Audit)> { (bodyProof, body) };
     if (tablesMethod is not null)
@@ -3172,7 +3162,11 @@ string MethodNumber(string extracted, string method, string name)
         parts.Add(command.Value);
         start = command.Index + command.Length;
     }
-    parts.Add(string.Join('\n', commands.Select(entry => $"#print axioms {entry.Audit}")) + "\nend Extracted\n");
+    var baseCount = receiverBases is { } count
+        ? $"#guard {prefix}Original.objectBases.length == {count}\n#guard {prefix}Names.bases.length == {count}\n"
+        : "";
+    parts.Add(string.Join('\n', commands.Select(entry => $"#print axioms {entry.Audit}")) + "\n" +
+        baseCount + "end Extracted\n");
     var costs = PartHeartbeats(Path.Combine(output, "BodyChecked.lean"), parts);
     return (costs[bodyAt] - costs[openAt], tablesAt.Sum(index => costs[index]));
 }
@@ -3399,9 +3393,8 @@ void IndirectTargetCosts()
     }
 }
 
-// A method reading a field declared `depth` base classes up carries one row and one link per class of the chain, and
-// its body check walks the chain once. The cost is a fixed part plus a part linear in the depth, so the increment from
-// depth 8 to 16 is twice the increment from 4 to 8; a quadratic walk makes it four times.
+// The instance reader carries its receiver's full base chain. The static reader names only the argument and field.
+// Fixed-width identifiers keep longer UTF-8 names out of the measured cost difference.
 const double AllowedChainIncrementRatio = 2.5;
 int[] baseDepths = [4, 8, 16];
 var deepSource = Path.Combine(directory, "DeepAssembly");
@@ -3412,30 +3405,43 @@ File.WriteAllText(Path.Combine(deepSource, "Deep.csproj"), """
     <AssemblyName>Bodies</AssemblyName></PropertyGroup>
 </Project>
 """);
-string Deep(int depth) =>
-    $"public class Deep{depth}_0 {{ public ulong F; }} " +
-    Join(depth, index => $"public class Deep{depth}_{index + 1} : Deep{depth}_{index} {{ }} ") +
-    $"public static ulong ReadDeep{depth}(Deep{depth}_{depth} o) => o.F; ";
+string DeepType(int depth, int index) => $"Deep{depth:D2}_{index:D2}";
+string Deep(int depth)
+{
+    var classes = Join(depth, index =>
+    {
+        var reader = index + 1 == depth ? "public ulong ReadField() => F;" : "";
+        return $"public class {DeepType(depth, index + 1)} : {DeepType(depth, index)} {{ {reader} }} ";
+    });
+    return $"public class {DeepType(depth, 0)} {{ public ulong F; }} {classes}" +
+        $"public static ulong ReadDeep{depth:D2}({DeepType(depth, depth)} o) => o.F; ";
+}
 File.WriteAllText(Path.Combine(deepSource, "Deep.cs"),
     "public static class Bodies { " + string.Concat(baseDepths.Select(Deep)) + "}");
 Run(["dotnet", "build", Path.Combine(deepSource, "Deep.csproj"), "-c", "Release"]);
 var deepAssembly = Path.Combine(deepSource, "bin/Bodies.dll");
 void BaseDepthCosts()
 {
-    var depthCosts = Concurrently(baseDepths, depth => (double)BodyCheck(deepAssembly, "Deep" + depth,
-        $"Bodies::ReadDeep{depth}(Bodies/Deep{depth}_{depth})", $"ReadDeep{depth}"));
-    var incrementRatio = (depthCosts[2] - depthCosts[1]) / (depthCosts[1] - depthCosts[0]);
-    Console.WriteLine(FormattableString.Invariant(
-        $"PASS body check of a field read through {baseDepths[0]}, {baseDepths[1]} and ") +
-        FormattableString.Invariant($"{baseDepths[2]} base classes: ") +
-        FormattableString.Invariant($"{depthCosts[0]:F0}, {depthCosts[1]:F0} and {depthCosts[2]:F0} heartbeats, ") +
-        FormattableString.Invariant($"increments in the ratio {incrementRatio:F2} (linear 2, quadratic 4)"));
-    if (incrementRatio > AllowedChainIncrementRatio)
-        throw new Exception(FormattableString.Invariant(
-            $"The body check grows by {incrementRatio:F2} times as much from depth {baseDepths[1]} to ") +
-            FormattableString.Invariant($"{baseDepths[2]} ") +
-            FormattableString.Invariant(
-                $"as from {baseDepths[0]} to {baseDepths[1]}; the limit is {AllowedChainIncrementRatio}."));
+    foreach (var instance in new[] { false, true })
+    {
+        var receiver = instance ? "instance" : "static";
+        var costs = Concurrently(baseDepths, depth =>
+        {
+            var leaf = "Bodies/" + DeepType(depth, depth);
+            var method = instance ? "ReadField" : $"ReadDeep{depth:D2}";
+            var entry = instance ? $"{leaf}::{method}()" : $"Bodies::{method}({leaf})";
+            return BodyChecks(deepAssembly, $"Deep-{receiver}-{depth}", entry, method,
+                receiverBases: instance ? depth : 0).Body;
+        });
+        var first = costs[1] - costs[0];
+        var second = costs[2] - costs[1];
+        var result = $"{receiver} field read at depths {string.Join("/", baseDepths)}: " +
+            $"{string.Join("/", costs)} heartbeats";
+        if (second > Math.Max(0, first) * AllowedChainIncrementRatio)
+            throw new InvalidOperationException($"{result}; increments {first} and {second} exceed " +
+                $"the {AllowedChainIncrementRatio} growth limit.");
+        Console.WriteLine($"PASS {result}; increments {first} and {second} stay within {AllowedChainIncrementRatio}.");
+    }
 }
 
 // The kernel heartbeats of the scalar certificate of a body whose segments each address an array element, with
@@ -3997,13 +4003,8 @@ static partial class LookupPatterns
     [GeneratedRegex(@"\(\d+, \.call ")]
     internal static partial Regex CallToken { get; }
 
-    [GeneratedRegex("""def method(\d+)Signature : String := "[^"]*?Bodies::(?<method>[^"(]*)\(""")]
+    [GeneratedRegex("""def method(\d+)Signature : String := "[^"]*?Bodies(?:/[^":(]+)?::(?<method>[^"(]*)\(""")]
     internal static partial Regex BodySignature { get; }
-
-    /// <summary>A complete original or closed raw-method literal in a generated body fixture.</summary>
-    [GeneratedRegex(@"(?m)^def (?<name>method[0-9]+(?:Original|Closed)) : Extraction\.RawMethod := " +
-        @"(?<literal>\{[^\r\n]*\})(?=\r?$)")]
-    internal static partial Regex RawMethodLiteral { get; }
 
     [GeneratedRegex(@"(?m)^theorem (?<name>method\d+_body_validated) : (?<statement>[^\r\n]*?) := ⟨[^\r\n]*⟩\r?\n")]
     internal static partial Regex BodyObligation { get; }
