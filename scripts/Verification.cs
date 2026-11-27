@@ -1942,7 +1942,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     /// <summary>Physical file hashes from a whole-library check, usable until the next command or callback.</summary>
-    sealed record CheckedLibraryContents(string Library, IReadOnlyDictionary<string, string> Files);
+    sealed class CheckedLibraryContents(string library, IReadOnlyDictionary<string, string> files)
+    {
+        public readonly string Library = library;
+        public readonly IReadOnlyDictionary<string, string> Files = files;
+    }
 
     /// <summary>Requires every library file to retain its certified bytes, including in a private build.</summary>
     CheckedLibraryContents CheckCertifiedLibraryContents()

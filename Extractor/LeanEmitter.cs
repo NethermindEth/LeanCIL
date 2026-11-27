@@ -23,16 +23,20 @@ internal static class LeanEmitter
         const int maximumBindings = 8;
         foreach (var (state, count) in states.CountBy(state => state, StringComparer.Ordinal))
         {
+            if (count == 1) continue;
             var local = $"state{names.Count}";
-            if (count == 1 || state.Length <= local.Length) continue;
+            if (state.Length <= local.Length) continue;
             var binding = $"let {local} : {elementType} := {state}; ";
             if ((long)count * (state.Length - local.Length) <= binding.Length) continue;
             names.Add(state, local);
             lean.Append(binding);
             if (names.Count == maximumBindings) break;
         }
-        lean.Append('[').AppendJoin(", ", states.Select(state => names.GetValueOrDefault(state, state)))
-            .AppendLine("]");
+        if (names.Count != 0)
+            for (int index = 0; index < states.Length; index++)
+                if (names.TryGetValue(states[index], out string? local))
+                    states[index] = local;
+        lean.Append('[').AppendJoin(", ", states).AppendLine("]");
     }
 
     internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
