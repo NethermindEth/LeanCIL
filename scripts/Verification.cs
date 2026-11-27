@@ -829,12 +829,21 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             .. targets], leanPath: leanPath, progress: progress);
     }
 
-    static SortedDictionary<string, string> ModuleArtifacts(string session) =>
-        !Directory.Exists(Path.Combine(session, ".lake/build/lib/lean")) ? new(StringComparer.Ordinal) :
-        HashFiles(Directory.EnumerateFiles(Path.Combine(session, ".lake/build/lib/lean"), "*", SearchOption.AllDirectories)
+    static SortedDictionary<string, string> ModuleArtifacts(string session,
+        CheckedLibraryContents? checkedLibrary = null)
+    {
+        var compiled = Path.Combine(session, ".lake/build/lib/lean");
+        if (!Directory.Exists(compiled)) return new(StringComparer.Ordinal);
+        var files = Directory.EnumerateFiles(compiled, "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
-            .Select(path => (Path.GetRelativePath(Path.Combine(session, ".lake/build/lib/lean"), path)
-                .Replace('\\', '/'), path)));
+            .Select(path => (Name: Path.GetRelativePath(compiled, path).Replace('\\', '/'), Path: path));
+        if (checkedLibrary is null || checkedLibrary.Library != session) return HashFiles(files);
+        var artifacts = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (name, path) in files)
+            artifacts.Add(name, checkedLibrary.Files.TryGetValue(CompiledLibraryPrefix + name, out var hash)
+                ? hash : Sha(path));
+        return artifacts;
+    }
 
     // Publish a deterministic manifest only after every file has been hashed successfully.
     static SortedDictionary<string, string> HashFiles(IEnumerable<(string Name, string Path)> files)
@@ -1932,12 +1941,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 Path.Combine(library!, changed));
     }
 
+    /// <summary>Physical file hashes from a whole-library check, usable until the next command or callback.</summary>
+    sealed record CheckedLibraryContents(string Library, IReadOnlyDictionary<string, string> Files);
+
     /// <summary>Requires every library file to retain its certified bytes, including in a private build.</summary>
-    void RequireCertifiedLibraryContents()
+    CheckedLibraryContents CheckCertifiedLibraryContents()
     {
-        if (libraryManifest is null || !Same(libraryManifest, CacheFiles(library!)))
+        var files = libraryManifest is not null ? CacheFiles(library!) : null;
+        if (files is null || !Same(libraryManifest!, files))
             throw new InvalidOperationException("The certified library contents changed during verification");
+        return new(library!, files);
     }
+
+    void RequireCertifiedLibraryContents() => CheckCertifiedLibraryContents();
 
     // The pinned manifest binds the source snapshot before copying. Hash exactly the bytes
     // written to the private destination; callers independently verify that destination.
@@ -5268,15 +5284,16 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             }
             RequireStagedProofSources();
             var built = OleanHashes(fresh, session);
-            void RequireDeepStable()
+            void RequireDeepStable(bool checkLibraryContents = false)
             {
                 if (deep is null) return;
+                var checkedLibrary = checkLibraryContents ? CheckCertifiedLibraryContents() : null;
                 deep.RequireStable();
                 if (!Same(built, OleanHashes(fresh, session)) ||
                     bindingSourcesKey != BindingSourcesKey(library!) ||
                     bindingPreparation!.Toolchain != BindingToolchainKey(session))
                     throw new InvalidOperationException("Deep-check sources, toolchain or compiled artifacts changed");
-                RequireDeepBindingStable();
+                RequirePreparedBindingLibrary(checkedLibrary);
                 RequireStagedProofSources();
             }
             void RequireReplayDiagnosticInputs()
@@ -5287,8 +5304,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (!Same(before, Inputs(proof, settings)))
                     throw new InvalidOperationException("Inputs changed during verification");
                 RecheckManifest();
-                RequireCertifiedLibraryContents();
-                RequireDeepStable();
+                RequireDeepStable(checkLibraryContents: true);
             }
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
@@ -5427,9 +5443,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (!Same(before, Inputs(proof, settings)))
                     throw new InvalidOperationException("Inputs changed during verification");
                 RecheckManifest();
-                RequireCertifiedLibraryContents();
+                RequireDeepStable(checkLibraryContents: true);
             }
-            RequireDeepStable();
             deep?.RequireTheorems(audited, proofAudits, deepRun?.Attempt);
             var auditedTheorems = audited.theorems.ToDictionary(result => result.name, StringComparer.Ordinal);
             foreach (var request in proofAudits) AuditedAxioms(auditedTheorems[request.name]);
@@ -5446,7 +5461,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 throw new InvalidOperationException($"Cannot compare the verified statement: {proved.termError}");
             RequireOriginalProofSources();
             RequireStagedProofSources();
-            RequireOriginalProofSources();
             if (!Same(before, Inputs(proof, settings)))
                 throw new InvalidOperationException("Inputs changed during verification");
             // The display is published only here, after every check above, and never feeds a check.
@@ -5496,7 +5510,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 initializationAssumptions: InitializationAssumptions(extraction.Root), libraryModules: libraryModules,
                 statementIdentity: statement is null ? null : Identity(proved), refutation: refutation);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
-            RequireDeepStable();
             var deepPublication = deep is null ? null : StageDeepResult(deep, fresh);
             if (!proofRestored) PublishProof();
             if (extractionPublication is not null)

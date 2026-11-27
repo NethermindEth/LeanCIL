@@ -708,7 +708,7 @@ partial class Program
     /// The prepared library and session retain their StrictBinding sources, toolchain and every original artifact
     /// family; a session module never takes the place of a library module.
     /// </summary>
-    SortedDictionary<string, string> RequirePreparedBindingLibrary()
+    SortedDictionary<string, string> RequirePreparedBindingLibrary(CheckedLibraryContents? checkedLibrary = null)
     {
         var prepared = bindingPreparation ??
             throw new InvalidOperationException("StrictBinding has not been prepared");
@@ -717,7 +717,7 @@ partial class Program
             prepared.LibraryKey != libraryKey || prepared.Toolchain != BindingToolchainKey(session) ||
             bindingSourcesKey != BindingSourcesKey(library!))
             throw new InvalidOperationException("The prepared StrictBinding library changed");
-        var baseArtifacts = ModuleArtifacts(library!);
+        var baseArtifacts = ModuleArtifacts(library!, checkedLibrary);
         var sessionArtifacts = ModuleArtifacts(session);
         var current = new SortedDictionary<string, string>(baseArtifacts, StringComparer.Ordinal);
         foreach (var (name, hash) in sessionArtifacts) current[name] = hash;
