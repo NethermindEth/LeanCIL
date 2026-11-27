@@ -254,8 +254,8 @@ instantiations an extraction holds or in which order.
 
 A field access carries the `Field` rows of its owner from the first up to the accessed field, and the
 owner's and the next type's `TypeDef` rows; rows carried only to be counted keep their flag bytes and name
-no heap entry. Lean counts the instance fields before the accessed one over the carried rows, which must
-run unbroken from the owner's first field, so a gap fails at the lookup. The total number of instance
+no heap entry. Lean finds the owner's first field in the row tree, then visits consecutive rows in
+order and counts the instance fields. A gap ends the carried prefix. The total number of instance
 fields of a type is recorded only when every field is carried: base classes of a class receiver, the
 owner of an instance method, and enums carry their whole field lists.
 

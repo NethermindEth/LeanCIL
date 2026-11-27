@@ -1036,20 +1036,32 @@ abbrev AssemblyIdentified (assembly : AssemblyMetadata) (identity : AssemblyName
   (decodeTableHeader assembly.tableHeader).toOption = some assembly.header ∧
     assembly.name.toOption = some identity
 
+/-- A pending row and the subtree containing its successors. -/
+private abbrev PendingRow := Nat × List Nat × SearchTree (List Nat)
+
+/-- The path to the first carried row at or above a token, followed by its pending ancestors. -/
+private def rowsFrom (token : Nat) : SearchTree (List Nat) → List PendingRow → List PendingRow
+  | .leaf, rest => rest
+  | .node left key bytes right, rest =>
+    match compare token key with
+    | .lt => rowsFrom token left ((key, bytes, right) :: rest)
+    | .eq => (key, bytes, right) :: rest
+    | .gt => rowsFrom token right rest
+
 /-- The running instance field count before each of up to `count` consecutive `Field` rows from
     `row`, as far as the rows are carried, with the total and whether every row was carried. A
     field is static when bit 4 of the first flag byte is set. -/
-private def fieldCounts (index : MetadataIndex) :
-    Nat → Nat → Nat → List (Nat × Nat) → Except MetadataError (List (Nat × Nat) × Nat × Bool)
-  | 0, _, instances, found => .ok (found, instances, true)
-  | count + 1, row, instances, found => do
+private def fieldCounts :
+    Nat → Nat → Nat → List (Nat × Nat) → List PendingRow →
+      Except MetadataError (List (Nat × Nat) × Nat × Bool)
+  | 0, _, instances, found, _ => .ok (found, instances, true)
+  | count + 1, row, instances, found, pending => do
     let token ← checkedTokenOf Table.field row .rowOverflow
-    match index.rows.find? token with
-    | none => .ok (found, instances, false)
-    | some bytes =>
-      let isStatic := bytes.getD 0 0 / 0x10 % 2 == 1
-      fieldCounts index count (row + 1) (if isStatic then instances else instances + 1)
-        ((token, instances) :: found)
+    let (key, bytes, right) :: rest := pending | return (found, instances, false)
+    if key != token then return (found, instances, false)
+    let isStatic := bytes.getD 0 0 / 0x10 % 2 == 1
+    fieldCounts count (row + 1) (if isStatic then instances else instances + 1)
+      ((token, instances) :: found) (rowsFrom 0 right rest)
 
 /-- The carried prefix of a type's field counts, with a total when all its rows are carried. -/
 private def typeCounts (index : MetadataIndex) (token : Nat) :
@@ -1061,7 +1073,8 @@ private def typeCounts (index : MetadataIndex) (token : Nat) :
     let next ← checkedTokenOf Table.typeDef (tokenRow token + 1) .rowOverflow
     pure ((index.typeDef next).toOption.map (·.fieldList))
   let some stop := stop | return none
-  let (found, instances, complete) ← fieldCounts index (stop - row.fieldList) row.fieldList 0 []
+  let pending := rowsFrom (tokenOf Table.field row.fieldList) index.rows []
+  let (found, instances, complete) ← fieldCounts (stop - row.fieldList) row.fieldList 0 [] pending
   return some (found, if complete then some instances else none)
 
 /-- The instance field counts of every carried type, as entries in ascending key order. -/
