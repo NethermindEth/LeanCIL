@@ -73,16 +73,7 @@ using (var hardware = ModuleDefinition.ReadModule(hardwareImage))
 }
 
 
-var pending = new List<(GeneratedVerification Request, string Profile, Action Passed)>();
-void Flush()
-{
-    foreach (var group in pending.GroupBy(item => item.Profile))
-    {
-        verification.VerifyGeneratedBatch(assembly, "Examples", group.Select(item => item.Request).ToArray(), group.Key);
-        foreach (var item in group) item.Passed();
-    }
-    pending.Clear();
-}
+var pending = new GeneratedQueue(verification, assembly);
 
 foreach (var name in new[] { "DefinedLocal", "PrunedUnsafeLocal" })
 {
@@ -109,8 +100,8 @@ theorem correctness :
 #print axioms correctness
 end ExampleProof
 """);
-    pending.Add((new(selectors[name], proof, output), "x64-sse42",
-        () => Console.WriteLine("PASS byte-home compatibility and forged opaque rejection: " + name)));
+    pending.Add(new(selectors[name], proof, output, Profile: "x64-sse42"),
+        () => Console.WriteLine("PASS byte-home compatibility and forged opaque rejection: " + name));
     if (name == "PrunedUnsafeLocal")
     {
         var reachableOutput = Path.Combine(root, name + "-reachable");
@@ -125,8 +116,8 @@ theorem correctness : Extracted.method0.opaqueVectorLocals = [{{local}}] := rfl
 #print axioms correctness
 end ExampleProof
 """);
-        pending.Add((new(selectors[name], reachableProof, reachableOutput), "x64-v3",
-            () => Console.WriteLine("PASS reachable unsafe intrinsic selects the eligible opaque local")));
+        pending.Add(new(selectors[name], reachableProof, reachableOutput, Profile: "x64-v3"),
+            () => Console.WriteLine("PASS reachable unsafe intrinsic selects the eligible opaque local"));
     }
 }
 
@@ -153,8 +144,8 @@ theorem correctness :
 #print axioms correctness
 end ExampleProof
 """);
-    pending.Add((new(selectors[name], proof, output), "x64-v3",
-        () => Console.WriteLine("PASS unspecified vector boundary rejection: " + name)));
+    pending.Add(new(selectors[name], proof, output, Profile: "x64-v3"),
+        () => Console.WriteLine("PASS unspecified vector boundary rejection: " + name));
 }
 
 foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in new (string, ulong, ulong, ulong, bool)[]
@@ -202,11 +193,11 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
         "theorem correctness : (CIL.Safety.invoke Extracted.program 256 0 [.scalar (.i64 " + left +
         "), .scalar (.i64 " + right + ")] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (." + word + " " + expected +
         ")] := by " + executionProof + "\n#print axioms correctness\nend ExampleProof\n");
-    pending.Add((new(selectors[name], proof, output), wide ? "x64-v4" : "x64-v3", () =>
+    pending.Add(new(selectors[name], proof, output, Profile: wide ? "x64-v4" : "x64-v3"), () =>
     {
         RequireRuntimeGroups(output, wide);
         Console.WriteLine("PASS compiled exact intrinsic: " + name);
-    }));
+    });
     if (wide ? Avx512DQ.IsSupported && Avx512F.IsSupported : Avx2.IsSupported)
     {
         object result = runtime.GetMethod(name)!.Invoke(null, [left, right])!;
@@ -215,7 +206,7 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
     }
 }
 
-Flush();
+pending.Flush();
 
 // Change only the AVX2 member reference in the compiled AND entry, keeping its broadcast and lane.
 var wrongAnd = Path.Combine(root, "OrInsteadOfAnd");
@@ -542,8 +533,8 @@ theorem correctness :
   exact ⟨rfl, rfl⟩
 end ExampleProof
 """);
-    pending.Add((new(selectors[name], proof, output), "scalar",
-        () => Console.WriteLine("PASS vector initialization, exact zero bytes and bounds: " + name)));
+    pending.Add(new(selectors[name], proof, output, Profile: "scalar"),
+        () => Console.WriteLine("PASS vector initialization, exact zero bytes and bounds: " + name));
     object[] arguments = [initial];
     runtime.GetMethod(name)!.Invoke(null, arguments);
     bool zero = arguments[0] switch
@@ -556,7 +547,7 @@ end ExampleProof
     if (!zero) throw new InvalidOperationException("Runtime vector initialization did not clear every lane: " + name);
 }
 
-Flush();
+pending.Flush();
 
 // The byte shuffles and span constructions are compared with the host CPU on seeded random spans.
 if (!Avx2.IsSupported) throw new InvalidOperationException("The byte shuffle differential test needs an AVX2 host");
@@ -648,8 +639,8 @@ foreach ((string name, int width, string profile, string unavailable, string fea
         #print axioms correctness
         end ExampleProof
         """);
-    pending.Add((new(selectors[name], proof, output), profile,
-        () => Console.WriteLine($"PASS byte shuffle matches the host CPU on {cases.Count} spans: {name}")));
+    pending.Add(new(selectors[name], proof, output, Profile: profile),
+        () => Console.WriteLine($"PASS byte shuffle matches the host CPU on {cases.Count} spans: {name}"));
     // Without the shuffle's feature the reachable call is rejected before any evidence is written.
     var rejectedOutput = Path.Combine(root, $"{name}-{unavailable}");
     Directory.CreateDirectory(rejectedOutput);
@@ -662,7 +653,7 @@ foreach ((string name, int width, string profile, string unavailable, string fea
     Console.WriteLine($"PASS {name} rejected under {unavailable}");
 }
 
-Flush();
+pending.Flush();
 
 static string ShuffleProof(int width, string contract) => $$"""
         set_option maxRecDepth 8192 in
@@ -808,10 +799,10 @@ foreach (var (label, profile) in new[]
         #print axioms correctness
         end ExampleProof
         """);
-    pending.Add((new(selectors["AesRound"], proof, output), profile,
-        () => Console.WriteLine($"PASS hash round matches the host CPU's AESENC on {AesCases} blocks: {label}")));
+    pending.Add(new(selectors["AesRound"], proof, output, Profile: profile),
+        () => Console.WriteLine($"PASS hash round matches the host CPU's AESENC on {AesCases} blocks: {label}"));
 }
-Flush();
+pending.Flush();
 // Both profiles must implement the same round for every input and reject a lost high key half.
 var wrongAes = Path.Combine(root, "AesRoundLowKeyTwice");
 Directory.CreateDirectory(wrongAes);
@@ -1135,8 +1126,8 @@ foreach ((string name, string[] claims) in new[]
         #print axioms correctness
         end ExampleProof
         """);
-    pending.Add((new(selectors[name], proof, output), "x64-v4",
-        () => Console.WriteLine($"PASS {name} extraction matches its reference on {claims.Length} inputs")));
+    pending.Add(new(selectors[name], proof, output, Profile: "x64-v4"),
+        () => Console.WriteLine($"PASS {name} extraction matches its reference on {claims.Length} inputs"));
 }
 
 // The compiled REV64 result is checked against BinaryPrimitives.ReverseEndianness of each lane.
@@ -1169,8 +1160,8 @@ File.WriteAllText(reverseProof, $$"""
     #print axioms correctness
     end ExampleProof
     """);
-pending.Add((new(selectors["ReverseLimbs"], reverseProof, reverseOutput), "arm64-advsimd",
-    () => Console.WriteLine("PASS ReverseLimbs reverses the bytes of each lane under arm64-advsimd")));
+pending.Add(new(selectors["ReverseLimbs"], reverseProof, reverseOutput, Profile: "arm64-advsimd"),
+    () => Console.WriteLine("PASS ReverseLimbs reverses the bytes of each lane under arm64-advsimd"));
 // Exchange the two argument loads and preserve every other instruction.
 (string Assembly, string Output) SwapFirstArguments(string methodName, int secondLoad = 1)
 {
@@ -1362,9 +1353,9 @@ File.WriteAllText(halvesProof, $$"""
     #print axioms short_destination_faults
     end ExampleProof
     """);
-pending.Add((new(selectors["SwapHalves"], halvesProof, halvesOutput), "arm64-advsimd",
-    () => Console.WriteLine("PASS SwapHalves matches the host's halves and faults past a short destination")));
-Flush();
+pending.Add(new(selectors["SwapHalves"], halvesProof, halvesOutput, Profile: "arm64-advsimd"),
+    () => Console.WriteLine("PASS SwapHalves matches the host's halves and faults past a short destination"));
+pending.Flush();
 // Move only the upper LoadUnsafe to offset zero. The compiled variant still returns normally.
 var repeatedHalf = Path.Combine(root, "RepeatLowerHalf");
 Directory.CreateDirectory(repeatedHalf);
@@ -1628,9 +1619,9 @@ File.WriteAllText(multiplyProof, $$"""
     #print axioms correctness
     end ExampleProof
     """);
-pending.Add((new(selectors["MultiplyEven128"], multiplyProof, multiplyOutput), "x64-sse42",
-    () => Console.WriteLine($"PASS MultiplyEven128 matches the host CPU on {multiplyClaims.Length} inputs")));
-Flush();
+pending.Add(new(selectors["MultiplyEven128"], multiplyProof, multiplyOutput, Profile: "x64-sse42"),
+    () => Console.WriteLine($"PASS MultiplyEven128 matches the host CPU on {multiplyClaims.Length} inputs"));
+pending.Flush();
 // Shift each input's odd UInt32 element into the even position before the original SSE2 multiply.
 var oddProducts = Path.Combine(root, "OddProducts128");
 Directory.CreateDirectory(oddProducts);
