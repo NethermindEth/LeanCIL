@@ -833,17 +833,18 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var definitions = new HashSet<TypeDefinition>();
         var instantiation = arguments.Count == 0 ? "" :
             $", instantiation := {List(arguments.Select(argument => InstanceArgument(argument, definitions)))}";
-        var (rows, tables, assemblies) = (metadata ?? throw new InvalidOperationException(
+        var (rows, assemblies) = (metadata ?? throw new InvalidOperationException(
             "Method evidence requires the pinned assemblies.")).Method(original,
             operands.Select(entry => entry.Token).Append(original.Body.LocalVarToken.ToUInt32())
                 .Where(token => token != 0), classOwner, definitions);
-        // The kernel decides once that the literal tables are the decoder's; the body check reads them by name.
+        // The decoder's checked result supplies the same indexed metadata to every body check.
         var slices = $"def method{number}Metadata : Extraction.MethodMetadata := {rows}\n" +
-            $"def method{number}Tables : List Extraction.IndexTables := {tables}\n" +
+            $"cil_evaluated method{number}Tables : List Extraction.IndexTables := " +
+            $"method{number}Metadata.tables.toOption\n" +
             $"def method{number}Names : Extraction.MethodNames := " +
             $"{Names(original, classOwner, admitted.FullName, Pinned.Index(Pinned.Working(original.Module)))}\n" +
             $"theorem method{number}_tables_valid : Extraction.tablesMatch method{number}Metadata " +
-            $"method{number}Tables = true := by decide +kernel";
+            $"method{number}Tables = true := Extraction.tablesMatch_of_result method{number}Tables_eq";
         var table = List(operands.Select(entry => $"({entry.Token}, {entry.Operand})"));
         var identities = List(assemblies.Select(index => $"assembly{index}Identity"));
         var identified = assemblies.Reverse().Aggregate("Extraction.AllIdentified.nil",

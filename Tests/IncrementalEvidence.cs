@@ -87,7 +87,7 @@ string Component(string text, int method, string name)
     // A closed instantiation of a generic method shares its open definition's slice, which another component holds.
     var ownSlice = lines.Any(line => line.Contains($"metadata := method{method}Metadata,", StringComparison.Ordinal));
     foreach (var required in (ownSlice
-        ? new[] { $"def method{method}Metadata :", $"def method{method}Tables :",
+        ? new[] { $"def method{method}Metadata :", $"cil_evaluated method{method}Tables :",
             $"theorem method{method}_tables_valid :" }
         : []).Concat([$"def method{method}Body :", $"theorem method{method}_body_validated :"]))
         if (!lines.Any(line => line.StartsWith(required, StringComparison.Ordinal)))
@@ -205,7 +205,7 @@ static partial class IncrementalPatterns
     internal static partial Regex FirstBody { get; }
 
     const string MethodDeclaration =
-        """(?:@\[[^\r\n]*\] )?(?:def|theorem|cil_decoded_method) method(?<method>[0-9]+)(?![0-9])""";
+        """(?:@\[[^\r\n]*\] )?(?:def|theorem|cil_decoded_method|cil_evaluated) method(?<method>[0-9]+)(?![0-9])""";
 
     /// <summary>The assembly block, or a declaration of the method that the method group numbers.</summary>
     [GeneratedRegex($"""(?m)^(?:def assembly\d+Metadata |{MethodDeclaration})[^\n]*$""")]

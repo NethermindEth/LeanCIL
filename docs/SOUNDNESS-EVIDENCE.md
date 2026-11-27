@@ -248,13 +248,10 @@ fixes, decodes strings, blobs and user strings, and decodes the signature blobs
 check what the extractor states. A coded index must have a valid table tag and a row number
 that fits in 24 bits. Both readers require each signature to consume its entire blob.
 
-Building the lookup trees of a slice costs its size, and the kernel keeps no cache between declarations. The
-extractor therefore writes them out as the literal `method{n}Tables` (balanced search trees of the rows, heap
-entries, links and instance field counts), and `method{n}_tables_valid` states that `tablesMatch`: the decoder
-builds exactly that literal from `method{n}Metadata`. That decision costs the method's carried rows times a
-logarithm; `method{n}_body_validated` uses it as a premise. Each closed instantiation of a generic method has
-its own copy, built from the open definition and the assembly, so reuse does not depend on which
-instantiations an extraction holds or in which order.
+Lean builds the lookup trees for rows, heap entries, links, field counts and generic owners from
+`method{n}Metadata`. It stores the result in `method{n}Tables` and the kernel checks that the decoder
+produces exactly those trees. The body proof uses that equality through `method{n}_tables_valid`.
+Each closed instantiation carries the rows from its own open definition and assembly.
 
 A field access carries the `Field` rows of its owner from the first up to the accessed field, and the
 owner's and the next type's `TypeDef` rows; rows carried only to be counted keep their flag bytes and name

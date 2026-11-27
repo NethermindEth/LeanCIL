@@ -109,8 +109,8 @@ var choice = original.GetType("Fixture.Choice");
 var sliceType = extractor.GetType("Nethermind.LeanCIL.MetadataSlices", throwOnError: true)!;
 var collector = Activator.CreateInstance(sliceType, pinned)!;
 var collect = sliceType.GetMethod("Method", Internal)!;
-(string Metadata, string Tables, int[] Assemblies) Collect(params uint[] tokens) =>
-    ((string, string, int[]))collect.Invoke(collector, [run, tokens, false, Array.Empty<TypeDefinition>()])!;
+(string Metadata, int[] Assemblies) Collect(params uint[] tokens) =>
+    ((string, int[]))collect.Invoke(collector, [run, tokens, false, Array.Empty<TypeDefinition>()])!;
 
 uint[] FieldRows(string metadata)
 {
@@ -139,7 +139,7 @@ var repeated = Collect(cells[2], cells[0], cells[2]);
 Require(FieldRows(repeated.Metadata).SequenceEqual(cells[..3]), "Repeated fields extend the carried prefix.");
 var forward = Collect(cells);
 var reverse = Collect(cells.Reverse().ToArray());
-Require(forward.Metadata == reverse.Metadata && forward.Tables == reverse.Tables,
+Require(forward.Metadata == reverse.Metadata && forward.Assemblies.SequenceEqual(reverse.Assemblies),
     "Field order changes emitted rows, signatures, names or links.");
 var inherited = Collect(derivedFields[0]);
 Require(FieldRows(inherited.Metadata).SequenceEqual(new[] { baseField, derivedFields[0] }),
@@ -148,7 +148,8 @@ Require(!HasName(inherited.Metadata, "BaseField") && !HasName(inherited.Metadata
     "Inherited row coverage must not carry unrequested names.");
 var inheritedAll = Collect([.. derivedFields, baseField]);
 var inheritedReverse = Collect([baseField, .. derivedFields.Reverse()]);
-Require(inheritedAll.Metadata == inheritedReverse.Metadata && inheritedAll.Tables == inheritedReverse.Tables,
+Require(inheritedAll.Metadata == inheritedReverse.Metadata &&
+    inheritedAll.Assemblies.SequenceEqual(inheritedReverse.Assemblies),
     "Repeated ancestors change emitted evidence.");
 var enumEvidence = Collect(choice.MetadataToken.ToUInt32());
 Require(FieldRows(enumEvidence.Metadata).SequenceEqual(choice.Fields.Select(field => field.MetadataToken.ToUInt32())),
@@ -160,7 +161,8 @@ Require(enumEvidence.Metadata.Contains(Bytes([2, 6, 8]), StringComparison.Ordina
     "Enum field coverage must carry signatures without unrequested names.");
 Console.WriteLine("PASS partial prefixes, repeated fields, inheritance, enums and order-independent evidence");
 var evidence = string.Join("\n", new[] { partial, repeated, forward, reverse, inherited,
-    inheritedAll, inheritedReverse, enumEvidence }.Select(item => item.Metadata + "\n" + item.Tables));
+    inheritedAll, inheritedReverse, enumEvidence }
+    .Select(item => item.Metadata + "\n" + string.Join(", ", item.Assemblies)));
 Console.WriteLine("Evidence SHA256 " + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
     System.Text.Encoding.UTF8.GetBytes(evidence))));
 
@@ -188,7 +190,7 @@ foreach (var count in new[] { 256, 1024, 4096 })
     var inputCollector = Activator.CreateInstance(sliceType, inputPinned)!;
     uint[] tokens = [.. fieldsType.Fields.Select(field => field.MetadataToken.ToUInt32())];
     var watch = System.Diagnostics.Stopwatch.StartNew();
-    var result = ((string Metadata, string Tables, int[] Assemblies))collect.Invoke(inputCollector,
+    var result = ((string Metadata, int[] Assemblies))collect.Invoke(inputCollector,
         [fieldsType.Methods.Single(), tokens, false, Array.Empty<TypeDefinition>()])!;
     watch.Stop();
     Require(FieldRows(result.Metadata).SequenceEqual(tokens), "Field collection lost a row.");

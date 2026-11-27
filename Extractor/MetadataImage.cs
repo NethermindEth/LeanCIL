@@ -203,15 +203,6 @@ internal sealed class MetadataImage
         return row;
     }
 
-    /// <summary>The first <c>Field</c> row of a <c>TypeDef</c> row: its <c>FieldList</c> column.</summary>
-    internal uint FieldList(byte[] typeDefRow)
-    {
-        var width = Reader.GetTableRowCount(TableIndex.Field) < 0x10000 ? 2 : 4;
-        var methodWidth = Reader.GetTableRowCount(TableIndex.MethodDef) < 0x10000 ? 2 : 4;
-        var at = typeDefRow.Length - width - methodWidth;
-        return width == 2 ? BitConverter.ToUInt16(typeDefRow, at) : BitConverter.ToUInt32(typeDefRow, at);
-    }
-
     /// <summary>A <c>#Strings</c> entry through its terminating zero.</summary>
     internal byte[] StringEntry(int offset)
     {

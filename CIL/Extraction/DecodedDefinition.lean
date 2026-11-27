@@ -21,9 +21,23 @@ and type operands as their listed `FieldRef` and `TypeExpr` constants. Stepping 
 their `cil_field_shape` and `cil_value_shape` facts. Decoded operands share their raw layouts'
 identity expressions, and a closed decoder keeps the raw type expressions
 in the declared signature. The kernel checks `name_decoder_eq` and every fact.
-`cil_evaluated name : type := term` writes a computed method, string list or constructor data
-the same way.
+`cil_evaluated name : type := term` writes computed metadata indexes, methods, names or
+constructor data the same way.
 -/
+
+namespace CIL.Extraction
+
+/-- A successful index construction certifies the materialized lookup tables. -/
+theorem tablesMatch_of_result {metadata : MethodMetadata} {tables : List IndexTables}
+    (checked : metadata.tables.toOption = some tables) : tablesMatch metadata tables = true := by
+  cases result : metadata.tables with
+  | error err => simp [result, Except.toOption] at checked
+  | ok built =>
+    have same : built = tables := by simpa [result, Except.toOption] using checked
+    simp [tablesMatch, result, same]
+#print axioms tablesMatch_of_result
+
+end CIL.Extraction
 
 namespace CIL.Extraction.DecodedDefinition
 
@@ -298,6 +312,8 @@ private unsafe def evaluatedLiteralUnsafe (type term : Expr) (optional : Bool) :
     return ← literalAt RuntimeRows type term optional
   if ← isDefEq type (mkApp (mkConst ``List [.zero]) (mkConst ``String)) then
     return ← literalAt (List String) type term optional
+  if ← isDefEq type (toTypeExpr (List IndexTables)) then
+    return ← literalAt (List IndexTables) type term optional
   throwError "cil_evaluated: no literal is written for the type {type}"
 
 /-- The literal of the closed term `term` of type `type`, computed by compiled code. -/
@@ -568,9 +584,9 @@ elab_rules : command
       addSimpTheorem simpSet fact (post := true) (inv := false) .global (eval_prio default)
 
 /-- `cil_evaluated name : type := term` defines `name` as the value the closed term evaluates to,
-    a raw method, bound caller, string list, managed package or runtime rows, written so tactics and
-    the kernel read it without evaluating `term`, and proves `name_eq : term = name` in the
-    kernel. A term of type `Option type` must evaluate to `some`, and `name_eq` states
+    metadata indexes, a raw method, bound caller, string list, managed package or runtime rows, so
+    tactics and the kernel read it without evaluating `term`. The kernel checks
+    `name_eq : term = name`. A term of type `Option type` must evaluate to `some`, and `name_eq` states
     `term = some name`. Constructor literals name each value of a current-module definition
     that `term` is computed from as that constant. A preceding doc comment documents `name`. A term
     that depends on `sorryAx` is refused. -/

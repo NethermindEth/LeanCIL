@@ -253,28 +253,35 @@ RejectBody(0, "altered-max-stack", bodyTheorem, "method0Original",
     line => line.Replace("maxStack := 8", "maxStack := 9"));
 // The module's lookup tables are decided once against its metadata; a changed row, heap entry or table is
 // refuted there.
-void RejectTables(string name, string definition, Func<string, string> change)
+void RejectTables(string name, Func<string, string> change)
 {
     const string theorem = "method0_tables_valid";
-    Reject(0, name, source => ChangeDefinition(source, definition, change), theorem);
-    var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, "0", "Extracted.lean")), definition, change);
+    string Mutate(string source) => change(Replaced(source,
+        " := Extraction.tablesMatch_of_result method0Tables_eq", " := by decide +kernel"));
+    Reject(0, name, Mutate, theorem);
+    var mutated = Mutate(File.ReadAllText(Path.Combine(output, "0", "Extracted.lean")));
     var refuted = KernelRefutation(mutated, theorem, "method0_tables_refuted");
     var path = Path.Combine(output, "RefutedTables-" + name + ".lean");
     File.WriteAllText(path, NarrowEvidence(refuted, "method0_tables_refuted"));
     evidence.Add(path, "PASS the kernel proves the mutated tables obligation false: " + name,
         "method0_tables_refuted");
 }
-RejectTables("altered-metadata-row", "method0Metadata",
-    line => ChangeLiteralByte(line, GenericPatterns.MetadataRowByte, 1));
-RejectTables("altered-metadata-string", "method0Metadata",
-    line => ChangeLiteralByte(line, GenericPatterns.MetadataStringByte, 1));
-RejectTables("altered-lookup-row", "method0Tables",
-    line => ChangeLiteralByte(line, GenericPatterns.LookupRowByte, 1));
-// A leaf entry of the rows tree removed, and one added before another.
-RejectTables("missing-lookup-row", "method0Tables",
-    line => GenericPatterns.LeafRow.Replace(line, ".leaf", 1));
-RejectTables("extra-lookup-row", "method0Tables",
-    line => GenericPatterns.LeafRowParts.Replace(line, "(.node (.node .leaf 1 [0] .leaf) $1 $2 .leaf)", 1));
+// Keep the genuine index when changing the metadata, and the genuine metadata when changing the index.
+string ChangeIndexedMetadata(string source, Regex pattern) =>
+    ChangeDefinition(Replaced(source, ":= method0Metadata.tables.toOption", ":= originalMetadata.tables.toOption"),
+        "method0Metadata", line => line.Replace("method0Metadata", "originalMetadata", StringComparison.Ordinal) +
+            "\n" + ChangeLiteralByte(line, pattern, 1));
+string ChangeIndexedRows(string source, string rows) => Replaced(source,
+    "cil_evaluated method0Tables : List Extraction.IndexTables := method0Metadata.tables.toOption",
+    "cil_evaluated originalTables : List Extraction.IndexTables := method0Metadata.tables.toOption\n" +
+    "def method0Tables : List Extraction.IndexTables := originalTables.modify 0 fun table => " +
+    $"{{ table with rows := Extraction.SearchTree.ofSorted ({rows}) }}");
+RejectTables("altered-metadata-row", source => ChangeIndexedMetadata(source, GenericPatterns.MetadataRowByte));
+RejectTables("altered-metadata-string", source => ChangeIndexedMetadata(source, GenericPatterns.MetadataStringByte));
+RejectTables("altered-lookup-row", source => ChangeIndexedRows(source,
+    "table.rows.toList.modify 0 (fun (key, bytes) => (key, bytes.modify 0 (fun b => (b + 1) % 256)))"));
+RejectTables("missing-lookup-row", source => ChangeIndexedRows(source, "table.rows.toList.tail"));
+RejectTables("extra-lookup-row", source => ChangeIndexedRows(source, "(1, [0]) :: table.rows.toList"));
 RejectBody(4, "altered-body-branch-index", "method1_body_validated", "method1Original",
     line => line.Replace("operand := .target 4", "operand := .target 3"));
 Console.WriteLine("PASS body bytes, token table and original definition reject changed bytes and operands");
@@ -496,15 +503,6 @@ static partial class GenericPatterns
 
     [GeneratedRegex($$"""(strings := \[\(0, {{LiteralHead}}1 0x00\)\), \(\d+, {{ByteLiteral}})([0-9A-F]{2})""")]
     internal static partial Regex MetadataStringByte { get; }
-
-    [GeneratedRegex($$"""(rows := .*?{{ByteLiteral}})([0-9A-F]{2})""")]
-    internal static partial Regex LookupRowByte { get; }
-
-    [GeneratedRegex($$"""\(\.node \.leaf \d+ {{ByteLiteral}}[0-9A-F]+\) \.leaf\)""")]
-    internal static partial Regex LeafRow { get; }
-
-    [GeneratedRegex($$"""\(\.node \.leaf (\d+) ({{ByteLiteral}}[0-9A-F]+\)) \.leaf\)""")]
-    internal static partial Regex LeafRowParts { get; }
 
     [GeneratedRegex(@"(?m)^def (?<name>\w+) : String := (?<value>.*)$")]
     internal static partial Regex StringDefinition { get; }

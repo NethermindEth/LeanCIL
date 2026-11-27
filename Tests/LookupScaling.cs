@@ -3122,9 +3122,7 @@ string MethodNumber(string extracted, string method, string name)
         .FirstOrDefault(match => match.Groups["method"].Value == method)?.Groups[1].Value
         ?? throw new InvalidOperationException($"Method {method} is not in the extraction {name}.");
 }
-// The heartbeats of the method's `method{n}_body_validated` and, for `tablesMethod`, of that method's
-// `tables_valid`, read in one file of the extraction narrowed to the body obligation. Each is read after the same
-// statement closed with `sorry`, which is subtracted.
+// Measure the body proof net of its statement, and the full cost of materializing and certifying the lookup trees.
 (long Body, long Tables) BodyChecks(string image, string name, string entry, string method,
     string? tablesMethod = null)
 {
@@ -3144,35 +3142,40 @@ string MethodNumber(string extracted, string method, string name)
         literals.Add(literal, name);
         return match.Value;
     });
-    var obligations = new List<(Match Proof, string Kind)> { (Obligation(narrowed, body, decided: false), "body") };
+    var bodyProof = LookupPatterns.BodyObligation.Matches(narrowed).Single(match => match.Groups["name"].Value == body);
+    var commands = new List<(Match Command, string Audit)> { (bodyProof, body) };
     if (tablesMethod is not null)
-        obligations.Add((Obligation(narrowed, $"method{MethodNumber(extracted, tablesMethod, name)}_tables_valid",
-            decided: true), "tables"));
-    var parts = new List<string>();
-    var readAt = new Dictionary<string, int>();
-    var start = 0;
-    foreach (var (proof, kind) in obligations.OrderBy(obligation => obligation.Proof.Index))
     {
-        parts.Add(narrowed[start..proof.Index]);
-        var statement = proof.Groups["statement"].Value;
-        parts.Add($"theorem {proof.Groups["name"].Value}_open : {statement} := sorry\n");
-        readAt[kind] = parts.Count - 1;
-        parts.Add(proof.Value);
-        start = proof.Index + proof.Length;
+        var tableMethod = "method" + MethodNumber(extracted, tablesMethod, name);
+        var tableDefinition = LookupPatterns.EvaluatedTables.Matches(narrowed)
+            .Single(match => match.Groups["method"].Value == tableMethod);
+        var tableProof = LookupPatterns.TablesObligation.Matches(narrowed)
+            .Single(match => match.Groups["method"].Value == tableMethod);
+        commands.Add((tableDefinition, tableMethod + "Tables_eq"));
+        commands.Add((tableProof, tableMethod + "_tables_valid"));
     }
-    // Audit each measured proof; later declarations cannot contribute to its elaboration cost.
-    parts.Add(string.Join('\n', obligations.Select(obligation =>
-        $"#print axioms {obligation.Proof.Groups["name"].Value}")) + "\nend Extracted\n");
+    var parts = new List<string>();
+    int openAt = 0, bodyAt = 0;
+    var tablesAt = new List<int>();
+    var start = 0;
+    foreach (var (command, audit) in commands.OrderBy(entry => entry.Command.Index))
+    {
+        parts.Add(narrowed[start..command.Index]);
+        // PartHeartbeats excludes the header from its result.
+        if (audit == body)
+        {
+            openAt = parts.Count - 1;
+            parts.Add($"theorem {body}_open : {command.Groups["statement"].Value} := sorry\n");
+            bodyAt = parts.Count - 1;
+        }
+        else tablesAt.Add(parts.Count - 1);
+        parts.Add(command.Value);
+        start = command.Index + command.Length;
+    }
+    parts.Add(string.Join('\n', commands.Select(entry => $"#print axioms {entry.Audit}")) + "\nend Extracted\n");
     var costs = PartHeartbeats(Path.Combine(output, "BodyChecked.lean"), parts);
-    long Cost(string kind) => costs[readAt[kind]] - costs[readAt[kind] - 1];
-    return (Cost("body"), tablesMethod is null ? 0 : Cost("tables"));
+    return (costs[bodyAt] - costs[openAt], tablesAt.Sum(index => costs[index]));
 }
-// The line of obligation `theorem` in `narrowed`, proved by `decide +kernel` when `decided` and by an anonymous
-// constructor otherwise.
-static Match Obligation(string narrowed, string theorem, bool decided) =>
-    LookupPatterns.ProvedObligation.Matches(narrowed).FirstOrDefault(match =>
-        match.Groups["name"].Value == theorem && match.Groups["decision"].Success == decided)
-    ?? throw new InvalidOperationException("Missing obligation " + theorem);
 long BodyCheck(string image, string name, string entry, string method) =>
     BodyChecks(image, name, entry, method).Body;
 void BodyCheckCosts()
@@ -4002,9 +4005,12 @@ static partial class LookupPatterns
         @"(?<literal>\{[^\r\n]*\})(?=\r?$)")]
     internal static partial Regex RawMethodLiteral { get; }
 
-    const string ProofTerm = """(?:⟨[^\r\n]*⟩|(?<decision>by decide \+kernel))""";
+    [GeneratedRegex(@"(?m)^theorem (?<name>method\d+_body_validated) : (?<statement>[^\r\n]*?) := ⟨[^\r\n]*⟩\r?\n")]
+    internal static partial Regex BodyObligation { get; }
 
-    /// <summary>A one-line theorem proved by a constructor or, in its decision group, by the kernel.</summary>
-    [GeneratedRegex($"""(?m)^theorem (?<name>[\w?!']+) : (?<statement>[^\r\n]*?) := {ProofTerm}\r?\n""")]
-    internal static partial Regex ProvedObligation { get; }
+    [GeneratedRegex(@"(?m)^cil_evaluated (?<method>method\d+)Tables : [^\r\n]+\r?\n")]
+    internal static partial Regex EvaluatedTables { get; }
+
+    [GeneratedRegex(@"(?m)^theorem (?<method>method\d+)_tables_valid : [^\r\n]+\r?\n")]
+    internal static partial Regex TablesObligation { get; }
 }
