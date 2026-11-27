@@ -35,15 +35,15 @@ internal static class Reachability
         if (method.Body.HasExceptionHandlers) addressed.UnionWith(Enumerable.Range(0, method.Body.Variables.Count));
         Dictionary<Instruction, FeatureConstants> incoming = new()
         {
-            [instructions[0]] = new(method.Body.Variables.Count)
+            [instructions[0]] = new()
         };
         Queue<Instruction> pending = new();
         HashSet<Instruction> queued = [instructions[0]];
         pending.Enqueue(instructions[0]);
         foreach (var handler in method.Body.ExceptionHandlers)
         {
-            incoming[handler.HandlerStart] = FeatureConstants.HandlerEntry(method.Body.Variables.Count,
-                handler.HandlerType == ExceptionHandlerType.Catch);
+            incoming[handler.HandlerStart] =
+                FeatureConstants.HandlerEntry(handler.HandlerType == ExceptionHandlerType.Catch);
             if (queued.Add(handler.HandlerStart)) pending.Enqueue(handler.HandlerStart);
         }
         // Revisit successors when a backedge or join weakens a constant fact.

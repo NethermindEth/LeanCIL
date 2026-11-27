@@ -623,8 +623,8 @@ Reuse is authenticated and local to the machine:
   whose Lake traces depend on those compiled imports.
 - Modified or unsigned cache files fall back to rebuilding and kernel replay, and a corrupt
   entry is replaced.
-- Concurrent verifiers publish through an atomic rename, and republishing the same module set
-  is a no-op.
+- Concurrent verifiers publish through an atomic rename. On Windows, publication retries for
+  up to one second when a reader blocks the rename. Republishing the same module set is a no-op.
 - [`--fresh`](CLI.md#verify) disables both consumer caches.
 - On another machine, `LEANCIL_CERTIFIED_LIBRARY` can supply the base library; see
   [library cache](CLI.md#library-cache).
@@ -713,6 +713,11 @@ writes `failed.json`.
 The session takes one source snapshot, restores certified support once and checks each
 extraction's integrity. Requests share work as follows:
 
+- The verifier compares the source hashes from each fresh snapshot to check the pinned LeanCIL
+  framework. When the bytes differ, it checks the decoded text with normalized line endings.
+- To find keyed extraction imports and symbol dependencies, the verifier indexes the source
+  paths in the snapshot. It reads imports once per reached file and follows every matching
+  path when several package roots provide the same module.
 - Requests whose `Extracted.lean` is identical share one Lake workspace: one `lake build` of all
   their proof modules, one extraction certificate audit and one kernel replay of the union of
   non-certified modules. Requests with different extractions use separate workspaces.

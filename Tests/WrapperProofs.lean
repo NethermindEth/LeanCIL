@@ -1,21 +1,9 @@
 import CIL.Safety.StepComposition
 import CIL.Safety.HandlerSteps
 
-namespace Tests.WrapperProofs
+/-! Arithmetic wrapper fixtures use the resolved call's model to check its result or fault. -/
 
-/-- An instruction fault terminates the checked execution at its actual site. -/
-theorem run_fault {program : CIL.Program} {fuel method pc : Nat}
-    {body : CIL.Method} {op : CIL.Instruction} {args stack : List CIL.Safety.Value}
-    {frame : CIL.Safety.Frame} {memory : CIL.Safety.Memory}
-    {fault : CIL.Safety.ExecutionFault}
-    (found : program[method]? = some body) (instruction : body.code[pc]? = some op)
-    (failed : CIL.Safety.step body op pc args frame stack memory = .error fault)
-    (free : CIL.Safety.HandlerFree program := by handler_free) :
-    CIL.Safety.run program (fuel + 1) method pc args frame stack memory =
-      .error ⟨method, pc, fault⟩ := by
-  simp only [CIL.Safety.run_succ _ _ _ _ _ _ _ _ (free.unprotected method pc), found,
-    instruction, failed, Except.mapError,
-    Bind.bind, Except.bind]
+namespace Tests.WrapperProofs
 
 /-- Select the checked call model and simplify its arithmetic result. -/
 macro "math_wrapper_step " model:term:max evaluated:term : tactic => `(tactic|

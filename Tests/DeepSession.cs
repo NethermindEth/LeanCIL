@@ -10,6 +10,7 @@
 
 using System.Text.Json;
 
+CheckPinCoverage();
 if (args is ["--request-scaling"])
 {
     foreach (var count in new[] { 16, 128, 1024 })
@@ -285,6 +286,36 @@ void Compile(string source)
     var result = Execute([verification.LeanExecutable, "--root=" + session, "-o",
         Path.ChangeExtension(source, ".olean"), source], leanPath: search, environment: verification.LeanEnvironment);
     if (result.Code != 0) throw new InvalidOperationException(result.Output);
+}
+
+void CheckPinCoverage()
+{
+    var digest = Sha256Digest.Of([1]);
+    BindingImagePin[] pins = [new("A", Sha256Digest.Of([2]), [2]), new("A", digest, [1])];
+    var grouped = pins.ToLookup(pin => pin.Identity, StringComparer.Ordinal);
+    var empty = Array.Empty<BindingImagePin>().ToLookup(pin => pin.Identity, StringComparer.Ordinal);
+    var survey = new EvidenceSurvey(4, 0, ["Z", "A", "a"]);
+    const string missing = "the method evidence names assemblies no supplied image is pinned under: ";
+    if (UncoveredEvidence(survey, grouped)[BindingFact.BodyBytes] != missing + "Z; a" ||
+        UncoveredEvidence(survey, empty)[BindingFact.BodyBytes] != missing + "Z; A; a")
+        throw new InvalidOperationException("Missing assembly identities lost their order or case");
+
+    var import = new
+    {
+        slot = 0, profile = "scalar", implementationSha256 = digest.ToString(), typeArguments = new[] { "T" },
+        typedSignature = new { owner = new { scope = "A" } }, contractConstant = "P",
+        actualLayouts = new[] { new { scope = "A" }, new { scope = "B" }, new { scope = "a" }, new { scope = "B" } }
+    };
+    var root = JsonSerializer.SerializeToElement(new { imports = new[] { import } });
+    ExtractionIdentity extraction = new("", "", root, new());
+    if (UnpinnedImportedLayouts(extraction, grouped) is not ["B", "a"] ||
+        UnpinnedImportedLayouts(extraction, empty) is not ["A", "B", "a"] ||
+        ReadPublishedImports(extraction, grouped, new()) is not null ||
+        ReadPublishedImports(extraction, empty, new()) is not null)
+        throw new InvalidOperationException("A pin resolved the wrong layout or unchecked publication");
+    var ambiguous = pins.Append(pins[1]).ToLookup(pin => pin.Identity, StringComparer.Ordinal);
+    ExpectFailure(() => ReadPublishedImports(extraction, ambiguous, new()), "more than one");
+    Console.WriteLine("PASS pin lookup preserves missing identity order, layout digests and publication ambiguity");
 }
 
 void ExpectFailure(Action action, string marker)

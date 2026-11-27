@@ -907,7 +907,8 @@ from those of `simp only`. A run starts to use the record after `cil.stepping.wa
 by default), since the goal of a short run is small; a step is one stepping call, and a loop
 instruction takes up to four.
 
-The record holds one set of terms for each list of supplied facts the run steps with, so a loop
+Checked calls use their caller's record while stepping the callee. The record holds one set of
+terms for each list of supplied facts the run steps with, so a loop
 walk whose instructions read different groups of facts keeps them all. Each set is keyed by the
 facts as elaborated, a lemma with implicit arguments or universe parameters included, and by the
 hypotheses in scope when it was made. A step that only adds hypotheses, as a call does, keeps the

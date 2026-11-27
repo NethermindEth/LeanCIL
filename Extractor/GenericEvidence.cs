@@ -343,7 +343,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             if (!isStatic) fieldType = layouts.Metadata.Fields(field.DeclaringType)[index].Type;
             // A class field's index counts its bases' fields first, as its model slot does.
             if (!isStatic && ObjectTypes.Is(field.DeclaringType))
-                index = ObjectTypes.FieldIndex(field.DeclaringType, resolved);
+                index = layouts.Metadata.ClassFieldIndex(field.DeclaringType, resolved);
         }
         else if (!isStatic && ValueTuples.Is(field.DeclaringType))
         {
@@ -513,7 +513,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var owner = Quote(LayoutEvidence.Identity(method.DeclaringType));
         var classOwner = ObjectReceiver(method);
         var receiverClass = classOwner ? $"some ({ObjectType(method.DeclaringType)})" : "none";
-        var objectFields = classOwner ? ObjectTypes.Fields(method.DeclaringType).Length : 0;
+        var objectFields = classOwner ? layouts.Metadata.ClassFieldCount(method.DeclaringType) : 0;
         var objectBases = classOwner ? ObjectTypes.BaseList(method.DeclaringType) : "[]";
         var (parameters, returnType) = SignatureTypes(method);
         var locals = Locals(method);
@@ -531,7 +531,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             returnType := {{returnType}}, parameters := {{parameters}},
             locals := {{locals}}, initLocals := {{Bool(method.Body.InitLocals)}},
             maxStack := {{method.Body.MaxStackSize}}, genericParameters := {{List(constraints)}},
-            {{staticInput}}code := {{List(code)}}{{handlers}} }
+            {{staticInput}}code := cil_list%{{List(code)}}{{handlers}} }
             """.ReplaceLineEndings(" ");
     }
 
@@ -607,16 +607,17 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 def method{number}BodyImports : Extraction.BodyImports :=
                   importIndex.forLinks {methodCount} method{number}Links
                 """);
-lean.AppendLine(body.Definition);
+        lean.AppendLine(body.Definition);
         carried?.AppendLine(body.Definition);
         if (binding is not null)
         {
             var bound = $"""
                 /-- This caller with its constructions bound to the image's CoreLib definitions. -/
-                def method{number}Binding : Runtime.Net11WinX64.BoundCaller :=
-                  (constructorImage.bindCaller? {binding.Base} method{number}SourceBody method{number}SourceOriginal
-                    [{string.Join(", ", binding.Pcs)}]).get (by cil_kernel_rfl)
-                cil_evaluated method{number}Original : Extraction.RawMethod := method{number}Binding.original
+                cil_evaluated method{number}Binding : Runtime.Net11WinX64.BoundCaller :=
+                  constructorImage.bindCaller? {binding.Base} method{number}SourceBody method{number}SourceOriginal
+                    [{string.Join(", ", binding.Pcs)}]
+                def method{number}Original : Extraction.RawMethod := method{number}Binding.original
+                theorem method{number}Original_eq : method{number}Binding.original = method{number}Original := rfl
                 def method{number}Body : Extraction.BodyEvidence := method{number}Binding.body
                 """;
             lean.AppendLine(bound);
@@ -627,11 +628,12 @@ lean.AppendLine(body.Definition);
         lean.AppendLine(typeArguments);
         // The appended rows' call table lists every local method with its type arguments.
         if (appendsRows) decoderInputs?.AppendLine(typeArguments);
-        // A bound caller is not generic, so its closed definition is its original.
-        var closed = binding is null ? $"def method{number}Closed : Extraction.RawMethod := {closedEvidence}"
-            : $"def method{number}Closed : Extraction.RawMethod := method{number}Original";
-        lean.AppendLine(closed);
-        decoderInputs?.AppendLine(closed);
+        var closedHeader = $"def method{number}Closed : Extraction.RawMethod := ";
+        var originalName = $"method{number}Original";
+        var sameMethod = binding is not null || originalEvidence == closedEvidence;
+        lean.AppendLine(closedHeader + (sameMethod ? originalName : closedEvidence));
+        // Decoder inputs for an unbound method can be used without its original declaration.
+        decoderInputs?.AppendLine(closedHeader + (binding is null ? closedEvidence : originalName));
         lean.AppendLine($"def method{number}DispatchTypes : List Extraction.DispatchType := {DispatchTypes(method)}");
         // Direct equality proofs avoid a separate structural decision over the raw metadata.
         lean.AppendLine(string.Join(" ",
@@ -831,17 +833,18 @@ lean.AppendLine(body.Definition);
         var definitions = new HashSet<TypeDefinition>();
         var instantiation = arguments.Count == 0 ? "" :
             $", instantiation := {List(arguments.Select(argument => InstanceArgument(argument, definitions)))}";
-        var (rows, tables, assemblies) = (metadata ?? throw new InvalidOperationException(
+        var (rows, assemblies) = (metadata ?? throw new InvalidOperationException(
             "Method evidence requires the pinned assemblies.")).Method(original,
             operands.Select(entry => entry.Token).Append(original.Body.LocalVarToken.ToUInt32())
                 .Where(token => token != 0), classOwner, definitions);
-        // The kernel decides once that the literal tables are the decoder's; the body check reads them by name.
+        // The decoder's checked result supplies the same indexed metadata to every body check.
         var slices = $"def method{number}Metadata : Extraction.MethodMetadata := {rows}\n" +
-            $"def method{number}Tables : List Extraction.IndexTables := {tables}\n" +
+            $"cil_evaluated method{number}Tables : List Extraction.IndexTables := " +
+            $"method{number}Metadata.tables.toOption\n" +
             $"def method{number}Names : Extraction.MethodNames := " +
             $"{Names(original, classOwner, admitted.FullName, Pinned.Index(Pinned.Working(original.Module)))}\n" +
             $"theorem method{number}_tables_valid : Extraction.tablesMatch method{number}Metadata " +
-            $"method{number}Tables = true := by decide +kernel";
+            $"method{number}Tables = true := Extraction.tablesMatch_of_result method{number}Tables_eq";
         var table = List(operands.Select(entry => $"({entry.Token}, {entry.Operand})"));
         var identities = List(assemblies.Select(index => $"assembly{index}Identity"));
         var identified = assemblies.Reverse().Aggregate("Extraction.AllIdentified.nil",
@@ -860,8 +863,6 @@ lean.AppendLine(body.Definition);
             identified, $"""method{number}_tables_valid""");
     }
 
-    static string Utf8(string text) => ByteLiterals.Of(Encoding.UTF8.GetBytes(text));
-
     /// <summary>
     /// The owner and base class names the method's metadata spells and the signature the extraction selects it by,
     /// as UTF-8 bytes: Lean reads the same names from the carried rows and proves by <c>cil_kernel_rfl</c> that they
@@ -871,11 +872,11 @@ lean.AppendLine(body.Definition);
     {
         var bases = classOwner
             ? ObjectTypes.Bases(original.DeclaringType)
-                .Select(type => $"({Utf8(LayoutEvidence.Scope(type))}, {ClassName(type)})")
+                .Select(type => $"({ByteLiterals.Utf8(LayoutEvidence.Scope(type))}, {ClassName(type)})")
             : [];
         return $"{{ assembly := some assembly{assembly}Identity, " +
-            $"owner := {Utf8(LayoutEvidence.Identity(original.DeclaringType))}, bases := {List(bases)}, " +
-            $"signature := {Utf8(signature)} }}";
+            $"owner := {ByteLiterals.Utf8(LayoutEvidence.Identity(original.DeclaringType))}, bases := {List(bases)}, " +
+            $"signature := {ByteLiterals.Utf8(signature)} }}";
     }
 
     // Closed arguments name a carried definition row or a platform entry. Lean resolves their kinds.
@@ -911,7 +912,7 @@ lean.AppendLine(body.Definition);
         if (type.Scope is AssemblyNameReference reference && Pinned.IsPlatform(reference))
         {
             statedTypes.Add(type);
-            var parts = PlatformDefinitions.NameParts(type).Select(Utf8);
+            var parts = PlatformDefinitions.NameParts(type).Select(ByteLiterals.Utf8);
             return $"(.platform {ArgumentScope(reference, type.Module)} {List(parts)})";
         }
         var definition = type.Resolve() ?? throw new InvalidDataException($"Unresolved type argument {type.FullName}");
@@ -984,7 +985,7 @@ lean.AppendLine(body.Definition);
     internal void InsertPlatformDefinitions(StringBuilder lean)
     {
         var platform = Platform();
-        var definitions = platform.Lean(assembly => assembly.ToLean(), ByteLiterals.Of);
+        var definitions = platform.Lean(assembly => assembly.ToLean());
         lean.Insert(platformAt, $"""
             set_option maxRecDepth {platform.Depth} in
             def platformDefinitions : Extraction.PlatformTable := platform_table% {definitions}

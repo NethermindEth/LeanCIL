@@ -195,7 +195,7 @@ theorem write_equivalent_alwaysPrepend (m : Memory) (r : Reference)
     (bytes : List (BitVec 8)) (alignment : Nat) :
     ResultEquivalent Memory.Equivalent (write m r bytes alignment)
       (writeAlwaysPrepend m r bytes alignment) := by
-  unfold write writeAlwaysPrepend
+  simp only [write, writeAlwaysPrepend, initializedCellAt_eq]
   cases ha : access m r bytes.length alignment true with
   | error fault => exact .error fault
   | ok value =>

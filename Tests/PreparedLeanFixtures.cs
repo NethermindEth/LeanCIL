@@ -23,27 +23,59 @@ partial class Program
             if (!FixtureModule.IsMatch(module))
                 throw new ArgumentException("Expected a test fixture module: " + module);
         // A fixture's imports of other test modules are compiled and recorded with it, so no list has to name them.
-        var dependencies = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        var importsRemaining = new Dictionary<string, int>(StringComparer.Ordinal);
+        var importers = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var sourceLengths = new Dictionary<string, int>(StringComparer.Ordinal);
         var unread = new Stack<string>(modules);
         while (unread.TryPop(out var module))
         {
-            if (dependencies.ContainsKey(module)) continue;
+            if (importsRemaining.ContainsKey(module)) continue;
             var text = File.ReadAllText(At(module.Replace('.', '/') + ".lean"));
-            dependencies[module] = [.. TestImport.Matches(text)
-                .Select(match => match.Groups[1].Value)];
-            foreach (var dependency in dependencies[module]) unread.Push(dependency);
+            var imports = TestImport.Matches(text).Select(match => match.Groups[1].Value).Distinct().ToArray();
+            sourceLengths.Add(module, text.Length);
+            importsRemaining.Add(module, imports.Length);
+            foreach (var dependency in imports)
+            {
+                if (!importers.TryGetValue(dependency, out var children))
+                    importers.Add(dependency, children = []);
+                children.Add(module);
+                unread.Push(dependency);
+            }
         }
-        var pending = dependencies.Keys.ToHashSet(StringComparer.Ordinal);
-        while (pending.Count != 0)
+        var ready = new PriorityQueue<string, (int Leaf, int NegativeLength)>();
+        void Enqueue(string module) =>
+            ready.Enqueue(module, (importers.ContainsKey(module) ? 0 : 1, -sourceLengths[module]));
+        foreach (var (module, count) in importsRemaining)
+            if (count == 0) Enqueue(module);
+        // Compile prerequisites first, then larger leaves, with at most two Lean processes.
+        var running = new Dictionary<Task, string>();
+        try
         {
-            var ready = pending.Where(module => dependencies[module].All(dependency => !pending.Contains(dependency)))
-                .ToArray();
-            if (ready.Length == 0) throw new InvalidOperationException("Test fixture imports contain a cycle");
-            Parallel.ForEach(ready, new ParallelOptions { MaxDegreeOfParallelism = 2 }, Compile);
-            pending.ExceptWith(ready);
+            while (ready.Count != 0 || running.Count != 0)
+            {
+                while (running.Count < 2 && ready.Count != 0)
+                {
+                    var module = ready.Dequeue();
+                    running.Add(Task.Run(() => Compile(module)), module);
+                }
+                var finished = Task.WhenAny(running.Keys).GetAwaiter().GetResult();
+                var compiledModule = running[finished];
+                running.Remove(finished);
+                finished.GetAwaiter().GetResult();
+                if (importers.TryGetValue(compiledModule, out var children))
+                    foreach (var child in children)
+                        if (--importsRemaining[child] == 0) Enqueue(child);
+            }
         }
+        finally
+        {
+            // A sibling may still be writing into this session when another compilation fails.
+            Task.WhenAll(running.Keys).GetAwaiter().GetResult();
+        }
+        if (records.Count != importsRemaining.Count)
+            throw new InvalidOperationException("Test fixture imports contain a cycle");
         var sources = LibrarySources(inputs);
-        if (!Same(sources, LibrarySources(CommonInputs())))
+        if (!Same(sources, CommonInputs(libraryOnly: true)))
             throw new InvalidOperationException("Library sources changed while checking fixtures");
         var manifest = Path.Combine(session, "prepared-test-fixtures.json");
         File.WriteAllText(manifest,
@@ -75,7 +107,7 @@ partial class Program
             throw new InvalidOperationException("Prepared Lean fixture manifest changed");
         var manifest = JsonSerializer.Deserialize<PreparedLeanManifest>(File.ReadAllText(path))!;
         // Compare snapshot keys, not raw files: the lakefile's key covers only its library view.
-        var current = LibrarySources(CommonInputs());
+        var current = CommonInputs(libraryOnly: true);
         if (manifest.LibrarySources.Count != current.Count)
             throw new InvalidOperationException("Prepared Lean library sources changed");
         foreach (var (source, hash) in manifest.LibrarySources)

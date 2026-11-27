@@ -50,15 +50,16 @@ def expand : Nat → List Nat → List Nat
   | 0, _ => []
   | count + 1, w0 :: w1 :: w2 :: w3 :: w4 :: w5 :: w6 :: w7 :: w8 :: w9 :: w10 :: w11 :: w12 ::
       w13 :: w14 :: w15 :: _ =>
-    let next := add (add (smallSigma1 w14) w9) (add (smallSigma0 w1) w0)
+    let next := add (Nat.add (smallSigma1 w14) w9) (Nat.add (smallSigma0 w1) w0)
     next :: expand count [w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, w14, w15, next]
   | _ + 1, _ => []
 
 /-- The 64 rounds over the constants and schedule words, returning the working variables. -/
 def rounds : List Nat → List Nat → Nat → Nat → Nat → Nat → Nat → Nat → Nat → Nat → List Nat
   | k :: ks, w :: ws, a, b, c, d, e, f, g, h =>
-    let t1 := add (add (add h (bigSigma1 e)) (add (choose e f g) k)) w
-    let t2 := add (bigSigma0 a) (majority a b c)
+    -- Each sum is reduced to a 32-bit word when it enters the next state.
+    let t1 := Nat.add (Nat.add (Nat.add h (bigSigma1 e)) (Nat.add (choose e f g) k)) w
+    let t2 := Nat.add (bigSigma0 a) (majority a b c)
     rounds ks ws (add t1 t2) a b c (add d t1) e f g
   | _, _, a, b, c, d, e, f, g, h => [a, b, c, d, e, f, g, h]
 
@@ -66,8 +67,11 @@ def rounds : List Nat → List Nat → Nat → Nat → Nat → Nat → Nat → N
 def compress (state : List Nat) (block : Nat) : List Nat :=
   match state with
   | [a, b, c, d, e, f, g, h] =>
-    let words := blockWords block
-    match rounds roundConstants (words ++ expand 48 words) a b c d e f g h with
+    -- Every word derived from an all-zero block is zero.
+    let schedule := if block == 0 then List.replicate 64 0 else
+      let words := blockWords block
+      words ++ expand 48 words
+    match rounds roundConstants schedule a b c d e f g h with
     | [a', b', c', d', e', f', g', h'] =>
       [add a a', add b b', add c c', add d d', add e e', add f f', add g g', add h h']
     | _ => []

@@ -6,6 +6,7 @@
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
+#:include ../scripts/ProofProfiler.cs
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -86,9 +87,16 @@ if (selectedWorkloads is not null)
         throw new ArgumentException("Unknown or empty stepping workload selection.");
     workloads = workloads.Where(row => selectedWorkloads.Contains(row.Name, StringComparer.Ordinal)).ToArray();
 }
-foreach (var (workload, sizes, full) in workloads)
-    foreach (var requested in sizes)
-        rows.Add(Measure(workload, requested, full));
+var buildDirectory = Directory.CreateTempSubdirectory("leancil-stepping-profiler-");
+string profiler;
+try
+{
+    profiler = BuildProofProfiler(buildDirectory.FullName, At("scripts/ProofCost.lean"), package).Executable;
+    foreach (var (workload, sizes, full) in workloads)
+        foreach (var requested in sizes)
+            rows.Add(Measure(workload, requested, full));
+}
+finally { buildDirectory.Delete(recursive: true); }
 
 var report = new
 {
@@ -103,7 +111,7 @@ var report = new
         Runtime = RuntimeInformation.FrameworkDescription, Environment.ProcessorCount },
     Concurrency = 1,
     Repetitions,
-    CacheState = "Compiled library; fresh generated proof modules; OS caches unspecified",
+    CacheState = "Compiled library and profiler; fresh process and module per sample; OS caches unspecified",
     TimingIsolation = "External machine load is not controlled; wall times are observations",
     Measurement = "Frontend includes its initial kernel check; kernel columns are separate rechecks. " +
         "Module command time excludes imports. Compiled proof bytes subtract the same body without its proof.",
@@ -916,7 +924,7 @@ CompiledSample Compile(string module, string source, string suffix)
     var report = Path.Combine(directory, module + "." + suffix + ".json");
     var compiled = Path.Combine(directory, module + "." + suffix + ".olean");
     var timer = Stopwatch.StartNew();
-    Run(["lake", "env", "lean", "--run", At("scripts/ProofCost.lean"), module, source, report, compiled], cwd: package);
+    Run(["lake", "env", profiler, module, source, report, compiled], cwd: package);
     timer.Stop();
     using var document = JsonDocument.Parse(File.ReadAllText(report));
     var commands = document.RootElement.GetProperty("commands").EnumerateArray().Select(command => new CommandSample(

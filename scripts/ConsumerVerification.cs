@@ -364,7 +364,7 @@ partial class Program
                 File.Copy(Within(export.Staging, file), target);
             }
             Directory.CreateDirectory(staging);
-            try { Directory.Move(staging, directory); }
+            try { MoveCacheDirectory(staging, directory); }
             catch (IOException) when (Directory.Exists(directory)) { }
         }
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
@@ -529,9 +529,10 @@ partial class Program
             LocationComparer.Equals(Path.GetFullPath(root), Path.GetFullPath(excludedDirectory))) yield break;
         foreach (var path in Directory.EnumerateFileSystemEntries(root).Order(StringComparer.Ordinal))
         {
-            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            var attributes = File.GetAttributes(path);
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
                 throw new InvalidDataException("Consumer sources must not contain symbolic links: " + path);
-            if (Directory.Exists(path))
+            if ((attributes & FileAttributes.Directory) != 0)
             {
                 if (ExcludedConsumerDirectory(Path.GetFileName(path))) continue;
                 foreach (var source in ConsumerSources(path, excludedDirectory)) yield return source;
@@ -564,7 +565,32 @@ partial class Program
         }).ToArray();
     }
 
-    static SortedDictionary<string, string> ConsumerSnapshot(string root, string? output, ConsumerDependency[]? bundled = null)
+    /// <summary>Resolved locations where a batch output would overlap a consumer source.</summary>
+    static HashSet<string> ConsumerSourceLocations(SortedDictionary<string, string> snapshot)
+    {
+        var locations = new HashSet<string>(CollidingLocationComparer);
+        var parents = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var key in snapshot.Keys)
+        {
+            if (!key.StartsWith("consumer:", StringComparison.Ordinal)) continue;
+            var source = key["consumer:".Length..];
+            var parent = Path.GetDirectoryName(source)!;
+            if (!parents.TryGetValue(parent, out var resolved))
+                parents.Add(parent, resolved = ResolvedPath(parent));
+            string? location = Path.Join(resolved, Path.GetFileName(source));
+            // A source may have become a link since the snapshot read it.
+            if (new FileInfo(location).LinkTarget is not null) location = ResolvedPath(source);
+            while (location is not null && locations.Add(location))
+                location = Path.GetDirectoryName(location);
+        }
+        foreach (var (parent, resolved) in parents)
+            if (!string.Equals(ResolvedPath(parent), resolved, StringComparison.Ordinal))
+                throw new InvalidDataException("Consumer source directory changed during verification: " + parent);
+        return locations;
+    }
+
+    static SortedDictionary<string, string> ConsumerSnapshot(string root, string? output,
+        ConsumerDependency[]? bundled = null, SortedDictionary<string, string>? frameworkInputs = null)
     {
         var inputs = new SortedDictionary<string, string>(StringComparer.Ordinal);
         ConsumerDependency[] dependencies = bundled ?? ConsumerDependencies(root);
@@ -575,24 +601,35 @@ partial class Program
             throw new InvalidDataException("Extracted.lean is reserved for the selected extraction artifact; remove stale generated sources from the consumer package.");
         var framework = dependencies.SingleOrDefault(d => d.Name == "leancil")
             ?? throw new InvalidDataException("Consumer package must depend on leancil. Run lake update first.");
-        RequireBundledFramework(framework.Source, root);
+        RequireBundledFramework(framework.Source, root, inputs, frameworkInputs);
         return inputs;
     }
 
     /// <summary>Rejects a framework at `source` or a toolchain pin at `root` that differs from the tool's.</summary>
-    static void RequireBundledFramework(string source, string root)
+    static void RequireBundledFramework(string source, string root,
+        SortedDictionary<string, string>? consumerInputs = null, SortedDictionary<string, string>? frameworkInputs = null)
     {
         foreach (var path in Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories)
             .Append(At("CIL.lean")).Append(At("lean-toolchain")))
         {
-            var consumer = Path.Combine(source, Path.GetRelativePath(Root, path));
-            if (!File.Exists(consumer) || File.ReadAllText(consumer).ReplaceLineEndings("\n") != File.ReadAllText(path).ReplaceLineEndings("\n"))
-                throw new InvalidDataException("Consumer leancil sources differ from the verifier's bundled framework: " + consumer +
-                    (SourceRevision is { } revision ? $"\n  Pin leancil to rev \"{revision}\" (see leancil --version)." : ""));
+            var relative = Path.GetRelativePath(Root, path);
+            var consumer = Path.Combine(source, relative);
+            var bundledHash = frameworkInputs?.GetValueOrDefault(relative.Replace('\\', '/'));
+            var consumerHash = bundledHash is null ? null : consumerInputs?.GetValueOrDefault("consumer:" + consumer);
+            if (!File.Exists(consumer) || !SameFrameworkSource(consumer, consumerHash, path, bundledHash))
+                throw new InvalidDataException("Consumer leancil sources differ from the verifier's bundled framework: " +
+                    consumer + (SourceRevision is { } revision
+                        ? $"\n  Pin leancil to rev \"{revision}\" (see leancil --version)." : ""));
         }
         if (File.ReadAllText(Path.Combine(root, "lean-toolchain")).Trim() != File.ReadAllText(At("lean-toolchain")).Trim())
             throw new InvalidDataException("Consumer and verifier Lean toolchains differ.");
     }
+
+    // Git checkouts may encode identical Lean text with different line endings.
+    static bool SameFrameworkSource(string consumer, string? consumerHash, string bundled, string? bundledHash) =>
+        consumerHash is not null && consumerHash == bundledHash ||
+        SnapshotText(consumer, consumerHash).ReplaceLineEndings("\n") ==
+            SnapshotText(bundled, bundledHash).ReplaceLineEndings("\n");
 
     static SortedDictionary<string, string> RequestInputs(SortedDictionary<string, string> common, string proof, string? settings)
     {
@@ -602,40 +639,61 @@ partial class Program
         return inputs;
     }
 
-    // Read from source text before any build, so the proof key can bind PDB names; Lean's
-    // compiled import headers confirm it after the build. Ambiguous module paths all count.
-    static bool ConsumerImportsSymbols(string proof, SortedDictionary<string, string> snapshot, string root) =>
-        ConsumerGeneratedImports(proof, snapshot, root).Any(import =>
-            import.Module == "ExtractedSymbols" || SelectionModules.IsSymbols(import.Module));
-
-    /// <summary>
-    /// The keyed extraction modules the proof's import closure names, after rejecting a key of another extraction.
-    /// </summary>
-    static string[] ConsumerSelectedModules(string proof, SortedDictionary<string, string> snapshot, string root,
-        JsonElement identity) =>
-        [.. ConsumerGeneratedImports(proof, snapshot, root).Where(import => SelectionModules.Is(import.Module))
-            .GroupBy(import => import.Module, StringComparer.Ordinal)
-            .SelectMany(group => SelectionModules.Selected([group.Key], identity, group.First().Source))];
-
-    // Imports of the proof's closure that no consumer source provides, with the source naming each.
-    static IEnumerable<(string Module, string Source)> ConsumerGeneratedImports(string proof,
-        SortedDictionary<string, string> snapshot, string root)
+    /// <summary>Read a source as text, checking the same bytes against its snapshot when supplied.</summary>
+    static string SnapshotText(string path, string? expected)
     {
-        var sources = snapshot.Keys.Where(key => key.StartsWith("consumer:", StringComparison.Ordinal) && key.EndsWith(".lean", StringComparison.Ordinal))
-            .Select(key => (Path: key["consumer:".Length..], Relative: "/" + Path.GetRelativePath(root, key["consumer:".Length..]).Replace('\\', '/'))).ToArray();
-        var pending = new Queue<string>([proof]);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        while (pending.TryDequeue(out var path))
+        if (expected is null) return File.ReadAllText(path);
+        var bytes = File.ReadAllBytes(path);
+        if (Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)) != expected)
+            throw new InvalidOperationException("Inputs changed during consumer verification");
+        using StreamReader reader = new(new MemoryStream(bytes));
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>Consumer import paths and source imports for one input snapshot.</summary>
+    sealed class ConsumerImports(SortedDictionary<string, string> snapshot, string root)
+    {
+        // Multiple package or library roots can provide the same module. Keep snapshot order for diagnostics.
+        readonly ILookup<string, string> sources = snapshot.Keys
+            .Where(key => key.StartsWith("consumer:", StringComparison.Ordinal) &&
+                key.EndsWith(".lean", StringComparison.Ordinal))
+            .SelectMany(key => ModulePaths(root, key["consumer:".Length..]))
+            .ToLookup(entry => entry.Module, entry => entry.Path, StringComparer.Ordinal);
+        readonly Dictionary<string, string[]> imports = new(StringComparer.Ordinal);
+
+        static IEnumerable<(string Module, string Path)> ModulePaths(string root, string path)
         {
-            if (!seen.Add(path)) continue;
-            foreach (Match import in SourceImport.Matches(File.ReadAllText(path)))
+            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+            for (var start = 0; start < relative.Length;)
             {
-                var name = import.Groups[1].Value;
-                if (name == "ExtractedSymbols" || SelectionModules.Is(name)) yield return (name, path);
-                var module = "/" + name.Replace('.', '/') + ".lean";
-                foreach (var source in sources.Where(source => source.Relative.EndsWith(module, StringComparison.Ordinal)))
-                    pending.Enqueue(source.Path);
+                yield return (relative[start..], path);
+                var separator = relative.IndexOf('/', start);
+                if (separator < 0) yield break;
+                start = separator + 1;
             }
+        }
+
+        string[] ReadImports(string path)
+        {
+            if (imports.TryGetValue(path, out var names)) return names;
+            var source = SnapshotText(path, snapshot["consumer:" + path]);
+            names = SourceImport.Matches(source).Select(match => match.Groups[1].Value).ToArray();
+            imports.Add(path, names);
+            return names;
+        }
+
+        // Lean's compiled import headers confirm the source-level selection after the build.
+        internal IEnumerable<(string Module, string Source)> Generated(string proof)
+        {
+            var pending = new Queue<string>([proof]);
+            var seen = new HashSet<string>(StringComparer.Ordinal) { proof };
+            while (pending.TryDequeue(out var path))
+                foreach (var name in ReadImports(path))
+                {
+                    if (name == "ExtractedSymbols" || SelectionModules.Is(name)) yield return (name, path);
+                    foreach (var source in sources[name.Replace('.', '/') + ".lean"])
+                        if (seen.Add(source)) pending.Enqueue(source);
+                }
         }
     }
 
@@ -1531,11 +1589,10 @@ partial class Program
 
         // A batch shares one snapshot, so no output may be part of the consumer sources.
         string? excluded = batch ? null : outputs[live[0]];
-        SortedDictionary<string, string> Common(SortedDictionary<string, string> snapshot)
+        SortedDictionary<string, string> ReadInputs(out SortedDictionary<string, string> snapshot)
         {
-            var common = new SortedDictionary<string, string>(Inputs(At("CIL.lean")).Where(pair =>
-                !pair.Key.StartsWith("proof:", StringComparison.Ordinal) && !pair.Key.StartsWith("settings:", StringComparison.Ordinal))
-                .ToDictionary(), StringComparer.Ordinal);
+            var common = CommonInputs();
+            snapshot = ConsumerSnapshot(root, excluded, fullBundleDependencies, common);
             foreach (var (key, value) in snapshot) common[key] = value;
             return common;
         }
@@ -1544,25 +1601,25 @@ partial class Program
         Stage(live, "consumer source snapshot");
         try
         {
-            snapshot = ConsumerSnapshot(root, excluded, fullBundleDependencies);
-            var common = Common(snapshot);
-            // Each source is resolved once, so a batch costs one pass over the sources per request.
-            string[] consumerSources = batch
-                ? snapshot.Keys.Where(key => key.StartsWith("consumer:", StringComparison.Ordinal))
-                    .Select(key => ResolvedPath(key["consumer:".Length..])).ToArray()
-                : [];
+            var common = ReadInputs(out snapshot);
+            var sourceLocations = batch ? ConsumerSourceLocations(snapshot) : null;
+            var imports = new ConsumerImports(snapshot, root);
             foreach (var i in live)
                 try
                 {
-                    if (consumerSources.Any(source => MayLieBelow(locations[i], source)))
+                    if (sourceLocations?.Contains(locations[i]) == true)
                         throw new InvalidDataException(
                             "Batch outputs must lie outside the consumer sources, for example under artifacts/: " +
                             outputs[i]);
                     before[i] = BoundRequestInputs(i, common);
                     if (!before[i].ContainsKey("consumer:" + proofs[i]))
                         throw new InvalidDataException("Proof must be a Lean source under the consumer root, outside excluded build/artifact directories.");
-                    if (ConsumerImportsSymbols(proofs[i], snapshot, root))
+                    List<(string Module, string Source)> keyed = [];
+                    foreach (var import in imports.Generated(proofs[i]))
                     {
+                        if (SelectionModules.Is(import.Module)) keyed.Add(import);
+                        if (symbols[i] is not null ||
+                            import.Module != "ExtractedSymbols" && !SelectionModules.IsSymbols(import.Module)) continue;
                         var path = Path.Combine(outputs[i], "Symbols.lean");
                         if (!File.Exists(path))
                         {
@@ -1571,7 +1628,9 @@ partial class Program
                         }
                         symbols[i] = Sha(path);
                     }
-                    selections[i] = ConsumerSelectedModules(proofs[i], snapshot, root, extractions[i].Root);
+                    selections[i] = [.. keyed.DistinctBy(import => import.Module, StringComparer.Ordinal)
+                        .SelectMany(import =>
+                            SelectionModules.Selected([import.Module], extractions[i].Root, import.Source))];
                 }
                 catch (Exception error) { Fail([i], error); }
         }
@@ -1589,7 +1648,7 @@ partial class Program
             if (members.Length == 0) return;
             try
             {
-                SortedDictionary<string, string> common = Common(ConsumerSnapshot(root, excluded, fullBundleDependencies));
+                var common = ReadInputs(out _);
                 foreach (var i in members)
                     if (!Same(before[i], BoundRequestInputs(i, common)) ||
                         (symbols[i] is not null && (!File.Exists(Path.Combine(outputs[i], "Symbols.lean")) ||
@@ -1876,8 +1935,11 @@ partial class Program
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 File.Copy(Within(support, file), target, true);
             }
-            if (restoredArtifacts.Count > 0) CacheProgress("certified consumer support library");
-            RequireDeepBindingStable();
+            if (restoredArtifacts.Count > 0)
+            {
+                CacheProgress("certified consumer support library");
+                RequireDeepBindingStable();
+            }
             var certificateRestoration = new SortedDictionary<string, string>(restoredArtifacts, StringComparer.Ordinal);
             // Not part of restoredArtifacts: these are rebuilt only if stale and always replayed.
             SortedDictionary<string, string> RestoreCertificateSupport(string key, bool? dependent,
@@ -2143,8 +2205,10 @@ partial class Program
             SortedDictionary<string, string> DirectoryArtifacts(string directory) =>
                 LocationComparer.Equals(directory, frameworkModules) ? BaseModuleArtifacts()
                     : ConsumerArtifactSnapshot(directory);
-            var artifactSnapshots = importDirectories.Where(Directory.Exists)
-                .Select(directory => (Directory: directory, Artifacts: DirectoryArtifacts(directory))).ToArray();
+            var existingDirectories = importDirectories.Where(Directory.Exists).ToArray();
+            (string Directory, SortedDictionary<string, string> Artifacts)[] ReadArtifacts() =>
+                existingDirectories.Select(directory => (directory, DirectoryArtifacts(directory))).ToArray();
+            var artifactSnapshots = ReadArtifacts();
             DeepSessionContribution? deep = null;
             if (deepChecks is not null)
             {
@@ -2161,14 +2225,15 @@ partial class Program
                 if (Directory.Exists(Path.Combine(session, "BindingAudit")) ||
                     File.Exists(Path.Combine(session, "BindingAudit.lean")))
                     throw new InvalidDataException("Consumer source uses the reserved BindingAudit namespace.");
-                SortedDictionary<string, string> PhysicalArtifacts() => new(artifactSnapshots
-                    .SelectMany(snapshot => DirectoryArtifacts(snapshot.Directory).Select(pair =>
+                static SortedDictionary<string, string> PhysicalArtifacts(
+                    (string Directory, SortedDictionary<string, string> Artifacts)[] snapshots) => new(snapshots
+                    .SelectMany(snapshot => snapshot.Artifacts.Select(pair =>
                         KeyValuePair.Create(Path.GetFullPath(Path.Combine(snapshot.Directory, pair.Key)), pair.Value)))
                     .ToDictionary(), StringComparer.Ordinal);
-                var priorArtifacts = PhysicalArtifacts();
+                var priorArtifacts = PhysicalArtifacts(artifactSnapshots);
                 Stage(proceeding, "deep checks");
                 RequireDeepBindingStable();
-                RequireOnlyAdded(priorArtifacts, PhysicalArtifacts());
+                RequireOnlyAdded(priorArtifacts, PhysicalArtifacts(ReadArtifacts()));
                 var deepRoot = Path.Combine(session, ".deep-checks");
                 Directory.CreateDirectory(deepRoot);
                 leanPath += Path.PathSeparator + deepRoot;
@@ -2181,10 +2246,8 @@ partial class Program
                     CacheProgress("certified consumer deep checks: " + requests[members[0]].Theorem);
                 }
                 importDirectories = [.. importDirectories, deepRoot];
-                artifactSnapshots = [.. artifactSnapshots.Select(snapshot =>
-                    (snapshot.Directory, Artifacts: DirectoryArtifacts(snapshot.Directory))),
-                    (deepRoot, ConsumerArtifactSnapshot(deepRoot))];
-                RequireOnlyAdded(priorArtifacts, PhysicalArtifacts(), [.. deep.Artifacts
+                artifactSnapshots = [.. ReadArtifacts(), (deepRoot, ConsumerArtifactSnapshot(deepRoot))];
+                RequireOnlyAdded(priorArtifacts, PhysicalArtifacts(artifactSnapshots), [.. deep.Artifacts
                     .Where(pair => pair.Key != "Extracted").Select(pair => Path.ChangeExtension(pair.Value, null)!) ]);
                 RequireDeepBindingStable();
             }
@@ -2246,7 +2309,15 @@ partial class Program
                 .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
             var checkedArtifacts = JsonSerializer.Serialize(mainArtifacts.OrderBy(pair => pair.Name, StringComparer.Ordinal)
                 .ToDictionary(pair => pair.Name, pair => pair.Parts));
-            var checkedPhysicalArtifacts = deep is null ? null : BindingArtifactHashes(currentArtifacts.Values);
+            // Every deep stability check independently verifies the prepared library and contribution files.
+            // Keep checking every family name, including companions those inventories do not cover.
+            var guardedFiles = deep is null ? null : bindingPreparation!.BaseArtifacts.Keys
+                .Select(name => Path.GetFullPath(Path.Combine(frameworkModules, name)))
+                .Concat(deep.Hashes.Keys).ToHashSet(StringComparer.Ordinal);
+            SortedDictionary<string, string> OtherArtifactHashes() =>
+                HashFiles(ModuleFamilyParts(currentArtifacts.Values)
+                    .Where(path => !guardedFiles!.Contains(path)).Select(path => (path, path)));
+            var checkedPhysicalArtifacts = deep is null ? null : OtherArtifactHashes();
             void RequireDeepStable()
             {
                 if (deep is null) return;
@@ -2255,7 +2326,7 @@ partial class Program
                 RequireExtractionArtifacts();
                 RequireGeneratedArtifacts();
                 RequireInterfaceArtifacts();
-                if (!Same(checkedPhysicalArtifacts!, BindingArtifactHashes(currentArtifacts.Values)) ||
+                if (!Same(checkedPhysicalArtifacts!, OtherArtifactHashes()) ||
                     checkedArtifacts != JsonSerializer.Serialize(ImportArtifactParts()) ||
                     prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
                     throw new InvalidDataException("Deep-check consumer sources or compiled artifacts changed.");
@@ -2494,10 +2565,10 @@ partial class Program
             foreach (int i in proceeding)
                 if (fullImportAudit is not null)
                     fullResults.Add(i, fullImportAudit(outputs[i], session, requestModules[i], leanPath));
-            RequireDeepStable();
-            if (contractExportAudit || fullImportAudit is not null)
+            if (contractExportAudit || fullResults.Count > 0)
             {
                 // Only callbacks can run further verification code after the first recheck.
+                RequireDeepStable();
                 Recheck(proceeding);
                 proceeding = Pending(proceeding);
                 if (proceeding.Length == 0) return;

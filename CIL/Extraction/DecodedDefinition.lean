@@ -1,7 +1,9 @@
 import Lean
 import CIL.Extraction.DecodedMethod
 import CIL.Extraction.ManagedPackage
+import CIL.Interface.Closure
 import CIL.KernelReduction
+import CIL.Runtime.Net11WinX64.BoundCaller
 import CIL.SymbolicExecution
 
 /-!
@@ -19,13 +21,34 @@ and type operands as their listed `FieldRef` and `TypeExpr` constants. Stepping 
 their `cil_field_shape` and `cil_value_shape` facts. Decoded operands share their raw layouts'
 identity expressions, and a closed decoder keeps the raw type expressions
 in the declared signature. The kernel checks `name_decoder_eq` and every fact.
-`cil_evaluated name : type := term` writes a computed raw method, string list or managed package
-the same way.
+`cil_evaluated name : type := term` writes computed metadata indexes, methods, names or
+constructor data the same way.
 -/
+
+namespace CIL.Extraction
+
+/-- A successful index construction certifies the materialized lookup tables. -/
+theorem tablesMatch_of_result {metadata : MethodMetadata} {tables : List IndexTables}
+    (checked : metadata.tables.toOption = some tables) : tablesMatch metadata tables = true := by
+  cases result : metadata.tables with
+  | error err => simp [result, Except.toOption] at checked
+  | ok built =>
+    have same : built = tables := by simpa [result, Except.toOption] using checked
+    simp [tablesMatch, result, same]
+#print axioms tablesMatch_of_result
+
+end CIL.Extraction
 
 namespace CIL.Extraction.DecodedDefinition
 
 open Lean Meta Elab Command
+
+/-- A list literal whose entries are elaborated at the element type specified by the context. -/
+elab "cil_list%[" entries:term,* "]" : term <= expectedType => do
+  let listType ← whnf expectedType
+  let_expr List elementType := listType | throwError "cil_list% expects a list type"
+  let values ← entries.getElems.mapM (Term.elabTermEnsuringType · elementType)
+  mkListLit elementType values.toList
 
 /-- The natural number a closed `Nat` term reduces to. -/
 partial def natValue (term : Expr) : MetaM Nat := do
@@ -233,6 +256,7 @@ instance : ToExpr LayoutEnvironment where
   toTypeExpr := mkConst ``LayoutEnvironment
 
 deriving instance ToExpr for Extraction.BodyEvidence
+deriving instance ToExpr for Runtime.Net11WinX64.BoundCaller
 deriving instance ToExpr for Extraction.RawArguments
 deriving instance ToExpr for Extraction.LayoutUse
 deriving instance ToExpr for Extraction.DispatchType
@@ -274,15 +298,29 @@ private unsafe def literalAt (α : Type) [ToExpr α] (type term : Expr) (optiona
     | throwError "cil_evaluated: {term} evaluates to none"
   return toExpr value
 
-/-- The literal of the closed term `term` of type `type` (or `Option type` when `optional`),
-    computed by compiled code: a raw method, a list of strings or a managed package. -/
+/-- The executable rows and getter declarations appended to a multi-method extraction. -/
+private abbrev RuntimeRows :=
+  List (Extraction.MethodEvidence × Method) × List Extraction.MethodEvidence
+
+/-- Constructor literals can reuse metadata already named in the extraction. -/
+private def sharesSourceLiterals (type : Expr) : MetaM Bool := do
+  return type.isConstOf ``Extraction.ManagedPackage ||
+    type.isConstOf ``Runtime.Net11WinX64.BoundCaller || (← isDefEq type (toTypeExpr RuntimeRows))
+
+/-- The literal of the closed term `term` of type `type` (or `Option type` when `optional`). -/
 private unsafe def evaluatedLiteralUnsafe (type term : Expr) (optional : Bool) : MetaM Expr := do
   if type.isConstOf ``Extraction.RawMethod then
     return ← literalAt Extraction.RawMethod type term optional
   if type.isConstOf ``Extraction.ManagedPackage then
     return ← literalAt Extraction.ManagedPackage type term optional
+  if type.isConstOf ``Runtime.Net11WinX64.BoundCaller then
+    return ← literalAt Runtime.Net11WinX64.BoundCaller type term optional
+  if ← isDefEq type (toTypeExpr RuntimeRows) then
+    return ← literalAt RuntimeRows type term optional
   if ← isDefEq type (mkApp (mkConst ``List [.zero]) (mkConst ``String)) then
     return ← literalAt (List String) type term optional
+  if ← isDefEq type (toTypeExpr (List IndexTables)) then
+    return ← literalAt (List IndexTables) type term optional
   throwError "cil_evaluated: no literal is written for the type {type}"
 
 /-- The literal of the closed term `term` of type `type`, computed by compiled code. -/
@@ -440,15 +478,40 @@ private def decoderFields (decoder : Expr) : MetaM (Array Expr) := do
 /-- The field and type constants a decoded method names in its operands. -/
 syntax decodedOperands := "[" ident,* "]"
 
+/-- The construction and validation proofs for a constructor image's checked runtime rows. -/
+syntax decodedRows := "from_rows " ident ident
+
+/-- The image and physical-row checks imply the same decoder equation as direct reduction. -/
+private def proveFromRows (name : Name) (doc : String) (equation : Expr)
+    (rows : TSyntax ``decodedRows) : TermElabM Unit := do
+  let `(decodedRows| from_rows $built:ident $validated:ident) := rows
+    | throwUnsupportedSyntax
+  for evidence in [built, validated] do
+    let constant ← realizeGlobalConstNoOverloadWithInfo evidence
+    for axiomName in ← collectAxioms constant do
+      unless CIL.Interface.approvedAxioms.contains axiomName do
+        throwErrorAt evidence
+          "cil_decoded_method: {constant} depends on unapproved axiom {axiomName}"
+  let bridge := mkIdent `_root_.CIL.Runtime.Net11WinX64.ConstructorImage.rowMethod?_of_validated
+  let derived ← `($bridge $built $validated (by cil_kernel_rfl))
+  let proof ← Term.elabTermEnsuringType derived equation
+  Term.synthesizeSyntheticMVarsNoPostponing
+  let proof ← instantiateMVars proof
+  withOptions (Elab.async.set · false) <| withCurrHeartbeats <| addDecl (.thmDecl {
+    name, levelParams := [], type := equation, value := proof })
+  addDocStringCore name doc
+
 /-- `cil_decoded_method name [operand, ...] := decoder` defines `name` as the method the closed
     decoder evaluates to, with each listed field or type operand
     written as its constant and each zero-initialized struct local as `List.replicate size 0`.
-    It proves the successful decoder equation and one tagged fact for each field in `factFields`. -/
+    It proves the successful decoder equation and one tagged fact for each field in `factFields`.
+    `from_rows built validated` derives that equation from a constructor image's checked rows. -/
 syntax (name := decodedMethod)
-  "cil_decoded_method " ident (decodedOperands)? " := " term : command
+  "cil_decoded_method " ident (decodedOperands)? " := " term (decodedRows)? : command
 
 elab_rules : command
-  | `(cil_decoded_method $nameSyntax:ident $[$fieldsSyntax:decodedOperands]? := $decoderSyntax) =>
+  | `(cil_decoded_method $nameSyntax:ident $[$fieldsSyntax:decodedOperands]? :=
+      $decoderSyntax $[$rowsSyntax:decodedRows]?) =>
     liftTermElabM do
     let methodType := mkConst ``CIL.Method
     let optionType := mkApp (mkConst ``Option [.zero]) methodType
@@ -512,8 +575,13 @@ elab_rules : command
     addDeclarationRangesFromSyntax name (← getRef) nameSyntax
     addDocStringCore name s!"The method `{decoderSyntax}` decodes to."
     let method := mkConst name
-    proveByReduction (name.appendAfter "_decoder_eq") s!"`{name}` is the decoded method."
-      (← mkEq decoder (mkApp success method))
+    let equation ← mkEq decoder (mkApp success method)
+    let equationName := name.appendAfter "_decoder_eq"
+    let equationDoc := s!"`{name}` is the decoded method."
+    if let some rows := rowsSyntax then
+      proveFromRows equationName equationDoc equation rows
+    else
+      proveByReduction equationName equationDoc equation
     for field in factFields do
       let some position := fields.idxOf? field
         | throwError "cil_decoded_method: CIL.Method has no field {field}"
@@ -523,10 +591,10 @@ elab_rules : command
       addSimpTheorem simpSet fact (post := true) (inv := false) .global (eval_prio default)
 
 /-- `cil_evaluated name : type := term` defines `name` as the value the closed term evaluates to,
-    a raw method, a list of strings or a managed package, written as a literal so tactics and
-    the kernel read it without evaluating `term`, and proves `name_eq : term = name` in the
-    kernel. A term of type `Option type` must evaluate to `some`, and `name_eq` states
-    `term = some name`. A package literal names each value of a definition of the current module
+    metadata indexes, a raw method, bound caller, string list, managed package or runtime rows, so
+    tactics and the kernel read it without evaluating `term`. The kernel checks
+    `name_eq : term = name`. A term of type `Option type` must evaluate to `some`, and `name_eq` states
+    `term = some name`. Constructor literals name each value of a current-module definition
     that `term` is computed from as that constant. A preceding doc comment documents `name`. A term
     that depends on `sorryAx` is refused. -/
 syntax (name := evaluatedDefinition)
@@ -549,14 +617,14 @@ elab_rules : command
       if (← collectAxioms constant).contains ``sorryAx then
         throwError "cil_evaluated: {constant} depends on `sorryAx`, so its value is not evaluated"
     let name := (← getCurrNamespace) ++ nameSyntax.getId
-    let package := type.isConstOf ``Extraction.ManagedPackage
+    let share ← sharesSourceLiterals type
     let mut value ← evaluatedLiteral type term optional
-    if package then value ← shareSources (← moduleSources term) value
+    if share then value ← shareSources (← moduleSources term) value
     let declaration := Declaration.defnDecl {
       name, levelParams := [], type, value,
       hints := .regular (getMaxHeight (← getEnv) value + 1), safety := .safe }
-    -- Compiled code for a package literal would add megabytes to the module; `term` runs instead.
-    if package then addDecl declaration else addAndCompile declaration
+    -- Compiling the shared metadata literal would add megabytes to each extraction.
+    if share then addDecl declaration else addAndCompile declaration
     addDeclarationRangesFromSyntax name (← getRef) nameSyntax
     match doc? with
     | some doc => addDocStringCore name (← getDocStringText doc)
@@ -565,7 +633,7 @@ elab_rules : command
       else mkConst name
     let equation := name.appendAfter "_eq"
     proveByReduction equation s!"`{name}` is the value of `{termSyntax}`." (← mkEq term written)
-    if package then
+    if share then
       let implementation := name ++ `compiled
       let computed ← if optional then do
         let present ← mkEqTrans (← mkCongrArg (mkApp (mkConst ``Option.isSome [.zero]) type)

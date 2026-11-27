@@ -2,9 +2,8 @@
 
 <!-- audience: maintainers -->
 
-This page reports how far proof-cost figures move between runs of one tree, how clearly a real
-cost increase shows, and how long measuring takes. Read it when a `Proof cost` comparison
-reports a change and you need to decide whether it is noise.
+Use two measurements of the same tree to distinguish variation between runs from a change in
+proof cost. The reports include the cost of each command and the total for its module.
 [CI operation](../CI.md#proof-cost) defines the measures and thresholds;
 [validation](../VALIDATION.md#proof-cost) gives the commands that compare a head with its base.
 
@@ -25,44 +24,18 @@ module and the checkout modules it imports instead of every test library. A manu
 verification workflow on a commit main has published reports the same comparison for the hosted
 runner.
 
-## Reference figures
-
-The figures were measured on Windows, on an AMD Ryzen 9 9950X with Lean 4.35.0 and
-`--libraries --jobs 16`, with other builds sharing the machine. The workload is the 92 test
-libraries of `lakefile.toml`: 4,859 rows and 2,411,059,442 heartbeats. Row and heartbeat totals
-grow as tests are added.
-
-| Between two runs of one tree | Figure |
-| --- | ---: |
-| Rows whose heartbeats differ | 90 to 92 of 4,859 |
-| Largest heartbeat difference of a row | 36 |
-| Largest relative difference of a row | 0.0083% |
-| Olean bytes, kernel heartbeats or proof objects that differ | 0 |
-
-| Cost of measuring | Seconds |
-| --- | ---: |
-| 92 test libraries, wall time | 180 to 200 |
-| 92 test libraries, summed over modules | 309 |
-| Kernel rechecks within that sum | 55 |
-| 54 modules of 19 output directories of `loops` and `structoutlines`, wall time | 146 |
-| The same 54 modules, summed over modules | 58 |
-
-One source elaborated from two different absolute paths gives identical heartbeats, kernel
-heartbeats, proof objects and olean bytes, so a base checkout in another directory is comparable.
-
 ## Reading a difference
 
-- A row that moves by a few dozen heartbeats is noise. The 50,000-heartbeat floor of the
-  comparison is three orders of magnitude above the largest difference between reruns.
-- Any olean byte, kernel heartbeat or proof object that differs comes from a change to the
-  sources or the toolchain, never from a rerun.
-- A change to code that a module imports moves that module's rows slightly: 205 heartbeats in a
-  module total of 23,453,868 in one measured case.
-- A real cost shows on its own row. A scratch copy of `Tests/CodeAt.lean` whose
-  `run_sum_segment` proof runs `cil_checked_steps` twice measures 2,350,930 heartbeats for that
-  theorem against 1,259,640. The comparison fails on that theorem and on its module total and
-  on no other row; the other 29 rows of the module move by at most 0.2%.
-- Elapsed times depend on load and never decide a comparison.
+- Frontend heartbeats can vary by a few dozen on the same tree. CI flags an increase only
+  when it exceeds both 5% and 50,000 heartbeats.
+- Kernel heartbeats, proof-object counts and olean bytes are reproducible for identical sources,
+  compiled imports and toolchain. Check the imports when a proof's cost changes with no edit
+  to its source.
+- Find the named declaration in the report to see how much it contributes to the module total.
+  CI compares module totals when the base and head contain the same rows.
+- Use the measurement step in the verification job log for elapsed time and the number of
+  modules and commands measured. Module measurements overlap when multiple workers run.
+  Elapsed time depends on runner load and does not decide the comparison.
 
 ## Measuring one module of another package
 

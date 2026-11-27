@@ -1,5 +1,6 @@
 import CIL.Extraction.ManagedPackage
 import CIL.Runtime.Net11WinX64.ActualValueCtor
+import CIL.Runtime.Net11WinX64.BoundCaller
 import CIL.Runtime.Net11WinX64.InnerMethods
 import CIL.Runtime.Net11WinX64.MessageCtor
 
@@ -465,13 +466,6 @@ def ConstructorImage.of? (overloads : List (ExceptionType × List TypeExpr)) :
     methods := firstByKey (·.2.token) (selected.flatMap (·.methods)),
     getters := firstByKey (·.token) (selected.flatMap (·.getter.toList)) }
 
-/-- A caller rebound to an image: its body carrying the dependency rows and member links, its
-method decoded from that body, and the construction link of each bound site. -/
-structure BoundCaller where
-  body : BodyEvidence
-  original : RawMethod
-  links : List (Nat × Link)
-
 /-- Bind the live exception constructions at `pcs` in a caller whose program places the image's
 methods from slot `base`. Each site selects an overload of the image, and every entry to its
 `newobj` runs that overload's literal loads, so a declared getter is never reached. -/
@@ -533,6 +527,62 @@ def ConstructorImage.rowMethod? (image : ConstructorImage) (locals : List Specia
   let live := List.replicate original.code.length true
   (Method.ofClosed? profile environment (links (image.table locals) closed) live closed
     storage).toOption
+
+/-- A successful optional traversal preserves the source and result at each index. -/
+private theorem mapM_source {convert : α → Option β} {sources : List α} {results : List β}
+    {index : Nat} {result : β} (mapped : sources.mapM convert = some results)
+    (selected : results[index]? = some result) :
+    ∃ source, sources[index]? = some source ∧ convert source = some result := by
+  induction sources generalizing results index with
+  | nil =>
+    simp at mapped
+    subst results
+    simp at selected
+  | cons first rest ih =>
+    simp only [List.mapM_cons, Option.bind_eq_bind, Option.bind_eq_some_iff,
+      Option.pure_def, Option.some.injEq] at mapped
+    obtain ⟨value, firstChecked, tail, restChecked, rfl⟩ := mapped
+    cases index with
+    | zero =>
+      simp only [List.getElem?_cons_zero, Option.some.injEq] at selected
+      exact ⟨first, rfl, selected ▸ firstChecked⟩
+    | succ index => exact ih restChecked selected
+#print axioms mapM_source
+
+/-- The closed decoder selects the same executable method as a physically checked image row. -/
+theorem ConstructorImage.rowMethod?_of_validated {image : ConstructorImage}
+    {locals : List SpecializedMethod} {caller : BodyEvidence} {profile : FeatureProfile}
+    {environment : LayoutEnvironment}
+    {package : List (MethodEvidence × Method) × List MethodEvidence}
+    {pins platform table} {index : Nat} {method : Method}
+    (built : image.rows? locals caller profile environment = some package)
+    (validated : package.1.all (ManagedPackage.rowValid environment pins platform table) = true)
+    (selected : package.1[index]?.map Prod.snd = some method) :
+    image.rowMethod? locals profile environment index = some method := by
+  obtain ⟨rows, declarations⟩ := package
+  unfold ConstructorImage.rows? at built
+  simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+    Option.some.injEq, Prod.mk.injEq] at built
+  obtain ⟨written, madeRows, _, _, rfl, rfl⟩ := built
+  cases picked : written[index]? with
+  | none => simp [picked] at selected
+  | some row =>
+    obtain ⟨source, atSource, made⟩ := mapM_source madeRows picked
+    have valid : MethodEvidenceValid environment.rawLayouts environment.layouts pins platform
+        table [] row.1 row.2 :=
+      of_decide_eq_true (List.all_eq_true.mp validated row (List.mem_of_getElem? picked))
+    obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, bodyBinds, _⟩ := valid
+    unfold runtimeRow? at made
+    simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      Option.some.injEq] at made
+    obtain ⟨closed, instantiated, storage, stored, executable, decoded, _, _, _, _, same⟩ := made
+    subst row
+    simp only [picked, Option.map_some, Option.some.injEq] at selected
+    subst method
+    rw [Method.ofBody?_of_decodes bodyBinds] at decoded
+    simpa [ConstructorImage.rowMethod?, atSource, Method.ofRaw?, instantiated, stored, Option.bind]
+      using decoded
+#print axioms ConstructorImage.rowMethod?_of_validated
 
 /-- Decode a single entry method and the framework methods reached with a non-null message.
 The caller must resolve its constructor through the two pinned runtime slices. -/

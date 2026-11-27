@@ -140,15 +140,19 @@ and locals against the metadata it carries ([Metadata binding](#metadata-binding
   inside a region, no `localloc` in a handler, control to enter a region only at the first
   instruction of a protected range and to leave one only by `leave`, `endfinally` only in a
   finally handler, no `leave` out of a finally handler and no instruction falling out of a
-  region.
+  region. For a body with handlers, it sorts the clause ranges once and counts the instructions
+  once. After sorting, the check takes linear work in the ranges, instructions and branch targets.
 - Every opcode of the ECMA-335 table has one operand encoding. The table is transcribed from the
   standard; `operand_kinds_agree_with_cecil` in `Tests/BodyDecoding.lean` compares it with a
   static list generated once from `Mono.Cecil.Cil.OpCodes`. An unknown opcode byte, a truncated
   operand or a token missing from the table is an error.
-- A branch must land on the first byte of an instruction inside the body, and its operand
-  becomes that instruction's index. A target outside the body, inside an instruction or on the
-  instruction after a prefix opcode (`unaligned.`, `volatile.`, `tail.`, `constrained.`, `no.`,
-  `readonly.`) is an error, whether or not any path reaches the branch. Decoded code therefore
+- The decoder builds a balanced index from instruction offsets in byte order. Construction takes
+  O(n) work for n instructions. Branches, switch targets and exception boundaries share the
+  index, with O(log n) comparisons per offset lookup. A branch must land on the first byte of an
+  instruction inside the body, and its operand becomes that instruction's index.
+  The decoder rejects targets outside the body, inside an instruction or at the instruction
+  immediately following a prefix opcode (`unaligned.`, `volatile.`, `tail.`, `constrained.`,
+  `no.`, `readonly.`). It applies these checks to unreachable branches too. Decoded code therefore
   satisfies `PrefixEntryFree` over instruction indices (`checkBody_prefixEntryFree`), and so
   does the instantiated code of every method whose evidence is valid
   (`MethodEvidenceValid.prefixEntryFree`). The extractor refuses such a body with the blocker
@@ -244,18 +248,15 @@ fixes, decodes strings, blobs and user strings, and decodes the signature blobs
 check what the extractor states. A coded index must have a valid table tag and a row number
 that fits in 24 bits. Both readers require each signature to consume its entire blob.
 
-Building the lookup trees of a slice costs its size, and the kernel keeps no cache between declarations. The
-extractor therefore writes them out as the literal `method{n}Tables` (balanced search trees of the rows, heap
-entries, links and instance field counts), and `method{n}_tables_valid` states that `tablesMatch`: the decoder
-builds exactly that literal from `method{n}Metadata`. That decision costs the method's carried rows times a
-logarithm; `method{n}_body_validated` uses it as a premise. Each closed instantiation of a generic method has
-its own copy, built from the open definition and the assembly, so reuse does not depend on which
-instantiations an extraction holds or in which order.
+Lean builds the lookup trees for rows, heap entries, links, field counts and generic owners from
+`method{n}Metadata`. It stores the result in `method{n}Tables` and the kernel checks that the decoder
+produces exactly those trees. The body proof uses that equality through `method{n}_tables_valid`.
+Each closed instantiation carries the rows from its own open definition and assembly.
 
 A field access carries the `Field` rows of its owner from the first up to the accessed field, and the
 owner's and the next type's `TypeDef` rows; rows carried only to be counted keep their flag bytes and name
-no heap entry. Lean counts the instance fields before the accessed one over the carried rows, which must
-run unbroken from the owner's first field, so a gap fails at the lookup. The total number of instance
+no heap entry. Lean finds the owner's first field in the row tree, then visits consecutive rows in
+order and counts the instance fields. A gap ends the carried prefix. The total number of instance
 fields of a type is recorded only when every field is carried: base classes of a class receiver, the
 owner of an instance method, and enums carry their whole field lists.
 
@@ -336,7 +337,14 @@ What `MetadataResolution` and `MetadataBinding` check:
   field operand as its `field`. For ordinary statics, `Method.ofClosed?` reads the descriptor
   from `RawMethod.staticFields` and checks its owner, field index, type, name and scalar storage.
   It checks a literal against its bytes. An initializer call needs the complete program, where
-  `StaticValuesValid` executes the recorded callee and checks the result against those bytes.
+  `StaticValuesValid` checks that all sites for one storage identity carry the same descriptor,
+  including its bytes, initializer, field, scalar signedness, alignment and opaque flag. It executes
+  each distinct field's initializer once and compares the result to the descriptor's bytes.
+  Calls and constructors share a program with constructor-fixed sites removed.
+  The extractor is trusted to identify the single store to that field in its owner's type
+  initializer and to record the literal, callee and arguments that produced its value. Lean
+  checks the recorded computation. Its link to that store in the pinned type initializer's
+  body remains trusted.
   Both `decodedProgram?` and `TranslationValid` require `StaticValuesValid` and
   `StaticIdentitiesValid` for the complete program. A standalone closure must include each
   initializer needed to reproduce its static bytes at the index the descriptor records.
@@ -386,7 +394,9 @@ What `MetadataResolution` and `MetadataBinding` check:
   both arguments, including when the pair is nested inside another layout. Runtime scalars and
   strings retain their fixed storage.
   The `RVA` and `ParamList` columns are not read.
-- Generic parameter counts come from `GenericParam` rows. An owner's carried rows must form its
+- Generic parameter counts come from `GenericParam` rows. Lean builds the owner index in linear
+  time for rows in coded owner order and sorts out-of-order rows before indexing them.
+  An owner's carried rows must form its
   whole zero-based run. An owner with none carried must be shown to have none by its neighbours in
   the table, which ECMA-335 requires sorted by coded owner: the first carried row above the
   owner's coded value is row 1 or follows a carried row below it, or the table's last row lies
@@ -425,6 +435,12 @@ platform type is a value type, a class or an enum, an enum's underlying type, th
 `ValueTuple`, and that `System.Object` declares no instance fields), public key tokens of referenced assemblies,
 imported implementation definitions, raw layout content, the layouts import slots select, dispatch catalog
 completeness, static data bytes and generic parameter constraints.
+The default virtual-call check trusts that the catalog includes every concrete descendant of
+the declaring class and faithfully reports each base, method declaration and explicit override.
+An omitted override can make the supplied hierarchy select an inherited body. Constrained
+dispatch also trusts the interface implementations and inherited slots in the catalog. For an
+indirect call, Lean checks the full identity and signature of every listed target. Calling a pointer
+whose target is absent from that table faults.
 The extractor reads raw layout content, dispatch catalogs, static data bytes and generic parameter
 constraints from the metadata of the pinned image, and the default check does not reconfirm them.
 [Deep verification](CLI.md#deep-verification) reconfirms them as the `layout-content`,

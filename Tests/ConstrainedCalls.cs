@@ -315,7 +315,9 @@ if (!offCaller.Success || !offGetter.Success || !onGetter.Success)
     throw new Exception("Missing constant flag mutation targets");
 var (callerIndex, offIndex, onIndex) =
     (offCaller.Groups[1].Value, offGetter.Groups[1].Value, onGetter.Groups[1].Value);
-var offCalls = DirectLinks(flags, int.Parse(offIndex, System.Globalization.CultureInfo.InvariantCulture))
+var offMethod = int.Parse(offIndex, System.Globalization.CultureInfo.InvariantCulture);
+flags = SeparateClosedBody(flags, offMethod);
+var offCalls = DirectLinks(flags, offMethod)
     .Where(call => call.Method.ToString(System.Globalization.CultureInfo.InvariantCulture) == callerIndex).ToArray();
 var callerStates = Regex.Match(flags, $@"(?m)^def method{callerIndex}FeatureStates : [^\r\n]+");
 var offBody = Regex.Match(flags, $@"(?m)^def method{offIndex}Closed : [^\r\n]+");

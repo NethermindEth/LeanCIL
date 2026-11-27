@@ -519,6 +519,7 @@ info: 'Tests.Automation.static_load_from_fact' depends on axioms: [propext, Quot
 def twoStoresMethod : CIL.Method := {
   code := [.stobj Tests.IntrinsicMethods.vector256UInt64, .stobj Tests.IntrinsicMethods.vector256UInt64, .ret], locals := [], returnsValue := false }
 
+set_option maxHeartbeats 5000 in
 open CIL.Safety in
 /-- Facts at both levels in one run: each store takes the retry for its own fact's level, so
     neither retry may exclude the other. -/
@@ -689,6 +690,7 @@ theorem feature_steps_evaluate_term (program : CIL.Program) (index : Nat) (profi
   cil_checked_steps [(show profile.evaluate .avx2 = true from wide)]
 
 -- A fact over every feature is instantiated at each constructor, so it still decides the field test.
+set_option maxHeartbeats 1800 in
 theorem feature_step_evaluate_forall (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
     (unlinked : body.linkAt 0 = none) (all : ∀ f, body.profile.evaluate f = true) :
     CIL.Safety.step body (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
@@ -808,6 +810,7 @@ private def addUInt64 : CIL.Extraction.MethodRef :=
 
 cil_runtime_models addBody
 
+set_option maxHeartbeats 4500 in
 open CIL.Safety in
 theorem add_run (memory : Memory) (source moved : Reference)
     (formed : form memory source = .ok source)
@@ -1351,6 +1354,70 @@ open Lean Elab Tactic in
 /-- Fails unless no record is active or kept. -/
 def recordIsEmpty : TacticM Unit := do
   if ← recordIsLeft then throwError "a stepping record outlived its run"
+
+/-- Each call passes a different argument to the identity method. -/
+@[cil_code] def twoCallInputs : CIL.Method := {
+  code := [.ldarg 0, .call (Tests.callee 1) {}, .pop,
+    .ldarg 1, .call (Tests.callee 1) {}, .ret],
+  links := [(1, .direct 1), (4, .direct 1)], locals := [], returnsValue := true }
+
+attribute [-cil_step] step_call_eq in
+/-- A supplied instruction equation keeps priority over specialization of a direct call. -/
+theorem directCallInstructionPriority (frame : Frame) (memory final : Memory) (value : CIL.W64)
+    (_instructionFact : instruction (.call (Tests.callee 1) {}) [.scalar (.i64 value)] memory =
+      .ok (final, [])) :
+    step twoCallInputs (.call (Tests.callee 1) {}) 1 [] frame [.scalar (.i64 value)] memory =
+      .ok (.call 1 [.scalar (.i64 value)] [] memory) := by
+  -- Only the specialized route can close the step with the generic call equation disabled.
+  fail_if_success cil_checked_step [_instructionFact]
+  cil_checked_step []
+
+#print axioms directCallInstructionPriority
+
+section
+
+/-- A body whose link is known only through its supplied site fact. -/
+private structure DirectCallSite where
+  /-- The method containing the call. -/
+  body : CIL.Method
+  /-- The call at pc zero enters method one. -/
+  target : body.linkAt 0 = some (.direct 1)
+
+attribute [local cil_code] DirectCallSite.target
+
+attribute [-cil_step] step_call_eq in
+/-- The same site fact that selects the callee can determine the argument passed to it. -/
+private theorem directLinkInOperand (site : DirectCallSite) (frame : Frame) (memory : Memory)
+    (left right : CIL.W64) :
+    step site.body (.call (Tests.callee 1) {}) 0 [] frame
+      [.scalar (.i64 (match site.body.linkAt 0 with | some (.direct _) => left | _ => right))]
+      memory = .ok (.call 1 [.scalar (.i64 left)] [] memory) := by
+  cil_checked_step []
+
+#print axioms directLinkInOperand
+
+end
+
+/-- Reusing a caller's simplification record preserves the second child's argument. -/
+theorem childCallsKeepInputs (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run [twoCallInputs, identityCallee] 9 0 0
+      [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+        .ok (leaveFrame frame memory, [.scalar (.i64 right)]) := by
+  run_tac sameGoal (← `(tactic| cil_checked_steps 5 []))
+  cil_checked_steps
+
+#print axioms childCallsKeepInputs
+
+/-- The first child returns. The second child runs out of fuel at its return instruction. -/
+theorem secondChildExhausted (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run [twoCallInputs, identityCallee] 6 0 0
+      [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+        .error ⟨1, 1, .fuelExhausted⟩ := by
+  cil_checked_steps 4 []
+  fail_if_success cil_checked_steps 1 []
+  rfl
+
+#print axioms secondChildExhausted
 
 /-- Adds two arguments. -/
 @[cil_code] def recordBody : CIL.Method := {

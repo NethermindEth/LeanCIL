@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:property EnforceCodeStyleInBuild=true
 #:property GenerateDocumentationFile=true
+#:property WarningsAsErrors=IDE0005
 #:include Verification.cs
 #:include DeepChecks.cs
 #:include FailureReports.cs
@@ -90,10 +91,9 @@ var signatures = CoreExampleSignatures;
 
 // Each suite can run in its own checkout, with only the projects it needs.
 string[] tools = ["Extractor", "Examples/Assembly"];
-var projects = new List<string>(tools) { "scripts/Test.cs" };
-if (suite == "tools") projects = [.. tools];
+var projects = new List<string>(tools);
 // CI builds the shared tools once per run and ships their outputs to every suite job.
-else if (Environment.GetEnvironmentVariable(PrebuiltToolsEnvironment) == "true")
+if (suite != "tools" && Environment.GetEnvironmentVariable(PrebuiltToolsEnvironment) == "true")
 {
     if (!File.Exists(ExtractorPath) || !File.Exists(assembly))
         throw new InvalidOperationException(
@@ -107,33 +107,9 @@ if (suite is "all" or "core")
         "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs",
         "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs", "Tests/DecodedOpcodes.cs",
         "Tests/SupportExtractionCache.cs", "Tests/SummaryCalls.cs"]);
-if (suite is "all" or "evidence")
-    projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
-        "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs",
-        "Tests/Objects.cs", "Tests/Guards.cs", "Tests/SpanHomeReads.cs"]);
 if (suite is "all" or "dispatch")
-    projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/ManagedDispatch.cs",
-        "Tests/NativeManagedDispatch.cs", "Tests/StackAllocation.cs", "Tests/CompilerCoverage.cs",
-        "Tests/RuntimeModelInventory.cs", "Tests/NativeProbe"]);
-if (suite is "all" or "evidence")
-    projects.AddRange([
-        "Tests/PreparedLeanFixturesTests.cs", "Tests/RejectedEvidenceTests.cs", "Tests/LayoutEvidence.cs",
-        "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs",
-        "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
-        "Tests/TranslationAudit.cs", "Tests/MetadataDifferential.cs", "Tests/CallSiteAgreement.cs"]);
-if (suite is "all" or "identity") projects.Add("Tests/Identities.cs");
-if (suite is "all" or "primitive") projects.Add("Tests/Strings.cs");
-if (suite is "all" or "blockers") projects.AddRange(["Tests/SelfAdmission.cs", "Tests/ExampleAdmission.cs"]);
+    projects.Add("Tests/NativeProbe");
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
-if (suite is "all" or "generics") projects.AddRange(["Tests/GenericOwners.cs", "Tests/GenericLayouts.cs"]);
-if (suite is "all" or "unsafe")
-    projects.AddRange(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs", "Tests/UnalignedMemory.cs",
-        "Tests/MarshaledMemory.cs", "Tests/ReinterpretedSpans.cs", "Tests/SpanCopies.cs", "Tests/ViewAccessors.cs",
-        "Tests/BinarySpans.cs", "Tests/AggregateSpans.cs", "Tests/SpanConstructors.cs",
-        "Tests/AggregateSpanFill.cs", "Tests/AggregateArrays.cs", "Tests/SpanReferences.cs"]);
-foreach (var (name, entry) in independentSuites)
-    if (suite == "all" || suite == name)
-        projects.Add(entry.Script);
 foreach (ExportSuite entry in ExportVerificationSuites.Plan())
     if (suite == "all" || suite == entry.Name)
         projects.AddRange(entry.Inputs.Where(path => path.EndsWith(".cs", StringComparison.Ordinal) &&

@@ -152,10 +152,9 @@ partial class Program : IDisposable
         var separator = Array.IndexOf(command, "--", 4);
         var options = command[4..(separator < 0 ? command.Length : separator)];
         // Only the repository's standard Release build options match the producer.
-        if (options.Length != 0 && !options.SequenceEqual(new[] { "-c", "Release", "--no-build",
-                "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true" }) &&
-            !options.SequenceEqual(new[] { "-c", "Release",
-                "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true" })) return command;
+        if (options is not ([] or ["-c", "Release", "--no-build", EnforceStyle, GenerateDocumentation] or
+            ["-c", "Release", EnforceStyle, GenerateDocumentation] or
+            ["-c", "Release", EnforceStyle, GenerateDocumentation, RejectUnusedImports])) return command;
         var arguments = separator < 0 ? [] : command[(separator + 1)..];
         // Nested fixtures share the parent's Release configuration but still rebuild changed sources.
         return PreparedFixtureCommand(Path.GetFullPath(command[3], cwd), arguments) ??
@@ -299,12 +298,15 @@ partial class Program : IDisposable
     }
 #endif
 
+    const string EnforceStyle = "-p:EnforceCodeStyleInBuild=true";
+    const string GenerateDocumentation = "-p:GenerateDocumentationFile=true";
+    const string RejectUnusedImports = "-p:WarningsAsErrors=IDE0005";
+
     static string[] FixtureCommand(string script, string[] arguments, bool prepared)
     {
         string[] buildArguments = prepared
-            ? ["-c", "Release", "--no-build", "-p:EnforceCodeStyleInBuild=true",
-                "-p:GenerateDocumentationFile=true"]
-            : ["-c", "Release", "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"];
+            ? ["-c", "Release", "--no-build", EnforceStyle, GenerateDocumentation]
+            : ["-c", "Release", EnforceStyle, GenerateDocumentation, RejectUnusedImports];
         return ["dotnet", "run", "--file", script, .. buildArguments, "--", .. arguments];
     }
 
@@ -313,17 +315,20 @@ partial class Program : IDisposable
     {
         if (!File.Exists(ExtractorPath)) return "";
         var inputs = CommonInputs();
+        var files = new List<(string Name, string Path)>();
         foreach (var path in Directory.EnumerateFiles(Root))
-            inputs["root:" + Path.GetFileName(path)] = Sha(path);
+            files.Add(("root:" + Path.GetFileName(path), path));
         foreach (var path in Directory.EnumerateFiles(At("Extractor"), "*", SearchOption.AllDirectories))
         {
             var relative = Path.GetRelativePath(Root, path).Replace('\\', '/');
-            if (!relative.Split('/').Any(part => part is "bin" or "obj"))
-                inputs[relative] = Sha(path);
+            if (!inputs.ContainsKey(relative) && !relative.Split('/').Any(part => part is "bin" or "obj"))
+                files.Add((relative, path));
         }
         foreach (var path in Directory.EnumerateFiles(Path.GetDirectoryName(ExtractorPath)!, "*",
                      SearchOption.AllDirectories))
-            inputs["output:" + Path.GetRelativePath(Root, path)] = Sha(path);
+            files.Add(("output:" + Path.GetRelativePath(Root, path), path));
+        foreach (var (name, digest) in HashFiles(files))
+            inputs.Add(name, digest);
         return ContentKey(Root + JsonSerializer.Serialize(inputs));
     }
 
@@ -472,7 +477,7 @@ partial class Program : IDisposable
             File.WriteAllBytes(Path.Combine(staging, "receipt.hmac"), HMACSHA256.HashData(ReceiptKey, Encoding.UTF8.GetBytes(key).Concat(manifest).ToArray()));
             try
             {
-                Directory.Move(staging, cached);
+                MoveCacheDirectory(staging, cached);
                 return;
             }
             catch (IOException) when (Directory.Exists(cached)) { }
@@ -481,8 +486,8 @@ partial class Program : IDisposable
             var invalid = cached + ".invalid-" + Guid.NewGuid().ToString("N");
             try
             {
-                Directory.Move(cached, invalid);
-                Directory.Move(staging, cached);
+                MoveCacheDirectory(cached, invalid);
+                MoveCacheDirectory(staging, cached);
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
             finally
@@ -492,6 +497,27 @@ partial class Program : IDisposable
             }
         }
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+    }
+
+    // A reader without delete sharing on Windows can briefly block an atomic cache-directory rename.
+    static void MoveCacheDirectory(string source, string destination)
+    {
+        const int accessDenied = unchecked((int)0x80070005);
+        const int sharingViolation = unchecked((int)0x80070020);
+        const int retryLimit = 20;
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                Directory.Move(source, destination);
+                return;
+            }
+            catch (IOException error) when (OperatingSystem.IsWindows() && attempt < retryLimit &&
+                error.HResult is accessDenied or sharingViolation && !Directory.Exists(destination))
+            {
+                Thread.Sleep(50);
+            }
+        }
     }
 
     string LeanExecutable => Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
@@ -803,12 +829,21 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             .. targets], leanPath: leanPath, progress: progress);
     }
 
-    static SortedDictionary<string, string> ModuleArtifacts(string session) =>
-        !Directory.Exists(Path.Combine(session, ".lake/build/lib/lean")) ? new(StringComparer.Ordinal) :
-        HashFiles(Directory.EnumerateFiles(Path.Combine(session, ".lake/build/lib/lean"), "*", SearchOption.AllDirectories)
+    static SortedDictionary<string, string> ModuleArtifacts(string session,
+        CheckedLibraryContents? checkedLibrary = null)
+    {
+        var compiled = Path.Combine(session, ".lake/build/lib/lean");
+        if (!Directory.Exists(compiled)) return new(StringComparer.Ordinal);
+        var files = Directory.EnumerateFiles(compiled, "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
-            .Select(path => (Path.GetRelativePath(Path.Combine(session, ".lake/build/lib/lean"), path)
-                .Replace('\\', '/'), path)));
+            .Select(path => (Name: Path.GetRelativePath(compiled, path).Replace('\\', '/'), Path: path));
+        if (checkedLibrary is null || checkedLibrary.Library != session) return HashFiles(files);
+        var artifacts = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (name, path) in files)
+            artifacts.Add(name, checkedLibrary.Files.TryGetValue(CompiledLibraryPrefix + name, out var hash)
+                ? hash : Sha(path));
+        return artifacts;
+    }
 
     // Publish a deterministic manifest only after every file has been hashed successfully.
     static SortedDictionary<string, string> HashFiles(IEnumerable<(string Name, string Path)> files)
@@ -867,6 +902,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 continue;
             }
             var next = Path.Join(resolved, component);
+            var directory = new DirectoryInfo(next);
+            if (directory.Exists && (directory.Attributes & FileAttributes.ReparsePoint) == 0)
+            {
+                resolved = next;
+                continue;
+            }
             // A dangling link is still a link: where it points is where a write through it lands.
             if (new FileInfo(next).LinkTarget is { } target)
             {
@@ -914,13 +955,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// differing only in case are one entry exactly where the directory holding them is known to ignore case.
     /// </summary>
     internal static string? RelativeBelow(string root, string path) => RelativeBelow(root, path, NameCaseIn);
-
-    /// <summary>
-    /// Whether `path` may lie below `root` (both resolved): as <see cref="RelativeBelow(string, string)"/>, but a
-    /// name differing only in case matches where the case rule is unknown, for checks that must keep outputs apart.
-    /// </summary>
-    internal static bool MayLieBelow(string root, string path) =>
-        RelativeBelow(root, path, NameCaseIn, unknownMatches: true) is not null;
 
     /// <summary>
     /// `path` relative to `root` (`.` when they are equal), or null when it lies outside; both are full paths
@@ -1585,36 +1619,35 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static SortedDictionary<string, string> Inputs(string proof, string? settings = null)
         => Inputs(CommonInputs(), proof, settings);
 
-    static SortedDictionary<string, string> CommonInputs()
+    static SortedDictionary<string, string> CommonInputs(bool libraryOnly = false)
     {
-        var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
-
-        foreach (var name in CertifiedLibraryRoots.Select(root => root + ".lean")
-            .Prepend("lake-manifest.json").Prepend("lean-toolchain"))
-            result[name] = Sha(At(name));
-        // Checkout identities see every declaration; the certified library sees only what builds it.
-        var lakefile = File.ReadAllBytes(At("lakefile.toml"));
-        result[CheckoutLakefileInput] = Convert.ToHexStringLower(SHA256.HashData(lakefile));
-        result["lakefile.toml"] = ContentKey(LibraryLakefile(Encoding.UTF8.GetString(lakefile)));
-
+        var files = CertifiedLibraryRoots.Select(root => root + ".lean")
+            .Prepend("lake-manifest.json").Prepend("lean-toolchain").Select(name => (name, At(name))).ToList();
         var folders = CertifiedLibraryRoots.Select(root => (root, new[] { ".lean" })).ToList();
 #if !LEANCIL_TOOL
-        // The repository's examples and tests are checkout inputs; the tool ships only the framework.
-        foreach (var name in new[] { "global.json", "Directory.Build.props", "Directory.Packages.props", ".editorconfig" })
-            result[name] = Sha(At(name));
-        folders.AddRange([("Examples", [".lean"]), ("Tests", [".lean"]), ("Extractor", [".cs", ".csproj"]),
-            ("scripts", [".cs"])]);
+        if (!libraryOnly)
+        {
+            foreach (var name in new[] { "global.json", "Directory.Build.props", "Directory.Packages.props",
+                ".editorconfig" })
+                files.Add((name, At(name)));
+            folders.AddRange([("Examples", [".lean"]), ("Tests", [".lean"]), ("Extractor", [".cs", ".csproj"]),
+                ("scripts", [".cs"])]);
+        }
 #endif
-
         foreach (var (folder, extensions) in folders)
             foreach (var path in Directory.EnumerateFiles(At(folder), "*", SearchOption.AllDirectories))
             {
+                if (!extensions.Contains(Path.GetExtension(path))) continue;
                 var relative = Path.GetRelativePath(Root, path).Replace('\\', '/');
-
-                if (extensions.Contains(Path.GetExtension(path)) && !relative.Split('/').Any(p => p is "bin" or "obj"))
-                    result[relative] = Sha(path);
+                if (!relative.Contains("/bin/", StringComparison.Ordinal) &&
+                    !relative.Contains("/obj/", StringComparison.Ordinal))
+                    files.Add((relative, path));
             }
-
+        var result = HashFiles(files);
+        // The checkout key also covers test declarations omitted from the certified library.
+        var lakefile = File.ReadAllBytes(At("lakefile.toml"));
+        if (!libraryOnly) result[CheckoutLakefileInput] = Convert.ToHexStringLower(SHA256.HashData(lakefile));
+        result["lakefile.toml"] = ContentKey(LibraryLakefile(Encoding.UTF8.GetString(lakefile)));
         return result;
     }
 
@@ -1795,7 +1828,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     void InstallReleasedLibrary(string archive, string staging, string cached, CertifiedReleaseAsset asset)
     {
-        var (key, _) = LibraryIdentity(CommonInputs());
+        var (key, _) = LibraryIdentity(CommonInputs(libraryOnly: true));
         if (!ValidReleaseAsset(asset, key) || new FileInfo(archive).Length != asset.ArchiveBytes ||
             Sha(archive) != asset.ArchiveSha256)
             throw new InvalidDataException("Release archive identity or integrity mismatch");
@@ -1908,12 +1941,23 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 Path.Combine(library!, changed));
     }
 
-    /// <summary>Requires every library file to retain its certified bytes, including in a private build.</summary>
-    void RequireCertifiedLibraryContents()
+    /// <summary>Physical file hashes from a whole-library check, usable until the next command or callback.</summary>
+    sealed class CheckedLibraryContents(string library, IReadOnlyDictionary<string, string> files)
     {
-        if (libraryManifest is null || !Same(libraryManifest, CacheFiles(library!)))
-            throw new InvalidOperationException("The certified library contents changed during verification");
+        public readonly string Library = library;
+        public readonly IReadOnlyDictionary<string, string> Files = files;
     }
+
+    /// <summary>Requires every library file to retain its certified bytes, including in a private build.</summary>
+    CheckedLibraryContents CheckCertifiedLibraryContents()
+    {
+        var files = libraryManifest is not null ? CacheFiles(library!) : null;
+        if (files is null || !Same(libraryManifest!, files))
+            throw new InvalidOperationException("The certified library contents changed during verification");
+        return new(library!, files);
+    }
+
+    void RequireCertifiedLibraryContents() => CheckCertifiedLibraryContents();
 
     // The pinned manifest binds the source snapshot before copying. Hash exactly the bytes
     // written to the private destination; callers independently verify that destination.
@@ -2804,7 +2848,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 // An incremental build replays donor modules too: an unchanged olean may import changed ones.
                 ReplayLibrary(library, (incrementalLibrary is null ? "fresh" : "incremental") +
                     " Lean verification library");
-                if (!Same(sources, LibrarySources(CommonInputs())))
+                if (!Same(sources, CommonInputs(libraryOnly: true)))
                     throw new InvalidDataException("Library sources changed during preparation");
                 libraryBuild = incrementalLibrary is null ? "fresh" : "incremental";
                 manifest = CacheFiles(library);
@@ -3070,7 +3114,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 throw new InvalidOperationException("Lake built other modules than the import closure it was given.");
             ReplayLibrary(build, "the framework modules the proof imports");
             var manifest = CacheFiles(build);
-            if (!ClosureManifest(manifest, LibrarySources(CommonInputs()), modules))
+            if (!ClosureManifest(manifest, CommonInputs(libraryOnly: true), modules))
                 throw new InvalidDataException("Library sources changed during preparation");
             File.WriteAllText(Path.Combine(build, "cache-manifest.json"), JsonSerializer.Serialize(manifest, Json));
             var manifestBytes = File.ReadAllBytes(Path.Combine(build, "cache-manifest.json"));
@@ -3468,8 +3512,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             ?? throw new InvalidDataException("Missing certified base manifest");
         var oldSources = LibrarySources(manifest);
         var (oldKey, _) = LibraryIdentity(oldSources);
-        var snapshot = Inputs(At("CIL.lean"));
-        var (newKey, newSources) = LibraryIdentity(snapshot);
+        var (newKey, newSources) = LibraryIdentity(CommonInputs(libraryOnly: true));
         if (oldSources.Any(pair => !newSources.TryGetValue(pair.Key, out var hash) || hash != pair.Value))
             throw new InvalidDataException("Source extension changed or removed an existing certified source");
         var additions = newSources.Where(pair => !oldSources.ContainsKey(pair.Key)).ToArray();
@@ -3505,7 +3548,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (Sha(target) != hash)
                     throw new InvalidDataException("Added source changed while copying: " + name);
             }
-            if (!Same(newSources, LibrarySources(Inputs(At("CIL.lean")))))
+            if (!Same(newSources, CommonInputs(libraryOnly: true)))
                 throw new InvalidDataException("Source extension changed during preparation");
             // Carry the producer's authenticated hashes forward; rehashing here could
             // otherwise authorize an old artifact that changed after its private copy.
@@ -3537,7 +3580,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var manifest = Path.Combine(directory, "cache-manifest.json");
         if (string.IsNullOrWhiteSpace(trustedDigest) || !File.Exists(manifest) || Sha(manifest) != trustedDigest)
             return null;
-        var (key, sources) = LibraryIdentity(CommonInputs());
+        var (key, sources) = LibraryIdentity(CommonInputs(libraryOnly: true));
         return ValidCertifiedLibrary(directory, trustedDigest, key, sources) ? trustedDigest : null;
     }
 
@@ -4900,7 +4943,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
         string? settings = null, Action<string>? stage = null, DeepCheckInputs? deepChecks = null,
         DeepCheckRun? deepRun = null, Func<Sha256Digest, Sha256Digest>? receiveDigest = null,
-        StatementRequest? statement = null)
+        StatementRequest? statement = null, Action<string>? onCleanExtractionCompiled = null)
     {
         Sha256Digest RunCheck(string[] command) => CheckManifest(command, receiveDigest);
         deepRun = DeepCheckRun.Claim(deepChecks, deepRun);
@@ -5101,6 +5144,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             var extractionSuffix = "\n" + Sha(Path.Combine(fresh, "Extracted.lean"));
             var extractedKey = StandaloneExtractionKey(environmentKey, extractionSuffix);
             string? extractionPublication = null;
+            bool cleanExtractionCompiled = false;
             if (RestoreSuccess(extractedKey, fresh))
             {
                 extractionCacheHits++;
@@ -5110,8 +5154,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             {
                 // The native audit checks this theorem's exact type after independent kernel replay.
                 stage?.Invoke("proof checking");
-                Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, "Extracted.olean"),
+                var diagnostics = Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, "Extracted.olean"),
                     Path.Combine(fresh, "Extracted.lean")], leanPath: leanPath, progress: "Checking Extracted: " + entry);
+                cleanExtractionCompiled = onCleanExtractionCompiled is not null &&
+                    !diagnostics.Contains("sorryAx", StringComparison.Ordinal);
                 var publication = Path.Combine(fresh, "extraction-cache");
                 Directory.CreateDirectory(publication);
                 foreach (var path in Directory.EnumerateFiles(fresh).Where(path =>
@@ -5242,15 +5288,16 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             }
             RequireStagedProofSources();
             var built = OleanHashes(fresh, session);
-            void RequireDeepStable()
+            void RequireDeepStable(bool checkLibraryContents = false)
             {
                 if (deep is null) return;
+                var checkedLibrary = checkLibraryContents ? CheckCertifiedLibraryContents() : null;
                 deep.RequireStable();
                 if (!Same(built, OleanHashes(fresh, session)) ||
                     bindingSourcesKey != BindingSourcesKey(library!) ||
                     bindingPreparation!.Toolchain != BindingToolchainKey(session))
                     throw new InvalidOperationException("Deep-check sources, toolchain or compiled artifacts changed");
-                RequireDeepBindingStable();
+                RequirePreparedBindingLibrary(checkedLibrary);
                 RequireStagedProofSources();
             }
             void RequireReplayDiagnosticInputs()
@@ -5261,8 +5308,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (!Same(before, Inputs(proof, settings)))
                     throw new InvalidOperationException("Inputs changed during verification");
                 RecheckManifest();
-                RequireCertifiedLibraryContents();
-                RequireDeepStable();
+                RequireDeepStable(checkLibraryContents: true);
             }
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
@@ -5401,9 +5447,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (!Same(before, Inputs(proof, settings)))
                     throw new InvalidOperationException("Inputs changed during verification");
                 RecheckManifest();
-                RequireCertifiedLibraryContents();
+                RequireDeepStable(checkLibraryContents: true);
             }
-            RequireDeepStable();
             deep?.RequireTheorems(audited, proofAudits, deepRun?.Attempt);
             var auditedTheorems = audited.theorems.ToDictionary(result => result.name, StringComparer.Ordinal);
             foreach (var request in proofAudits) AuditedAxioms(auditedTheorems[request.name]);
@@ -5420,7 +5465,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 throw new InvalidOperationException($"Cannot compare the verified statement: {proved.termError}");
             RequireOriginalProofSources();
             RequireStagedProofSources();
-            RequireOriginalProofSources();
             if (!Same(before, Inputs(proof, settings)))
                 throw new InvalidOperationException("Inputs changed during verification");
             // The display is published only here, after every check above, and never feeds a check.
@@ -5470,7 +5514,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 initializationAssumptions: InitializationAssumptions(extraction.Root), libraryModules: libraryModules,
                 statementIdentity: statement is null ? null : Identity(proved), refutation: refutation);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
-            RequireDeepStable();
             var deepPublication = deep is null ? null : StageDeepResult(deep, fresh);
             if (!proofRestored) PublishProof();
             if (extractionPublication is not null)
@@ -5481,7 +5524,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             standaloneCachePromotion = completesLibrary && deep is null && UseSuccessCache
                 ? new(fullLibraryKey!, new(currentModules, StringComparer.Ordinal),
                     extractedKey, extractionSuffix, proofKey, proofSuffix) : null;
-
+            // A fixture can reuse the frontend and its axiom diagnostics only after the module passes audit.
+            if (cleanExtractionCompiled) onCleanExtractionCompiled?.Invoke(extractedKey);
             return report;
         }
         catch (Exception error)

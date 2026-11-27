@@ -79,7 +79,9 @@ partial class Program
                 CopyTree(batchB, output);
             // Expected rejections: a refutation of the contract the Add copy verifies, and one control per way a
             // rejection can fail; the tampered copy fails its extraction check.
-            var (contractOutput, absentOutput) = (Copy(batchB, "ConsumerBatchContract"), Copy(batchB, "Absent"));
+            var contractOutput = Path.Combine(Path.GetDirectoryName(batchB)!, "ConsumerBatchContract");
+            CopyTree(batchB, contractOutput);
+            var absentOutput = Copy(batchB, "Absent");
             var (refutedOutput, tamperedOutput) = (Copy(batchC, "Refuted"), Copy(batchC, "Tampered"));
             File.AppendAllText(Path.Combine(tamperedOutput, "Extracted.lean"), "\n-- changed after extraction\n");
             File.WriteAllText(contract, ContractSource);
@@ -201,8 +203,9 @@ partial class Program
         {
             Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", savedTrace);
             Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedCache);
+            // The proof-cost measurement reads the successful contract and proof through their certificate.
             foreach (var path in new[] { forged, forgedProof, axiomatic, axiomProof, missingProof, hiddenProof,
-                contract, contractProof, refutationProof, brokenProof, otherProof })
+                refutationProof, brokenProof, otherProof })
                 File.Delete(path);
         }
     }

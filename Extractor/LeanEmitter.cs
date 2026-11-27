@@ -12,6 +12,33 @@ internal static class LeanEmitter
         IReadOnlyList<ClassViews.Access> ClassFields,
         ComputedLayout[] Layouts, string TemplateInputs, int ImageRows);
 
+    /// <summary>Writes a certificate with one list entry per instruction, sharing repeated state terms.</summary>
+    internal static void EmitCertificate(StringBuilder lean, string name, string type, string elementType,
+        IEnumerable<string> entries)
+    {
+        var states = entries.ToArray();
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        lean.Append($"def {name} : Extraction.{type} := ");
+        // Bound the nesting of lets even for methods with many distinct states.
+        const int maximumBindings = 8;
+        foreach (var (state, count) in states.CountBy(state => state, StringComparer.Ordinal))
+        {
+            if (count == 1) continue;
+            var local = $"state{names.Count}";
+            if (state.Length <= local.Length) continue;
+            var binding = $"let {local} : {elementType} := {state}; ";
+            if ((long)count * (state.Length - local.Length) <= binding.Length) continue;
+            names.Add(state, local);
+            lean.Append(binding);
+            if (names.Count == maximumBindings) break;
+        }
+        if (names.Count != 0)
+            for (int index = 0; index < states.Length; index++)
+                if (names.TryGetValue(states[index], out string? local))
+                    states[index] = local;
+        lean.Append('[').AppendJoin(", ", states).AppendLine("]");
+    }
+
     internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
         "System.SByte" => Narrowing.Signed8,
@@ -254,7 +281,7 @@ internal static class LeanEmitter
                 def importIndex : Extraction.ImportSlotIndex := .ofList imports
                 """);
         var shapeFactsAt = lean.Length;
-        var operandShapes = new OperandShapes(layoutEvidence);
+        var operandShapes = new OperandShapes(layoutEvidence, layoutContext);
         var metadataStart = lean.Length;
         genericEvidence.EmitAssemblyMetadata(lean);
         if (package is not null) ManagedConstructorPackage.EmitImage(lean, package);
@@ -262,7 +289,6 @@ internal static class LeanEmitter
         // inputs take this block, completed below with the platform definitions, before its methods.
         var metadataEnd = lean.Length;
         var metadataInputsAt = package is null ? null : inputs?.Length;
-        var fieldAccesses = new List<ClassViews.Access>();
         for (int n = 0; n < methods.Length; n++)
         {
             MethodDefinition m = methods[n];
@@ -281,8 +307,6 @@ internal static class LeanEmitter
                     Initial(variable.VariableType, m.Module, profile.Architecture, layoutContext)
                 : InitialValue.Unmodeled)];
 
-            fieldAccesses.AddRange(m.Body.Instructions.Select((site, pc) => reachable.Contains(site)
-                ? ClassViews.Of(site, n, pc, profile.Architecture) : null).OfType<ClassViews.Access>());
             LocalKind[] kinds =
                 [.. m.Body.Variables.Select(variable => KindOf(variable.VariableType, variable.Index))];
             StaticSite[] sites = [.. m.Body.Instructions.Select((i, pc) => (i, pc))
@@ -544,8 +568,9 @@ internal static class LeanEmitter
             lean.AppendLine("theorem programIndex_get? (index : Nat) : programIndex.get? index = program[index]? := by");
             lean.AppendLine("  rw [programIndex_eq]; exact Extraction.FlowIndex.get?_ofList program index");
             ProgramLookupFacts.Append(lean, "program", "method", lookups);
-            var classViews = ClassViews.Views(fieldAccesses);
-            var views = ClassViews.Emit(fieldAccesses, classViews);
+            var fieldAccesses = operandShapes.ClassFields;
+            var classViews = ClassViews.Views(fieldAccesses, layoutContext);
+            var views = ClassViews.Emit(fieldAccesses, classViews, instructionFacts: !managed);
             if (views.Length > 0)
             {
                 lean.Append(views);
@@ -564,12 +589,15 @@ internal static class LeanEmitter
     /// The distinct field and type operands of the reachable field and value-type instructions of every method, each
     /// written once as a definition beside the fact that states how every method of the extraction resolves it.
     /// </summary>
-    internal sealed class OperandShapes(LayoutEvidence layouts)
+    internal sealed class OperandShapes(LayoutEvidence layouts, MetadataValidation.LayoutContext classLayouts)
     {
         readonly Dictionary<FieldRef, string> fields = [];
         // TypeExpr has no typed C# form, so a type operand is keyed by its rendered term.
         readonly Dictionary<string, string> types = new(StringComparer.Ordinal);
         readonly StringBuilder text = new();
+
+        /// <summary>Reachable class field accesses, with the operand named in each instruction.</summary>
+        internal List<ClassViews.Access> ClassFields { get; } = [];
 
         /// <summary>Records the reachable raw operands and names the shape facts used by this method.</summary>
         internal (string Names, string? ObjectProof) RecordMethod(MethodDefinition method, int index,
@@ -583,7 +611,12 @@ internal static class LeanEmitter
                 var instruction = method.Body.Instructions[pc];
                 if (!reachable.Contains(instruction)) continue;
                 if (instruction.OpCode.Code is Code.Ldfld or Code.Ldflda or Code.Stfld)
-                    names.Add(RecordField(evidence.FieldReferenceOf(method, pc)));
+                {
+                    var operand = RecordField(evidence.FieldReferenceOf(method, pc));
+                    names.Add(operand);
+                    if (ClassViews.Of(instruction, index, pc, operand, classLayouts) is { } access)
+                        ClassFields.Add(access);
+                }
                 else if (instruction.OpCode.Code is
                     Code.Ldobj or Code.Stobj or Code.Initobj or Code.Cpobj or Code.Sizeof)
                 {

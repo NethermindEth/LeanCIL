@@ -298,7 +298,7 @@ before executing it. Bootstrap and profiling use the toolchain frontend runner.
 | Export callback, full-import audit, profiled replay, audit needing source locations | Use the ordinary audit import of the checked artifacts. |
 | Direct and consumer contract interfaces | Replayed and validated in the same native environment when their complete declaration ownership is unambiguous. The ownership map enumerates private, auxiliary and unused declarations; interface checks do not select only the exported contract's dependencies. A reached declaration that neither the map nor the imported module index places in a module fails the closure walk. |
 | Imported interface outside the replay target set, duplicate ownership, conflicting code-generator ownership | Metadata import fallback. |
-| Rejected joint set | `--replay-separately` replays per module: each module gets its own imported environment and sequential kernel replay, so no successful sibling can supply an undeclared dependency, and each failure is attributed to its module. |
+| Rejected joint set | `--replay-separately` replays per module: each module gets its own imported environment and sequential kernel replay, so no successful sibling can supply an undeclared dependency, and each failure is attributed to its module. The auditor reports results in request order after all checks finish. The elapsed time for each successful module includes any shared import setup. |
 | Single request whose fused audit reports a kernel rejection | Goes directly to isolated replay. Unrecognized diagnostics and metadata or eligibility failures use the ordinary joint retry. |
 | Batch workspace with an isolated helper rejection | Later requests importing that helper are rejected. Successful requests get their own checks; successful joint module results are not reused across request scopes, and each eligible request can fuse its own replay and audit after another fails. |
 
@@ -336,8 +336,8 @@ These regressions cover joint replay:
 - The `evidence` runner compiles its test modules once against the authenticated CIL library,
   without asking Lake to rebuild that library from copied build traces. Child fixtures validate
   the parent's source/output hashes before reusing a completed test; a standalone fixture
-  invocation builds on its own. The `dispatch` runner prepares its modules the
-  same way. Run this preparation alone with
+  invocation builds on its own. Both `evidence` and `dispatch` compile up to two test modules
+  at once. Each module can start as soon as its imports finish. Run preparation alone with
   `dotnet run --file Tests/ExtractionEvidence.cs -- --prepare-only` or
   `Tests/DispatchEvidence.cs -- --prepare-only`.
 - Generated rejection batches keep each mutation's expected diagnostic markers. A Lean command

@@ -728,7 +728,14 @@ private def AssemblyName.orderKey (assembly : AssemblyName) :
 
 /-- Assembly order compares raw name codes, version components, culture and optional token. -/
 instance : Ord AssemblyName where
-  compare := compareOn AssemblyName.orderKey
+  compare left right :=
+    (compare left.name.code right.name.code).then <|
+    (compare left.version.major right.version.major).then <|
+    (compare left.version.minor right.version.minor).then <|
+    (compare left.version.build right.version.build).then <|
+    (compare left.version.revision right.version.revision).then <|
+    (compare left.culture.code right.culture.code).then <|
+    compare left.publicKeyToken right.publicKeyToken
 
 /-- Assembly comparison is transitive and reverses when its arguments are exchanged. -/
 instance : Std.TransOrd AssemblyName :=

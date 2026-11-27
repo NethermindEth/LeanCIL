@@ -2,9 +2,7 @@
 
 <!-- audience: maintainers -->
 
-These pages describe how to measure the cost of LeanCIL's proofs, library modules and CI
-artifacts, with reference figures to compare against. Read the page for the part you are
-changing before and after the change.
+Use these commands to measure LeanCIL's proofs, library modules and CI artifacts.
 
 | You are changing | Measure | Page |
 | --- | --- | --- |
@@ -19,31 +17,41 @@ changing before and after the change.
 
 ## Reading a measurement
 
-- Heartbeats, olean bytes, kernel heartbeats and proof objects do not depend on machine load.
-  Compare them between any two runs on one toolchain.
+- Compare heartbeats, olean bytes, kernel heartbeats and proof objects on the same toolchain.
+  Frontend heartbeats can vary by a few dozen between runs of the same tree.
 - Wall and CPU time depend on the machine and its load. Compare two times only when both were
   taken in one session on one machine with nothing else running, and repeat each at least once.
 - Stage times inside a suite overlap (a fixture time includes its Lean calls), and modules
   compile concurrently. Do not add stage or module savings to predict a job's time.
-- A local time does not predict a hosted runner's time. Use the suite times below for CI.
 
 ## Scaling suites
 
-Four suites fail when cost grows faster than the size of the input. Run one with
+These suites check how verification cost grows with the size of the input. Run one with
 `dotnet run --file scripts/Test.cs -- --suite <name>`.
 
 | Suite | Fails when |
 | --- | --- |
+| `core` | Frontend or kernel heartbeats per byte for a checked initialized aggregate store and load grow more than 1.25 times from 16 to 64 or from 64 to 256 bytes. Compiled reads of a 4,096-byte store exceed twice the time per cell of a 16-byte store in at least two of three paired samples. |
 | `lookups` | Heartbeats per instruction grow more than 1.15 times from about 500 to about 2,000 instructions, kernel heartbeats per array element address grow more than 1.15 times from 128 to 512 addresses, kernel heartbeats per instruction of the scalar certificate or closed argument storage of bodies of 128 to 512 loaded, addressed or `calli` pointer locals grow more than 1.25 times, kernel heartbeats per instruction of the feature certificate of local loads, stores and addresses grow more than 1.25 times from 256 to 4,096 instructions or from 16 to 256 locals at a fixed length, the feature certificate's cost grows more than 4.5 times as much from 16 to 64 known local facts as from 4 to 16, the kernel heartbeats of one native method table step or one load of its first entry at 64 or 256 entries exceed 1.15 times those at 16 entries, the kernel heartbeats per index of a load of its last entry grow more than 1.15 times from 16 to 256 entries, the kernel heartbeats per byte of the call check's method name clause or of a metadata name's encoding grow more than 1.15 times from 20 to 80 or from 80 to 320 bytes, the kernel heartbeats per call of an embedding grow more than 1.15 times at four times the calls, or the heartbeats per call site of the managed-call check grow more than 1.35 times at four times the call sites; see [instruction lookups](InstructionLookups.md) |
 | `stepping` | Checked stepping exceeds its per-instruction growth budgets; see [validation](../VALIDATION.md#proof-cost) |
-| `scaling` | The certificate of a six-method call graph exceeds the default heartbeat limit, kernel heartbeats per layout of the header struct layout check over nested or over generic structs, or of a method's layout check over nested structs, grow more than 1.5 times from 64 to 512 structs, or 512 structs of either kind do not check within 8 GiB |
+| `scaling` | The certificate of a six-method call graph exceeds the default heartbeat limit, kernel heartbeats per layout of the header struct layout check over nested or over generic structs, or of a method's layout check over nested structs, grow more than 1.5 times from 64 to 512 structs, 512 structs of either kind do not check within 8 GiB, or a fourfold increase in virtual or indirect target entries (8, 32, 128) costs more than six times the kernel heartbeats |
 | `excluded` | Certificates with hundreds of excluded and live sites exceed the default heartbeat limit |
+
+### Package pin indexes
+
+The `core` suite measures the kernel cost of constructing both indexes for an ordered package.
+The 128-, 512- and 2,048-pin fixtures each allow 10,000 heartbeats per pin. Separate checks
+measure how the cost of querying a shared index grows with the number of methods.
+
+```sh
+lake build Tests.PinnedIndexScaling
+```
 
 ## Suite times
 
-`scripts/verification-durations.json` holds the verification seconds of each suite on the hosted
-runner, excluding job setup; its `source` field names the runs they came from. CI packs suites
-into jobs from this table. Print the resulting jobs and their estimated minutes with:
+`scripts/verification-durations.json` includes each suite's verification and verified-output
+measurement on the hosted runner. The file records the source runs and how their times are combined.
+Print the resulting jobs and their estimated minutes with:
 
 ```sh
 dotnet run --file scripts/EstimateVerificationSchedule.cs -- --jobs
@@ -51,6 +59,45 @@ dotnet run --file scripts/EstimateVerificationSchedule.cs -- --jobs
 
 A job's summary and each suite's transcript report the suite's verification time; see
 [CI operation](../CI.md).
+
+## Gate and dispatch costs
+
+Gate validation indexes comparison targets by profile and variant and follows each comparison
+edge once. For *V* variants and *R* rows, this takes expected O(V + R) work.
+
+The extractor validates a class's base chain once and returns its ancestors nearest first.
+During a read-only layout pass, it indexes inherited and declared fields once per class
+reference. For *F* fields and *A* slot requests, field enumeration and lookup take expected
+O(F + A) work.
+
+The strict-binding auditor checks the parent graph in one pass when parent rows precede their
+children. In other row orders it records completed chain depths. If a chain fails validation,
+the auditor follows the parent links to identify the cycle or invalid row.
+
+The first virtual dispatch query for an owner builds a membership bitmap over the validated
+graph. A balanced map bounds classification at O(n log n) for *n* physical rows. Subsequent
+queries reuse the owner's bitmap. The auditor reads members in physical row order and checks
+the target table at each reachable call site. Exact-class queries select the owner directly.
+
+The translation checker shares virtual slot resolution across a class hierarchy. Each reachable
+class summary records its nearest matching declaration, its class identities and the owners named
+by explicit overrides. Extending a summary checks overrides in both directions. Cycle detection
+marks each cyclic path as unable to reach the slot. For a finite catalog with distinct identity
+keys and bounded signature and name sizes, the ordered-map work is
+O(N log N), where N counts classes, method declarations, override entries and virtual targets.
+Strictly ascending or descending indirect-call tokens take one pass to certify distinctness.
+Other token orders track 64 metadata rows per occupied bitmap word. When tokens recur, the
+checker compares full identities, including declaring owners and generic arguments.
+The default certificate checks the supplied catalog. The physical metadata covered by the deep
+binding audit is described in [soundness evidence](../SOUNDNESS-EVIDENCE.md).
+
+Run the gate, dispatch and scaling fixtures with these commands.
+
+```sh
+dotnet run --file scripts/Test.cs -- --suite gates
+dotnet run --file scripts/Test.cs -- --suite dispatch
+dotnet run --file scripts/Test.cs -- --suite scaling
+```
 
 ## Fold discovery
 
@@ -73,10 +120,20 @@ with a failing limit.
 ## Bound constructor packages
 
 A single caller whose throw is bound to a CoreLib constructor defines `boundPackage` with
-`cil_evaluated` (see [proof binding](../PROOFS-BINDING.md)). The kernel evaluates the binding
-once, in `boundPackage_eq`, and checks the package rows once, in `Extracted.translation_valid`. Every
-later check, in the extraction or in a consumer proof, reads the literal. A proof that reduces
-`managedPackage` rather than `boundPackage` evaluates the binding again, about 6 s per check.
+`cil_evaluated`. The kernel evaluates the binding in `boundPackage_eq` and checks the package
+rows in `Extracted.translation_valid`. Consumer proofs can read the checked literal through
+`boundPackage`. Reducing `managedPackage` evaluates the binding again. See [proof binding](../PROOFS-BINDING.md).
+
+Binding several constructor sites in one caller checks its header, instruction stream and operand
+table once. Each site selects a decoded `newobj` and reads the four token bytes at its physical
+offset. A single site reads the instruction and byte lists directly. Multiple sites share indexed
+instructions and bytes. The binder checks each distinct MemberRef in first-use order and requires
+repeated occurrences to name the same complete method specialization.
+
+For the seven CoreLib methods in the range-exception constructor chain, the library stores the
+decoded methods and their metadata indexes as literals. Lean checks each literal against the
+decoder when it builds the library. Caller proofs can then read the method or look up an index
+without decoding CoreLib again.
 
 After the `evidence` suite has written `artifacts/Throws/Percent`, time the extraction and its
 boundary proof:
@@ -88,14 +145,17 @@ lake env lean -Dprofiler=true -Dprofiler.threshold=100 -o $dir/Extracted.olean $
 lake env sh -c "LEAN_PATH=\"\$LEAN_PATH$sep$dir\" lean -Dprofiler=true $dir/BoundaryProof.lean"
 ```
 
-Reference figures for `Examples.Throws::Percent(uint)` on one Windows x64 workstation, as the
-range over four runs:
+### ItemPool.Rent
 
-| Declaration | Kernel time |
-| --- | --- |
-| `boundPackage_eq` | 5.2 to 8.6 s |
-| `Extracted.translation_valid` | 6.4 to 10.1 s |
-| All of `Extracted.lean` | 12.1 to 19.5 s |
-| All of `BoundaryProof.lean` (four `translation_valid.invoke` goals and one program lookup) | 0.7 to 1.3 s |
+`ItemPool::Rent()` binds its caller to six CoreLib rows. The kernel checks the bound caller and
+the runtime rows, then derives each constructor's decoder equation from its validated row at
+the corresponding program index. The evidence, attribution and translation proofs read the
+caller's original method, body and links from that checked value.
 
-Checking the eight rows, the caller and seven CoreLib methods, takes about 6 s of `Extracted.translation_valid`.
+Run the pool suite to generate the extraction, then collect the per-command profile:
+
+```sh
+dotnet run --file scripts/Test.cs -- --suite pool
+lake env lean -j1 --run scripts/ProofCost.lean Extracted \
+  artifacts/ItemPool/Rent/Extracted.lean artifacts/ItemPool/rent-cost.json
+```

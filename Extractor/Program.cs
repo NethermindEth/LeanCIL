@@ -306,8 +306,7 @@ internal static partial class Program
                     global::Program.ExtractionIdentity.Resolve(output, pin.GetProperty("path").GetString()!),
                     pin.GetProperty("sha256").GetString()!));
             referenceSources.AddRange(referencePaths.Select(path => new PinnedAssemblies.Source(path)));
-            using PinnedAssemblies pinned = new(assemblySnapshot, referenceSources,
-                batch is null ? null : batch.ReadAssembly);
+            using PinnedAssemblies pinned = new(assemblySnapshot, referenceSources, batch);
             ModuleDefinition module = pinned.Selected;
             foreach ((JsonElement record, var reference) in recordedReferences.Zip(pinned.References))
                 if (record.GetProperty("assemblyIdentity").GetString() != reference.Pin.Identity ||

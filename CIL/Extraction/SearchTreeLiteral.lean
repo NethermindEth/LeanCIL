@@ -1,4 +1,5 @@
-import CIL.Extraction.MetadataBytes
+import Lean
+import CIL.Extraction.SearchTree
 
 /-!
 # Literal search trees

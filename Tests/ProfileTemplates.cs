@@ -260,6 +260,11 @@ import Templates
 example (profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) (callee : Nat) :
     (Templates.method0 profile environment true true callee).code[1]? = some (.brfalse 6) := by rfl
 """, sharedPath, "is not definitionally equal to the right-hand side");
+// The wrapper loads two in-scope arguments. Swapping the first raw opcode must disagree with its argument evidence.
+const string loads = "{ offset := 0, opcode := 2, operand := .none }, { offset := 1, opcode := 3, operand := .none }";
+var wrongArgument = templates.Replace(loads, loads.Replace("opcode := 2", "opcode := 3", StringComparison.Ordinal),
+    StringComparison.Ordinal);
+RejectLean("WrongArgumentOperand", wrongArgument, sharedPath, "MethodDecodeError.invalidFrame");
 var wrongBranch = templates.Replace("Input2.method0.code)", "(Input2.method0.code.set 1 (.brfalse 6)))",
     StringComparison.Ordinal);
 RejectLean("WrongBranch", wrongBranch, sharedPath);

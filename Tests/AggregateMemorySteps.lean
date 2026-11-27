@@ -224,4 +224,110 @@ theorem access_does_not_supply_contents (memory : Memory) (source : Reference)
   trivial
 #print axioms access_does_not_supply_contents
 
+namespace WriteReadback
+
+/-- A readable and writable range with one leading byte outside the store. -/
+private def memory (width : Nat) : Memory := { Memory.empty with
+  allocations := fun id => if id == 0 then
+    some (.mk .callerStack (.mk (width + 1) 1 []) true []) else none
+  views := [.mk 0 0 (width + 1) true true]
+  nextIdentity := 1 }
+
+/-- The bytes change within each block and across the byte index rollover. -/
+private def payload (width : Nat) : List (BitVec 8) :=
+  (List.range width).map fun index => BitVec.ofNat 8 (index + index / 256)
+
+/-- A short write at a symbolic offset reduces directly to list lookup in framing proofs. -/
+theorem short_symbolic_read (value : BitVec 8) (offset : Nat) :
+    initializedCellAt (List.replicate 16 value).toArray offset =
+      (List.replicate 16 value)[offset]? := rfl
+#print axioms short_symbolic_read
+
+/-- A checked store and load of the same initialized aggregate through a nonzero offset. -/
+private def Stepped (width : Nat) : Prop :=
+  let target : Reference := ⟨0, 1⟩
+  let type := CIL.Extraction.TypeExpr.aggregate "Fixture::Bytes" 0
+  let raw : CIL.Extraction.RawLayout :=
+    { identity := "Fixture::Bytes", explicit := true, packing := 1, declaredSize := width,
+      fields := [] }
+  let body : CIL.Method :=
+    { code := [.stobj type, .ldobj type], locals := [], returnsValue := false
+      environment := { rawLayouts := [raw], layouts := #[⟨{ size := width, fields := [] }, 1⟩] } }
+  let frame := Frame.mk 0 [] [] 0 []
+  let address := Value.reference (.address target)
+  let bytes := payload width
+  let value := Value.scalar (.aggregate bytes)
+  let stored := (write (memory width) target bytes 1).toOption.getD Memory.empty
+  step body (.stobj type) 0 [] frame [value, address] (memory width) =
+      .ok (.next 1 [] frame stored) ∧
+    step body (.ldobj type) 1 [] frame [address] stored =
+      .ok (.next 2 [value] frame stored)
+
+open Lean Elab Command Meta in
+set_option maxRecDepth 65536 in
+set_option maxHeartbeats 0 in
+run_cmd do
+  let mut previous : Option (Nat × Nat) := none
+  let mut excessive := false
+  for width in ([16, 64, 256] : List Nat) do
+    let start ← IO.getNumHeartbeats
+    let (claim, proof) ← liftTermElabM do
+      let claim ← Term.elabType (← `(Stepped $(quote width)))
+      let proof ← Term.elabTermAndSynthesize (← `(by
+        unfold Stepped
+        dsimp only
+        constructor <;> cil_checked_step [])) (some claim)
+      return (← instantiateMVars claim, ← instantiateMVars proof)
+    let elaborated ← IO.getNumHeartbeats
+    match Kernel.check (← getEnv) {} (Expr.letE `checked claim proof (.bvar 0) false) with
+    | .error error => throwKernelException error
+    | .ok _ => pure ()
+    let frontend := elaborated - start
+    let kernel := (← IO.getNumHeartbeats) - elaborated
+    logInfo m!"initialized aggregate, {width} bytes: {frontend} frontend, {kernel} kernel"
+    -- Quadrupling the width allows up to 25% more work per byte.
+    if let some (lastFrontend, lastKernel) := previous then
+      excessive := excessive || frontend > 5 * lastFrontend || kernel > 5 * lastKernel
+    previous := some (frontend, kernel)
+  if excessive then throwError "aggregate store/readback work per byte grew by more than 25%"
+
+/-- A compiled read of every stored byte, including the untouched cell before the store. -/
+@[noinline] private def sumCells (stored : Memory) (width : Nat) : Nat := Id.run do
+  let mut sum := (stored.cells 0 0).bits.toNat
+  for offset in [:width] do
+    sum := sum + (stored.cells 0 (offset + 1)).bits.toNat
+  return sum
+
+/-- Nanoseconds per compiled cell read over repeated sweeps of one checked store. -/
+private def nanosPerCell (width : Nat) : IO Nat := do
+  let bytes := payload width
+  let .ok stored := write (memory width) ⟨0, 1⟩ bytes 1
+    | throw (IO.userError "aggregate write failed")
+  let expected := bytes.foldl (fun sum bits => sum + bits.toNat) 0
+  let start ← IO.monoNanosNow
+  let mut sweeps := 0
+  let mut total := 0
+  repeat
+    total := total + sumCells stored width
+    sweeps := sweeps + 1
+    let elapsed := (← IO.monoNanosNow) - start
+    if elapsed >= 20_000_000 then
+      unless total == sweeps * expected do throw (IO.userError "aggregate readback failed")
+      return elapsed / (width * sweeps)
+
+/-- Two of three paired measurements must stay within twice the small store's cost per byte. -/
+private def checkCompiledCost : IO Unit := do
+  let mut slow := 0
+  for _ in [:3] do
+    let small ← nanosPerCell 16
+    let large ← nanosPerCell 4096
+    IO.println s!"compiled aggregate, 16 and 4096 bytes: {small} and {large} ns/cell"
+    if large > 2 * small then slow := slow + 1
+  if slow >= 2 then
+    throw (IO.userError "compiled aggregate reads exceeded twice the 16-byte cost per cell")
+
+#eval checkCompiledCost
+
+end WriteReadback
+
 end Tests.AggregateMemorySteps

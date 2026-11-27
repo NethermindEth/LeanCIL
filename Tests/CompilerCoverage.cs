@@ -59,18 +59,35 @@ foreach (var version in versions)
         if (args.Contains("--whole-only")) continue;
         var assembly = CompileCorpus(compiler, toolchain, directory, "Corpus", [source], language);
         using var module = ModuleDefinition.ReadModule(assembly);
-        foreach (var method in module.GetType("Corpus").Methods.Where(method => method.IsPublic))
+        var cases = module.GetType("Corpus").Methods.Where(method => method.IsPublic)
+            .Select(method => (Method: method, Output: Path.Combine(directory, method.Name),
+                Expected: method.Name != "Unsupported")).ToArray();
+        var positive = cases.Where(item => item.Expected)
+            .Select(item => new GeneratedExtraction(assembly, item.Method.FullName, item.Output));
+        var batchPassed = true;
+        try { ExtractBatch("extract", null, positive); }
+        catch (InvalidOperationException error)
         {
-            var output = Path.Combine(directory, method.Name);
-            var result = Execute(["dotnet", ExtractorPath, "extract", assembly, method.FullName, output]);
-            var accepted = result.Code == 0;
-            var expected = method.Name != "Unsupported";
+            // Keep the batch failure and collect each method's diagnostic for the coverage report.
+            failures.Add($"Roslyn {version}/{language} extraction batch: {error.Message}");
+            batchPassed = false;
+        }
+        foreach (var (method, output, expected) in cases)
+        {
+            var accepted = true;
+            var diagnostic = "";
+            if (!expected || !batchPassed)
+            {
+                var result = Execute(["dotnet", ExtractorPath, "extract", assembly, method.FullName, output]);
+                accepted = result.Code == 0;
+                diagnostic = result.Output.Trim();
+            }
             report.Add(new { compiler = version, language, compilerVersion, compilerSha256 = compilerHash,
                 sourceSha256 = sourceHash, referencePack = CorpusReferenceVersion, method = method.FullName,
-                accepted, expected, diagnostic = accepted ? "" : result.Output.Trim() });
-            var unsupported = result.Output.Contains("Unsupported instruction", StringComparison.Ordinal);
+                accepted, expected, diagnostic = accepted ? "" : diagnostic });
+            var unsupported = diagnostic.Contains("Unsupported instruction", StringComparison.Ordinal);
             if (accepted != expected || (!expected && !unsupported))
-                failures.Add($"Roslyn {version}/{language}: {method.Name}: {result.Output}");
+                failures.Add($"Roslyn {version}/{language}: {method.Name}: {diagnostic}");
             if (accepted)
             {
                 var generated = Path.Combine(output, "Extracted.lean");

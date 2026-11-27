@@ -116,6 +116,8 @@ internal static class MetadataValidation
     {
         readonly Dictionary<StructuralSignatures.Signature, AggregateInfo> validated = [];
         readonly Dictionary<TypeReference, FieldSet> fields = new(ReferenceEqualityComparer.Instance);
+        readonly Dictionary<TypeReference, (int Count, Dictionary<FieldDefinition, int> Slots)> classFields =
+            new(ReferenceEqualityComparer.Instance);
         // Selected definitions of admitted imported layouts; the ambient resolver never supplies one.
         readonly Dictionary<StructuralSignatures.Signature, TypeDefinition> imported = [];
         readonly Dictionary<ModuleDefinition, ILookup<string, TypeDefinition>> definitions =
@@ -199,6 +201,23 @@ internal static class MetadataValidation
         }
 
         internal InstanceField[] Fields(TypeReference owner) => FieldSnapshot(Canonical(owner)).Fields;
+
+        // Class slots include inherited fields in base-first order. A working module and its original
+        // can have identical names but different Cecil field objects.
+        (int Count, Dictionary<FieldDefinition, int> Slots) ClassFields(TypeReference owner)
+        {
+            if (classFields.TryGetValue(owner, out var cached)) return cached;
+            var ordered = ObjectTypes.Fields(owner);
+            var slots = new Dictionary<FieldDefinition, int>(ordered.Length, ReferenceEqualityComparer.Instance);
+            for (var index = 0; index < ordered.Length; index++) slots.TryAdd(ordered[index], index);
+            return classFields[owner] = (ordered.Length, slots);
+        }
+
+        internal int ClassFieldCount(TypeReference owner) => ClassFields(owner).Count;
+
+        internal int ClassFieldIndex(TypeReference owner, FieldDefinition field) =>
+            ClassFields(owner).Slots.TryGetValue(field, out var slot) ? slot :
+                throw new InvalidDataException("Unresolved class instance field: " + owner.FullName + "::" + field.Name);
 
         internal int FieldIndex(TypeReference owner, FieldDefinition field, bool includeStatic = false)
         {
@@ -520,7 +539,8 @@ internal static class MetadataValidation
         // 1 while visiting, 2 once admitted to the walk, 3 when its body could not be analysed.
         Dictionary<MethodDefinition, int> state = [];
         List<MethodDefinition> ordered = [];
-        Dictionary<MethodDefinition, MethodDefinition[]> chains = [];
+        Dictionary<MethodDefinition, MethodDefinition> callers = [];
+        Dictionary<MethodDefinition, MethodDefinition[]> reportedChains = [];
         Dictionary<MethodDefinition, List<(MethodDefinition Method, bool Deferred)>> dependencies = [];
         MethodReference[]? addressedMethods = null;
         Dictionary<StructuralSignatures.Signature, MethodDefinition[]> indirectTargets = [];
@@ -537,7 +557,15 @@ internal static class MetadataValidation
             try { check(); return true; }
             catch (Exception error)
             {
-                blocked.Add(new(method, at, error, chains[method]));
+                if (!reportedChains.TryGetValue(method, out var chain))
+                {
+                    var path = new Stack<MethodDefinition>();
+                    path.Push(method);
+                    while (callers.TryGetValue(path.Peek(), out var caller)) path.Push(caller);
+                    chain = path.ToArray();
+                    reportedChains.Add(method, chain);
+                }
+                blocked.Add(new(method, at, error, chain));
                 return false;
             }
         }
@@ -569,8 +597,8 @@ internal static class MetadataValidation
                         throw new InvalidDataException($"Recursive managed dependency: {item.Method.FullName}");
                     continue;
                 }
-                chains[item.Method] = item.Caller is { } caller
-                    ? [.. chains[caller], item.Method] : [item.Method];
+                // Diagnostics use the first traversal path to a method, including shared callees.
+                if (blocked is not null && item.Caller is { } caller) callers.Add(item.Method, caller);
                 dependencies[item.Method] = [];
                 Walk(item.Method);
                 if (state[item.Method] == 3) continue;

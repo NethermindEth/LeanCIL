@@ -1,6 +1,8 @@
+import CIL.Extraction.KernelEquation
 import StrictBinding.Rows
 import StrictBinding.MemberLinks
 import Tests.StrictBinding.Fixture
+import Tests.StrictBinding.PreparedData
 import Tests.StrictBinding.Mutation
 
 /-!
@@ -36,9 +38,20 @@ namespace Tests.StrictBinding.Rows
 open _root_.StrictBinding
 open CIL.Extraction (AssemblyMetadata ByteEntry MetadataSlice stringsHeap blobHeap)
 
+/-- Prepared data paired with its equality to the audit's preparation of the pin. -/
+private abbrev Preparation (pin : PinnedImage) :=
+  { data : Except AuditError PreparedImage // prepareOne pin = data }
+
+/-- The materialized preparation of a pin with the equation checked by the kernel. -/
+local macro "prepare_fixture% " pin:term : term =>
+  `((⟨prepared_data% (prepareOne $pin), by cil_kernel_rfl⟩ : Preparation $pin))
+
+/-- The audit's checked preparation of the fixture. -/
+private def preparedFixture :=
+  prepare_fixture% { identity := StrictFixture.identity, image := StrictFixture.image }
+
 /-- The fixture, prepared as the audit prepares a pinned image. -/
-private def fixture : Except AuditError PreparedImage :=
-  prepareOne { identity := StrictFixture.identity, image := StrictFixture.image }
+private abbrev fixture := preparedFixture.val
 
 /-- The assembly check of a carried block against a prepared image. -/
 private def checked (prepared : Except AuditError PreparedImage) (assembly : AssemblyMetadata) :
@@ -73,7 +86,8 @@ theorem accepts_the_carried_assembly_block : ok (checked fixture block) = true :
 /-- The block is the fixture's in the sense of `AssemblyMatches`. -/
 theorem the_carried_block_matches_the_fixture {image : PreparedImage}
     (prepared : fixture = .ok image) : AssemblyMatches image block := by
-  apply assemblyMatches_of_assemblyBound (prepareOne_bounded prepared)
+  apply assemblyMatches_of_assemblyBound
+    (prepareOne_bounded (preparedFixture.property.trans prepared))
   have accepted := accepts_the_carried_assembly_block
   simp only [checked, prepared, bind, Except.bind] at accepted
   cases checkedBlock : assemblyBound image block with
@@ -248,13 +262,17 @@ theorem the_suffix_block_does_not_match {image : PreparedImage} (prepared : fixt
     simp at inRow
 #print axioms the_suffix_block_does_not_match
 
+/-- A metadata cell written at its measured offset and width. -/
+private def writeImageLittle (image : ImageBytes) (offset width value : Nat) : ImageBytes :=
+  writeImageBytes image offset (littleBytes width value)
+
 /-- The fixture with the culture cell of its `Assembly` row set to `offset`. -/
 private def culturedImage (offset : Nat) : ImageBytes :=
   match fixture with
   | .ok image =>
     match image.layout.cellAt assemblyToken 8 with
     | .ok (cell, width) =>
-      ImageBytes.ofBytes (writeLittle (imageBytes StrictFixture.image) cell width offset)
+      writeImageLittle StrictFixture.image cell width offset
     | .error _ => StrictFixture.image
   | .error _ => StrictFixture.image
 
@@ -308,9 +326,8 @@ private def keyedImage : ImageBytes :=
   | .ok image =>
     match image.layout.cellAt assemblyToken 6 with
     | .ok (keyCell, keyWidth) =>
-      let named := writeLittle (imageBytes StrictFixture.image) keyCell keyWidth 1
-      ImageBytes.ofBytes
-        (writeBytes named (image.layout.pe.blobs.start + 1) (keyBytes.length :: keyBytes))
+      let named := writeImageLittle StrictFixture.image keyCell keyWidth 1
+      writeImageBytes named (image.layout.pe.blobs.start + 1) (keyBytes.length :: keyBytes)
     | .error _ => StrictFixture.image
   | .error _ => StrictFixture.image
 
@@ -324,9 +341,12 @@ private def keyedTokenValue : Nat := 0x4705f121e18edfe3
 private def keyedIdentity : String :=
   "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=" ++ keyedToken
 
-/-- The variant, prepared under the identity its key spells. -/
-private def keyed : Except AuditError PreparedImage :=
-  prepareOne { image := keyedImage, identity := keyedIdentity }
+set_option maxRecDepth 4096 in
+/-- The signed variant prepared under the identity its key spells. -/
+private def preparedKeyed := prepare_fixture% { image := keyedImage, identity := keyedIdentity }
+
+/-- The signed image from its checked preparation. -/
+private abbrev keyed := preparedKeyed.val
 
 /-- The block an extraction carries for the variant: its key is the only blob, ranked 1. -/
 private def keyedBlock : AssemblyMetadata :=
@@ -461,7 +481,7 @@ theorem accepts_the_carried_slice_rows :
 /-- The slice's rows and entries are the fixture's in the sense of `RowsMatch`. -/
 theorem the_carried_slice_rows_match_the_fixture {image : PreparedImage}
     (prepared : fixture = .ok image) : RowsMatch image slice.rows slice.strings slice.blobs := by
-  apply rowsMatch_of_rowsBound (prepareOne_bounded prepared)
+  apply rowsMatch_of_rowsBound (prepareOne_bounded (preparedFixture.property.trans prepared))
   have accepted := accepts_the_carried_slice_rows
   simp only [rowsChecked, prepared, bind, Except.bind] at accepted
   cases checkedRows : rowsBound image slice.rows slice.strings slice.blobs with
@@ -729,28 +749,49 @@ private def linkedImage : ImageBytes :=
     let image ← fixture
     let definition := assemblyToken
     let reference := tokenOf 0x23 1
-    let mut bytes := imageBytes StrictFixture.image
+    let mut changed := StrictFixture.image
     for i in [:4] do
       let (offset, width) ← image.layout.cellAt reference i
-      bytes := writeLittle bytes offset width (← image.layout.cell image.view definition (i + 1))
+      let value ← image.layout.cell image.view definition (i + 1)
+      changed := writeImageLittle changed offset width value
     for (column, value) in [(4, 0), (5, 0), (6, ← image.layout.cell image.view definition 7),
         (7, 0)] do
       let (offset, width) ← image.layout.cellAt reference column
-      bytes := writeLittle bytes offset width value
+      changed := writeImageLittle changed offset width value
     for column in [1, 2] do
       let (offset, width) ← image.layout.cellAt objectTypeRef column
-      bytes := writeLittle bytes offset width (← image.layout.cell image.view shapeType column)
-    return ImageBytes.ofBytes bytes
+      let value ← image.layout.cell image.view shapeType column
+      changed := writeImageLittle changed offset width value
+    return changed
   match rewritten with
   | .ok image => image
   | .error _ => StrictFixture.image
 
+/-- The complete file after independent byte-list writes at physical offsets in the fixture. -/
+private def fileWith (edits : List (Nat × List Nat)) : List Nat :=
+  edits.foldl (fun bytes (offset, replacement) => writeBytes bytes offset replacement)
+    (imageBytes StrictFixture.image)
+
+/-- The two culture keys, the signed assembly's key and its blob, and the TypeRef and AssemblyRef
+    of the redirected MemberRef change exactly these bytes in the compiled fixture. -/
+private theorem changed_image_bytes :
+    imageBytes (culturedImage suffixOffset) = fileWith [(1436, [suffixOffset])] ∧
+    imageBytes (culturedImage nameOffset) = fileWith [(1436, [nameOffset])] ∧
+    imageBytes keyedImage = fileWith [(1432, [1]), (2041, keyBytes.length :: keyBytes)] ∧
+    imageBytes linkedImage = fileWith [(952, [178, 0, 207, 0]), (1438, [1, 0, 2, 0, 3, 0, 4]),
+      (1450, [0]), (1452, [207])] := by
+  exact ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+#print axioms changed_image_bytes
+
 /-- The pinned variant. -/
 private def linkedPin : PinnedImage := { identity := StrictFixture.identity, image := linkedImage }
 
+/-- The redirected MemberRef image prepared for the individual link checks. -/
+private def preparedLinked := prepare_fixture% linkedPin
+
 /-- The link from the MemberRef to `definition`, checked in the variant. -/
 private def linkChecked (definition : Nat) : Except AuditError (Option Unit) := do
-  let image ← prepareOne linkedPin
+  let image ← preparedLinked.val
   MemberLinks.memberListsAscend image
   (MemberLinks.memberLinkBound [image] image image objectConstructorRef definition).run
 

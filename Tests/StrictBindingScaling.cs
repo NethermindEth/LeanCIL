@@ -43,8 +43,8 @@ partial class Program
                     $"{BindingPageSize(methods)}, not {pages} x {size}");
         Console.WriteLine("PASS the body proof pages at about 250 methods up to 8 pages");
         var package = FixturePackage();
-        Run(["lake", "build", "StrictBinding.Evidence", "StrictBinding.Sha256"], package,
-            progress: "Building the strict binding library");
+        Run(["lake", "build", "StrictBinding.Evidence", "StrictBinding.PreparedImages", "StrictBinding.Sha256"],
+            package, progress: "Building the strict binding library");
         CheckGeneratedPagedModulesElaborate(root, package);
         CheckAssemblyBlockScaling(root, package);
         CheckSliceRowsScaling(root, package);
@@ -59,26 +59,27 @@ partial class Program
         new Random(5).NextBytes(larger.AsSpan(examples.Length));
         const int smaller = 1272;
         const int largerClaims = 5088;
-        (string Name, byte[] Bytes, int? Claims)[] cases =
+        (string Name, byte[] Bytes, int? Claims, int MemoryGiB)[] cases =
         [
-            ("fixture", StrictBindingFacts.ReadImage(File.ReadAllText(Fixture)), null),
-            ($"Examples.dll, {smaller} claims", examples, smaller),
-            ($"Examples.dll and 770 KB more, {smaller} claims", larger, smaller),
-            ($"Examples.dll, {largerClaims} claims", examples, largerClaims)
+            ("fixture", StrictBindingFacts.ReadImage(File.ReadAllText(Fixture)), null, 3),
+            ($"Examples.dll, {smaller} claims", examples, smaller, 3),
+            ($"Examples.dll and 770 KB more, {smaller} claims", larger, smaller, 5),
+            ($"Examples.dll, {largerClaims} claims", examples, largerClaims, 5)
         ];
         Directory.CreateDirectory(root);
-        var heartbeats = new long[cases.Length];
-        for (var index = 0; index < cases.Length; index++)
+        long BodyHeartbeats(int index)
         {
             var path = Path.Combine(root, $"Bodies{index}.lean");
             File.WriteAllText(path, AllBodiesModule(cases[index].Bytes, cases[index].Claims) +
                 "\n#eval show IO Nat from IO.getNumHeartbeats\n");
-            var run = Execute(["lake", "env", "lean", "-DElab.async=false", path], cwd: package);
+            var run = Execute(["lake", "env", "lean", "-j1", "-DElab.async=false", path], cwd: package);
             if (run.Code != 0)
                 throw new InvalidOperationException($"The bodies of {cases[index].Name} were not found: {run.Output}");
-            heartbeats[index] = long.Parse(run.Output.Split('\n', StringSplitOptions.TrimEntries |
+            return long.Parse(run.Output.Split('\n', StringSplitOptions.TrimEntries |
                 StringSplitOptions.RemoveEmptyEntries).Last(), System.Globalization.CultureInfo.InvariantCulture);
         }
+        var heartbeats = Concurrently(Enumerable.Range(0, cases.Length).ToArray(),
+            index => ReservingMemory((long)cases[index].MemoryGiB << 30, () => BodyHeartbeats(index)));
         var costs = cases.Zip(heartbeats, (item, count) => $"{item.Name} {count} heartbeats");
         Console.WriteLine("Body checks: " + string.Join(", ", costs));
         double Above(int index) => heartbeats[index] - heartbeats[0];
@@ -303,21 +304,24 @@ partial class Program
     /// </summary>
     static void CheckMetadataRowsModuleScaling(string root, string package)
     {
-        int[] sizes = [318, 1272, 5088];
+        (int Methods, int Images, int MemoryGiB)[] cases =
+            [(318, 1, 3), (1272, 1, 5), (5088, 1, 9), (1272, 2, 5)];
         Directory.CreateDirectory(root);
-        var heartbeats = sizes.Select(methods => MetadataRowsModuleHeartbeats(root, package, methods, 1)).ToArray();
-        var split = MetadataRowsModuleHeartbeats(root, package, sizes[1], 2);
-        var measured = string.Join(", ", sizes.Zip(heartbeats, (methods, cost) => $"{cost} heartbeats at {methods}"));
-        var perMethod = (double)heartbeats[2] / sizes[2] / ((double)heartbeats[1] / sizes[1]);
+        var heartbeats = Concurrently(cases, item => ReservingMemory((long)item.MemoryGiB << 30,
+            () => MetadataRowsModuleHeartbeats(root, package, item.Methods, item.Images)));
+        var measured = string.Join(", ", cases[..^1].Zip(heartbeats,
+            (item, cost) => $"{cost} heartbeats at {item.Methods}"));
+        var split = heartbeats[^1];
+        var perMethod = (double)heartbeats[2] / cases[2].Methods / ((double)heartbeats[1] / cases[1].Methods);
         if (heartbeats[1] <= 0 || perMethod > MaximumPerClaimGrowth)
             throw new InvalidOperationException($"The metadata rows module costs {measured}; a method costs " +
-                $"{perMethod:F2} times as much at {sizes[2]} methods as at {sizes[1]}");
+                $"{perMethod:F2} times as much at {cases[2].Methods} methods as at {cases[1].Methods}");
         var perImage = (double)split / heartbeats[1];
         if (split <= 0 || perImage > MaximumPerClaimGrowth)
-            throw new InvalidOperationException($"The metadata rows module costs {split} heartbeats for {sizes[1]} " +
-                $"methods over two images and {heartbeats[1]} over one");
+            throw new InvalidOperationException($"The metadata rows module costs {split} heartbeats for " +
+                $"{cases[1].Methods} methods over two images and {heartbeats[1]} over one");
         Console.WriteLine($"PASS the metadata rows module is linear in the methods ({measured}; " +
-            $"{perMethod:F2} times per method; {split} heartbeats at {sizes[1]} over two images, " +
+            $"{perMethod:F2} times per method; {split} heartbeats at {cases[1].Methods} over two images, " +
             $"{perImage:F2} times)");
     }
 
@@ -349,21 +353,10 @@ partial class Program
         var perImage = methods / images;
         var files = Enumerable.Range(0, images).Select(image => SyntheticMethods(perImage, "Synthetic" + image))
             .ToArray();
-        var definitions = string.Concat(files.Select((file, image) => $$"""
-            namespace Image{{image}}
-            {{BindingImage.Definitions(file)}}
-            def assemblyBlock : CIL.Extraction.AssemblyMetadata :=
-              {{StrictBindingFacts.AssemblyBlock(file)}}
-            {{string.Concat(Enumerable.Range(1, perImage).Select(row =>
-                $"def slice{row} : CIL.Extraction.MetadataSlice :=\n  " +
-                StrictBindingFacts.Slice(file, new HashSet<int> { MetadataTokens.GetToken(
-                    MetadataTokens.MethodDefinitionHandle(row)) }) +
-                $"\ndef method{row} : CIL.Extraction.MethodMetadata := {{ own := slice{row} }}\n"))}}end Image{{image}}
-
-            """));
+        List<string> claims = [];
+        var definitions = string.Concat(files.Select((file, image) => MethodImageSource(file, image, claims)));
         // One list per page keeps each list literal within the elaborator's recursion limit.
-        var parts = Enumerable.Range(0, images).SelectMany(image => Enumerable.Range(1, perImage)
-            .Select(row => $"Image{image}.method{row}")).Chunk(size).ToArray();
+        var parts = claims.Chunk(size).ToArray();
         var lists = string.Concat(parts.Select((part, page) =>
             $"def claims{page} : List CIL.Extraction.MethodMetadata :=\n  [{string.Join(", ", part)}]\n"));
         var joined = Enumerable.Range(0, parts.Length - 1).Reverse()
@@ -374,6 +367,7 @@ partial class Program
         var path = Path.Combine(root, $"MetadataRows{methods}x{images}.lean");
         File.WriteAllText(path, $$"""
             import StrictBinding.Evidence
+            import StrictBinding.PreparedImages
 
             namespace {{name}}
             {{definitions}}{{lists}}def claims : List CIL.Extraction.MethodMetadata := {{joined}}
@@ -382,6 +376,9 @@ partial class Program
             theorem preparedOnce : StrictBinding.ok (StrictBinding.prepare BindingAudit.images) = true := by
               decide +kernel
             {{report}}
+            namespace BindingAudit
+            {{PreparedImagesSource.Replace("set_option debug.skipKernelTC true in", "", StringComparison.Ordinal)}}
+            end BindingAudit
             {{module}}
             {{report}}
             #print axioms BindingAudit.metadataRows
@@ -389,6 +386,37 @@ partial class Program
 
             """);
         return CheckHeartbeats(path, package, 1, $"metadata rows of {methods} methods over {images} images")[0];
+    }
+
+    /// <summary>Every method retains its physical token and names and shares equal row and signature bytes.</summary>
+    static string MethodImageSource(byte[] file, int image, List<string> claims)
+    {
+        Dictionary<(string Row, string Blobs), string> constructors = [];
+        foreach (var method in StrictBindingFacts.MethodSlices(file))
+        {
+            var bytes = (method.Row, method.Blobs);
+            if (!constructors.TryGetValue(bytes, out var constructor))
+            {
+                constructor = "methodWithRows" + constructors.Count;
+                constructors.Add(bytes, constructor);
+            }
+            claims.Add($"Image{image}.{constructor} 0x{method.Token:x8} {method.Strings}");
+        }
+        var methods = string.Concat(constructors.Select(pair => $$"""
+            def {{pair.Value}} (token : Nat) (strings : List CIL.Extraction.ByteEntry) :
+                CIL.Extraction.MethodMetadata :=
+              { own := { assembly := assemblyBlock, rows := [(token, {{pair.Key.Row}})],
+                         strings, blobs := {{pair.Key.Blobs}} } }
+
+            """));
+        return $$"""
+            namespace Image{{image}}
+            {{BindingImage.Definitions(file)}}
+            def assemblyBlock : CIL.Extraction.AssemblyMetadata :=
+              {{StrictBindingFacts.AssemblyBlock(file)}}
+            {{methods}}end Image{{image}}
+
+            """;
     }
 
     /// <summary>A library whose user-string heap holds one repeated UTF-16 string at offset 1.</summary>
@@ -861,13 +889,15 @@ partial class Program
     static void CheckGeneratedPagedModulesElaborate(string root, string package)
     {
         const string imports = "import BindingAudit.Images\nimport Extracted\nimport StrictBinding.Evidence\n";
-        const string stubs = """
+        var stubs = $$"""
             import StrictBinding.Evidence
+            import StrictBinding.PreparedImages
             namespace Extracted
             def methodEvidence : List CIL.Extraction.MethodEvidence := []
             end Extracted
             namespace BindingAudit
             def images : List StrictBinding.PinnedImage := []
+            {{PreparedImagesSource}}
             end BindingAudit
 
             """;
@@ -902,16 +932,12 @@ partial class Program
         // A claim count beyond the bodies the image has repeats them, so the claims can outgrow a fixed image.
         var bodies = Enumerable.Range(0, claims ?? read.Count).Select(index => read[index % read.Count]).ToArray();
         var size = BindingPageSize(bodies.Length);
-        // One definition per claim keeps each list literal small enough for the elaborator's recursion limit.
         var parts = bodies.Select(body =>
-            $"{{ identity := {name}, token := 0x{body.Token:x8}, " +
-            $"bytes := [{string.Join(", ", body.Bytes)}] }}")
+            $"{{ identity := claimIdentity, token := 0x{body.Token:x8}, " +
+            $"bytes := {Nethermind.LeanCIL.ByteLiterals.Of(body.Bytes)} }}")
             .Chunk(size).ToArray();
         var defs = string.Concat(parts.Select((part, index) =>
-            string.Concat(part.Select((claim, at) =>
-                $"def claim{index}_{at} : StrictBinding.BodyClaim := {claim}\n")) +
-            $"def claims{index} : List StrictBinding.BodyClaim :=\n  " +
-            $"[{string.Join(", ", part.Select((_, at) => $"claim{index}_{at}"))}]\n\n"));
+            $"def claims{index} : List StrictBinding.BodyClaim :=\n  [{string.Join(",\n   ", part)}]\n\n"));
         var joined = Enumerable.Range(0, parts.Length - 1).Reverse().Aggregate($"claims{parts.Length - 1}",
             (rest, index) => $"(claims{index} ++ {rest})");
         var lemmas = string.Concat(parts.Select((_, index) => $"theorem bodiesOf{index} : " +
@@ -928,6 +954,8 @@ partial class Program
 
             {{BindingImage.Definitions(file)}}
             def pinned : List StrictBinding.PinnedImage := [{ identity := "{{identity}}", image := image }]
+
+            def claimIdentity : CIL.AssemblyName := {{name}}
 
             {{defs}}def claims : List StrictBinding.BodyClaim := {{joined}}
 

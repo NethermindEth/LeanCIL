@@ -10,6 +10,11 @@ internal static class VerificationSuites
     /// <summary>The runner's own in-process checks, which also run when no suite is named.</summary>
     internal const string Core = "core";
 
+    /// <summary>Inputs that select the test libraries for proof-cost measurement.</summary>
+    internal static bool MeasureLibraries(IEnumerable<string> paths) => paths.Any(path =>
+        path.EndsWith(".lean", StringComparison.Ordinal) ||
+        path is "lakefile.toml" or "lean-toolchain" or "lake-manifest.json");
+
     /// <summary>
     /// The suites whose verified outputs are proofs about extracted methods: examples and generated
     /// outlines. Proof cost measures each one's outputs, in the CI job that verified them.
@@ -29,9 +34,9 @@ internal static class VerificationSuites
     {
         [Core] =
         [
-            "Add", "AddModel", "Alias", "Calls", "CallsSummary", "CertificateReuse", "Choose", "ConsumerBatchA",
-            "ConsumerBatchB", "ConsumerBatchContract", "ConsumerSupportUnion", "CountCallsSummary", "DecodedAdd",
-            "Escape", "Hardware",
+            "Add", "AddContract", "AddModel", "Alias", "Calls", "CallsSummary", "CertificateReuse", "Choose",
+            "ConsumerBatchA", "ConsumerBatchB", "ConsumerBatchContract", "ConsumerSupportUnion",
+            "CountCallsSummary", "DecodedAdd", "Escape", "Hardware",
             "IdentitySummary", "InitializedTypes", "LargeStruct", "PastEnd", "ProofBindingFamilies", "RepeatedSummary",
             "StaticData", "Struct", "StructCopy", "SummaryCalls", "SupportExtractionCache", "VectorSummary",
             "VerificationReuse", "WrongAdd"

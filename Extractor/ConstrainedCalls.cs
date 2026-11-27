@@ -185,8 +185,9 @@ internal static class ConstrainedCalls
                         closedSlotOwner)))
                     candidates.Add((method, candidate));
         }
+        var inheritance = new Dictionary<(TypeReference, TypeReference, int), bool>();
         var winners = candidates.Where(candidate => candidates.All(other =>
-            Derives(candidate.Owner, other.Owner, listed.Length))).ToArray();
+            Derives(candidate.Owner, other.Owner, listed.Length, inheritance))).ToArray();
         if (winners.Length != 1)
             throw new InvalidDataException("Static virtual slot has no unique most specific interface implementation");
         if (winners[0].Body.IsAbstract)
@@ -199,10 +200,20 @@ internal static class ConstrainedCalls
         type.Resolve().Interfaces.Select(implementation =>
             GenericStructs.Substitute(implementation.InterfaceType, type as GenericInstanceType));
 
-    // Inheritance through at most `depth` interface lists, matching the Lean walk's bound.
-    static bool Derives(TypeReference derived, TypeReference ancestor, int depth) =>
-        SameType(derived, ancestor) ||
-        depth > 0 && BaseInterfaces(derived).Any(parent => Derives(parent, ancestor, depth - 1));
+    // Paths reaching the same interface with the same remaining depth have the same answer.
+    static bool Derives(TypeReference derived, TypeReference ancestor, int depth,
+        Dictionary<(TypeReference, TypeReference, int), bool> inheritance)
+    {
+        if (SameType(derived, ancestor)) return true;
+        if (depth == 0) return false;
+        var query = (derived, ancestor, depth);
+        if (!inheritance.TryGetValue(query, out bool found))
+        {
+            found = BaseInterfaces(derived).Any(parent => Derives(parent, ancestor, depth - 1, inheritance));
+            inheritance.Add(query, found);
+        }
+        return found;
+    }
 
     // Dispatch stays inside one extracted assembly: the caller's own or a pinned reference.
     internal static bool Extracted(ModuleDefinition module, ModuleDefinition caller) =>

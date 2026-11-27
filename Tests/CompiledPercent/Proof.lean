@@ -50,6 +50,21 @@ theorem rejectsInvalidBindings :
   all_goals cil_kernel_rfl
 #print axioms rejectsInvalidBindings
 
+/-- Repeating a valid site gives the same physical binding. An empty list, a non-constructor
+in the second slot, or a second specialization for the same token fails. -/
+theorem repeatedConstructorBindings :
+    let bindSites := fun sites =>
+      Extracted.method0Body.bindConstructors? Extracted.method0Original sites rangeDependencies
+    let callee : SpecializedMethod := ⟨[], Core.RangeCtor.definition, ⟨coreLibraryAssembly⟩⟩
+    let wrong := { callee with assembly := ⟨runtimeAssembly⟩ }
+    (bindSites []).isNone ∧
+      bindSites [(5, callee), (5, callee)] = bindSites [(5, callee)] ∧
+      (bindSites [(5, callee), (6, callee)]).isNone ∧
+      (bindSites [(5, callee), (5, wrong)]).isNone := by
+  repeat' constructor
+  all_goals cil_kernel_rfl
+#print axioms repeatedConstructorBindings
+
 /-- The Windows x64 constructor image requires a compatible target and the actual newobj. -/
 theorem rejectsOtherTarget :
     (Extracted.translation_valid.entry .portable).isNone ∧

@@ -24,7 +24,8 @@ internal static class ScalarEvidence
         IEnumerable<string> states = method.Body.Instructions.Select(instruction =>
             certificate.Incoming.TryGetValue(instruction, out NativeOperands.StackType[]? stack)
                 ? $"some [{string.Join(", ", stack.Reverse().Select(Kind))}]" : "none");
-        lean.AppendLine($"def method{number}ScalarStates : Extraction.ScalarCertificate := [{string.Join(", ", states)}]");
+        LeanEmitter.EmitCertificate(lean, $"method{number}ScalarStates", "ScalarCertificate",
+            "Option (List Extraction.ScalarKind)", states);
         var calls = method.Body.Instructions.Count(instruction =>
             instruction.OpCode.Code is Code.Call or Code.Callvirt or Code.Newobj or Code.Calli);
         EmitInstructionChecks(lean, number, method.Body.Instructions.Count, calls, objectProof);

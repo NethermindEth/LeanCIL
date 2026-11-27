@@ -129,7 +129,7 @@ internal sealed class InstructionAdmission(MethodDefinition method, FeatureProfi
         var field = operand.Resolve() ?? throw new InvalidDataException("Unresolved field");
         var code = site.OpCode.Code;
         if (ObjectTypes.Candidate(operand.DeclaringType))
-            ObjectTypes.FieldOperation(operand, field, code == Code.Stfld, code == Code.Ldflda, profile.Architecture);
+            ObjectTypes.FieldOperation(operand, field, code == Code.Stfld, code == Code.Ldflda, layouts);
         else
             InstructionOperands.StructField(operand, field, code, method, profile, layouts);
     }

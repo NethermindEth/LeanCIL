@@ -205,11 +205,13 @@ def regionTable (code : List RawInstruction) (handlers : List ExceptionClause) :
 def checkRegions (code : List RawInstruction) (handlers : List ExceptionClause) :
     Except RegionError Unit := do
   if handlers.isEmpty then return ()
-  unless regionsNest (sortedRegions handlers) [] do
+  let regions := sortedRegions handlers
+  unless regionsNest regions [] do
     throw .misnested
-  let table := regionTable code handlers
+  let count := code.length
+  let table := regionsFrom count 0 regions [] #[]
   match code.zipIdx.findSome? fun (instruction, pc) =>
-      instructionRegionError table code.length pc instruction with
+      instructionRegionError table count pc instruction with
   | some error => throw error
   | none => return ()
 

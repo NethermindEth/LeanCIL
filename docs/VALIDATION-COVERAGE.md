@@ -111,10 +111,11 @@ workflow.
 ### Evidence batches
 
 - The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
-  extractions in six batches. Each method keeps fresh mutable metadata; immutable assembly bytes,
-  hashes and whole-assembly signature validation are shared within the batch. Long-form argument
-  fixtures use a separate batch after writing their modified assembly. Expected extraction
-  failures are isolated, since a batch stops at its first failure.
+  extractions in six batches. Each extraction gets fresh mutable metadata. A batch reads each
+  selected, referenced or trusted runtime assembly image once and checks its hash again before
+  completion. It also shares whole-assembly signature validation for selected and referenced images.
+  Long-form argument fixtures use a separate batch after writing their modified assembly.
+  Expected extraction failures run separately because a batch stops at its first failure.
 - `PrimitiveArrays`, `LayoutEvidence`, `ParameterEvidence`, `GenericEvidence` and
   `StaticScalarValues` each compile their generated positive evidence once as one file, with
   shared imports and a namespace per extraction and proof, and replay it independently with
@@ -124,6 +125,10 @@ workflow.
 - Each of these five scripts accepts `--measure`, which first checks the same final source files
   separately. `artifacts/<fixture>/batch-timings.json` records source hashes, separate time and
   batch compilation/replay time.
+- The call-site agreement suite checks each extracted method, its emission witnesses and its
+  altered operands in a separate namespace. Up to four Lean processes share the cases by source
+  size, subject to the runner's processor and memory limits. All batches must pass before the
+  suite reports any successful case.
 - `GenericEvidence` also checks that an invalid proof fails batch compilation and that an
   unchecked declaration reaches, and fails, independent kernel replay.
 - `GenericEvidence` mutates the emitted `declared` signature (a parameter, the return type, the
@@ -140,7 +145,11 @@ workflow.
   `Tests/BodyDecoding.lean` decodes hand-made tiny and fat bodies with short and long branches, a
   switch, two-byte opcodes, token operands and float constants, rejects each kind of malformed
   body separately with its specific error, and compares the operand table with a static list
-  generated once from the opcodes of Mono.Cecil.
+  generated once from the opcodes of Mono.Cecil. A branchless try/finally case checks that
+  exception boundaries after a five-byte instruction resolve to the correct instruction indices.
+  The body literal fixture decodes one short branch followed by 64, 256 or 1,024 nops and a
+  return. Kernel heartbeats per additional instruction may grow by at most 15% from the first
+  interval to the second.
   `Tests/BodyEncoding.lean` writes bytes and the metadata slice for the hand-built methods of
   other Lean fixtures.
   `Tests/MetadataDecoding.lean` decodes rows, headers, heap entries, signature blobs and

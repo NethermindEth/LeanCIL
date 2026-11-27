@@ -11,7 +11,7 @@ partial class Program
     {
         string directory = At($"artifacts/LeanStrings-\U00010401-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
-        string build = Run(["lake", "build", "+StrictBinding.Image", "+CIL.Interface.FullTransfer"], Root);
+        string build = Run(["lake", "build", "+StrictBinding.PreparedImages", "+CIL.Interface.FullTransfer"], Root);
         if (build.Contains("sorryAx", StringComparison.Ordinal)) throw new InvalidOperationException(build);
         string leanPath = string.Join(Path.PathSeparator, directory, At(".lake/build/lib/lean"));
         var checks = new EmissionChecks(directory, leanPath);
@@ -152,6 +152,9 @@ partial class Program
             Elaborate("Images", $"""
                 {images}
                 #guard BindingAudit.images.map StrictBinding.PinnedImage.identity == [{Expected(Unusual)}]
+                #guard !StrictBinding.ok BindingAudit.preparedImages
+                example : BindingAudit.preparedImages = StrictBinding.prepare BindingAudit.images :=
+                  BindingAudit.prepare_eq.symm
                 """);
             Console.WriteLine("PASS deep binding assembly identity including CRLF");
         }

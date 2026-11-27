@@ -67,7 +67,7 @@ def constructorYields (program : Program) (descriptor : StaticDescriptor)
 
 /-- Initializers reproduce exactly the descriptor's bytes; RVA descriptors have none. An opaque
     scalar has no initializer and only zero bytes, so no value can be pinned through it. -/
-def initializerYields (program : Program) (descriptor : StaticDescriptor) : Bool :=
+private def initializerYieldsIn (stripped : Thunk Program) (descriptor : StaticDescriptor) : Bool :=
   if descriptor.opaqueValue then
     descriptor.initializer.isNone && descriptor.scalar.isSome && descriptor.bytes.all (· == 0)
   else match descriptor.initializer with
@@ -77,16 +77,30 @@ def initializerYields (program : Program) (descriptor : StaticDescriptor) : Bool
     | some value => !init.construct && init.method == 0 && init.arguments.isEmpty &&
         descriptor.scalar.isSome &&
         staticStoredBytes descriptor value == some descriptor.bytes
-    | none => if init.construct then constructorYields (withoutStaticValues program) descriptor init
-      else match Safety.invoke (withoutStaticValues program) initializerFuel init.method
+    | none => if init.construct then constructorYields stripped.get descriptor init
+      else match Safety.invoke stripped.get initializerFuel init.method
         (init.arguments.map .scalar) initializerMemory with
       | .ok (_, [.scalar value]) => staticStoredBytes descriptor value == some descriptor.bytes
       | _ => false
 
-/-- Every constructor-fixed static value in the program is the result of its initializer. -/
+/-- Whether a single descriptor is valid with all constructor-fixed sites removed from execution. -/
+def initializerYields (program : Program) (descriptor : StaticDescriptor) : Bool :=
+  initializerYieldsIn (Thunk.mk fun _ => withoutStaticValues program) descriptor
+
+/-- All sites of a static identity agree on the full descriptor, and its initializer reproduces
+    its bytes. Initializers share a program without constructor-fixed sites. -/
 def StaticValuesValid (program : Program) : Prop :=
-  (program.flatMap fun body => body.staticSites.map Prod.snd).all (initializerYields program) =
-    true
+  let stripped := Thunk.mk fun _ => withoutStaticValues program
+  let checked := program.foldlM (init := (∅ : Std.TreeMap Nat StaticDescriptor)) fun seen body =>
+    body.staticSites.foldlM (init := seen) fun seen (_, descriptor) => do
+      match seen.get? descriptor.identity with
+      | some previous =>
+        guard (previous = descriptor)
+        return seen
+      | none =>
+        guard (initializerYieldsIn stripped descriptor)
+        return seen.insert descriptor.identity descriptor
+  (checked : Option (Std.TreeMap Nat StaticDescriptor)).isSome = true
 
 instance (program : Program) : Decidable (StaticValuesValid program) :=
   inferInstanceAs (Decidable (_ = _))

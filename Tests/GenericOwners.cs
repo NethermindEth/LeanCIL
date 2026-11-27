@@ -83,7 +83,7 @@ foreach (var name in new[] { "Identity", "Combined", "Nested", "NestedHelper", "
     if (name == "Combined")
     {
         var specialization = NarrowEvidence(source, "method1_specialization_validated");
-        var calls = NarrowEvidence(source, "method0_calls_validated");
+        var calls = SeparateClosedBody(NarrowEvidence(source, "method0_calls_validated"), 0);
         proof += "\n" + CheckedEvidenceControl(source, specialization, ["method1_specialization_validated"], 0);
         proof += "\n" + CheckedEvidenceControl(source, calls, ["method0_calls_validated"], 1);
         var cases = new (string Name, string Source)[]

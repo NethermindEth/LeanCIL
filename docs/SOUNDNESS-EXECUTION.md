@@ -65,6 +65,9 @@ override on its chain up to the slot's class, or the slot's own body. A null rec
 `NullReferenceException`. A live receiver enters the body listed for its exact runtime class;
 a receiver whose class the table omits is the model failure `outsideDispatchTable`.
 
+For each slot owner, the extractor records which classes reach it through their base classes.
+It reuses that result for subclasses and rejects a base chain that cycles before reaching the owner.
+
 `ConstrainedCallsValid` re-resolves each table entry over the class catalog the extraction
 emits: it walks the class chain through each class's admitted base, requires the slot to be
 introduced by the called method (`NewSlot`), and requires the listed body's token, owner,

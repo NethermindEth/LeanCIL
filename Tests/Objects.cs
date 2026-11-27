@@ -208,14 +208,15 @@ var forgedViews = new RejectedEvidence(root);
 foreach (var (name, proof, view, forged, marker) in new[]
 {
     ("offset", "LinkedNodes", "def Next : Safety.ReferenceField := ⟨type, 8⟩",
-        "def Next : Safety.ReferenceField := ⟨type, 0⟩", "Next.accessedBy"),
+        "def Next : Safety.ReferenceField := ⟨type, 0⟩", "Safety.ReferenceField.accessedBy_of_shape Next false"),
     ("width", "LinkedNodes", "def Value : Safety.WordField 8 := ⟨type, 0⟩",
-        "def Value : Safety.WordField 4 := ⟨type, 0⟩", "Value.accessedBy"),
+        "def Value : Safety.WordField 4 := ⟨type, 0⟩", "Safety.WordField.accessedBy_of_shape Value false"),
     ("element", "SampleValues", "def Values : Safety.ArrayField .signed32 := ⟨type, 0⟩",
-        "def Values : Safety.ArrayField .unsigned32 := ⟨type, 0⟩", "Values.accessedBy"),
+        "def Values : Safety.ArrayField .unsigned32 := ⟨type, 0⟩",
+        "Safety.ArrayField.accessedBy_of_shape Values false"),
     // A struct element's width is its layout's, so a view with another width fails its own theorem.
     ("structWidth", "TilePairs", "PublicKeyToken=null::Examples.AggregateArrays/Pair\" 16)",
-        "PublicKeyToken=null::Examples.AggregateArrays/Pair\" 8)", "Pairs.accessedBy")
+        "PublicKeyToken=null::Examples.AggregateArrays/Pair\" 8)", "Safety.ArrayField.accessedBy_of_shape Pairs false")
 })
 {
     var extracted = File.ReadAllText(Path.Combine(root, proof, "Extracted.lean"));
@@ -223,7 +224,7 @@ foreach (var (name, proof, view, forged, marker) in new[]
         throw new InvalidOperationException("The extraction does not name the field view: " + view);
     var path = Path.Combine(root, $"ForgedView-{name}.lean");
     File.WriteAllText(path, extracted.Replace(view, forged, StringComparison.Ordinal));
-    forgedViews.Add(path, $"PASS forged field view rejected: {name}", marker);
+    forgedViews.Add(path, $"PASS forged field view rejected: {name}", "Application type mismatch", marker);
 }
 // Lean re-resolves every dispatch table entry from the catalog and requires every concrete class
 // deriving from the slot's class, so a table that swaps bodies or omits a class fails its check.

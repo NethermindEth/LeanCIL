@@ -45,11 +45,35 @@ try
         sequentialSeconds = timer.Elapsed.TotalSeconds;
     }
     var batched = Stopwatch.StartNew();
-    verification.VerifyGeneratedBatch(assembly, "Examples", requests);
+    var first = requests[0];
+    var shared = first with { Theorem = "ExampleProof.same_result", Output = Path.Combine(root, "SharedProof") };
+    if (!benchmark)
+        File.AppendAllText(first.Proof, """
+
+            namespace ExampleProof
+            theorem same_result : (CIL.Safety.invoke Extracted.program 8 0
+                [.scalar (.i64 0), .scalar (.i64 1)] CIL.Safety.Memory.empty).map Prod.snd =
+                .ok [.scalar (.i64 1)] := correctness
+            #print axioms same_result
+            end ExampleProof
+
+            """);
+    var batch = benchmark ? requests : [.. requests, shared];
+    verification.VerifyGeneratedBatch(assembly, "Examples", batch);
     batched.Stop();
     foreach (var request in requests)
         verification.Verify(assembly, "Examples", request.Entry, request.Proof, request.Output, check: true);
-    Console.WriteLine($"PASS {requests.Length} batched proofs, independent certificates and report identities");
+    if (!benchmark)
+    {
+        verification.Verify(assembly, "Examples", shared.Entry, shared.Proof, shared.Output,
+            theorem: shared.Theorem, check: true);
+        var sharedReport = JsonSerializer.Deserialize<JsonElement>(
+            File.ReadAllText(Path.Combine(shared.Output, "verified.json")));
+        if (sharedReport.GetProperty("batchTheorem").GetString() != "BatchCase0.ExampleProof.same_result" ||
+            Sha(Path.Combine(shared.Output, "Batch.lean")) != Sha(Path.Combine(first.Output, "Batch.lean")))
+            throw new InvalidOperationException("Theorems of the same input did not share their checked batch case");
+    }
+    Console.WriteLine($"PASS {batch.Length} batched proofs, independent certificates and report identities");
     if (benchmark)
     {
         var timing = new { fixtures = requests.Length, sequentialSeconds, batchSeconds = batched.Elapsed.TotalSeconds };
@@ -89,13 +113,13 @@ try
             rejected = false;
             try
             {
-                verification.VerifyGeneratedBatch(assembly, "Examples", requests);
+                verification.VerifyGeneratedBatch(assembly, "Examples", batch);
             }
             catch (InvalidOperationException error) when (error.Message == "Batch inputs changed during verification")
             {
                 rejected = true;
             }
-            if (!rejected || requests.Any(r => File.Exists(Path.Combine(r.Output, "verified.json"))))
+            if (!rejected || batch.Any(r => File.Exists(Path.Combine(r.Output, "verified.json"))))
                 throw new InvalidOperationException("Proof code mutated batch inputs without rejecting every report");
             File.WriteAllText(requests[0].Proof, firstProof);
         }

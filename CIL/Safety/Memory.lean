@@ -1,4 +1,5 @@
 import CIL.TypeExpr
+import CIL.Safety.CellIndex
 
 /-!
 # Allocation-aware memory
@@ -128,9 +129,6 @@ inductive Fault where
 
 /-- A memory operation that either succeeds or reports a `Fault`. -/
 abbrev Checked := Except Fault
-
-/-- One past the largest native (64-bit) offset or size. -/
-def nativeLimit : Nat := 2^64
 
 /-- An allocation fits the native address space, has a positive alignment, and its
     sentinels and reference slots lie within its size. -/
@@ -263,13 +261,14 @@ def writeAlwaysPrepend (m : Memory) (r : Reference) (bytes : List (BitVec 8)) (a
 def write (m : Memory) (r : Reference) (bytes : List (BitVec 8)) (alignment : Nat) :
     Checked Memory := do
   access m r bytes.length alignment true
+  let storedCell := initializedCellAt bytes.toArray
   -- A method may read its own initialized output. This grants no write authority
   -- and exposes exactly the interval whose original write authority was checked.
   return { m with
     views := writeViews m r bytes.length
     cells := (fun id offset =>
     if id = r.allocation ∧ r.offset ≤ offset then
-      (match bytes[offset - r.offset]? with
+      (match storedCell (offset - r.offset) with
       | some bits => { bits, initialized := true }
       | none => m.cells id offset)
     else m.cells id offset) }
@@ -299,7 +298,7 @@ def writeIndexed (memory : Memory) (reference : Reference) (bytes : List (BitVec
 theorem writeIndexed_eq (memory : Memory) (reference : Reference)
     (bytes : List (BitVec 8)) (alignment : Nat) :
     writeIndexed memory reference bytes alignment = write memory reference bytes alignment := by
-  simp only [writeIndexed, write, List.getElem?_toArray]
+  simp only [writeIndexed, write, initializedCellAt_eq, List.getElem?_toArray]
 #print axioms writeIndexed_eq
 
 /-- A snapshot is obtained before any destination change, preserving overlap. -/

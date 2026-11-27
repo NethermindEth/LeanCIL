@@ -31,6 +31,21 @@ partial class Program
                 Within(package, ".") == package, "A path inside its package was not returned as spelled under it.");
             Console.WriteLine("PASS a package path that leaves through .. or an absolute path is rejected");
 
+            if (!OperatingSystem.IsWindows())
+            {
+                var restricted = Path.Combine(work, "restricted");
+                Directory.CreateDirectory(restricted);
+                var mode = File.GetUnixFileMode(restricted);
+                try
+                {
+                    File.SetUnixFileMode(restricted, UnixFileMode.None);
+                    var leaf = Path.Combine(restricted, "Missing.lean");
+                    Require(ResolvedPath(leaf) == Path.Combine(ResolvedPath(work), "restricted", "Missing.lean"),
+                        "An inaccessible child lost its spelling below the resolved directory.");
+                }
+                finally { File.SetUnixFileMode(restricted, mode); }
+            }
+
             // A case variant is one location only where the file system says so; no sibling exists to confuse it.
             var variant = Path.Combine(real, "PACKAGE");
             var sameUnderCase = Directory.Exists(variant);
@@ -108,6 +123,15 @@ partial class Program
             Reject(linkedPackage, "escape/Secret.lean", "a link");
             Require(ResolvedRelativePath(outside, Path.Combine(package, "escape", "Secret.lean")) == "Secret.lean",
                 "A location inside a directory reached through a link was not found inside it.");
+            var source = Path.Combine(linkedPackage, "escape", "Secret.lean");
+            var blocked = ConsumerSourceLocations(new(StringComparer.Ordinal)
+            {
+                ["consumer:" + source] = "", ["revision:leancil"] = ""
+            });
+            Require(blocked.Contains(ResolvedPath(source)) && blocked.Contains(ResolvedPath(outside)) &&
+                blocked.Contains(ResolvedPath(work)) && !blocked.Contains(ResolvedPath(linkedPackage)) &&
+                !blocked.Contains(ResolvedPath(Path.Combine(outside, "Other.lean"))),
+                "Batch output overlap changed for a source reached through two directory links.");
             // A dangling link still names where a write through it would land.
             var gone = Path.Combine(work, "gone");
             Directory.CreateDirectory(gone);

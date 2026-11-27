@@ -1,3 +1,4 @@
+#:include ProofProfiler.cs
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
@@ -478,7 +479,8 @@ internal static partial class ProofCostReport
     // Measures the modules of one checkout against one compiled library.
     sealed class Measurer(string tree, string library, string work, int jobs)
     {
-        readonly string frontend = Path.Combine(ScriptDirectory(), "ProofCost.lean");
+        readonly Lazy<Program.ProofProfiler> profiler = new(() => Program.BuildProofProfiler(
+            Path.Combine(work, "profiler"), Path.Combine(ScriptDirectory(), "ProofCost.lean"), tree));
         readonly string shared = Path.Combine(work, "modules");
         readonly SemaphoreSlim slots = new(jobs);
         readonly ModuleTasks modules = new();
@@ -496,11 +498,15 @@ internal static partial class ProofCostReport
         async Task<string?> Compile(string group, string module, string source, string root,
             string[]? treeImports = null)
         {
-            foreach (var import in treeImports ?? Imports(File.ReadAllText(source)))
-                if ((root == shared ||
-                    !File.Exists(Path.Combine(root, import.Replace('.', Path.DirectorySeparatorChar) + ".olean"))) &&
-                    TreeSource(import) is not null && await TreeModule(import) is { } reason)
-                    return $"its import {import} was not measured: {reason}";
+            // Queue independent imports together. Only compilation takes one of the worker slots.
+            var dependencies = treeImports ?? Imports(File.ReadAllText(source)).Where(import =>
+                TreeSource(import) is not null && (root == shared ||
+                    !File.Exists(Path.Combine(root, import.Replace('.', Path.DirectorySeparatorChar) + ".olean"))))
+                .ToArray();
+            var failures = await Task.WhenAll(dependencies.Select(TreeModule));
+            for (var i = 0; i < failures.Length; i++)
+                if (failures[i] is { } reason)
+                    return $"its import {dependencies[i]} was not measured: {reason}";
             var olean = Path.Combine(root, module.Replace('.', Path.DirectorySeparatorChar) + ".olean");
             var report = Path.ChangeExtension(olean, ".cost.json");
             Directory.CreateDirectory(Path.GetDirectoryName(olean)!);
@@ -508,8 +514,11 @@ internal static partial class ProofCostReport
             try
             {
                 var path = string.Join(Path.PathSeparator, new[] { root, shared, library }.Distinct());
-                var result = await Task.Run(() => Execute(["lean", "--run", frontend, module, source, report, olean],
-                    tree, new Dictionary<string, string> { ["LEAN_PATH"] = path, ["LEAN_NUM_THREADS"] = "1" }));
+                var driver = profiler.Value;
+                var environment = new Dictionary<string, string>(driver.Runtime)
+                    { ["LEAN_PATH"] = path, ["LEAN_NUM_THREADS"] = "1" };
+                var result = await Task.Run(() => Execute([driver.Executable, module, source, report, olean],
+                    tree, environment));
                 if (result.Code != 0 || !File.Exists(report)) return Diagnostic(result.Code, result.Output);
             }
             finally { slots.Release(); }
@@ -607,7 +616,8 @@ internal static partial class ProofCostReport
                     directories = consumerDirectories.GetOrAdd(root, path => new Lazy<string[]>(() =>
                         Program.ConsumerSourceDirectories(path, [path]))).Value;
                 }
-                catch (Exception error) when (error is IOException or InvalidOperationException or ArgumentException)
+                catch (Exception error) when (error is IOException or InvalidDataException or
+                    InvalidOperationException or ArgumentException)
                 {
                     consumerFailure = error.Message;
                 }
@@ -757,8 +767,6 @@ internal static partial class ProofCostReport
 
     internal const string LibrariesSource = "libraries";
 
-    static readonly string[] LibraryInputs = ["lakefile.toml", "lean-toolchain", "lake-manifest.json"];
-
     // What a change needs measured: the test libraries when Lean inputs changed, and each selected proof suite.
     internal static string[] Sources(string selectionMatrix, IEnumerable<string> changedPaths)
     {
@@ -766,8 +774,7 @@ internal static partial class ProofCostReport
         var selected = matrix.RootElement.GetProperty("include").EnumerateArray()
             .SelectMany(group => group.GetProperty("suites").EnumerateArray()).Select(suite => suite.GetString())
             .ToHashSet(StringComparer.Ordinal);
-        var lean = changedPaths.Any(path => path.EndsWith(".lean", StringComparison.Ordinal) ||
-            LibraryInputs.Contains(path));
+        var lean = VerificationSuites.MeasureLibraries(changedPaths);
         return [.. lean ? [LibrariesSource] : Array.Empty<string>(),
             .. VerificationSuites.ProofSuites.Where(selected.Contains)];
     }
@@ -812,6 +819,7 @@ internal static partial class ProofCostReport
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"{Schema}\n{Sha(Path.Combine(ScriptDirectory(), "ProofCost.lean"))}\n" +
             $"{Sha(Path.Combine(ScriptDirectory(), "ProofCostReport.cs"))}\n" +
+            $"{Sha(Path.Combine(ScriptDirectory(), "ProofProfiler.cs"))}\n" +
             $"{Sha(Path.Combine(ScriptDirectory(), "Verification.cs"))}\n" +
             string.Join('\n', MeasuringSteps.Select(step => WorkflowStep(workflow, step))))));
     }

@@ -166,7 +166,7 @@ Run(["dotnet", "build", Path.Combine(fixture, "Queries.csproj"), "-c", "Release"
 var evidence = new GeneratedEvidence(output);
 Check(assembly, "Examples", witnesses);
 Check(Path.Combine(fixture, "bin", "Queries.dll"), "Queries", extraSites);
-evidence.Check(replay: false);
+evidence.Check(replay: false, maxShards: 4);
 
 void Check(string dll, string identity, IEnumerable<CallWitness> sites)
 {

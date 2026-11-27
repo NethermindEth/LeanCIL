@@ -448,28 +448,30 @@ private def decodeInstructions (tokens : Std.TreeMap Nat (RawOperand × TokenFac
     | some token => .ok (instruction :: rest, (index, token) :: statics)
     | none => .ok (instruction :: rest, statics)
 
-/-- Map each instruction's start offset to its index and to whether a prefix opcode precedes
-    it. -/
-private def indexStarts : List RawInstruction → Nat → Bool → Std.TreeMap Nat (Nat × Bool) →
-    Std.TreeMap Nat (Nat × Bool)
-  | [], _, _, starts => starts
-  | instruction :: rest, index, afterPrefix, starts =>
-    indexStarts rest (index + 1) (isPrefixOpcode instruction.opcode)
-      (starts.insert instruction.offset (index, afterPrefix))
+/-- Instruction offsets in stream order, with the instruction index and preceding-prefix flag. -/
+private def startEntries : List RawInstruction → Nat → Bool → List (Nat × (Nat × Bool))
+  | [], _, _ => []
+  | instruction :: rest, index, afterPrefix =>
+    (instruction.offset, index, afterPrefix) ::
+      startEntries rest (index + 1) (isPrefixOpcode instruction.opcode)
+
+/-- The decoder advances at least one byte per instruction, so the starts form an ordered index. -/
+private def indexStarts (code : List RawInstruction) : SearchTree (Nat × Bool) :=
+  SearchTree.ofSorted (startEntries code 0 false)
 
 /-- Replace a branch's absolute byte offset by the index of the instruction starting there. The
     target must lie inside the code, start an instruction, and not follow a prefix: control may
     enter a prefixed instruction only at its first prefix (ECMA-335 III.2). -/
-private def instructionIndex (starts : Std.TreeMap Nat (Nat × Bool))
+private def instructionIndex (starts : SearchTree (Nat × Bool))
     (codeLength offset target : Nat) : Except BodyError Nat :=
   if codeLength ≤ target then .error (.branchOutsideBody offset)
-  else match starts[target]? with
+  else match starts.find? target with
     | some (index, false) => .ok index
     | some (_, true) => .error (.branchIntoPrefixed offset target)
     | none => .error (.branchIntoInstruction offset target)
 
 /-- Turn the absolute branch offsets of one instruction into instruction indices. -/
-private def resolveBranches (starts : Std.TreeMap Nat (Nat × Bool)) (codeLength : Nat)
+private def resolveBranches (starts : SearchTree (Nat × Bool)) (codeLength : Nat)
     (instruction : RawInstruction) : Except BodyError RawInstruction :=
   match instruction.operand with
   | .target target => do
@@ -479,6 +481,41 @@ private def resolveBranches (starts : Std.TreeMap Nat (Nat × Bool)) (codeLength
     let indices ← targets.mapM (instructionIndex starts codeLength instruction.offset)
     .ok { instruction with operand := .targets indices }
   | _ => .ok instruction
+
+/-- A target operand needs translation from byte offsets to instruction indices. -/
+private def hasBranch (instruction : RawInstruction) : Bool :=
+  match instruction.operand with
+  | .target _ | .targets _ => true
+  | _ => false
+
+/-- Resolve instruction targets, reusing a body whose operands carry no offsets. -/
+private def resolveCodeBranches (starts : Thunk (SearchTree (Nat × Bool))) (size : Nat)
+    (raw : List RawInstruction) : Except BodyError (List RawInstruction) :=
+  if raw.any hasBranch then raw.mapM (resolveBranches starts.get size) else .ok raw
+
+/-- Resolving a body without target operands leaves every instruction intact. -/
+private theorem resolveCodeBranches_eq (starts : Thunk (SearchTree (Nat × Bool))) (size : Nat)
+    (raw : List RawInstruction) :
+    resolveCodeBranches starts size raw = raw.mapM (resolveBranches starts.get size) := by
+  unfold resolveCodeBranches
+  split
+  · rfl
+  · rename_i noBranches
+    have same (instruction : RawInstruction) (member : instruction ∈ raw) :
+        resolveBranches starts.get size instruction = .ok instruction := by
+      have absent : hasBranch instruction ≠ true := fun present =>
+        noBranches (List.any_eq_true.mpr ⟨instruction, member, present⟩)
+      cases operand : instruction.operand <;> simp_all [hasBranch, resolveBranches]
+    clear noBranches
+    induction raw with
+    | nil => rfl
+    | cons head tail ih =>
+      rw [List.mapM_cons, same head (by simp), ← ih (fun i member =>
+        same i (List.mem_cons_of_mem _ member))]
+      rfl
+
+#print axioms resolveCodeBranches_eq
+
 /-- The fields of a method body header. -/
 structure BodyHeader where
   maxStack : Nat
@@ -618,11 +655,11 @@ private def finallyFlags : Nat := 2
     `count`; both ranges are nonempty and disjoint. A catch takes the class its token has in the
     checked token table, and a finally's reserved word is zero. -/
 private def decodeClause (tokens : Std.TreeMap Nat (RawOperand × TokenFacts))
-    (starts : Std.TreeMap Nat (Nat × Bool)) (codeLength count index : Nat)
+    (starts : SearchTree (Nat × Bool)) (codeLength count index : Nat)
     (encoded : EncodedClause) : Except BodyError ExceptionClause := do
   let boundary := fun offset =>
     if offset == codeLength then some count
-    else match starts[offset]? with
+    else match starts.find? offset with
       | some (position, false) => some position
       | _ => none
   let (some tryStart, some tryEnd, some handlerStart, some handlerEnd) :=
@@ -643,7 +680,7 @@ private def decodeClause (tokens : Std.TreeMap Nat (RawOperand × TokenFacts))
 
 /-- Decode `remaining` clauses from `fields`, numbering them from `index`. -/
 private def decodeClauses (tokens : Std.TreeMap Nat (RawOperand × TokenFacts))
-    (starts : Std.TreeMap Nat (Nat × Bool)) (codeLength count : Nat) (fat : Bool) :
+    (starts : SearchTree (Nat × Bool)) (codeLength count : Nat) (fat : Bool) :
     Nat → Nat → List Nat → Except BodyError (List ExceptionClause)
   | 0, _, _ => .ok []
   | remaining + 1, index, fields => do
@@ -659,7 +696,7 @@ private def fatTable : Nat := 0x41
     instructions, when the header announces one: padding to a four-byte boundary, then one small
     or fat table that holds at least one clause and ends the body. -/
 private def decodeSection (tokens : Std.TreeMap Nat (RawOperand × TokenFacts))
-    (starts : Std.TreeMap Nat (Nat × Bool)) (codeLength count : Nat) (header : BodyHeader)
+    (starts : Thunk (SearchTree (Nat × Bool))) (codeLength count : Nat) (header : BodyHeader)
     (sectionBytes : List Nat) : Except BodyError (List ExceptionClause) := do
   if !header.moreSections then return []
   let padding := (4 - codeLength % 4) % 4
@@ -672,7 +709,7 @@ private def decodeSection (tokens : Std.TreeMap Nat (RawOperand × TokenFacts))
   let width := if fat then 24 else 12
   unless padding ≤ sectionBytes.length && size == 4 + fields.length && 0 < fields.length &&
       fields.length % width == 0 do throw .invalidSection
-  decodeClauses tokens starts codeLength count fat (fields.length / width) 0 fields
+  decodeClauses tokens starts.get codeLength count fat (fields.length / width) 0 fields
 
 /-- Decode the complete instruction stream under the checked header and operand table, then the
     exception section after it, whose clauses must pass `checkRegions`. -/
@@ -686,13 +723,25 @@ private def decodeCode (env : MetadataEnv) (arity ownerArity : Nat) (body : Body
   let (raw, statics) ← decodeInstructions tokens code.length 0 0 code
   if !body.imports.calls.isEmpty && !body.imports.checkUses imports raw then
     throw (.metadata (.operandMismatch 0))
-  let starts := indexStarts raw 0 false {}
-  let instructions ← raw.mapM (resolveBranches starts code.length)
+  let starts := Thunk.mk fun _ => indexStarts raw
+  let instructions ← resolveCodeBranches starts code.length raw
   let handlers ← decodeSection tokens starts code.length raw.length header sectionBytes
   (checkRegions instructions handlers).mapError BodyError.regions
   .ok { maxStack := header.maxStack, initLocals := header.initLocals,
         localSignature := header.localSignature, code := instructions, statics := statics,
         handlers := handlers }
+
+/-- The header and its payload, after checking every carried byte fits in eight bits. -/
+private def checkedHeader (body : BodyEvidence) : Except BodyError (BodyHeader × List Nat) := do
+  if !body.bytes.all (· < 256) then throw .invalidByte
+  decodeHeader body.bytes
+
+/-- The checked instructions and sections belonging to one header. -/
+private def decodePayload (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
+    (header : BodyHeader) (payload : List Nat) : Except BodyError DecodedBody :=
+  let (code, sectionBytes) :=
+    if header.moreSections then payload.splitAt header.codeSize else (payload, [])
+  decodeCode env arity ownerArity body header code sectionBytes
 
 /-- Decode a method body: its header, its instructions, with branch operands as instruction
     indices and every token operand checked against the metadata, and its exception clauses.
@@ -701,11 +750,8 @@ private def decodeCode (env : MetadataEnv) (arity ownerArity : Nat) (body : Body
     header announces. -/
 def decodeBody (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence) :
     Except BodyError DecodedBody := do
-  if !body.bytes.all (· < 256) then throw .invalidByte
-  let (header, payload) ← decodeHeader body.bytes
-  let (code, sectionBytes) :=
-    if header.moreSections then payload.splitAt header.codeSize else (payload, [])
-  decodeCode env arity ownerArity body header code sectionBytes
+  let (header, payload) ← checkedHeader body
+  decodePayload env arity ownerArity body header payload
 
 /-- The metadata environment and imported layouts used to check the body's own tokens. -/
 def BodyEvidence.environment (body : BodyEvidence) : Except MetadataError MetadataEnv := do
@@ -713,17 +759,61 @@ def BodyEvidence.environment (body : BodyEvidence) : Except MetadataError Metada
   return { env with publishedLayouts := body.imports.layouts,
                     layoutDeclarations := some body.layoutDeclarations }
 
+/-- Read the little-endian operand at an indexed byte position. -/
+private def indexedUnsigned? (bytes : Array Nat) : Nat → Nat → Option Nat
+  | 0, _ => some 0
+  | width + 1, offset => do
+    let byte ← indexedRead? bytes offset
+    let high ← indexedUnsigned? bytes width (offset + 1)
+    return byte + 256 * high
+
+/-- An indexed operand agrees with the physical byte reader, including truncated operands. -/
+private theorem indexedUnsigned?_eq (bytes : List Nat) (width offset site : Nat) :
+    indexedUnsigned? bytes.toArray width offset =
+      ((readUnsigned site width (bytes.drop offset)).toOption.map Prod.fst) := by
+  induction width generalizing offset with
+  | zero => rfl
+  | succ width ih =>
+    rw [indexedUnsigned?, indexedRead?_eq, List.getElem?_toArray, ih]
+    rw [← List.head?_drop, ← List.tail_drop]
+    cases tail : bytes.drop offset with
+    | nil => rfl
+    | cons byte rest =>
+      simp only [List.head?_cons, List.tail_cons, readUnsigned, bind, Option.bind, Except.bind]
+      cases readUnsigned site width rest <;> rfl
+#print axioms indexedUnsigned?_eq
+
+/-- A reader for the physical tokens at decoded `newobj` instructions of one checked body.
+Multiple sites share indexed instructions and bytes. A single site reads the two lists directly. -/
+def BodyEvidence.constructorTokenReader? (body : BodyEvidence) (arity ownerArity : Nat)
+    (indexed : Bool) : Option (Nat → Option Nat) := do
+  let env ← body.environment.toOption
+  let (header, bytes) ← (checkedHeader body).toOption
+  let decoded ← (decodePayload env arity ownerArity body header bytes).toOption
+  let lookup := if indexed then indexedRead? decoded.code.toArray else (decoded.code[·]?)
+  let operand := if indexed then
+      let indexedBytes := bytes.toArray
+      fun offset => indexedUnsigned? indexedBytes 4 (offset + 1)
+    else fun offset => (readUnsigned offset 4 (bytes.drop (offset + 1))).toOption.map Prod.fst
+  return fun pc => do
+    let site ← lookup pc
+    guard (site.opcode == 0x73)
+    operand site.offset
+
+/-- An indexed reader returns the same tokens and failures as individual list reads. -/
+theorem BodyEvidence.constructorTokenReader?_indexed (body : BodyEvidence)
+    (arity ownerArity : Nat) :
+    body.constructorTokenReader? arity ownerArity true =
+      body.constructorTokenReader? arity ownerArity false := by
+  simp [BodyEvidence.constructorTokenReader?, ← indexedUnsigned?_eq]
+#print axioms BodyEvidence.constructorTokenReader?_indexed
+
 /-- The metadata token encoded at a decoded `newobj` instruction. The byte offset comes from
 the decoder, so an earlier call or a matching byte inside another operand cannot select it. -/
 def BodyEvidence.constructorTokenAt? (body : BodyEvidence) (arity ownerArity pc : Nat) :
     Option Nat := do
-  let env ← body.environment.toOption
-  let decoded ← (decodeBody env arity ownerArity body).toOption
-  let site ← decoded.code[pc]?
-  guard (site.opcode == 0x73)
-  let (_, code) ← (decodeHeader body.bytes).toOption
-  let (token, _) ← (readUnsigned site.offset 4 (code.drop (site.offset + 1))).toOption
-  return token
+  let reader ← body.constructorTokenReader? arity ownerArity false
+  reader pc
 
 /-- The method's definition, its locals and its body, each checked against the metadata the
     body carries: the decoded body, when everything agrees with the method instantiated at
@@ -781,47 +871,45 @@ private def followsPrefix (code : List RawInstruction) : Nat → Bool
   | 0 => false
   | index + 1 => (code[index]?).any (isPrefixOpcode ·.opcode)
 
-/-- Every entry of `starts` records whether its index follows a prefix in `code`. -/
-private def StartsFollow (code : List RawInstruction)
-    (starts : Std.TreeMap Nat (Nat × Bool)) : Prop :=
-  ∀ (offset index : Nat) (after : Bool), starts[offset]? = some (index, after) →
-    after = followsPrefix code index
+/-- The preceding-prefix flag in each start entry agrees with the instruction stream. -/
+private theorem startEntries_follow (code : List RawInstruction) :
+    ∀ (rest : List RawInstruction) (index : Nat) (after : Bool),
+      code.drop index = rest → after = followsPrefix code index →
+      ∀ offset position flag, (offset, position, flag) ∈ startEntries rest index after →
+        flag = followsPrefix code position
+  | [], _, _, _, _, _, _, _, member => by simp [startEntries] at member
+  | instruction :: rest, index, after, dropped, current, offset, position, flag, member => by
+    rcases List.mem_cons.mp member with same | later
+    · cases same
+      exact current
+    · have fetched : code[index]? = some instruction := by
+        rw [← List.head?_drop, dropped]; rfl
+      apply startEntries_follow code rest (index + 1) (isPrefixOpcode instruction.opcode)
+        _ _ offset position flag later
+      · rw [← List.tail_drop, dropped]; rfl
+      · simp [followsPrefix, fetched]
 
-/-- `indexStarts` records, for each instruction it indexes, whether a prefix precedes it. -/
-private theorem indexStarts_follow (code : List RawInstruction) :
-    ∀ (rest : List RawInstruction) (index : Nat) (after : Bool)
-      (starts : Std.TreeMap Nat (Nat × Bool)),
-      code.drop index = rest → after = followsPrefix code index → StartsFollow code starts →
-      StartsFollow code (indexStarts rest index after starts)
-  | [], _, _, _, _, _, follow => by simpa [indexStarts] using follow
-  | instruction :: rest, index, after, starts, dropped, current, follow => by
-    simp only [indexStarts]
-    have fetched : code[index]? = some instruction := by
-      rw [← List.head?_drop, dropped]; rfl
-    apply indexStarts_follow code rest (index + 1)
-    · rw [← List.tail_drop, dropped]; rfl
-    · simp [followsPrefix, fetched]
-    · unfold StartsFollow at follow ⊢
-      intro offset found after' entry
-      rw [Std.TreeMap.getElem?_insert] at entry
-      split at entry
-      · simp only [Option.some.injEq, Prod.mk.injEq] at entry
-        obtain ⟨rfl, rfl⟩ := entry
-        exact current
-      · exact follow offset found after' entry
+#print axioms startEntries_follow
+
+/-- A successful offset lookup reports the preceding-prefix flag of the instruction it found. -/
+private theorem indexStarts_follow {code : List RawInstruction} {offset index : Nat} {after : Bool}
+    (found : (indexStarts code).find? offset = some (index, after)) :
+    after = followsPrefix code index :=
+  startEntries_follow code code 0 false List.drop_zero rfl offset index after
+    (SearchTree.mem_ofSorted (SearchTree.find?_mem_toList _ _ _ found))
 
 #print axioms indexStarts_follow
 
 /-- A branch destination the body decoder resolves is an entry of `starts` that follows no
     prefix. -/
-private theorem instructionIndex_unprefixed {starts : Std.TreeMap Nat (Nat × Bool)}
+private theorem instructionIndex_unprefixed {starts : SearchTree (Nat × Bool)}
     {codeLength offset target index : Nat}
     (resolved : instructionIndex starts codeLength offset target = .ok index) :
-    ∃ entry : Nat, starts[entry]? = some (index, false) := by
+    ∃ entry : Nat, starts.find? entry = some (index, false) := by
   unfold instructionIndex at resolved
   by_cases outside : codeLength ≤ target
   · simp [outside] at resolved
-  · cases found : starts[target]? with
+  · cases found : starts.find? target with
     | none => simp [outside, found] at resolved
     | some entry =>
       obtain ⟨foundIndex, after⟩ := entry
@@ -863,11 +951,11 @@ private theorem mapM_ok_at {α β ε : Type} {make : α → Except ε β} :
 
 /-- An instruction the decoder resolves keeps its opcode, and each of its branch destinations is
     an entry of `starts` that follows no prefix. -/
-private theorem resolveBranches_unprefixed {starts : Std.TreeMap Nat (Nat × Bool)}
+private theorem resolveBranches_unprefixed {starts : SearchTree (Nat × Bool)}
     {codeLength : Nat} {instruction resolved : RawInstruction}
     (ok : resolveBranches starts codeLength instruction = .ok resolved) :
     resolved.opcode = instruction.opcode ∧ ∀ target, branchesTo target resolved = true →
-      ∃ entry : Nat, starts[entry]? = some (target, false) := by
+      ∃ entry : Nat, starts.find? entry = some (target, false) := by
   unfold resolveBranches at ok
   split at ok
   · next destination operand =>
@@ -903,20 +991,15 @@ private theorem resolveBranches_unprefixed {starts : Std.TreeMap Nat (Nat × Boo
     have no branch into the instruction after a prefix. -/
 private theorem resolved_prefixEntryFree {raw instructions : List RawInstruction}
     {codeLength : Nat}
-    (ok : raw.mapM (resolveBranches (indexStarts raw 0 false ∅) codeLength) = .ok instructions) :
+    (ok : raw.mapM (resolveBranches (indexStarts raw) codeLength) = .ok instructions) :
     PrefixEntryFree instructions := by
-  have follow : StartsFollow raw (indexStarts raw 0 false ∅) :=
-    indexStarts_follow raw raw 0 false ∅ List.drop_zero rfl (by
-      unfold StartsFollow
-      intro offset index after found
-      simp at found)
   intro pc instruction fetched isPrefix
   rw [List.any_eq_false]
   intro other member branches
   obtain ⟨position, otherAt⟩ := List.mem_iff_getElem?.mp member
   obtain ⟨_, _, resolvedOther⟩ := mapM_ok_at ok position other otherAt
   obtain ⟨entry, found⟩ := (resolveBranches_unprefixed resolvedOther).2 (pc + 1) branches
-  have unprefixed := follow entry (pc + 1) false found
+  have unprefixed := indexStarts_follow found
   obtain ⟨original, originalAt, resolvedHere⟩ := mapM_ok_at ok pc instruction fetched
   have sameOpcode := (resolveBranches_unprefixed resolvedHere).1
   simp [followsPrefix, originalAt, ← sameOpcode, isPrefix] at unprefixed
@@ -928,7 +1011,8 @@ theorem decodeBody_prefixEntryFree {env : MetadataEnv} {arity ownerArity : Nat}
     {body : BodyEvidence} {decoded : DecodedBody}
     (ok : decodeBody env arity ownerArity body = .ok decoded) : PrefixEntryFree decoded.code := by
   unfold decodeBody at ok
-  simp only [decodeCode, bind, Except.bind] at ok
+  simp only [checkedHeader, decodePayload, decodeCode, resolveCodeBranches_eq,
+    bind, Except.bind] at ok
   repeat' split at ok
   all_goals first
     | (simp only [Except.ok.injEq] at ok; subst ok; exact resolved_prefixEntryFree ‹_›)
@@ -956,7 +1040,8 @@ private theorem decodeBody_checkedTable {env : MetadataEnv} {arity ownerArity : 
     ∃ frame table, env.frame arity ownerArity = .ok frame ∧
       checkTable env frame body.imports.byIdentity body.tokens.operands ∅ = .ok table := by
   unfold decodeBody at ok
-  simp only [decodeCode, bind, Except.bind] at ok
+  simp only [checkedHeader, decodePayload, decodeCode, resolveCodeBranches_eq,
+    bind, Except.bind] at ok
   repeat' split at ok
   all_goals first
     | contradiction
@@ -1101,7 +1186,8 @@ private theorem decodeBody_call {env arity ownerArity body decoded}
     (fetched : decoded.code[pc]? = some instruction) (called : instruction.operand = .call call) :
     ∃ token, (token, RawOperand.call call) ∈ body.tokens.operands := by
   unfold decodeBody at ok
-  simp only [decodeCode, bind, Except.bind] at ok
+  simp only [checkedHeader, decodePayload, decodeCode, resolveCodeBranches_eq,
+    bind, Except.bind] at ok
   repeat' split at ok
   all_goals first
     | contradiction

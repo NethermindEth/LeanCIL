@@ -38,6 +38,8 @@ try
     Reject("missing library module", () => RequireLeanFixtures("CIL.DoesNotExist"));
     File.AppendAllText(path, " ");
     Reject("manifest changed", () => RequireLeanFixtures(module));
+    File.WriteAllText(source, $"import {dependent}\n" + fixture);
+    Reject("import cycle", () => verification.PrepareLeanFixtures(dependent));
 }
 finally
 {

@@ -173,7 +173,7 @@ foreach (var (name, model) in new[]
     rejected.Add(path, "PASS empty span identity rejection: " + name,
         "cil_decoded_method: the decoded method has no type operand");
 }
-rejected.Check();
+rejected.Check(parallel: true);
 
 foreach (var mutation in new[] { "reset-scope", "reset-unscoped", "reset-interior" })
 {

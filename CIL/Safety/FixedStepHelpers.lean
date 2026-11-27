@@ -179,6 +179,18 @@ theorem referenceStepOperation (operation : CIL.Instruction)
   all_goals constructor
 #print axioms referenceStepOperation
 
+/-- An observable step passes a shared guard that would reject either computation. -/
+theorem ResultRenamed.ofUnsupportedGuard {mapping : AllocationRenaming} {relation : α → β → Prop}
+    {guard : Bool} {reason : String} {source : ExecutionResult α} {target : ExecutionResult β}
+    (observable : SuccessOrThrow (if guard then .error (.unsupported reason) else source))
+    (next : SuccessOrThrow source → ResultRenamed mapping relation source target) :
+    ResultRenamed mapping relation (if guard then .error (.unsupported reason) else source)
+      (if guard then .error (.unsupported reason) else target) := by
+  cases guard with
+  | false => exact next observable
+  | true => exact False.elim observable
+#print axioms ResultRenamed.ofUnsupportedGuard
+
 set_option hygiene false in
 /-- Resolve dispatcher fallback patterns without unfolding the checked fallback computation. -/
 macro "fixed_fallback" : tactic => `(tactic| (
@@ -195,25 +207,20 @@ macro "fixed_fallback" : tactic => `(tactic| (
   all_goals try exact fallback
   all_goals cases stack with
   | nil =>
-    try dsimp only [List.map_nil]
     exact fallback
   | cons first rest =>
     cases first
-    all_goals try dsimp only [List.map_cons, AllocationRenaming.value, LocalIndexMap.value]
     all_goals try exact fallback
     all_goals cases rest with
     | nil =>
-      try dsimp only [List.map_nil, List.map_cons, AllocationRenaming.value, LocalIndexMap.value]
       first
-      | contradiction
       | exact fallback
+      | contradiction
     | cons second rest =>
       cases second
-      all_goals try dsimp only [List.map_nil, List.map_cons, AllocationRenaming.value,
-        LocalIndexMap.value]
       all_goals first
-      | contradiction
       | exact fallback
+      | contradiction
       | (exfalso
          have excluded : ∀ (offset : CIL.Value) (reference : ManagedReference) (tail : List Value),
              CIL.Instruction.add = CIL.Instruction.add →
@@ -277,10 +284,9 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     (if unspecifiedOperands (observerCount operation) (stack.map (indices.value mapping))
       then _ else _)
   rw [indices.unspecifiedOperands mapping]
-  by_cases guard : unspecifiedOperands (observerCount operation) stack = true
-  · simp only [guard, ite_true] at observable
-    cases observable
-  · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
+  apply ResultRenamed.ofUnsupportedGuard observable
+  · clear observable
+    intro observable
     split at observable
     -- The catch-all's exclusions are named so the arms' own names stay the newest inaccessible
     -- ones; `fixed_fallback` reads the hole and table-offset exclusions and the boundary arm the

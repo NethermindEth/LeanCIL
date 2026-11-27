@@ -88,6 +88,63 @@ theorem constructor_bytes : StaticValuesValid (constructed [7, 0]) := by decide 
 theorem forged_constructor_bytes : ¬ StaticValuesValid (constructed [8, 0]) := by decide +kernel
 #print axioms forged_constructor_bytes
 
+/-- A method loading the field with the descriptor supplied at that site. -/
+private def reading (site : StaticDescriptor) : Method :=
+  { code := [.ldsfld site.field, .ret], locals := [], returnsValue := true,
+    staticSites := [(0, site)] }
+
+/-- The four-byte literal stored in one static field. -/
+private def literalSite (byte : BitVec 8) : StaticDescriptor :=
+  { identity := 0, field := { field with type := .primitive .uint32 },
+    bytes := [byte, 0, 0, 0], scalar := some false,
+    initializer := some ⟨0, [], some (.i32 (byte.zeroExtend 32)), false⟩ }
+
+/-- Each literal reproduces its own bytes. Two methods can share the same descriptor or load
+    different fields, but conflicting descriptors for one identity fail validation. -/
+theorem descriptor_agreement :
+    let first := literalSite 7
+    let second := literalSite 8
+    let otherField := { second.field with index := 1, name := name!"One" }
+    let other := { second with identity := 1, field := otherField }
+    StaticValuesValid [reading first, reading first] ∧
+    StaticValuesValid [reading first, reading other] ∧
+    StaticValuesValid [reading first, reading other, reading first] ∧
+    ¬ StaticValuesValid [reading first, reading other, reading second] ∧
+    ¬ StaticValuesValid [reading first, reading { first with field := otherField }] ∧
+    ¬ StaticValuesValid [reading first, reading second] ∧
+    ¬ StaticValuesValid [reading first, reading { first with alignment := 4 }] ∧
+    ¬ StaticValuesValid [reading first, reading { first with initializer := none }] := by
+  decide +kernel
+#print axioms descriptor_agreement
+
+/-- One initializer shared by every load in a method. -/
+private def repeatedLoads (count : Nat) : Program :=
+  let site := descriptor zeros (some ⟨1, [], none, false⟩)
+  [{ code := (List.replicate count [.ldsfld field, .pop]).flatten ++ [.ret],
+     staticSites := (List.range count).map (fun index => (2 * index, site)),
+     locals := [], returnsValue := false }, initializer]
+
+open Lean Elab Command Meta in
+set_option maxHeartbeats 0 in
+run_cmd do
+  let cost (count : Nat) := do
+    let claim ← `(decide (StaticValuesValid (repeatedLoads $(quote count))) = true)
+    let statement ← liftTermElabM do
+      instantiateMVars (← Term.elabTermAndSynthesize claim (some (mkSort 0)))
+    let proof := mkApp2 (mkConst ``Eq.refl [1]) (mkConst ``Bool) (mkConst ``Bool.true)
+    let start ← IO.getNumHeartbeats
+    match Kernel.check (← getEnv) {} (Expr.letE `checked statement proof (.bvar 0) false) with
+    | .error error => throwKernelException error
+    | .ok _ => return (← IO.getNumHeartbeats) - start
+  let one ← cost 1
+  let eight ← cost 8
+  let many ← cost 64
+  logInfo m!"static initializer check at 1, 8 and 64 loads: {one}, {eight}, {many} heartbeats"
+  -- The first repeat pays for descriptor equality. Later sites only look up and compare.
+  let maxPerAdditionalLoad := 1600
+  if one ≥ eight || eight ≥ many || many - eight > (64 - 8) * maxPerAdditionalLoad then
+    throwError "static initializer checks exceeded the kernel work budget per additional load"
+
 /-- A constructor must return void, even if its returned aggregate matches the descriptor. -/
 theorem returning_constructor : ¬ StaticValuesValid (constructed zeros initializer) := by
   decide +kernel

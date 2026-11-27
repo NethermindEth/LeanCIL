@@ -1363,6 +1363,15 @@ elab_rules : tactic
               evalTactic (← `(tactic| cil_checked_step_equations [$facts,*]))
               return
             catch _ => saved.restore
+        if let some equation ← typedObjectStep? body op pc args frame stack memory then
+          let some (_, _, resolved) := (← inferType equation).eq? | throwError "expected a step equation"
+          let stated ← withLocalDeclD `stepped (← inferType step) fun stepped => do
+            mkLambdaFVars #[stepped] (← mkEq stepped result)
+          let rewritten ← mkCongrArg stated equation
+          let target ← mkEq resolved result
+          replaceMainGoal [← (← getMainGoal).replaceTargetEq target rewritten]
+          evalTactic (← `(tactic| cil_checked_step_normalized [$facts:term,*]))
+          return
         if op.isAppOfArity ``CIL.Instruction.ldobj 1 then
           let saved ← saveState
           try
@@ -1397,15 +1406,6 @@ elab_rules : tactic
               all_goals simp [cil_guard, cil_checked, referenceAt, checkedAt, $[$facts:term],*] <;> rfl)))
             return
           catch _ => saved.restore
-        if let some equation ← typedObjectStep? body op pc args frame stack memory then
-          let some (_, _, resolved) := (← inferType equation).eq? | throwError "expected a step equation"
-          let stated ← withLocalDeclD `stepped (← inferType step) fun stepped => do
-            mkLambdaFVars #[stepped] (← mkEq stepped result)
-          let rewritten ← mkCongrArg stated equation
-          let target ← mkEq resolved result
-          replaceMainGoal [← (← getMainGoal).replaceTargetEq target rewritten]
-          evalTactic (← `(tactic| cil_checked_step_normalized [$facts:term,*]))
-          return
     if let some (_, pending, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq? then
       let opcodeHead := (argument? pending 1).bind (·.getAppFn.constName?)
       if pending.isAppOfArity ``CIL.Safety.step 7 &&
@@ -1555,12 +1555,34 @@ elab_rules : tactic
           replaceMainGoal [goal]
           let factTerm ← goal.withContext (Term.exprToSyntax (mkFVar fact))
           pure (.ofElems (facts.getElems.push factTerm))
-    -- A call-family step's arm matches on its link; the read's fact lets that match reduce. It
-    -- enters as a hypothesis, so the run's record, whose simp contexts are keyed by fact text and
-    -- would hand a later pc this pc's fact, is not consulted for this step.
-    let linkFacts : Array Term ← if linkedOpcodes.contains operation then
-        match (← stepLinkFact? (← entryAt "cil_checked_step_normalized" args 0)
-            (← entryAt "cil_checked_step_normalized" args 2) facts.getElems) with
+    let linkProof ← if linkedOpcodes.contains operation then
+        stepLinkFact? (← entryAt "cil_checked_step_normalized" args 0)
+          (← entryAt "cil_checked_step_normalized" args 2) facts.getElems
+      else pure none
+    -- Field reads and writes have their own fact selection. Other instructions prefer a supplied
+    -- instruction equation to reducing the operation to its shape.
+    let instructionFacts ← if operation == ``CIL.Instruction.ldfld ||
+        operation == ``CIL.Instruction.stfld then pure #[]
+      else dispatchFacts lhs ``CIL.Safety.instruction facts.getElems
+    if let (true, some proof) := (operation == ``CIL.Instruction.call &&
+        instructionFacts.isEmpty, linkProof) then
+      unless ← statesNone proof do
+        -- The direct equation consumes the site proof. Reuse the caller's simplification
+        -- context unless an operand also needs this site's link rewritten.
+        let saved ← saveState
+        try
+          let link ← Term.exprToSyntax proof
+          evalTactic (← `(tactic| cil_strict (
+            refine Eq.trans (CIL.Safety.step_call_direct _ _ _ _ _ $link _) ?_
+            first
+            | cil_checked_linked_step_by_equations [] [$facts,*]
+            | (have atSite := $link
+               cil_checked_linked_step_by_equations [] [$[$facts:term],*, atSite]))))
+          return
+        catch _ => saved.restore
+    -- A link or model used as a simp rule belongs to this pc's local context.
+    let linkFacts : Array Term ←
+        match linkProof with
         | some proof =>
           let (link, goal) ← (← (← getMainGoal).assert (← mkFreshUserName `link)
             (← inferType proof) proof).intro1P
@@ -1583,7 +1605,6 @@ elab_rules : tactic
             replaceMainGoal [goal]
             pure #[linkFact, ← goal.withContext (Term.exprToSyntax (mkFVar fact))]
         | none => pure #[]
-      else pure #[]
     let stepFacts := facts.getElems ++ linkFacts
     -- A checked field can also step from the byte-level read selected by its shape.
     let strategy ← if operation == ``CIL.Instruction.ldfld then
@@ -1604,35 +1625,48 @@ elab_rules : tactic
                (by first | assumption | cil_step_shape) _) ?_
              simp only [storeValueField, cil_guard, cil_checked, checkedAt, ordinaryAccessAlignment,
                Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, $[$stepFacts:term],*] <;> rfl))
-      -- A fact about `instruction` keeps its abstraction only if tried before a per-shape
-      -- equation rewrites past it.
-      else if !(← dispatchFacts lhs ``CIL.Safety.instruction facts.getElems).isEmpty then
+      else if !instructionFacts.isEmpty then
         `(tactic| cil_strict (cil_checked_instruction_from_fact [$facts:term,*]))
       else if let #[link, model] := linkFacts then
+        let modelValue? ← (← getMainGoal).withContext do
+          let type ← inferType (← Term.elabTerm model none)
+          let some (_, _, result) := type.consumeMData.eq? | return none
+          let some #[_, value] := argumentsOf? result ``Option.some 2 | return none
+          return some value
+        -- A known memory call can use its operation equation with the caller's memory facts.
+        let result ← if operation == ``CIL.Instruction.call &&
+            modelValue?.any (·.isAppOf ``CIL.RuntimeModel.memory) then
+            `(tactic| first | cil_checked_step_normalized [$facts:term,*] | rfl)
+          else `(tactic| rfl)
         let evaluate ← `(tactic| (
           refine Eq.trans (CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl _) ?_
-          rfl))
+          $result:tactic))
         let intrinsic ← `(tactic| (
           refine Eq.trans (CIL.Safety.step_call_intrinsic _ _ _ _ _ $link $model rfl) ?_
           cil_checked_intrinsic [$facts:term,*]))
+        let feature ← `(tactic| (
+          refine Eq.trans (CIL.Safety.step_call_feature _ _ _ _ _ $link $model rfl) ?_
+          cil_try_simp_only [cil_step, cil_guard, cil_checked, cil_side, $[$facts:term],*,
+            ite_true, ite_false, Bool.true_eq_false, Bool.false_eq_true]
+          all_goals rfl))
         -- Scalar results can reduce directly. Vector steps normalize lanes, and supplied
         -- evaluation facts must rewrite before reduction unfolds their symbolic operands.
-        let preferIntrinsic ← (← getMainGoal).withContext do
-          let type ← inferType (← Term.elabTerm model none)
-          let some (_, _, result) := type.consumeMData.eq? | return false
-          let some #[_, value] := argumentsOf? result ``Option.some 2 | return false
-          let some #[op, _] := argumentsOf? value ``CIL.RuntimeModel.intrinsic 2 | return false
-          return !op.isAppOf ``CIL.Intrinsic.scalar || !facts.getElems.isEmpty
-        let (firstStep, secondStep) := if preferIntrinsic then (intrinsic, evaluate) else (evaluate, intrinsic)
+        let preferIntrinsic := modelValue?.any fun value =>
+          match argumentsOf? value ``CIL.RuntimeModel.intrinsic 2 with
+          | some #[op, _] => !op.isAppOf ``CIL.Intrinsic.scalar || !facts.getElems.isEmpty
+          | _ => false
+        let featureCall := operation == ``CIL.Instruction.call &&
+          modelValue?.any (·.isAppOf ``CIL.RuntimeModel.feature)
+        let (firstStep, secondStep, thirdStep) :=
+          if featureCall then (feature, intrinsic, evaluate)
+          else if preferIntrinsic then (intrinsic, evaluate, feature)
+          else (evaluate, intrinsic, feature)
         `(tactic| cil_strict (first
           | $firstStep:tactic
           | $secondStep:tactic
           | (apply CIL.Safety.step_call_skipInit_address _ _ _ _ _ $link $model rfl
              assumption)
-          | (refine Eq.trans (CIL.Safety.step_call_feature _ _ _ _ _ $link $model rfl) ?_
-             cil_try_simp_only [cil_step, cil_guard, cil_checked, cil_side, $[$facts:term],*,
-               ite_true, ite_false, Bool.true_eq_false, Bool.false_eq_true]
-             all_goals rfl)
+          | $thirdStep:tactic
           | (refine Eq.trans (CIL.Safety.step_call_typedTransfer _ _ _ _ _ $link $model rfl _) ?_
              cil_simp_only [CIL.Safety.typedTransferCall, CIL.Safety.observedTransfer,
                CIL.Safety.transferValues, cil_guard, cil_checked, $[$facts:term],*]
@@ -1648,12 +1682,6 @@ elab_rules : tactic
              | cil_checked_step_normalized [$facts:term,*]
              | cil_checked_memory_by_equations [$facts:term,*])
           | cil_checked_linked_step_by_equations [$link, $model] [$[$stepFacts:term],*]))
-      else if let (true, #[link]) := (operation == ``CIL.Instruction.call, linkFacts) then
-        -- A directly linked call rewrites by one equation that never mentions the model.
-        `(tactic| cil_strict (first
-          | (refine Eq.trans (CIL.Safety.step_call_direct _ _ _ _ _ $link _) ?_
-             cil_checked_linked_step_by_equations [] [$[$stepFacts:term],*])
-          | cil_checked_linked_step_by_equations [$link] [$[$stepFacts:term],*]))
       else if linkedOpcodes.contains operation then
         `(tactic| cil_strict
           (cil_checked_linked_step_by_equations [$[$linkFacts:term],*] [$[$stepFacts:term],*]))
@@ -1872,10 +1900,10 @@ def prepareStepFacts (facts : Array Term) : TacticM (Array Term) := do
   normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
     (← prepareOperationFacts (← gatherEvidenceFacts facts))
 
-/-- `cil_checked_steps` with facts already normalised: enters an `invoke` goal through
-    `cil_checked_entry`, then takes checked `run` steps until the goal closes or a step fails,
-    leaving that goal. Fails if it takes no step. -/
-syntax "cil_checked_steps_normalized" "[" term,* "]" : tactic
+/-- Enters an invocation and steps with normalised facts until the goal closes or a step fails.
+    A child invocation uses its caller's simplification record while the facts and context match.
+    Fails if it takes no step. -/
+syntax "cil_checked_steps_normalized" (&"child")? "[" term,* "]" : tactic
 
 /-- Takes a fetched `ret` through `run_return`, given the method and instruction lookups, and
     leaves the equation between the returned state and the stated result unless frame cleanup,
@@ -1971,7 +1999,7 @@ macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max
     cil_strict cil_refine_by CIL.Safety.run_call_of_invoke $methodFound $instructionFound
       (by cil_checked_step_normalized [$[$facts:term],*])
       (by first | cil_checked_child [$[$facts:term],*]
-                | (cil_checked_steps_normalized [$[$facts:term],*]; done)) ?_
+                | (cil_checked_steps_normalized child [$[$facts:term],*]; done)) ?_
     try (conv => lhs; arg 4; cil_literal_nat)
     cil_stack_cleanup))
 
@@ -2262,15 +2290,17 @@ syntax "cil_checked_run_step" "[" term,* "]" : tactic
 elab_rules : tactic
   | `(tactic| cil_checked_run_step [$facts:term,*]) => cilRunStep facts.getElems
 
-macro_rules
-  | `(tactic| cil_checked_steps_normalized [$facts:term,*]) =>
-  `(tactic| (
-    try (conv => lhs; arg 2; cil_reduce_fuel)
-    cil_checked_entry [$[$facts:term],*]
-    cil_normal_run
+open Lean Elab Tactic in
+elab_rules : tactic
+  | `(tactic| cil_checked_steps_normalized $[child%$child]? [$facts:term,*]) => do
+    evalTactic (← `(tactic| (
+      try (conv => lhs; arg 2; cil_reduce_fuel)
+      cil_checked_entry [$facts,*])))
+    let walk := evalTactic (← `(tactic|
       cil_steps_from "cil_checked_steps took no step: the method or instruction lookup, or the \
         first step, did not close; pass the lookup hypothesis, feature facts or step facts"
-        cil_checked_run_step [$[$facts:term],*]))
+        cil_checked_run_step [$facts,*]))
+    if child.isSome && (← getNormalNodes).active then walk else withNormalRun walk
 
 /-- Proves an `invoke` or `run` goal, returning or stating a located fault, by checked
     stepping with `facts` and the object evidence facts of the context, such as `live.formed` of

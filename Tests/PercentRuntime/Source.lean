@@ -1,4 +1,5 @@
 import CIL.Runtime.Net11WinX64.RangeConstructor
+import CIL.Extraction.DecodedDefinition
 
 /-! The pinned Examples.Throws.Percent body, its original string tokens and its reference
 through System.Runtime to the two-string constructor in CoreLib. -/
@@ -112,13 +113,15 @@ theorem bound_newobj : (decoded.toOption.bind fun d => (d.code[5]?).map (·.oper
 #print axioms bound_newobj
 
 /-- Method declaration with instructions, stack limit and locals from the decoder. -/
-def raw : RawMethod :=
-  let b := decoded.toOption.getD { maxStack := 0, initLocals := false, localSignature := 0, code := [], statics := [] }
+cil_evaluated raw : RawMethod :=
+  let body := decoded.toOption.getD
+    { maxStack := 0, initLocals := false, localSignature := 0, code := [], statics := [] }
   { token := 100664308, owner := (examplesScope ++ "::Examples.Throws"),
     hasThis := false, explicitThis := false, callingConvention := 0, attributes := 150,
     implementation := 0, returnType := .primitive .uint32,
-    parameters := [.primitive .uint32], locals := [], initLocals := b.initLocals,
-    maxStack := b.maxStack, genericParameters := [], code := b.code }
+    parameters := [.primitive .uint32], locals := [], initLocals := body.initLocals,
+    maxStack := body.maxStack, genericParameters := [], code := body.code : RawMethod }
+#print axioms raw_eq
 
 /-- Encoded owner, bases and signature checked against the method declaration. -/
 def names : MethodNames := {

@@ -48,13 +48,20 @@ internal static partial class Program
 
         internal AssemblySnapshot ReadAssembly(string path)
         {
+            var image = ReadImage(path);
+            ReadPdb(Path.ChangeExtension(path, ".pdb"));
+            return image;
+        }
+
+        /// <summary>Immutable PE bytes shared by the batch and rechecked at completion.</summary>
+        internal AssemblySnapshot ReadImage(string path)
+        {
             path = Path.GetFullPath(path);
             if (assemblies.TryGetValue(path, out var snapshot)) return snapshot;
             var bytes = File.ReadAllBytes(path);
             snapshot = new(bytes, Hash(bytes));
             assemblies.Add(path, snapshot);
             files.TryAdd(path, snapshot.Hash);
-            ReadPdb(Path.ChangeExtension(path, ".pdb"));
             return snapshot;
         }
 

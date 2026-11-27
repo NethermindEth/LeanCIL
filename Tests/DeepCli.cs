@@ -19,7 +19,6 @@ using System.Text.Json;
 using Program preparation = new();
 preparation.EnsureExtractorBuilt();
 MultiAssemblyFixture fixture = new("DeepCli");
-var checkoutBuild = new object();
 // Reservations of verifies that run beside other checks, from peak private working sets measured on Windows: a
 // rejected joint kernel replay replays each module separately (up to 19.1 GiB), a platform deep audit takes 4.9 GiB
 // and any other verify's process tree up to 3.3 GiB.
@@ -390,6 +389,14 @@ void CheckDispatchCatalog(bool changed)
     string[] binding = changed ? [] : ["--deep-checks", pins];
     Concurrently(() => CheckClassTests(assembly, build, changed), () =>
     {
+        if (!changed)
+        {
+            var derived = "";
+            Concurrently(() => derived = CheckForeignOverride(assembly, selector, changed: false),
+                () => CheckForeignOverride(assembly, selector, changed: true));
+            IncludeImageCases(proof, "DispatchOverrideCases", ("DispatchImage", assembly),
+                ("NeighbourImage", neighbour!), ("DerivedImage", derived));
+        }
         Run([.. cli, "verify", output, "--proof", proof, "--theorem", "DispatchGate.correctness", .. binding]);
         using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "verified.json")));
         if (changed)
@@ -405,12 +412,7 @@ void CheckDispatchCatalog(bool changed)
         if (fact.GetProperty("status").GetString() != "reconfirmed" ||
             fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
             throw new InvalidOperationException("Incorrect dispatch binding report: " + fact);
-        var derived = "";
-        Concurrently(() => derived = CheckForeignOverride(assembly, selector, changed: false),
-            () => CheckForeignOverride(assembly, selector, changed: true));
-        ReplayImageCases(output, assembly, "DispatchImage", At("Tests/StrictBinding/DispatchOverrideCases.lean"),
-            ["StrictBinding.DispatchCatalogs", "Tests.StrictBinding.Mutation"],
-            ("NeighbourImage", neighbour!), ("DerivedImage", derived));
+        RequireImageCaseAxioms(output, "DispatchOverrideCases");
         Console.WriteLine("PASS physical dispatch binds nested owners, byrefs and other pinned images");
     });
 }
@@ -421,7 +423,7 @@ string CheckForeignOverride(string assembly, string selector, bool changed)
     var image = fixture.Build(build, "DeepCli.Neighbour", $$"""
         namespace Neighbours;
         public sealed class NewShape : Geometry.Shape { public override int Sides() => {{(changed ? 8 : 7)}}; }
-        """, references: """<ProjectReference Include="../SixFaces/SixFaces.csproj" />""");
+        """, references: $"""<Reference Include="{System.Security.SecurityElement.Escape(assembly)}" />""");
     var context = new System.Runtime.Loader.AssemblyLoadContext(build, isCollectible: true);
     try
     {
@@ -518,6 +520,8 @@ void CheckTwoAssemblyCatalogs()
         var pins = Path.Combine(output, "inputs.sha256");
         File.WriteAllLines(pins, new[] { app, image }.Select(path => Sha(path) + "  " + path));
         string[] binding = original ? ["--deep-checks", pins] : [];
+        if (original)
+            IncludeImageCases(proof, "TwoCatalogCases", ("AppImage", app), ("LibImage", library));
         Run([.. cli, "verify", output, "--proof", proof, "--theorem", "BothCatalogs.correctness", .. binding]);
         using var receipt = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "verified.json")));
         if (!original)
@@ -533,8 +537,7 @@ void CheckTwoAssemblyCatalogs()
         if (fact.GetProperty("status").GetString() != "reconfirmed" ||
             fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
             throw new InvalidOperationException("Expected both methods' physical class catalogs: " + fact);
-        ReplayImageCases(output, app, "AppImage", At("Tests/StrictBinding/TwoCatalogCases.lean"),
-            ["StrictBinding.DispatchCatalogs", "Tests.StrictBinding.Mutation"], ("LibImage", library));
+        RequireImageCaseAxioms(output, "TwoCatalogCases");
     }
     Console.WriteLine("PASS changing the foreign class token refutes the unchanged caller's return contract");
 }
@@ -583,6 +586,8 @@ void CheckClassTests(string assembly, string build, bool changed)
     var pins = Path.Combine(output, "inputs.sha256");
     File.WriteAllText(pins, Sha(assembly) + "  " + assembly + "\n");
     string[] binding = changed ? [] : ["--deep-checks", pins];
+    if (!changed)
+        IncludeImageCases(proof, "ClassTestCases", ("TypeTestImage", assembly));
     Run([.. cli, "verify", output, "--proof", proof, "--theorem", "ClassTest.correctness", .. binding]);
     using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "verified.json")));
     if (changed)
@@ -598,8 +603,7 @@ void CheckClassTests(string assembly, string build, bool changed)
     if (fact.GetProperty("status").GetString() != "reconfirmed" ||
         fact.GetProperty("theorem").GetString() != "BindingAudit.dispatchCatalogs")
         throw new InvalidOperationException("Incorrect class-test binding: " + fact);
-    ReplayImageCases(output, assembly, "TypeTestImage", At("Tests/StrictBinding/ClassTestCases.lean"),
-        ["StrictBinding.DispatchCatalogs", "Tests.StrictBinding.Mutation"]);
+    RequireImageCaseAxioms(output, "ClassTestCases");
 }
 
 void CheckLayoutContent()
@@ -642,6 +646,8 @@ void CheckLayoutContent()
                 $"\ntheorem correctness : contract.{claim} Extracted.program 0 := {lemma} ({evidence})\n" +
                 "#print axioms correctness\nend LayoutGate\n");
             string[] binding = changed ? [] : ["--deep-checks", pins];
+            if (!changed && method == "Read")
+                IncludeImageCases(proof, "ImportedLayoutCases", ("LayoutImage", assembly));
             Run([.. cli, "verify", output, "--proof", proof, "--theorem", "LayoutGate.correctness", .. binding]);
             using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "verified.json")));
             if (changed)
@@ -659,8 +665,7 @@ void CheckLayoutContent()
                 fact.GetProperty("theorem").GetString() != "BindingAudit.layoutContent")
                 throw new InvalidOperationException("Incorrect layout binding report: " + fact);
             if (method != "Read") continue;
-            ReplayImageCases(output, assembly, "LayoutImage", At("Tests/StrictBinding/ImportedLayoutCases.lean"),
-                ["StrictBinding.ImportedLayouts"]);
+            RequireImageCaseAxioms(output, "ImportedLayoutCases");
             Console.WriteLine("PASS an import slot's extracted Overlay rows bind and forged rows are refused");
         }
     }
@@ -909,8 +914,6 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
     File.Delete(Path.Combine(output, "verification.json"));
     if (args is ["--arguments"]) return;
 
-    // The first use of the checkout package writes its lakefile, so it happens before the checks share it.
-    preparation.CheckoutPackage();
     // The binding text, platform image and consumer checks share the digest file and the Direct extraction.
     ReservingMemory(VerifyMemory, () => Concurrently(() =>
         {
@@ -977,6 +980,7 @@ void CheckStaticTable()
         end ExampleProof
 
         """);
+    IncludeImageCases(tableProof, "StaticSiteCases", ("RvaImage", tables));
     Run([.. cli, "verify", tableOutput, "--proof", tableProof, "--deep-checks", tableDigest]);
     var binding = JsonSerializer.Deserialize<JsonElement>(
         File.ReadAllText(Path.Combine(tableOutput, "verified.json"))).GetProperty("binding");
@@ -987,34 +991,59 @@ void CheckStaticTable()
         throw new InvalidOperationException("The compiled table has no audited physical-data theorem.");
     Console.WriteLine("PASS the third word comes from a 32-byte RVA field in the pinned table assembly");
 
-    ReplayImageCases(tableOutput, tables, "RvaImage", At("Tests/StrictBinding/StaticSiteCases.lean"),
-        ["StrictBinding.StaticData"]);
+    RequireImageCaseAxioms(tableOutput, "StaticSiteCases");
     Console.WriteLine("PASS the pinned FieldRVA rejects a matching prefix, changed bytes and a missing RVA marker");
 }
 
-void ReplayImageCases(string directory, string assembly, string imageModule, string casesFile, string[] dependencies,
-    params (string Module, string Assembly)[] otherImages)
+// The CLI kernel-replays every declaration in the proof module, including the physical mutation controls.
+static void IncludeImageCases(string proof, string cases, params (string Module, string Assembly)[] images)
 {
-    // Concurrent checks share the checkout package, which one lake build writes at a time.
-    lock (checkoutBuild) Run(["lake", "build", .. dependencies], preparation.CheckoutPackage());
-    var leanPath = directory + Path.PathSeparator + preparation.CheckoutLeanPath();
-    (string Module, string Assembly)[] images = [(imageModule, assembly), .. otherImages];
-    foreach (var (module, path) in images)
-        File.WriteAllText(Path.Combine(directory, module + ".lean"),
-            $"import StrictBinding.Image\nimport CIL.Extraction.FixedDigits\nnamespace {module}\n" +
-            BindingImage.Definitions(File.ReadAllBytes(path)) + $"\nend {module}\n");
-    var cases = Path.GetFileNameWithoutExtension(casesFile);
-    File.Copy(casesFile, Path.Combine(directory, cases + ".lean"), true);
-    string[] modules = ["Extracted", .. images.Select(image => image.Module), cases];
-    foreach (var module in modules)
+    var imports = new SortedSet<string>(StringComparer.Ordinal)
+        { "StrictBinding.Image", "CIL.Extraction.FixedDigits", "Lean.Util.CollectAxioms" };
+    string Body(string path)
     {
-        var log = Run([preparation.LeanExecutable, "--root=" + directory, "-o",
-            Path.Combine(directory, module + ".olean"), Path.Combine(directory, module + ".lean")],
-            leanPath: leanPath);
-        if (log.Contains("sorryAx", StringComparison.Ordinal))
-            throw new InvalidDataException(module + " depends on sorryAx");
+        var lines = File.ReadAllLines(path);
+        var count = 0;
+        while (count < lines.Length && lines[count].StartsWith("import ", StringComparison.Ordinal))
+            imports.Add(lines[count++]["import ".Length..]);
+        return string.Join('\n', lines.Skip(count));
     }
-    preparation.ReplayCheckedModules(modules, leanPath, "Kernel replay of " + cases);
+    var original = Body(proof);
+    var controls = Body(At("Tests/StrictBinding/" + cases + ".lean"));
+    var mutations = imports.Remove("Tests.StrictBinding.Mutation") ? Body(At("Tests/StrictBinding/Mutation.lean")) : "";
+    var definitions = new List<string>();
+    foreach (var (module, assembly) in images)
+    {
+        if (!imports.Remove(module)) throw new InvalidDataException(cases + " does not import " + module);
+        var bytes = BindingImage.Definitions(File.ReadAllBytes(assembly));
+        definitions.Add($"namespace {module}\n{bytes}\nend {module}");
+    }
+    // A theorem under test may refer to an extraction declaration outside the translation certificate.
+    const string extractionAxioms = """
+        run_cmd do
+          let env ← Lean.getEnv
+          let some index := env.getModuleIdx? `Extracted | throwError "missing Extracted"
+          for decl in env.header.moduleData[index.toNat]!.constNames do
+            if (← Lean.collectAxioms decl).contains ``sorryAx then
+              throwError "extracted declaration {decl} depends on sorryAx"
+        """;
+    File.WriteAllText(proof, string.Join('\n', imports.Select(module => "import " + module)) + "\n\n" +
+        original + "\n" + extractionAxioms + "\n" + mutations + "\n" + string.Join('\n', definitions) +
+        "\n" + controls + "\n");
+}
+
+static void RequireImageCaseAxioms(string output, string cases)
+{
+    const string print = "#print axioms ";
+    var messages = File.ReadAllText(Path.Combine(output, "proof-messages.txt"));
+    var theorems = File.ReadLines(At("Tests/StrictBinding/" + cases + ".lean"))
+        .Where(line => line.StartsWith(print, StringComparison.Ordinal))
+        .Select(line => cases + "." + line[print.Length..].Trim()).ToArray();
+    if (theorems.Length == 0 || messages.Contains("sorryAx", StringComparison.Ordinal))
+        throw new InvalidDataException("Missing or incomplete proof of physical cases: " + cases);
+    foreach (var theorem in theorems)
+        if (!messages.Contains("'" + theorem + "'", StringComparison.Ordinal))
+            throw new InvalidDataException("Expected an axiom report for " + theorem);
 }
 if (args is ["--text"]) return;
 if (args is ["--mutations"])

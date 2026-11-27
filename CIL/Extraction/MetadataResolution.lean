@@ -90,20 +90,66 @@ def ResolvedList.ofList : List ResolvedType → ResolvedList
   | [] => .nil
   | head :: tail => .cons head (ofList tail)
 
+namespace PinTable
+
+/-- The shape and stored sizes of a unit-valued pin table. -/
+abbrev Tree (Key : Type) := Std.DTreeMap.Internal.Impl Key (fun _ => Unit)
+
+/-- Every adjacent pair compares strictly in insertion order. -/
+def ascending [Ord Key] : List Key → Bool
+  | first :: second :: rest => compare first second == .lt && ascending (second :: rest)
+  | _ => true
+
+/-- The shape of Std's tree after inserting `count` strictly increasing keys. -/
+def ascendingShape (count : Nat) : Tree Unit :=
+  Nat.repeat (fun shape : Tree Unit => shape.insertMax! () ()) count .leaf
+
+/-- Fill a table in key order, returning the keys beyond its last node. -/
+def fill (shape : Tree Unit) (keys : List Key) : Tree Key × List Key :=
+  match shape with
+  | .leaf => (.leaf, keys)
+  | .inner size _ _ left right =>
+    let (before, remaining) := fill left keys
+    match remaining with
+    | [] => (.leaf, [])
+    | key :: tail =>
+      let (after, rest) := fill right tail
+      (.inner size key () before after, rest)
+
+/-- Packages with fewer than eight pins use direct insertion. -/
+private def minimumPins := 8
+
+/-- For a transitive key order, the exact insertion tree of the keys in their input order. -/
+def ofItems [Ord Key] (key : Item → Key) (items : List Item) : Std.TreeMap.Raw Key Unit :=
+  match items with
+  | [] => {}
+  | [one] => ({} : Std.TreeMap.Raw Key Unit).insert (key one) ()
+  | [one, two] => (({} : Std.TreeMap.Raw Key Unit).insert (key one) ()).insert (key two) ()
+  | [one, two, three] =>
+    let pair := (({} : Std.TreeMap.Raw Key Unit).insert (key one) ()).insert (key two) ()
+    pair.insert (key three) ()
+  | _ => Id.run do
+    if !(items.drop (minimumPins - 1)).isEmpty then
+      let keys := items.map key
+      if ascending keys then return ⟨⟨(fill (ascendingShape items.length) keys).1⟩⟩
+    return items.foldl (fun entries item => entries.insert (key item) ()) {}
+
+end PinTable
+
 /-- The simple names of the package's pinned assemblies. A reference to an assembly of one of
     these names that no carried slice is cannot be a platform type. -/
 abbrev PinnedNames := Std.TreeMap.Raw MetadataName Unit
 
 /-- Index each pin's simple name once per package. -/
 def indexPinNames (identities : List AssemblyName) : PinnedNames :=
-  identities.foldl (fun names identity => names.insert identity.name ()) {}
+  PinTable.ofItems AssemblyName.name identities
 
 /-- The package's complete assembly identities. -/
 abbrev ExactPins := Std.TreeMap.Raw AssemblyName Unit
 
 /-- Index each full pin once per package. -/
 def indexPins (identities : List AssemblyName) : ExactPins :=
-  identities.foldl (fun entries identity => entries.insert identity ()) {}
+  PinTable.ofItems id identities
 
 /-- Binary search of a materialized identity index, with structural fuel for kernel reduction. -/
 def containsName (names : Array (List Nat)) (key : List Nat) : Bool :=

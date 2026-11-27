@@ -280,6 +280,17 @@ def accessedBy (field : WordField width) (body : CIL.Method) : CIL.Instruction â
       | _ => false
   | _ => false
 
+/-- The instruction at `pc` accesses this field when its owner, offset and word width agree. -/
+theorem accessedBy_of_shape (field : WordField width) (store : Bool) {body : CIL.Method}
+    {pc : Nat} {reference : CIL.Extraction.FieldRef} {signed : Bool}
+    (instruction : body.code[pc]? =
+      some (if store then .stfld reference else .ldfld reference))
+    (owner : reference.owner = field.owner)
+    (shape : body.fieldShape reference = .classSlot field.offset (.word width signed)) :
+    (body.code[pc]?).any (field.accessedBy body) = true := by
+  cases store <;> simp [instruction, accessedBy, owner, shape]
+#print axioms accessedBy_of_shape
+
 @[simp] theorem address_allocation (field : WordField width) (object : Reference) :
     (field.address object).allocation = object.allocation := rfl
 
@@ -655,6 +666,17 @@ def accessedBy (field : ReferenceField) (body : CIL.Method) : CIL.Instruction â†
       | _ => false
   | _ => false
 
+/-- The instruction at `pc` accesses this field when its owner and reference slot agree. -/
+theorem accessedBy_of_shape (field : ReferenceField) (store : Bool) {body : CIL.Method}
+    {pc : Nat} {reference : CIL.Extraction.FieldRef}
+    (instruction : body.code[pc]? =
+      some (if store then .stfld reference else .ldfld reference))
+    (owner : reference.owner = field.owner)
+    (shape : body.fieldShape reference = .classSlot field.offset .reference) :
+    (body.code[pc]?).any (field.accessedBy body) = true := by
+  cases store <;> simp [instruction, accessedBy, owner, shape]
+#print axioms accessedBy_of_shape
+
 @[simp] theorem address_allocation (field : ReferenceField) (object : Reference) :
     (field.address object).allocation = object.allocation := rfl
 
@@ -1005,6 +1027,17 @@ def accessedBy (field : ArrayField element) (body : CIL.Method) : CIL.Instructio
       | .classSlot offset (.array held) => offset == field.offset && held == element
       | _ => false
   | _ => false
+
+/-- The instruction at `pc` accesses this field when its owner, offset and array element agree. -/
+theorem accessedBy_of_shape (field : ArrayField element) (store : Bool) {body : CIL.Method}
+    {pc : Nat} {reference : CIL.Extraction.FieldRef}
+    (instruction : body.code[pc]? =
+      some (if store then .stfld reference else .ldfld reference))
+    (owner : reference.owner = field.owner)
+    (shape : body.fieldShape reference = .classSlot field.offset (.array element)) :
+    (body.code[pc]?).any (field.accessedBy body) = true := by
+  cases store <;> simp [instruction, accessedBy, owner, shape]
+#print axioms accessedBy_of_shape
 
 /-- The element of the arrays the field holds, so a statement can name it through the field. -/
 @[reducible] def elementType (_ : ArrayField element) : CIL.ArrayElement := element

@@ -8,10 +8,10 @@ namespace Tests.StrictBinding.DispatchCatalogs
 open CIL.Extraction _root_.StrictBinding
 
 /-- The root class and the complete method list of every descendant, in physical row order. -/
-private def declarations (bytes := StrictFixture.image) :
+private def declarations (bytes := StrictFixture.image) (methodToken := 0x06000004) :
     Option (List (TypeExpr × Bool × List (Nat × Bool))) := do
   let image ← (prepareOne ⟨StrictFixture.identity, bytes⟩).toOption
-  let owner ← (methodDeclaringType image 0x06000004).toOption
+  let owner ← (methodDeclaringType image methodToken).toOption
   let some types ← (ClassDispatch.physicalHierarchy image (owner % 2^24)).run.toOption | none
   return types.map fun type =>
     (type.identity, type.abstractType, type.methods.map fun m => (m.token, m.isVirtual))
@@ -27,6 +27,10 @@ theorem completeDeclarations :
       (named "Triangle", false, [(0x06000007,true), (0x06000008,false)]),
       (named "Square", false, [(0x06000009,true), (0x0600000a,false)])] := by decide +kernel
 #print axioms completeDeclarations
+
+-- Selecting Triangle excludes its base Shape and its sibling Square.
+#guard declarations (methodToken := 0x06000007) ==
+  some [(named "Triangle", false, [(0x06000007,true), (0x06000008,false)])]
 
 /-- Mutate one physical metadata cell independently of the claimed declarations. -/
 private def change (token column mask : Nat) : Option Bool := do

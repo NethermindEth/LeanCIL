@@ -84,6 +84,179 @@ private def descends (parents : Array Nat) (root : Nat) : Nat → Nat → Bool �
     let some parent := parents[row]? | throwThe AuditError (.typeDefMismatch row .base)
     descends parents root fuel parent (found || row == root)
 
+/-- The physical chain from a row reaches zero in this many edges and visits the given owner
+    exactly when the membership bit is set. -/
+private inductive ParentPath (parents : Array Nat) (owner : Nat) : Nat → Nat → Bool → Prop where
+  | root : ParentPath parents owner 0 0 false
+  | step {row parent depth : Nat} {above : Bool} (nonzero : row ≠ 0)
+      (edge : parents[row]? = some parent) (tail : ParentPath parents owner parent depth above) :
+      ParentPath parents owner row (depth + 1) (row == owner || above)
+
+/-- A cached chain with sufficient fuel gives exactly the answer of the complete parent walk. -/
+private theorem ParentPath.walk {parents owner row depth member}
+    (path : ParentPath parents owner row depth member) {fuel} (enough : depth ≤ fuel)
+    (found : Bool) : descends parents owner fuel row found = pure (found || member) := by
+  induction path generalizing fuel found with
+  | root => simp [descends]
+  | @step row parent depth above nonzero edge tail ih =>
+    cases row with
+    | zero => contradiction
+    | succ row =>
+      cases fuel with
+      | zero => omega
+      | succ fuel =>
+        simp only [descends, edge]
+        simpa [Bool.or_assoc] using ih (fuel := fuel) (by omega) (found || row + 1 == owner)
+#print axioms ParentPath.walk
+
+/-- The depth and owner membership of one physical row, certified by its parent edges. -/
+private structure Ancestry (parents : Array Nat) (owner row : Nat) where
+  depth : Nat
+  member : Bool
+  path : ParentPath parents owner row depth member
+
+/-- Previously classified ancestors for one owner. -/
+private abbrev Ancestors (parents : Array Nat) (owner : Nat) :=
+  Std.DTreeMap Nat (Ancestry parents owner)
+
+/-- Classify an unseen suffix and reuse its depth and membership at subsequent children. -/
+private def classifyAncestor (parents : Array Nat) (owner : Nat) :
+    Nat → (row : Nat) → Ancestors parents owner →
+      Reading (Ancestors parents owner × Ancestry parents owner row)
+  | _, 0, known => return (known, ⟨0, false, .root⟩)
+  | 0, row + 1, _ => throwThe AuditError (.typeDefMismatch (row + 1) .base)
+  | fuel + 1, row + 1, known => do
+    let node := row + 1
+    match parentEvidence : indexedRead? parents node with
+    | none => throwThe AuditError (.typeDefMismatch node .base)
+    | some 0 =>
+      return (known, ⟨1, node == owner || false,
+        .step (Nat.succ_ne_zero row) (by simpa using parentEvidence) .root⟩)
+    | some parent =>
+      if let some answer := known.get? node then return (known, answer)
+      let (known, above) ← classifyAncestor parents owner fuel parent known
+      let answer : Ancestry parents owner node := ⟨above.depth + 1, node == owner || above.member,
+        .step (Nat.succ_ne_zero row) (by simpa using parentEvidence) above.path⟩
+      return (known.insert node answer, answer)
+
+/-- Physical row membership for one owner, in the combined table order and including row zero. -/
+private def descendants (parents : Array Nat) (owner : Nat) : Reading (Array Bool) := do
+  let mut known : Ancestors parents owner := ∅
+  let mut membership := []
+  for (parent, index) in parents.toList.tail.zipIdx do
+    let row := index + 1
+    if parent == 0 then
+      membership := (row == owner) :: membership
+      continue
+    let (next, answer) ← classifyAncestor parents owner parents.size parent known
+    membership := (row == owner || answer.member) :: membership
+    known := next
+  return (false :: membership.reverse).toArray
+
+/-- One lazy membership bitmap per physical owner. Exact-class queries do not force the table. -/
+private abbrev OwnerSubtrees := Thunk (Array (Thunk (Reading (Array Bool))))
+
+/-- Virtual sites that name the same physical owner share its classification. -/
+private def subtreeIndex (parents : Array Nat) : OwnerSubtrees :=
+  Thunk.mk fun _ => ((List.range parents.size).map fun owner =>
+    Thunk.mk fun _ => descendants parents owner).toArray
+
+/-- Each parent in the suffix precedes its own TypeDef row in the combined module table. -/
+private def earlierParents (first : Nat) : List Nat → Bool
+  | [] => true
+  | parent :: rest => parent < first && earlierParents (first + 1) rest
+
+/-- An edge in an ordered suffix points to a smaller row. -/
+private theorem parent_lt_of_earlier {rows : List Nat} {first index parent : Nat}
+    (ordered : earlierParents first rows) (edge : rows[index]? = some parent) :
+    parent < first + index := by
+  induction rows generalizing first index with
+  | nil => simp at edge
+  | cons head tail ih =>
+    simp [earlierParents] at ordered
+    cases index with
+    | zero => simp_all
+    | succ index =>
+      have smaller := ih ordered.2 (by simpa using edge : tail[index]? = some parent)
+      omega
+#print axioms parent_lt_of_earlier
+
+/-- The full parent walk succeeds from any row of an ordered graph with sufficient fuel. -/
+private theorem descends_of_earlierParents {parents : Array Nat}
+    (ordered : earlierParents 1 (parents.toList.drop 1))
+    {fuel row : Nat} (inside : row < parents.size) (enough : row ≤ fuel) :
+    descends parents 0 fuel row false = pure false := by
+  induction fuel generalizing row with
+  | zero =>
+    have eq : row = 0 := by omega
+    subst row
+    rfl
+  | succ fuel ih =>
+    cases row with
+    | zero => rfl
+    | succ index =>
+      have edge : parents[index + 1]? = some parents[index + 1] := by simp [inside]
+      have tailEdge : (parents.toList.drop 1)[index]? = some parents[index + 1] := by
+        simp
+      have bound := parent_lt_of_earlier ordered tailEdge
+      simpa [descends, edge] using ih (row := parents[index + 1]) (by omega) (by omega)
+#print axioms descends_of_earlierParents
+
+/-- Run the full parent walk from every non-root row, rejecting cycles and missing rows. -/
+private def walkParents (parents : Array Nat) (fuel : Nat) : Reading Unit := do
+  for row in [1:parents.size] do
+    let _ ← descends parents 0 fuel row false
+
+/-- Every listed row reaches a root within the original checker's fuel. -/
+private def RowsRooted (parents : Array Nat) (fuel : Nat) (rows : List Nat) : Prop :=
+  ∀ row ∈ rows, ∃ member, descends parents 0 fuel row false = pure member
+
+/-- Certifying every non-root row establishes the original validation result. -/
+private theorem walkParents_of_rooted {parents : Array Nat} {fuel : Nat}
+    (rooted : RowsRooted parents fuel (List.range' 1 (parents.size - 1))) :
+    walkParents parents fuel = pure () := by
+  have fold (rows : List Nat) (allRows : RowsRooted parents fuel rows) :
+      rows.foldlM (fun (_ : PUnit) row => (fun _ => ()) <$> descends parents 0 fuel row false)
+        () = pure () := by
+    induction rows with
+    | nil => rfl
+    | cons row tail ih =>
+      obtain ⟨_, walked⟩ := allRows row (by simp)
+      have rest : RowsRooted parents fuel tail := fun node mem => allRows node (by simp [mem])
+      simp [walked, ih rest]
+  simpa [walkParents] using fold _ rooted
+#print axioms walkParents_of_rooted
+
+/-- Validate an unordered graph using the depths of previously completed chains. -/
+private def certifyDepths (parents : Array Nat) (fuel : Nat) :
+    (rows : List Nat) → Ancestors parents 0 → Option (PLift (RowsRooted parents fuel rows))
+  | [], _ => some ⟨by intro row mem; cases mem⟩
+  | row :: rest, known => do
+    let .ok (some (known, answer)) := (classifyAncestor parents 0 fuel row known).run | none
+    if enough : answer.depth ≤ fuel then
+      let tail ← certifyDepths parents fuel rest known
+      return ⟨by
+        intro node mem
+        rcases List.mem_cons.mp mem with eq | mem
+        · subst node
+          exact ⟨_, answer.path.walk enough false⟩
+        · exact tail.down node mem⟩
+    else none
+
+/-- Check every physical chain with the result and diagnostics of the original row walks. -/
+private def checkParentChains (parents : Array Nat) (fuel : Nat) :
+    { result : Reading Unit // result = walkParents parents fuel } :=
+  if ordered : parents.size - 1 ≤ fuel ∧ earlierParents 1 (parents.toList.drop 1) then
+    ⟨pure (), (walkParents_of_rooted (by
+      intro row mem
+      obtain ⟨index, bound, rfl⟩ := List.mem_range'.mp mem
+      have enough := ordered.1
+      exact ⟨_, descends_of_earlierParents ordered.2 (by omega) (by omega)⟩)).symm⟩
+  else
+    match certifyDepths parents fuel (List.range' 1 (parents.size - 1)) ∅ with
+    | some rooted => ⟨pure (), (walkParents_of_rooted rooted.down).symm⟩
+    | none => ⟨walkParents parents fuel, rfl⟩
+
 /-- A primitive, local class or in-range method type parameter in a catalog signature. -/
 private def formalElement (image : PreparedImage) (core : Except AuditError String)
     (arity token : Nat) : SigType → Reading TypeExpr
@@ -253,6 +426,7 @@ private structure ModuleRows where
 private structure ParentGraph where
   modules : List ModuleRows
   parents : Array Nat
+  byOwner : OwnerSubtrees
 
 /-- Resolve each nonlocal parent by its physical TypeRef and every required forwarder. -/
 private def parentGraph (prepared : List PreparedImage) : Reading ParentGraph := do
@@ -278,9 +452,8 @@ private def parentGraph (prepared : List PreparedImage) : Reading ParentGraph :=
         let some target := ranges.find? (·.image.assembly == image.assembly) | failure
         let _ ← className image base
         parents := parents.push (target.offset + base)
-  for row in [1:parents.size] do
-    let _ ← descends parents 0 offset row false
-  return ⟨ranges.toList, parents⟩
+  (checkParentChains parents offset).val
+  return ⟨ranges.toList, parents, subtreeIndex parents⟩
 
 /-- Read a catalog class and its methods from the module that owns its TypeDef. -/
 private def readClass (prepared : List PreparedImage) (image : PreparedImage)
@@ -309,14 +482,19 @@ private def hierarchy (graph : ParentGraph) (prepared : List PreparedImage)
   let some origin := graph.modules.find? (·.image.assembly == home.assembly) | failure
   guard (owner > 0 && owner ≤ origin.count)
   let root := origin.offset + owner
+  let containsRow ← if includeDerived then do
+    let some family := indexedRead? graph.byOwner.get root | failure
+    let members ← family.get
+    pure (indexedRead? members)
+  else pure (fun node => some (node == root))
   let mut types := #[]
   for group in graph.modules do
     let image := group.image
     let mut selected := #[]
     for i in [:group.count] do
       let node := group.offset + i + 1
-      unless includeDerived || node == root do continue
-      if ← descends graph.parents root graph.parents.size node false then
+      let some member := containsRow node | failure
+      if member then
         selected := selected.push (i + 1)
     if selected.isEmpty then continue
     guard (image.layout.rowCount 5 == 0)

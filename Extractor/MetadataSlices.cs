@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Reflection.Metadata;
@@ -41,25 +42,14 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         var row = image.Row(0x20000001);
         var textWidth = image.HeapIndexWidth(HeapIndex.String);
         var blobWidth = image.HeapIndexWidth(HeapIndex.Blob);
-        var ranked = new SortedDictionary<int, byte[]>[] { [], [] };
-        var numbers = new Dictionary<int, int>[] { new() { [0] = 0 }, new() { [0] = 0 } };
-        foreach (var (heap, source) in new[] { (0, strings), (1, blobs) })
-        {
-            var rank = 1;
-            foreach (var entry in source.Where(entry => entry.Key != 0)
-                         .OrderBy(entry => Convert.ToHexString(entry.Value), StringComparer.Ordinal))
-            {
-                RequireHeapRank((uint)rank, heap == 0 ? textWidth : blobWidth, heap == 0 ? "#Strings" : "#Blob");
-                numbers[heap][entry.Key] = rank;
-                ranked[heap][rank++] = entry.Value;
-            }
-            if (source.TryGetValue(0, out var empty)) ranked[heap][0] = empty;
-        }
+        var textNumbers = RankHeap(strings, textWidth, "#Strings");
+        var blobNumbers = RankHeap(blobs, blobWidth, "#Blob");
         var at = 4 + 8 + 4;
-        foreach (var (heap, width) in new[] { (1, blobWidth), (0, textWidth), (0, textWidth) })
+        foreach (var (numbers, width) in new[]
+                 { (blobNumbers, blobWidth), (textNumbers, textWidth), (textNumbers, textWidth) })
         {
             var offset = width == 2 ? BitConverter.ToUInt16(row, at) : (int)BitConverter.ToUInt32(row, at);
-            Array.Copy(BitConverter.GetBytes(numbers[heap][offset]), 0, row, at, width);
+            WriteHeapOffset(row.AsSpan(at, width), (uint)numbers[offset]);
             at += width;
         }
         // The token is the SHA-1 of the public key, which Lean does not compute: it is stated, and checked only
@@ -68,16 +58,16 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             throw new InvalidDataException($"Invalid assembly row in {module.Assembly.Name.Name}");
         var keyToken = identity.PublicKeyToken is { } token ? $"publicKeyToken := some 0x{token:x16}, " : "";
         var headers = $"tableHeader := {ByteLiterals.Of(image.TableHeader())}, header := {image.DecodedHeader()}";
-        var tables = $"assemblyRow := {ByteLiterals.Of(row)}, strings := {Entries(ranked[0])}, blobs := {Entries(ranked[1])}";
+        var tables = $"assemblyRow := {ByteLiterals.Of(row)}, strings := {Entries(strings)}, blobs := {Entries(blobs)}";
         return $$"""{ {{keyToken}}{{headers}}, {{tables}} }""";
     }
 
     /// <summary>
-    /// The slices of one method's body, as a Lean <c>MethodMetadata</c> value, and the lookup tables of those slices.
+    /// The slices of one method's body, as a Lean <c>MethodMetadata</c> value, and their assembly indexes.
     /// They hold what this method reaches and nothing else, with heap entries numbered by rank among the entries
     /// carried, so the method's evidence is a function of the method and its assemblies alone.
     /// </summary>
-    internal (string Metadata, string Tables, int[] Assemblies) Method(MethodDefinition original,
+    internal (string Metadata, int[] Assemblies) Method(MethodDefinition original,
         IEnumerable<uint> tokens, bool classOwner, IEnumerable<Mono.Cecil.TypeDefinition> arguments)
     {
         var collection = new Collection(pinned, typeReferences ??= []);
@@ -92,7 +82,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             target.Arity(token);
         }
         var metadata = collection.Lean();
-        return (metadata, collection.Tables(), collection.Assemblies());
+        return (metadata, collection.Assemblies());
     }
 
     /// <summary>The reserved offset for a heap entry omitted from the carried evidence.</summary>
@@ -109,6 +99,36 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         if (rank >= OmittedHeapOffset(width))
             throw new InvalidDataException(
                 $"The carried {heap} rank {rank} reaches its reserved omitted-entry offset.");
+    }
+
+    /// <summary>Numbers carried entries by byte content, returning the rank for each image offset.</summary>
+    static Dictionary<int, int> RankHeap(SortedDictionary<int, byte[]> heap, int width, string name)
+    {
+        var numbers = new Dictionary<int, int>(heap.Count + 1) { [0] = 0 };
+        var ranked = heap.Where(entry => entry.Key != 0).ToArray();
+        RequireHeapRank((uint)ranked.Length, width, name);
+        Array.Sort(ranked, static (left, right) =>
+        {
+            var order = left.Value.AsSpan().SequenceCompareTo(right.Value);
+            return order == 0 ? left.Key.CompareTo(right.Key) : order;
+        });
+        heap.TryGetValue(0, out var empty);
+        heap.Clear();
+        if (empty is not null) heap.Add(0, empty);
+        for (var index = 0; index < ranked.Length; index++)
+        {
+            var rank = index + 1;
+            var (offset, bytes) = ranked[index];
+            heap.Add(rank, bytes);
+            numbers.Add(offset, rank);
+        }
+        return numbers;
+    }
+
+    static void WriteHeapOffset(Span<byte> destination, uint offset)
+    {
+        if (destination.Length == 2) BinaryPrimitives.WriteUInt16LittleEndian(destination, checked((ushort)offset));
+        else BinaryPrimitives.WriteUInt32LittleEndian(destination, offset);
     }
 
     internal static string Entries<TKey>(SortedDictionary<TKey, byte[]> entries) where TKey : notnull =>
@@ -150,11 +170,6 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
 
         /// <summary>The pinned assembly index of each slice, in slice order.</summary>
         internal int[] Assemblies() => [.. slices.Select(slice => slice.AssemblyIndex())];
-
-        /// <summary>
-        /// The lookup tables of each slice, in slice order; read after <see cref="Lean"/> has closed them.
-        /// </summary>
-        internal string Tables() => "[" + string.Join(", ", slices.Select(slice => slice.Tables())) + "]";
     }
 
     /// <summary>The rows, heap entries and links of one module the method reaches.</summary>
@@ -165,8 +180,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         readonly SortedDictionary<int, byte[]> strings = [];
         readonly SortedDictionary<int, byte[]> blobs = [];
         readonly SortedDictionary<int, byte[]> userStrings = [];
-        readonly List<(int Kind, uint Source, int Slice, uint Target)> links = [];
-        readonly Dictionary<(int Kind, uint Source), (int Slice, uint Target)> linked = [];
+        readonly Dictionary<(int Kind, uint Source), (int Slice, uint Target)> links = [];
         readonly HashSet<uint> visited = [];
         readonly HashSet<uint> namedDefinitions = [];
         readonly HashSet<uint> baseReferences = [];
@@ -207,11 +221,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             if (!userStrings.ContainsKey(offset)) userStrings[offset] = image.SizedEntry(HeapIndex.UserString, offset);
         }
 
-        void Link(int kind, uint source, int slice, uint target)
-        {
-            if (!linked.TryAdd((kind, source), (slice, target))) return;
-            links.Add((kind, source, slice, target));
-        }
+        void Link(int kind, uint source, int slice, uint target) => links.TryAdd((kind, source), (slice, target));
 
         /// <summary>
         /// The tokens a signature blob names, in the signature's order. A form the Lean checker has no place for
@@ -528,7 +538,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Arity(parent);
             if ((parent >> 24) == 0x02)
                 ClassChain(parent);
-            else if ((parent >> 24) == 0x01 && linked.TryGetValue((0, parent), out var target))
+            else if ((parent >> 24) == 0x01 && links.TryGetValue((0, parent), out var target))
                 collection.At(target.Slice).ClassChain(target.Target);
         }
 
@@ -653,7 +663,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         {
             if (token >> 24 == 0x01)
             {
-                if (linked.TryGetValue((0, token), out var target))
+                if (links.TryGetValue((0, token), out var target))
                     collection.At(target.Slice).Arity(target.Target);
                 return;
             }
@@ -779,27 +789,20 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         /// </summary>
         internal void Canonicalize()
         {
-            // By content, not by image order: the image orders its heaps by a hash or a suffix sort, so one
-            // changed name can move the position of every other entry.
-            Dictionary<int, int> Numbering(SortedDictionary<int, byte[]> heap, int width, string name)
+            var textNumbers = RankHeap(strings, image.HeapIndexWidth(HeapIndex.String), "#Strings");
+            var blobNumbers = RankHeap(blobs, image.HeapIndexWidth(HeapIndex.Blob), "#Blob");
+            TableIndex? previousTable = null;
+            (int Width, Heap Heap)[] columns = [];
+            foreach (var (token, row) in rows)
             {
-                var next = 1;
-                var numbers = new Dictionary<int, int> { [0] = 0 };
-                foreach (var entry in heap.Where(entry => entry.Key != 0)
-                             .OrderBy(entry => Convert.ToHexString(entry.Value), StringComparer.Ordinal))
+                var table = (TableIndex)(token >> 24);
+                if (table != previousTable)
                 {
-                    RequireHeapRank((uint)next, width, name);
-                    numbers[entry.Key] = next++;
+                    columns = Columns(table);
+                    previousTable = table;
                 }
-                return numbers;
-            }
-            var textNumbers = Numbering(strings, image.HeapIndexWidth(HeapIndex.String), "#Strings");
-            var blobNumbers = Numbering(blobs, image.HeapIndexWidth(HeapIndex.Blob), "#Blob");
-            foreach (var token in rows.Keys.ToArray())
-            {
-                var row = rows[token];
                 var at = 0;
-                foreach (var (width, heap) in Columns((TableIndex)(token >> 24)))
+                foreach (var (width, heap) in columns)
                 {
                     if (heap != Heap.None)
                     {
@@ -808,16 +811,13 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                         // A position-only row's omitted entry must remain unreadable even when zero is carried.
                         var number = numbers.TryGetValue(offset, out var rank)
                             ? (uint)rank : OmittedHeapOffset(width);
-                        var bytes = BitConverter.GetBytes(number);
-                        Array.Copy(bytes, 0, row, at, width);
+                        WriteHeapOffset(row.AsSpan(at, width), number);
                     }
                     at += width;
                 }
                 if (at != row.Length)
                     throw new InvalidDataException($"The columns of row 0x{token:X8} do not add up to its length.");
             }
-            Renumber(strings, textNumbers);
-            Renumber(blobs, blobNumbers);
             RequireRanked(strings, "#Strings");
             RequireRanked(blobs, "#Blob");
         }
@@ -828,22 +828,14 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         static void RequireRanked(SortedDictionary<int, byte[]> heap, string name)
         {
             var rank = 1;
-            string? previous = null;
+            byte[]? previous = null;
             foreach (var (key, value) in heap.Where(entry => entry.Key != 0))
             {
-                var hex = Convert.ToHexString(value);
-                if (key != rank++ || previous is not null && string.CompareOrdinal(previous, hex) > 0)
+                if (key != rank++ || previous is not null && previous.AsSpan().SequenceCompareTo(value) > 0)
                     throw new InvalidDataException(
                         $"The carried {name} entries are not numbered by their rank in bytes.");
-                previous = hex;
+                previous = value;
             }
-        }
-
-        static void Renumber(SortedDictionary<int, byte[]> heap, Dictionary<int, int> numbers)
-        {
-            var entries = heap.ToArray();
-            heap.Clear();
-            foreach (var (key, value) in entries) heap[numbers[key]] = value;
         }
 
         internal int AssemblyIndex() => collection.Pinned.Index(collection.Pinned.Working(module));
@@ -851,100 +843,11 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         internal string Lean()
         {
             var assembly = $"assembly{AssemblyIndex()}Metadata";
-            var linkList = string.Join(", ", SortedLinks().Select(link =>
-                $"⟨{link.Kind}, {link.Source}, {link.Slice}, {link.Target}⟩"));
+            var linkList = string.Join(", ", links.OrderBy(link => link.Key).Select(link =>
+                $"⟨{link.Key.Kind}, {link.Key.Source}, {link.Value.Slice}, {link.Value.Target}⟩"));
             return $"{{ assembly := {assembly}, rows := {Entries(rows)}, strings := {Entries(strings)}, " +
                 $"blobs := {Entries(blobs)}, userStrings := {Entries(userStrings)}, corlib := {corlib}, " +
                 $"links := [{linkList}] }}";
-        }
-
-        IEnumerable<(int Kind, uint Source, int Slice, uint Target)> SortedLinks() =>
-            links.OrderBy(link => ((ulong)link.Kind << 32) + link.Source);
-
-        /// <summary>
-        /// A balanced search tree over entries in ascending key order, as Lean's <c>SearchTree.ofSorted</c> builds
-        /// it: the first <c>count / 2</c> entries go left of the root.
-        /// </summary>
-        static string Tree(IReadOnlyList<(ulong Key, string Value)> entries)
-        {
-            string Build(int start, int count)
-            {
-                if (count == 0) return ".leaf";
-                var left = count / 2;
-                var root = entries[start + left];
-                var right = Build(start + left + 1, count - 1 - left);
-                return $"(.node {Build(start, left)} {root.Key} {root.Value} {right})";
-            }
-            return Build(0, entries.Count);
-        }
-
-        static (ulong, string) Entry<TKey>(KeyValuePair<TKey, byte[]> entry) where TKey : struct, IConvertible =>
-            (Convert.ToUInt64(entry.Key, CultureInfo.InvariantCulture), ByteLiterals.Of(entry.Value));
-
-        /// <summary>
-        /// The instance field counts Lean derives from the carried rows: for each field of a carried type whose
-        /// fields and following type are carried, the instance fields before it, and for the type their total.
-        /// </summary>
-        (string Before, string Total) FieldCounts()
-        {
-            var before = new List<(ulong, string)>();
-            var total = new List<(ulong, string)>();
-            var typeCount = (uint)Reader.GetTableRowCount(TableIndex.TypeDef);
-            var fieldCount = (uint)Reader.GetTableRowCount(TableIndex.Field);
-            foreach (var (token, row) in rows.Where(entry => entry.Key >> 24 == 0x02))
-            {
-                var first = image.FieldList(row);
-                uint stop;
-                if ((token & 0xFFFFFF) == typeCount) stop = fieldCount + 1;
-                else if (rows.TryGetValue(token + 1, out var next)) stop = image.FieldList(next);
-                else continue;
-                var found = new List<(ulong, string)>();
-                uint instances = 0;
-                var complete = true;
-                for (uint index = 0; index < (stop > first ? stop - first : 0) && complete; index++)
-                {
-                    var field = 0x04000000u + first + index;
-                    complete = rows.TryGetValue(field, out var bytes);
-                    if (!complete) break;
-                    found.Add((field, instances.ToString(CultureInfo.InvariantCulture)));
-                    if (bytes![0] / 0x10 % 2 == 0) instances++;
-                }
-                before.AddRange(found);
-                if (complete) total.Add((token, instances.ToString(CultureInfo.InvariantCulture)));
-            }
-            return (Tree(before), Tree(total));
-        }
-
-        /// <summary>Each owner's first carried parameter and count, keyed by the owner's coded value.</summary>
-        string GenericOwners()
-        {
-            var ownerWidth = Columns(TableIndex.GenericParam)[2].Width;
-            var genericOwners = new SortedDictionary<uint, (uint First, int Count)>();
-            foreach (var (token, bytes) in rows.Where(entry => entry.Key >> 24 == 0x2A))
-            {
-                uint codedOwner = 0;
-                for (var offset = 0; offset < ownerWidth; offset++)
-                    codedOwner |= (uint)bytes[4 + offset] << (8 * offset);
-                genericOwners[codedOwner] = genericOwners.TryGetValue(codedOwner, out var previous)
-                    ? (previous.First, previous.Count + 1) : (token, 1);
-            }
-            var ownerEntries = genericOwners.Select(entry =>
-                ((ulong)entry.Key, $"({entry.Value.First}, {entry.Value.Count})")).ToList();
-            return Tree(ownerEntries);
-        }
-
-        /// <summary>
-        /// The Lean <c>IndexTables</c> of this slice, equal to what the decoder builds from its bytes.
-        /// </summary>
-        internal string Tables()
-        {
-            var (before, total) = FieldCounts();
-            var linkEntries = SortedLinks().Select(link =>
-                (((ulong)link.Kind << 32) + link.Source, $"({link.Slice}, {link.Target})")).ToList();
-            return $"{{ rows := {Tree([.. rows.Select(Entry)])}, strings := {Tree([.. strings.Select(Entry)])}, " +
-                $"blobs := {Tree([.. blobs.Select(Entry)])}, userStrings := {Tree([.. userStrings.Select(Entry)])}, " +
-                $"links := {Tree(linkEntries)}, instanceBefore := {before}, instanceTotal := {total}, " +
-                $"genericOwners := {GenericOwners()} }}";
         }
 
         internal int PositionOf => position;

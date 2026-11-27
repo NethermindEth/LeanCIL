@@ -6,11 +6,15 @@
 #:include VerificationSuites.cs
 
 using System.Diagnostics;
+using System.Text;
 using System.Text.RegularExpressions;
 
 var checks = 0;
 var root = VerificationSelection.Root;
-string[] All() => VerificationSelection.SuiteInputs().Keys.Order(StringComparer.Ordinal).ToArray();
+var suiteInputs = VerificationSelection.SuiteInputs();
+var allSuites = suiteInputs.Keys.Order(StringComparer.Ordinal).ToArray();
+string[] Select(IEnumerable<string> paths, string eventName = "pull_request") =>
+    VerificationSelection.Select(suiteInputs, paths, eventName);
 void Require(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException(message);
@@ -29,15 +33,15 @@ void Test(string name, Action action)
 
 Test("longest-first preserves selection", () =>
 {
-    var selected = VerificationSelection.Select(["Tests/Loops.cs", "Tests/UnsafeLayouts.cs", "Tests/IntegerMath.cs"]);
+    var selected = Select(["Tests/Loops.cs", "Tests/UnsafeLayouts.cs", "Tests/IntegerMath.cs"]);
     Equal(VerificationSelection.Schedule(selected), ["unsafe", "loops", "math"]);
-    Equal(VerificationSelection.Schedule(All()).Order(StringComparer.Ordinal), All());
+    Equal(VerificationSelection.Schedule(allSuites).Order(StringComparer.Ordinal), allSuites);
     Equal(VerificationSelection.Schedule(["loops", "newlongsuite"]), ["newlongsuite", "loops"]);
     Equal(VerificationSelection.Schedule([]), []);
 });
 Test("measured schedule reduces estimated tail without skipping jobs", () =>
 {
-    var durations = VerificationSelection.ReadDurations();
+    var durations = VerificationSelection.ReadDurations().Suites;
     double Makespan(IEnumerable<string> order, int workers)
     {
         var available = new PriorityQueue<double, double>();
@@ -49,31 +53,30 @@ Test("measured schedule reduces estimated tail without skipping jobs", () =>
         }
         return available.UnorderedItems.Max(item => item.Element);
     }
-    Require(Makespan(VerificationSelection.Schedule(All()), 8) < Makespan(All(), 4),
+    Require(Makespan(VerificationSelection.Schedule(allSuites), 8) < Makespan(allSuites, 4),
         "Measured scheduling did not improve the simulated tail");
 });
 Test("short groups preserve selection, isolation and bounded duration", () =>
 {
-    var durations = VerificationSelection.ReadDurations();
-    var groups = VerificationSelection.Groups(All());
-    Equal(groups.SelectMany(group => group.Suites).Order(StringComparer.Ordinal), All());
+    var measured = VerificationSelection.ReadDurations();
+    var durations = measured.Suites;
+    var groups = VerificationSelection.Groups(allSuites);
+    Equal(groups.SelectMany(group => group.Suites).Order(StringComparer.Ordinal), allSuites);
     // Every job repeats setup and restores, so a full run must not go back to one job per suite.
-    double Seconds(VerificationSelection.Group group) => group.Suites.Sum(suite => durations[suite]);
+    double Seconds(VerificationSelection.Group group) => group.Suites.Sum(suite => durations[suite]) +
+        (group.Libraries ? measured.LibrarySeconds : 0);
     var target = VerificationSelection.GroupSeconds(durations);
     var longest = durations.MaxBy(suite => suite.Value);
-    Require(groups.Length <= All().Length / 3, "Suites were not packed: " + groups.Length + " jobs");
-    // The target is one runner's share of a round, with the fewest rounds that fit under the longest suite.
-    var rounds = durations.Values.Sum() / (VerificationSelection.Runners * target);
-    Require(target <= longest.Value && Math.Abs(rounds - Math.Round(rounds)) < 1e-9 &&
-        (rounds < 1.5 || durations.Values.Sum() / (VerificationSelection.Runners * (rounds - 1)) > longest.Value),
-        "The target is not the fewest whole rounds under the longest suite");
+    Require(groups.Length <= allSuites.Length / 3, "Suites were not packed: " + groups.Length + " jobs");
+    Require(target == Math.Min(longest.Value * 1.10, durations.Values.Sum() / VerificationSelection.Runners),
+        "Packed jobs must fit within the longest suite's 10% allowance and one runner's share");
     // A refreshed table moves the target; the longest suites may then swap places without unbalancing a run.
     var refreshed = new Dictionary<string, double>(durations) { ["evidence"] = longest.Value - 100 };
-    Require(VerificationSelection.GroupSeconds(refreshed) <= longest.Value &&
+    Require(VerificationSelection.GroupSeconds(refreshed) <= longest.Value * 1.10 &&
         VerificationSelection.GroupSeconds(new Dictionary<string, double> { ["only"] = 90 }) == 90.0 / 8,
         "The target follows the measured total, not one suite");
-    // The longest suite alone bounds the run; no packed job may outlast it or approach its timeout.
-    Require(groups[0].Suites is [var alone] && alone == longest.Key, "The longest suite shares its job");
+    Require(groups.Select(Seconds).SequenceEqual(groups.Select(Seconds).OrderDescending()),
+        "Groups must start in descending order of estimated work");
     foreach (var group in groups.Where(group => group.Suites.Length > 1))
         Require(group.Suites.Length <= VerificationSelection.GroupMembers && Seconds(group) <= target,
             "Unbounded group: " + group.Suite);
@@ -88,7 +91,7 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
         groups.All(group => group.Suite.StartsWith(group.Suites[0], StringComparison.Ordinal) &&
             WorkflowPatterns.JobName.IsMatch(group.Suite)), "A job name is ambiguous or not its first suite");
     // Eight runners, with the setup every job repeats: packing must cost neither wall time nor jobs.
-    const double setupSeconds = 52;
+    var setupSeconds = measured.SetupSeconds;
     double Wall(IEnumerable<double> jobs)
     {
         var runners = new PriorityQueue<double, double>();
@@ -100,7 +103,9 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
         }
         return runners.UnorderedItems.Max(item => item.Element);
     }
-    var single = VerificationSelection.Schedule(All()).Select(suite => durations[suite]).ToArray();
+    var shortest = durations.MinBy(suite => suite.Value).Key;
+    var single = durations.Select(pair => pair.Value +
+        (pair.Key == shortest ? measured.LibrarySeconds : 0)).OrderDescending().ToArray();
     Require(Wall(groups.Select(Seconds)) <= Wall(single), "Packing lengthened the simulated run");
     Require((single.Length - groups.Length) * setupSeconds >= 30 * 60, "Packing saves under thirty job-minutes");
     // A job measures proof cost exactly when it runs a proof suite, alone or grouped with others.
@@ -109,25 +114,28 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
             "Proof cost is measured in the wrong job: " + group.Suite);
     Require(groups.Any(group => group.Proof && group.Suites.Length > 1), "No proof suite shares a job");
     // The libraries take minutes to measure; a job near its timeout would fail a suite that passed.
-    Require(groups.Single(group => group.Libraries) == groups[^1] &&
-        Seconds(groups[^1]) + 8 * 60 <= groups[^1].Timeout * 60,
-        "The libraries are not measured in the shortest job, or leave it no time");
+    var carrier = groups.Single(group => group.Libraries);
+    Require(groups.Take(VerificationSelection.Runners).Contains(carrier) &&
+        Seconds(carrier) <= carrier.Timeout * 60 / 2,
+        "The library measurement must start in the first wave and fit within the job budget");
     Require(VerificationSelection.Groups(["unsafe"]).Single().Libraries,
         "A run of one job measures no libraries");
+    Require(VerificationSelection.Groups(["cli", "gates"], planLibraries: false).Length == 1,
+        "A selection without library measurements should keep suites that fit together in one job");
     Equal(VerificationSelection.Groups(["contracts", "unknown"]).SelectMany(group => group.Suites),
         ["unknown", "contracts"]);
     Require(VerificationSelection.Groups([]).Length == 0, "Empty selection gained suites");
 });
 Test("docs only", () =>
 {
-    Equal(VerificationSelection.Select(["README.md", "docs/design.md"]), ["docs"]);
-    Equal(VerificationSelection.Select(["skills/leancil/SKILL.md"]), ["docs"]);
-    Equal(VerificationSelection.Select(["AGENTS.md", "LICENSE"]), []);
+    Equal(Select(["README.md", "docs/design.md"]), ["docs"]);
+    Equal(Select(["skills/leancil/SKILL.md"]), ["docs"]);
+    Equal(Select(["AGENTS.md", "LICENSE"]), []);
 });
 Test("main and manual always full", () =>
 {
     foreach (var eventName in new[] { "push", "workflow_dispatch" })
-        Equal(VerificationSelection.Select(["README.md"], eventName), All());
+        Equal(Select(["README.md"], eventName), allSuites);
 });
 Test("test entry points", () =>
 {
@@ -136,72 +144,72 @@ Test("test entry points", () =>
         "Tests/BindingFamilies/Binding.lean.in", "Tests/BindingFamilies/Methods.cs",
         "Tests/BindingFamilies/Support.lean", "Tests/GatePlans.cs", "Tests/PublicProofSurface.lean" })
     {
-        var selected = VerificationSelection.Select([path]);
+        var selected = Select([path]);
         Require(selected.Contains("core") && selected.All(suite => suite is "core" or "docs"),
             "Binding and public-surface fixtures must select core without unrelated suites: " + path);
     }
-    Equal(VerificationSelection.Select(["Tests/Loops.cs"]), ["loops"]);
-    Equal(VerificationSelection.Select(["Tests/LoopVariants/CountCallsDiscarded.lean.in"]), ["loops"]);
+    Equal(Select(["Tests/Loops.cs"]), ["loops"]);
+    Equal(Select(["Tests/LoopVariants/CountCallsDiscarded.lean.in"]), ["loops"]);
     foreach (var path in new[] { "Tests/ProofCostFrontend.cs", "Tests/ProofCostDiscovery.lean" })
-        Equal(VerificationSelection.Select([path]), ["core"]);
-    Equal(VerificationSelection.Select(["Tests/SteppingScaling.cs"]), ["stepping"]);
+        Equal(Select([path]), ["core"]);
+    Equal(Select(["Tests/SteppingScaling.cs"]), ["stepping"]);
     foreach (var module in new[] { "OperationFacts", "VectorLocalCalls", "SimdCarryCalls" })
-        Equal(VerificationSelection.Select([$"Tests/{module}.lean"]), ["core"]);
-    Equal(VerificationSelection.Select(["Tests/ProofOutlines.cs"]),
+        Equal(Select([$"Tests/{module}.lean"]), ["core"]);
+    Equal(Select(["Tests/ProofOutlines.cs"]),
         ["outlines-buffers", "outlines-control", "outlines-objects"]);
-    Equal(VerificationSelection.Select(["Tests/StructOutlines.cs"]), ["structoutlines"]);
-    Equal(VerificationSelection.Select(["Tests/ReceiverLoopOutlines.cs"]), ["receiveroutlines"]);
-    Equal(VerificationSelection.Select(["Tests/WordReaderOutlines.cs"]), ["wordreader"]);
-    Equal(VerificationSelection.Select(["Tests/SavedWordReaderOutlines.cs"]), ["savedwordreader"]);
-    Equal(VerificationSelection.Select(["Tests/WordReaderOutlineSupport.cs"]), ["savedwordreader", "wordreader"]);
-    Equal(VerificationSelection.Select(["Tests/ProgramClosures/Proof.lean"]), ["closures"]);
-    Equal(VerificationSelection.Select(["Tests/SkipInitialization.cs"]), ["unsafe"]);
-    Equal(VerificationSelection.Select(["Tests/NullReferences.cs"]), ["unsafe"]);
+    Equal(Select(["Tests/StructOutlines.cs"]), ["structoutlines"]);
+    Equal(Select(["Tests/ReceiverLoopOutlines.cs"]), ["receiveroutlines"]);
+    Equal(Select(["Tests/WordReaderOutlines.cs"]), ["wordreader"]);
+    Equal(Select(["Tests/SavedWordReaderOutlines.cs"]), ["savedwordreader"]);
+    Equal(Select(["Tests/WordReaderOutlineSupport.cs"]), ["savedwordreader", "wordreader"]);
+    Equal(Select(["Tests/ProgramClosures/Proof.lean"]), ["closures"]);
+    Equal(Select(["Tests/SkipInitialization.cs"]), ["unsafe"]);
+    Equal(Select(["Tests/NullReferences.cs"]), ["unsafe"]);
     foreach (var name in new[] { "BatchVerification", "VerificationCache", "VerificationReuse" })
-        Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["core"]);
-    Equal(VerificationSelection.Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
-    Equal(VerificationSelection.Select(["Tests/MetadataDifferential.cs"]), ["evidence"]);
-    Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]),
+        Equal(Select([$"Tests/{name}.cs"]), ["core"]);
+    Equal(Select(["Tests/PinnedIndexScaling/Construction.lean"]), ["core"]);
+    Equal(Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
+    Equal(Select(["Tests/MetadataDifferential.cs"]), ["evidence"]);
+    Equal(Select(["Tests/GeneratedEvidence.cs"]),
         ["assemblies", "core", "dispatch", "enums", "evidence", "excluded", "generics", "imports", "intrinsics",
             "lookups", "scaling", "unsafe"]);
-    Equal(VerificationSelection.Select(["Tests/GenericOwners.cs"]), ["generics"]);
-    Equal(VerificationSelection.Select(["Tests/MultiAssemblyGenerics.cs"]), ["assemblies"]);
-    Equal(VerificationSelection.Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies", "audit", "cli"]);
-    Equal(VerificationSelection.Select(["Tests/DeepVerify.cs"]), ["audit"]);
-    Equal(VerificationSelection.Select(["Tests/GenericLayouts.cs"]), ["generics"]);
-    Equal(VerificationSelection.Select(["Tests/NativeManagedDispatch.cs"]), ["dispatch"]);
-    Equal(VerificationSelection.Select(["Tests/NativeMethodTables.lean"]), ["dispatch"]);
-    Equal(VerificationSelection.Select(["Tests/ConstrainedEvidence.lean"]), ["dispatch"]);
-    Equal(VerificationSelection.Select(["Tests/StackAllocationEvidence.lean"]), ["dispatch"]);
-    Equal(VerificationSelection.Select(["Tests/ManagedPointerValues.lean"]), ["evidence"]);
-    Equal(VerificationSelection.Select(["Tests/CompilerCorpusCoverage.cs"]), ["dispatch"]);
+    Equal(Select(["Tests/GenericOwners.cs"]), ["generics"]);
+    Equal(Select(["Tests/MultiAssemblyGenerics.cs"]), ["assemblies"]);
+    Equal(Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies", "audit", "cli"]);
+    Equal(Select(["Tests/DeepVerify.cs"]), ["audit"]);
+    Equal(Select(["Tests/GenericLayouts.cs"]), ["generics"]);
+    Equal(Select(["Tests/NativeManagedDispatch.cs"]), ["dispatch"]);
+    Equal(Select(["Tests/NativeMethodTables.lean"]), ["dispatch"]);
+    Equal(Select(["Tests/ConstrainedEvidence.lean"]), ["dispatch"]);
+    Equal(Select(["Tests/StackAllocationEvidence.lean"]), ["dispatch"]);
+    Equal(Select(["Tests/ManagedPointerValues.lean"]), ["evidence"]);
+    Equal(Select(["Tests/CompilerCorpusCoverage.cs"]), ["dispatch"]);
     foreach (var name in new[]
         { "AggregateSpans", "ViewAccessors", "BinarySpans", "SpanConstructors", "AggregateSpanFill", "AggregateArrays" })
-        Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["unsafe"]);
-    Equal(VerificationSelection.Select(["Tests/VectorStorage.cs"]), ["unsafe"]);
-    Equal(VerificationSelection.Select(["Tests/VectorStorage.lean"]), ["unsafe"]);
+        Equal(Select([$"Tests/{name}.cs"]), ["unsafe"]);
+    Equal(Select(["Tests/VectorStorage.cs"]), ["unsafe"]);
+    Equal(Select(["Tests/VectorStorage.lean"]), ["unsafe"]);
     // Sources compiled into the extractor change the self-admission scan, as does its baseline.
-    Equal(VerificationSelection.Select(["Tests/SelfAdmissionBaseline.txt"]), ["blockers"]);
-    Equal(VerificationSelection.Select(["Tests/ExampleAdmissionBaseline.txt"]), ["blockers"]);
+    Equal(Select(["Tests/SelfAdmissionBaseline.txt"]), ["blockers"]);
+    Equal(Select(["Tests/ExampleAdmissionBaseline.txt"]), ["blockers"]);
     // Suites run the built command, so a script compiled into it selects every suite; `leancil workspace`,
     // `watch`, contract export and verify reports are reached by no include edge.
-    var everySuite = VerificationSelection.SuiteInputs().Keys.Order(StringComparer.Ordinal).ToArray();
     foreach (var script in new[]
         { "scripts/ContractExport.cs", "scripts/ProofWorkspace.cs", "scripts/ProofWatch.cs", "scripts/VerifyReports.cs" })
-        Equal(VerificationSelection.Select([script]), everySuite);
+        Equal(Select([script]), allSuites);
 });
 Test("proof and transitive imports", () =>
 {
-    Equal(VerificationSelection.Select(["Examples/Proofs/Countdown.lean"]), ["cli", "contracts", "fsharp", "loops"]);
-    Equal(VerificationSelection.Select(["Tests/Support.lean"]), All());
-    Equal(VerificationSelection.Select(["Tests/UnsafeCallEvidence.lean"]), ["unsafe"]);
+    Equal(Select(["Examples/Proofs/Countdown.lean"]), ["cli", "contracts", "fsharp", "loops"]);
+    Equal(Select(["Tests/Support.lean"]), allSuites);
+    Equal(Select(["Tests/UnsafeCallEvidence.lean"]), ["unsafe"]);
     // A proof a documented command verifies changes what that command prints.
-    Require(VerificationSelection.Select(["Examples/Proofs/PastEnd.lean"]).Contains("docs"),
+    Require(Select(["Examples/Proofs/PastEnd.lean"]).Contains("docs"),
         "A proof the getting-started walkthrough verifies does not select the docs suite");
 });
 Test("dynamic proof paths", () =>
 {
-    bool Owns(string path, string suite) => VerificationSelection.Select([path]).Contains(suite);
+    bool Owns(string path, string suite) => Select([path]).Contains(suite);
     Require(Owns("Examples/Proofs/Negate64.lean", "integer"), "Missing integer proof owner");
     Require(Owns("Examples/Proofs/GenericIdentity.lean", "contracts"), "Missing generic proof owner");
     Require(Owns("Examples/Proofs/ConstructorValue.lean", "fsharp"), "Missing F# proof owner");
@@ -211,28 +219,28 @@ Test("shared unknown and workflow inputs", () =>
     foreach (var path in new[] { "CIL/Safety/Memory.lean", "Extractor/UnsafeModels.cs", "global.json",
         "Examples/Assembly/SkipInitialization.cs", "Tests/NewTest.cs", ".github/workflows/verification.yml",
         "scripts/SelectVerification.cs" })
-        Equal(VerificationSelection.Select([path]), All());
+        Equal(Select([path]), allSuites);
 });
 Test("other workflows do not rerun suites", () =>
 {
-    Equal(VerificationSelection.Select([".github/workflows/arm64-aes.yml", ".github/workflows/runtime-profiles.yml"]),
+    Equal(Select([".github/workflows/arm64-aes.yml", ".github/workflows/runtime-profiles.yml"]),
         []);
-    Equal(VerificationSelection.Select([".github/workflows/arm64-aes.yml", "Tests/Loops.cs"]), ["loops"]);
+    Equal(Select([".github/workflows/arm64-aes.yml", "Tests/Loops.cs"]), ["loops"]);
 });
 Test("multiple changes and deleted paths", () =>
 {
-    Equal(VerificationSelection.Select(["README.md", "Tests/Loops.cs", "Tests/Division.cs"]),
+    Equal(Select(["README.md", "Tests/Loops.cs", "Tests/Division.cs"]),
         ["division", "docs", "loops"]);
-    Equal(VerificationSelection.Select(["Tests/Deleted.cs"]), All());
+    Equal(Select(["Tests/Deleted.cs"]), allSuites);
 });
 Test("every registered suite has its entry point", () =>
 {
-    Equal(VerificationSuites.Names().Order(StringComparer.Ordinal), All());
+    Equal(VerificationSuites.Names().Order(StringComparer.Ordinal), allSuites);
     Require(VerificationSuites.Names().Distinct(StringComparer.Ordinal).Count() == VerificationSuites.Names().Length,
         "A suite name is registered twice");
     foreach (IndependentSuite suite in VerificationSuites.Independent)
         Require(File.Exists(Path.Combine(root, suite.Script)), "No entry point: " + suite.Name);
-    foreach (var (suite, inputs) in VerificationSelection.SuiteInputs())
+    foreach (var (suite, inputs) in suiteInputs)
         Require(inputs.Count > 0, "No entry point: " + suite);
 });
 void MustReject(Action action)
@@ -400,39 +408,39 @@ Test("export leaf selection, strict files and shared inputs", () =>
         .Where(entry => !entry.Standalone && entry.Cohort != "resolution")
         .Select(entry => entry.Name).Order(StringComparer.Ordinal).ToArray();
     bool Selects(string path, string suite) =>
-        VerificationSelection.Select([path]).Contains(suite, StringComparer.Ordinal);
+        Select([path]).Contains(suite, StringComparer.Ordinal);
     foreach (string name in exports)
-        Require(All().Contains(name, StringComparer.Ordinal), "Missing selected export leaf: " + name);
+        Require(allSuites.Contains(name, StringComparer.Ordinal), "Missing selected export leaf: " + name);
     foreach (string name in bootstrap)
         Require(Selects("Tests/ContractExport.cs", name), "Bootstrap change lost " + name);
     foreach (ExportSuite entry in ExportVerificationSuites.FullPlan())
         Require(Selects("Tests/FullImportVerification.cs", entry.Name), "Full change lost " + entry.Name);
-    Equal(VerificationSelection.Select(["scripts/ExportVerificationSuites.cs"]), All());
-    Equal(VerificationSelection.Select(["scripts/VerificationSuites.cs"]), All());
-    Equal(VerificationSelection.Select(["Tests/ModularStaticExports.cs"]).Order(StringComparer.Ordinal),
+    Equal(Select(["scripts/ExportVerificationSuites.cs"]), allSuites);
+    Equal(Select(["scripts/VerificationSuites.cs"]), allSuites);
+    Equal(Select(["Tests/ModularStaticExports.cs"]).Order(StringComparer.Ordinal),
         ["exportsfullstatics", "exportsstatics"]);
-    Equal(VerificationSelection.Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
-    Equal(VerificationSelection.Select(["Tests/ContractDiscovery.cs"]), ["exportsdiscovery"]);
-    Equal(VerificationSelection.Select(["Tests/GenericLayoutImports.cs"]), ["exportstyped"]);
+    Equal(Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
+    Equal(Select(["Tests/ContractDiscovery.cs"]), ["exportsdiscovery"]);
+    Equal(Select(["Tests/GenericLayoutImports.cs"]), ["exportstyped"]);
     string[] typedFixtures =
         ["TypedImportInterface", "TypedIdentityProof", "TypedCopyProof", "TypedIdentityCaller", "TypedCopyCaller",
             "TypedChainCaller"];
     foreach (string name in typedFixtures)
-        Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]), ["exportstyped"]);
-    Equal(VerificationSelection.Select(["Tests/DerivedContractExports.cs"]), ["exportsderived"]);
-    Equal(VerificationSelection.Select(["Tests/InitializedExports.cs"]), ["exportsinitialized"]);
-    Equal(VerificationSelection.Select(["Tests/ProfileFamilies.cs"]), ["exportsprofiles"]);
+        Equal(Select(["Tests/ContractImports/" + name + ".lean"]), ["exportstyped"]);
+    Equal(Select(["Tests/DerivedContractExports.cs"]), ["exportsderived"]);
+    Equal(Select(["Tests/InitializedExports.cs"]), ["exportsinitialized"]);
+    Equal(Select(["Tests/ProfileFamilies.cs"]), ["exportsprofiles"]);
     foreach (var name in new[] { "ProfileFamilyContract", "ProfileFamilyProof", "ProfileFamilyCaller" })
-        Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]), ["exportsprofiles"]);
+        Equal(Select(["Tests/ContractImports/" + name + ".lean"]), ["exportsprofiles"]);
     string[] derivedFixtures =
         ["DerivedInterface", "DerivedPercentProof", "DerivedAddProof", "DerivedShiftCaller", "DerivedSumCaller"];
     foreach (string name in derivedFixtures)
-        Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]),
+        Equal(Select(["Tests/ContractImports/" + name + ".lean"]),
             name is "DerivedInterface" or "DerivedPercentProof"
                 ? ["exportsderived", "exportstransitiveoutcomes"] : ["exportsderived"]);
-    Equal(VerificationSelection.Select(["Tests/TransitiveOutcomes.cs"]), ["exportstransitiveoutcomes"]);
-    Equal(VerificationSelection.Select(["Tests/StagedBundleMutation.cs"]), ["exportstransitive"]);
-    Require(VerificationSelection.Select(["Tests/ImportedLayouts.lean"]).Contains("evidence", StringComparer.Ordinal),
+    Equal(Select(["Tests/TransitiveOutcomes.cs"]), ["exportstransitiveoutcomes"]);
+    Equal(Select(["Tests/StagedBundleMutation.cs"]), ["exportstransitive"]);
+    Require(Select(["Tests/ImportedLayouts.lean"]).Contains("evidence", StringComparer.Ordinal),
         "Imported-layout model evidence lost its existing suite owner");
     Equal(VerificationSelection.Schedule(exports).Order(StringComparer.Ordinal), exports);
     string runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
@@ -488,7 +496,7 @@ Test("a missing registered export fixture fails selection", () =>
     }
     finally { Directory.Delete(isolated, recursive: true); }
 });
-Test("required gate, all 192 actual Bash status combinations", () =>
+Test("required gate, all 768 actual Bash status combinations", () =>
 {
     var bash = OperatingSystem.IsWindows() ? "C:/Program Files/Git/bin/bash.exe" :
         (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
@@ -500,6 +508,9 @@ Test("required gate, all 192 actual Bash status combinations", () =>
     var start = workflow.LastIndexOf(marker, StringComparison.Ordinal);
     Require(start >= 0, "Missing workflow gate");
     var gate = WorkflowPatterns.StepIndent.Replace(workflow[(start + marker.Length)..], "");
+    // Each case runs in its own errexit subshell. Invoking it inside an if would disable errexit.
+    var script = new StringBuilder("check_gate() (\nset -e\n").Append(gate).Append("\n)\n");
+    var cases = new List<(string Name, bool Expected)>();
     string[] statuses = ["success", "failure", "cancelled", "skipped"];
     foreach (var planned in statuses)
     foreach (var selected in new[] { "true", "false", "" })
@@ -507,27 +518,29 @@ Test("required gate, all 192 actual Bash status combinations", () =>
     foreach (var tools in statuses)
     foreach (var result in statuses)
     {
-        var command = new ProcessStartInfo(bash)
-        {
-            UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true
-        };
-        foreach (var arg in new[] { "-e", "-c", gate }) command.ArgumentList.Add(arg);
-        command.Environment["SELECT_RESULT"] = planned;
-        command.Environment["HAS_SUITES"] = selected;
-        command.Environment["PREPARE_RESULT"] = prepared;
-        command.Environment["TOOLS_RESULT"] = tools;
-        command.Environment["SUITES_RESULT"] = result;
-        using var process = Process.Start(command) ?? throw new InvalidOperationException("Could not start Bash");
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
         var expected = planned == "success" && ((selected, prepared, tools, result) is
             ("true", "success", "success", "success") or ("false", "skipped", "skipped", "skipped"));
-        string transcript = stdout.GetAwaiter().GetResult() + stderr.GetAwaiter().GetResult();
-        Require((process.ExitCode == 0) == expected,
-            $"Unexpected gate result: {planned}/{selected}/{prepared}/{tools}/{result}\n{transcript}");
+        cases.Add(($"{planned}/{selected}/{prepared}/{tools}/{result}", expected));
+        script.Append($"SELECT_RESULT={planned} HAS_SUITES={selected} PREPARE_RESULT={prepared} ")
+            .Append($"TOOLS_RESULT={tools} SUITES_RESULT={result} check_gate >&2\nprintf '%d\\n' \"$?\"\n");
     }
+    var command = new ProcessStartInfo(bash, "-s")
+    {
+        UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true,
+        RedirectStandardOutput = true, RedirectStandardError = true
+    };
+    using var process = Process.Start(command) ?? throw new InvalidOperationException("Could not start Bash");
+    var stdout = process.StandardOutput.ReadToEndAsync();
+    var stderr = process.StandardError.ReadToEndAsync();
+    process.StandardInput.Write(script.ToString());
+    process.StandardInput.Close();
+    process.WaitForExit();
+    var results = stdout.GetAwaiter().GetResult().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    var diagnostics = stderr.GetAwaiter().GetResult();
+    Require(process.ExitCode == 0 && results.Length == cases.Count, $"Incomplete Bash gate results\n{diagnostics}");
+    for (var i = 0; i < cases.Count; i++)
+        Require(int.TryParse(results[i], out int status) && (status == 0) == cases[i].Expected,
+            $"Unexpected gate result for {cases[i].Name}: {results[i]}\n{diagnostics}");
 });
 Test("certified library binding, main republication and observability", () =>
 {

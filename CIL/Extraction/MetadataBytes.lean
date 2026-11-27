@@ -1,5 +1,7 @@
 import CIL.Extraction.KernelEquation
 import CIL.Extraction.ByteLiterals
+import CIL.Extraction.AssemblySpelling
+import CIL.Extraction.SearchTree
 import CIL.Extraction.MetadataToken
 
 /-!
@@ -438,66 +440,9 @@ structure MethodSpecRow where
 
 /-! ## Search trees -/
 
-/-- A binary search tree keyed by number, built balanced from entries in ascending key order, so a
-    lookup costs the logarithm of the entry count and the tree can be written out as a literal. -/
-inductive SearchTree (α : Type) where
-  | leaf
-  | node (left : SearchTree α) (key : Nat) (value : α) (right : SearchTree α)
-  deriving DecidableEq, Repr
-
 namespace SearchTree
 
 variable {α : Type}
-
-/-- The value stored under `wanted`. -/
-def find? : SearchTree α → Nat → Option α
-  | .leaf, _ => none
-  | .node left key value right, wanted =>
-    match compare wanted key with
-    | .lt => find? left wanted
-    | .gt => find? right wanted
-    | .eq => some value
-
-/-- The entry with the least key above `wanted`. -/
-def above? : SearchTree α → Nat → Option (Nat × α)
-  | .leaf, _ => none
-  | .node left key value right, wanted =>
-    if wanted < key then
-      match above? left wanted with
-      | some entry => some entry
-      | none => some (key, value)
-    else above? right wanted
-
-/-- The entries in ascending key order. -/
-def toList : SearchTree α → List (Nat × α)
-  | .leaf => []
-  | .node left key value right => left.toList ++ (key, value) :: right.toList
-
-/-- The tree of the first `count` entries, taking `count / 2` of them to the left of the root, and
-    the entries left over. `fuel` bounds the depth. -/
-private def build : Nat → Nat → List (Nat × α) → SearchTree α × List (Nat × α)
-  | 0, _, rest => (.leaf, rest)
-  | fuel + 1, count, rest =>
-    if count == 0 then (.leaf, rest)
-    else
-      let leftCount := count / 2
-      let (left, afterLeft) := build fuel leftCount rest
-      match afterLeft with
-      | [] => (left, [])
-      | (key, value) :: afterRoot =>
-        let (right, remaining) := build fuel (count - 1 - leftCount) afterRoot
-        (.node left key value right, remaining)
-
-/-- The balanced tree of entries in ascending key order. -/
-def ofSorted (entries : List (Nat × α)) : SearchTree α :=
-  (build entries.length entries.length entries).1
-
-/-- The first key that does not ascend strictly from its predecessor. -/
-def firstOutOfOrder : Option Nat → List (Nat × α) → Option Nat
-  | _, [] => none
-  | none, (key, _) :: rest => firstOutOfOrder (some key) rest
-  | some previous, (key, _) :: rest =>
-    if previous < key then firstOutOfOrder (some key) rest else some key
 
 /-- The balanced tree of the entries, which must have strictly ascending keys. -/
 def ofEntries (entries : List (Nat × α)) : Except MetadataError (SearchTree α) :=
@@ -541,9 +486,6 @@ structure MetadataIndex extends IndexTables where
 def indexEntries (entries : List ByteEntry) : Except MetadataError (SearchTree (List Nat)) :=
   if !entries.all (fun entry => entry.2.all (· < 256)) then .error .invalidByte
   else SearchTree.ofEntries entries
-/-- The bytes of a string literal, for comparison with heap entries. -/
-def bytesOf (text : String) : List Nat := text.toByteArray.data.toList.map UInt8.toNat
-
 /-- A name tied to bytes by `spelled?` has exactly those bytes, so an equation
     `spelled? bytes = some name` accepts the same names as comparing `bytesOf name` with them. -/
 theorem bytesOf_of_spelled {bytes : List Nat} {text : String}
@@ -691,35 +633,42 @@ def userStringUnits (entries : SearchTree (List Nat)) (offset : Nat) :
 
 /-! ## Rows by token -/
 
+/-- The column widths of an in-scope token of a supported table. -/
+private def TableHeader.rowWidths (header : TableHeader) (table token : Nat) :
+    Except MetadataError (List Nat) := do
+  if tokenRow token == 0 || header.rows table < tokenRow token then
+    throw (.tokenOutOfScope token)
+  let some widths := columnWidths header.widths table | throw (.unsupportedTable token)
+  return widths
+
 /-- The row bytes of a token: the token must be in scope of the header, the slice must carry
     its row, the table must be one the checker reads and the row must have the length the
     header's widths give. -/
-def MetadataIndex.row (index : MetadataIndex) (token : Nat) : Except MetadataError (List Nat) :=
-  let table := metadataTableOf token
-  if tokenRow token == 0 || index.header.rows table < tokenRow token then
-    .error (.tokenOutOfScope token)
-  else match columnWidths index.header.widths table, index.rows.find? token with
-  | none, _ => .error (.unsupportedTable token)
-  | some widths, some bytes =>
-    if bytes.length == widths.sum then .ok bytes
-    else .error (.rowLength token widths.sum bytes.length)
-  | some _, none => .error (.missingRow token)
+def MetadataIndex.row (index : MetadataIndex) (token : Nat) : Except MetadataError (List Nat) := do
+  let widths ← index.header.rowWidths (metadataTableOf token) token
+  let some bytes := index.rows.find? token | throw (.missingRow token)
+  if bytes.length == widths.sum then return bytes
+  throw (.rowLength token widths.sum bytes.length)
+
+/-- Decode one carried row, requiring its columns to consume exactly its bytes. -/
+private def TableHeader.rowColumns (header : TableHeader) (table token : Nat)
+    (row : Option (List Nat)) : Except MetadataError (List Nat) := do
+  let widths ← header.rowWidths table token
+  let some bytes := row | throw (.missingRow token)
+  let some values := splitColumns widths bytes | throw (.rowLength token widths.sum bytes.length)
+  return values
 
 /-- The columns of a row as numbers. -/
 def MetadataIndex.columns (index : MetadataIndex) (token : Nat) :
-    Except MetadataError (List Nat) := do
-  let bytes ← index.row token
-  match columnWidths index.header.widths (metadataTableOf token) with
-  | some widths =>
-    match splitColumns widths bytes with
-    | some values => .ok values
-    | none => .error (.rowLength token widths.sum bytes.length)
-  | none => .error (.unsupportedTable token)
+    Except MetadataError (List Nat) :=
+  index.header.rowColumns (metadataTableOf token) token (index.rows.find? token)
 
 /-- A row of a given table; a token of another table is out of scope. -/
 private def MetadataIndex.columnsOf (index : MetadataIndex) (table token : Nat) :
     Except MetadataError (List Nat) :=
-  if metadataTableOf token == table then index.columns token else .error (.tokenOutOfScope token)
+  if metadataTableOf token == table then
+    index.header.rowColumns table token (index.rows.find? token)
+  else .error (.tokenOutOfScope token)
 
 /-- The `TypeRef` row of a token. -/
 def MetadataIndex.typeRef (index : MetadataIndex) (token : Nat) :
@@ -749,16 +698,12 @@ theorem MetadataIndex.typeDef_bytes {index : MetadataIndex} {token : Nat} {row :
     split at cols <;> try contradiction
     rename_i typed
     refine ⟨by simpa using typed, ?_⟩
-    cases read : index.row token with
-    | error fault => simp [MetadataIndex.columns, read, bind, Except.bind] at cols
-    | ok bytes =>
-      unfold MetadataIndex.row at read
-      cases stored : index.rows.find? token with
-      | some value => exact ⟨value, rfl⟩
-      | none =>
-        simp only [stored] at read
-        split at read <;> try contradiction
-        split at read <;> contradiction
+    cases stored : index.rows.find? token with
+    | some bytes => exact ⟨bytes, rfl⟩
+    | none =>
+      cases widths : index.header.rowWidths Table.typeDef token <;>
+        simp [TableHeader.rowColumns, stored, widths, bind, Except.bind,
+          throw] at cols
 #print axioms MetadataIndex.typeDef_bytes
 
 /-- The `Field` row of a token. -/
@@ -811,13 +756,19 @@ def MetadataIndex.nestedClass (index : MetadataIndex) (token : Nat) :
     .ok { nested := nestedToken, enclosing := enclosingToken }
   | _ => .error (.unsupportedTable token)
 
-/-- The `GenericParam` row of a token. -/
-def MetadataIndex.genericParam (index : MetadataIndex) (token : Nat) :
-    Except MetadataError GenericParamRow := do
-  match ← index.columnsOf Table.genericParam token with
+/-- The parameter in a carried `GenericParam` row, with its owner decoded from the coded index. -/
+private def TableHeader.genericParam (header : TableHeader) (token : Nat)
+    (row : Option (List Nat)) : Except MetadataError GenericParamRow := do
+  if metadataTableOf token != Table.genericParam then throw (.tokenOutOfScope token)
+  match ← header.rowColumns Table.genericParam token row with
   | [number, flags, owner, name] =>
     .ok { number, flags, owner := ← decodeCoded typeOrMethodDefTags 1 owner, name }
   | _ => .error (.unsupportedTable token)
+
+/-- The `GenericParam` row of a token. -/
+def MetadataIndex.genericParam (index : MetadataIndex) (token : Nat) :
+    Except MetadataError GenericParamRow :=
+  index.header.genericParam token (index.rows.find? token)
 
 /-- The `MethodSpec` row of a token. -/
 def MetadataIndex.methodSpec (index : MetadataIndex) (token : Nat) :
@@ -843,62 +794,6 @@ def MetadataIndex.userString (index : MetadataIndex) (offset : Nat) :
   userStringUnits index.userStrings offset
 
 /-! ## The identity of an assembly -/
-
-/-- The decimal ASCII digits of a number below `10 ^ fuel`. -/
-def decimalDigits : Nat → Nat → List Nat
-  | 0, _ => []
-  | fuel + 1, value =>
-    if value < 10 then [48 + value] else decimalDigits fuel (value / 10) ++ [48 + value % 10]
-
-/-- The 16 lowercase hexadecimal digits of the eight bytes of a public key token. -/
-def hexDigits : List Nat → List Nat
-  | [] => []
-  | byte :: rest =>
-    let digit (value : Nat) : Nat := if value < 10 then 48 + value else 87 + value
-    digit (byte / 16) :: digit (byte % 16) :: hexDigits rest
-
-/-- The fixed words of an assembly identity as bytes: `, Version=`, `, Culture=`, `neutral`,
-    `, PublicKeyToken=` and `null`. They are byte lists, not strings, so the kernel never
-    evaluates a string literal to read an identity. -/
-def versionMarker : List Nat := [44, 32, 86, 101, 114, 115, 105, 111, 110, 61]
-def cultureMarker : List Nat := [44, 32, 67, 117, 108, 116, 117, 114, 101, 61]
-def neutralCulture : List Nat := [110, 101, 117, 116, 114, 97, 108]
-def tokenMarker : List Nat :=
-  [44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101, 110, 61]
-def nullToken : List Nat := [110, 117, 108, 108]
-
-/-- The text of an assembly name as Cecil writes it:
-    `Name, Version=a.b.c.d, Culture=culture, PublicKeyToken=token`. -/
-def assemblySpelling (name : List Nat) (major minor build revision : Nat)
-    (culture token : List Nat) :
-    List Nat :=
-  name ++ versionMarker ++ decimalDigits 5 major ++ [46] ++ decimalDigits 5 minor ++ [46] ++
-    decimalDigits 5 build ++ [46] ++ decimalDigits 5 revision ++ cultureMarker ++
-    (if culture.isEmpty then neutralCulture else culture) ++ tokenMarker ++ token
-
-/-- The eight bytes of a public key token, in the order an `AssemblyRef` row stores them. -/
-def tokenBytes (token : Nat) : List Nat :=
-  (List.range 8).reverse.map fun index => (token >>> (8 * index)) % 256
-
-/-- The display bytes of an assembly as Cecil writes them:
-    `Name, Version=a.b.c.d, Culture=culture, PublicKeyToken=token`. Spelled type heads carry
-    them as their scope; slices and pins are compared as `AssemblyName` values instead. -/
-def _root_.CIL.AssemblyName.spelling (assembly : AssemblyName) : List Nat :=
-  let version := assembly.version
-  assemblySpelling (assembly.name.bytes?.getD []) version.major version.minor version.build
-    version.revision (assembly.culture.bytes?.getD [])
-    (match assembly.publicKeyToken with
-     | some token => hexDigits (tokenBytes token)
-     | none => nullToken)
-
-/-- The spelling has no colon, so `spelling ++ "::"` begins the type names of one spelling only. -/
-def _root_.CIL.AssemblyName.colonFree (assembly : AssemblyName) : Bool :=
-  !assembly.spelling.contains 58
-
-/-- `scope` is `assembly`'s colon-free spelling, as a scoped type identity's text names its
-    assembly. -/
-def _root_.CIL.AssemblyName.spelledAs (assembly : AssemblyName) (scope : String) : Bool :=
-  assembly.colonFree && assembly.spelling == bytesOf scope
 
 /-- Decoded identity columns of an assembly reference. -/
 private structure AssemblyRefParts where
@@ -1028,20 +923,32 @@ abbrev AssemblyIdentified (assembly : AssemblyMetadata) (identity : AssemblyName
   (decodeTableHeader assembly.tableHeader).toOption = some assembly.header ∧
     assembly.name.toOption = some identity
 
+/-- A pending row and the subtree containing its successors. -/
+private abbrev PendingRow := Nat × List Nat × SearchTree (List Nat)
+
+/-- The path to the first carried row at or above a token, followed by its pending ancestors. -/
+private def rowsFrom (token : Nat) : SearchTree (List Nat) → List PendingRow → List PendingRow
+  | .leaf, rest => rest
+  | .node left key bytes right, rest =>
+    match compare token key with
+    | .lt => rowsFrom token left ((key, bytes, right) :: rest)
+    | .eq => (key, bytes, right) :: rest
+    | .gt => rowsFrom token right rest
+
 /-- The running instance field count before each of up to `count` consecutive `Field` rows from
     `row`, as far as the rows are carried, with the total and whether every row was carried. A
     field is static when bit 4 of the first flag byte is set. -/
-private def fieldCounts (index : MetadataIndex) :
-    Nat → Nat → Nat → List (Nat × Nat) → Except MetadataError (List (Nat × Nat) × Nat × Bool)
-  | 0, _, instances, found => .ok (found, instances, true)
-  | count + 1, row, instances, found => do
+private def fieldCounts :
+    Nat → Nat → Nat → List (Nat × Nat) → List PendingRow →
+      Except MetadataError (List (Nat × Nat) × Nat × Bool)
+  | 0, _, instances, found, _ => .ok (found, instances, true)
+  | count + 1, row, instances, found, pending => do
     let token ← checkedTokenOf Table.field row .rowOverflow
-    match index.rows.find? token with
-    | none => .ok (found, instances, false)
-    | some bytes =>
-      let isStatic := bytes.getD 0 0 / 0x10 % 2 == 1
-      fieldCounts index count (row + 1) (if isStatic then instances else instances + 1)
-        ((token, instances) :: found)
+    let (key, bytes, right) :: rest := pending | return (found, instances, false)
+    if key != token then return (found, instances, false)
+    let isStatic := bytes.getD 0 0 / 0x10 % 2 == 1
+    fieldCounts count (row + 1) (if isStatic then instances else instances + 1)
+      ((token, instances) :: found) (rowsFrom 0 right rest)
 
 /-- The carried prefix of a type's field counts, with a total when all its rows are carried. -/
 private def typeCounts (index : MetadataIndex) (token : Nat) :
@@ -1053,13 +960,14 @@ private def typeCounts (index : MetadataIndex) (token : Nat) :
     let next ← checkedTokenOf Table.typeDef (tokenRow token + 1) .rowOverflow
     pure ((index.typeDef next).toOption.map (·.fieldList))
   let some stop := stop | return none
-  let (found, instances, complete) ← fieldCounts index (stop - row.fieldList) row.fieldList 0 []
+  let pending := rowsFrom (tokenOf Table.field row.fieldList) index.rows []
+  let (found, instances, complete) ← fieldCounts (stop - row.fieldList) row.fieldList 0 [] pending
   return some (found, if complete then some instances else none)
 
 /-- The instance field counts of every carried type, as entries in ascending key order. -/
-private def fieldCountEntries (index : MetadataIndex) :
+private def fieldCountEntries (index : MetadataIndex) (rows : List ByteEntry) :
     Except MetadataError (SearchTree Nat × SearchTree Nat) := do
-  let (before, total) ← index.rows.toList.foldlM (fun (before, total) (token, _) => do
+  let (before, total) ← rows.foldlM (fun (before, total) (token, _) => do
     if metadataTableOf token != Table.typeDef then return (before, total)
     match ← typeCounts index token with
     | some (found, some count) => return (found ++ before, (token, count) :: total)
@@ -1157,15 +1065,18 @@ theorem sortBy_perm {α : Type} (before : α → α → Bool) :
 def genericOwnerCode (owner : Nat) : Nat :=
   tokenRow owner * 2 + if metadataTableOf owner == Table.methodDef then 1 else 0
 
-/-- Index every carried generic parameter by the coded value of its owner in O(n log n) time. -/
-private def genericOwnerEntries (index : MetadataIndex) :
+/-- Index every carried generic parameter by its owner. A table in CLI owner order takes one
+    linear pass to collect its rows and linear time to build the tree. -/
+private def genericOwnerEntries (header : TableHeader) (rows : List ByteEntry) :
     Except MetadataError (SearchTree (Nat × Nat)) := do
-  let entries ← index.rows.toList.foldlM (fun found (token, _) => do
+  let entries ← rows.foldlM (fun found (token, bytes) => do
     if metadataTableOf token != Table.genericParam then return found
-    let parameter ← index.genericParam token
+    let parameter ← header.genericParam token (some bytes)
     return (genericOwnerCode parameter.owner, token) :: found) []
-  let ordered := sortPairs entries
-  SearchTree.ofEntries (genericOwnerGroups ordered)
+  -- Tokens ascend within a group. Out-of-order owners need a sort by owner and token.
+  match SearchTree.ofEntries (genericOwnerGroups entries.reverse) with
+  | .ok owners => return owners
+  | .error _ => SearchTree.ofEntries (genericOwnerGroups (sortPairs entries))
 
 /-- The assembly of the bare index tables are counted with; counting fields and generic
     parameters reads no assembly. -/
@@ -1193,8 +1104,8 @@ def MetadataSlice.tables (slice : MetadataSlice) : Except MetadataError IndexTab
   let index : MetadataIndex :=
     { toIndexTables := bare, header := header, corlib := slice.corlib,
       identity := tableAssembly, scope := [] }
-  let (before, total) ← fieldCountEntries index
-  let genericOwners ← genericOwnerEntries index
+  let (before, total) ← fieldCountEntries index slice.rows
+  let genericOwners ← genericOwnerEntries header slice.rows
   .ok { bare with
     instanceBefore := before
     instanceTotal := total

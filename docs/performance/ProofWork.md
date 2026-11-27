@@ -24,8 +24,7 @@ To compare a change, time the base and the changed source against the same compi
 one session, with nothing else running:
 
 - Discard the first run after a build; its imports are cold.
-- Run each side at least twice. On a one-minute module one pair measured a saving of 5.0 s and
-  its repeat 3.4 s, so one pair does not resolve a difference of a few percent.
+- Alternate the two versions and run each at least twice. Report the spread across runs.
 - The profiler's cumulative counters (`simp`, `dsimp`, type checking) overlap. Use them to find
   where time goes, not as additive savings.
 - Modules compile concurrently in a build. Do not add module savings to predict the time of a
@@ -50,18 +49,20 @@ with a time taken on the same machine class and with the same options.
 
 In the `Step.lean` run the cumulative `simp` counter is 12.7 s and `dsimp` 14.8 s.
 
-## Faster proof forms
+## Instruction-family proofs
 
-Each instruction-family proof in these modules traverses the full instruction dispatcher, so a
-redundant traversal is paid once per family. The figures are the cost of the slower form on the
-same module.
+Close impossible operand cases before inspecting the next operand. A padding proof can apply
+the dispatcher-tail theorem as soon as the first operand is invalid. When a bind succeeds,
+extract its result so the remaining proof only covers the successful branch.
 
-| Keep | Instead of | Cost of the slower form |
-| --- | --- | --- |
-| Close each operand-shape case before inspecting the next operand | Splitting all operands, then closing the impossible cases | These three together: `Step.lean` 55%, `StepFlow.lean` 43% and `AppendLocals.lean` 17% slower; the `Step.lean` olean 51% larger |
-| Try the dispatcher-tail theorem first in padding proofs | Repeating that proof for every second-operand constructor when the first operand is invalid | included above |
-| Extract the successful result of a bind | Expanding the bind's impossible error branch | included above |
-| `dsimp` to unfold `observerCount` in `step_observers`, where definitional equality suffices | `simp`, which builds congruence proofs over the dispatcher | `Step.lean` 26% to 29% slower |
-| Simplify the observer guard in the goal only; the hypothesis from `observer_ok` or `observer_thrown` does not contain it | Simplifying the normalized hypothesis as well | `Step.lean` 6% to 10% slower |
-| Rewrite a memory step with its dispatch equation | Unfolding the instruction dispatcher | 5,451 heartbeats against 602 |
-| Rewrite the outer guard directly and try the write correspondence before the read correspondence in `instructionResult` | The reverse order, which reduces a write while matching a read lemma that cannot apply | 264,632 heartbeats against 227,277 |
+In `step_observers`, unfold `observerCount` with `dsimp`. The hypotheses produced by
+`observer_ok` and `observer_thrown` already describe the result, so only the goal needs the
+observer guard simplified.
+
+Use a memory instruction's dispatch equation to rewrite its step directly. In
+`instructionResult`, rewrite the outer guard and try the write correspondence first. Trying the
+read lemma on a write forces the kernel to reduce the write while matching the lemma.
+
+The `allocation_fixed_step` tactic applies `ResultRenamed.ofUnsupportedGuard` to the
+observer check shared by fixed instructions. When the operand shape determines the fallback
+branch, the tactic applies its existing proof before inspecting more of the stack.

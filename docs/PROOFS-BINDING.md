@@ -813,7 +813,7 @@ the profile, the environment and the link table, is written as that constant, an
 zero-initialized struct local is written as `.aggregate (List.replicate size 0)`, the term an
 template's frame and `make_fitting_local` hypotheses name. In a method with a constrained call or a dead site,
 the command writes aggregate identities with the expressions from the environment's raw layouts.
-The kernel then checks by reduction the theorem, named with the suffix `_decoder_eq`, that
+The kernel then checks the theorem, named with the suffix `_decoder_eq`, that
 `decoder = .ok name` for a closed method or `decoder = some name` for an optional method,
 and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
 `_localKinds`, `_returnsValue`, `_staticSites`, `_declared`, `_environment`, `_links`,
@@ -823,22 +823,28 @@ decoder, the `declared` field and the `Extracted.method0_declared` fact use the 
 constructor with the closed method's parameter and return type expressions. The extraction derives
 `Extracted.method0_decoded` from the closed equation and the validated specialization.
 It states that decoding the original method at its type arguments gives the same method.
-The command requires a successful decoder result and kernel confirmation that it reduces to the
-evaluated method. Admission checks the instructions at live positions. The form
+For a multi-method constructor image, `from_rows runtimeRows_eq runtime_validated` derives
+the same decoder equation from the image's checked rows. The kernel checks the method at its
+exact row index. Other methods establish their decoder equations by reduction. Admission checks
+the instructions at live positions. The form
 `cil_decoded_method name [operand, ...] := decoder` writes each matching field or closed type
 operand as its listed constant. The method can then use the facts from `cil_field_shape` or
 `cil_value_shape`. The command rejects a listed constant that names no operand.
 
-`cil_evaluated name : type := term` defines `name` as the value of a closed `Extraction.RawMethod`,
-`List String` or `Extraction.ManagedPackage` term, written as a literal, and the kernel checks
-`name_eq : term = name` by reduction. For a term of type `Option type` the value must be `some`,
-and the checked equation is `name_eq : term = some name`. A package literal writes each value that a definition of
-the current module also denotes, such as the caller assembly's metadata or the extraction's
-profile, as that constant. Compiled code reads the package from `term` through `name.compiled`,
-so the literal adds no compiled code. The command refuses a term that depends on `sorryAx`. The
-extractor writes a bound caller's original, the signatures of a program with appended CoreLib rows, and a single caller's
-bound package (`boundPackage_eq : managedPackage = some boundPackage`) this way. Tactics and
-later kernel checks then read them without evaluating the binding again.
+`cil_evaluated name : type := term` writes the value of a closed term as a literal. It accepts
+`Extraction.RawMethod`, `Runtime.Net11WinX64.BoundCaller`, `List String`, `Extraction.ManagedPackage`
+and the pair of executable method rows and getter declarations returned by `constructorImage.rows?`.
+The kernel checks `name_eq : term = name` by reduction. A term of type `Option type` must
+evaluate to `some`, and the checked equation is `name_eq : term = some name`. The command
+refuses a term that depends on `sorryAx`.
+
+Constructor literals reference definitions of the current module for shared values
+such as assembly metadata. Compiled code evaluates the source term through `name.compiled`.
+The extractor emits a bound caller, the signatures of a program with appended CoreLib rows
+and a single caller's bound package this way. For a bound first caller, `method0Binding_eq`
+proves that binding the source body and original method returns `some method0Binding`.
+The body, original method and links are fields of that checked value. In a multi-method
+extraction, `runtimeRows_eq` proves that building the runtime rows returns `some runtimeRows`.
 
 The extractor defines every method this way. It refuses a method with a live instruction that does
 not decode, or with a live call or construction whose operation differs from the one its decoder

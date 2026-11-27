@@ -44,10 +44,9 @@ File.WriteAllText(path, $$"""
     /-- Every one-byte opcode and every two-byte opcode `0xFE nn`, numbered as raw instructions are. -/
     def opcodes : List Nat := List.range 256 ++ (List.range 256).map (65024 + ·)
 
-    /-- The table holds an opcode exactly when `Instruction.valueOpcode` does. -/
+    /-- The sorted extractor table contains exactly the opcodes accepted by the Lean decoder. -/
     theorem table_is_valueOpcode :
-        (opcodes.all fun opcode =>
-          CIL.Instruction.valueOpcode opcode == table.contains opcode) = true := by
+        opcodes.filter CIL.Instruction.valueOpcode = table := by
       decide +kernel
     #print axioms table_is_valueOpcode
 
@@ -314,9 +313,9 @@ foreach (var (root, name) in new[] { (getter, "Extracted"), (shared, "Templates"
 CheckLean(Path.Combine(trace, "Extracted.lean"));
 Console.WriteLine("PASS get_Both binds to its template and TraceGated's frame checks");
 
-static void CheckLean(string path)
+static void CheckLean(string path, string? package = null, params string[] options)
 {
-    var output = Run(["lake", "env", "lean", path], cwd: FixturePackage());
+    var output = Run(["lake", "env", "lean", .. options, path], cwd: package ?? FixturePackage());
     if (output.Contains("sorryAx", StringComparison.Ordinal))
         throw new InvalidOperationException($"Admitted declaration in {path}.");
 }
@@ -392,12 +391,13 @@ static void CheckReceiverMethods(string directory)
             return new GeneratedExtraction(assembly, method.FullName, output, profile);
         })).ToArray();
         ExtractBatch("extract", null, requests);
-        foreach (var request in requests)
+        var package = FixturePackage();
+        Concurrently(requests, request =>
         {
             var path = Path.Combine(request.Output, "Extracted.lean");
             RequireDecoded(File.ReadAllText(path), request.Entry);
-            CheckLean(path);
-        }
+            CheckLean(path, package, "-j1");
+        });
     }
 }
 

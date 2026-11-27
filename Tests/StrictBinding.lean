@@ -37,6 +37,11 @@ theorem sha256_empty : DigestIs (ImageBytes.ofBytes [])
     0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 := by decide +kernel
 #print axioms sha256_empty
 
+/-- One block of zero bytes still runs all compression rounds before the padding block. -/
+theorem sha256_zero_block : DigestIs (ImageBytes.ofBytes (List.replicate 64 0))
+    0xf5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b := by decide +kernel
+#print axioms sha256_zero_block
+
 theorem sha256_abc : DigestIs (ImageBytes.ofBytes (asciiOf "abc"))
     0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad := by decide +kernel
 #print axioms sha256_abc

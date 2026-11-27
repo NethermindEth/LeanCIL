@@ -25,6 +25,7 @@ Directory.CreateDirectory(root);
 var rejected = new RejectedEvidence(root);
 var queue = new GeneratedQueue(verification, assembly);
 var controls = new GeneratedEvidence(Path.Combine(root, "EvidenceControls"));
+var constructorProof = File.ReadAllText(At("Tests/ExceptionConstructor/Proof.lean"));
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Throws")!;
 using var exampleModule = ModuleDefinition.ReadModule(assembly);
 var throwMethods = exampleModule.GetType("Examples.Throws").Methods;
@@ -48,8 +49,8 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var extracted = Path.Combine(folder, "Extracted.lean");
     var source = File.ReadAllText(extracted);
     var entry = throwMethods.Single(candidate => candidate.Name == name);
-    var boundConstructor = name is "Percent" or "ActualValue" or "ArgumentInner" or "Inner" or "Message" or
-        "NamedArgument";
+    var hasConstructorProof = name is "ActualValue" or "ArgumentInner" or "Inner" or "Message" or "NamedArgument";
+    var boundConstructor = hasConstructorProof || name == "Percent";
     var method = name is "Null" or "Quotient" ? 1 : 0;
     var owner = method == 0 ? entry : ((MethodReference)entry.Body.Instructions
         .Single(instruction => instruction.OpCode.Code == Code.Call).Operand).Resolve();
@@ -142,9 +143,11 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         _ => ""
     };
     var proof = Path.Combine(folder, "BoundaryProof.lean");
+    // Both theorems share the elaborated extraction and receive separate audits.
+    var proofHeader = hasConstructorProof ? "import CIL.Safety.Execution\n" + constructorProof :
+        "import Extracted\nimport CIL.Safety.Execution";
     File.WriteAllText(proof, $$"""
-        import Extracted
-        import CIL.Safety.Execution
+        {{proofHeader}}
         namespace ExampleProof
         {{entryCheck}}
         {{nullEquations}}
@@ -199,10 +202,10 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         queue.Add(new(selector, proof, Path.Combine(root, name + "-Translated"), Assembly: image), () =>
             Console.WriteLine($"PASS {name}: the same boundary proof checks with translated exception literals"));
 
-        if (name is "ActualValue" or "ArgumentInner" or "Inner" or "Message" or "NamedArgument")
+        if (hasConstructorProof)
         {
             foreach (var (suffix, path) in new[] { ("", assembly), ("-Translated", image) })
-                queue.Add(new(selector, At("Tests/ExceptionConstructor/Proof.lean"),
+                queue.Add(new(selector, proof,
                     Path.Combine(root, name + "-All" + suffix), Theorem: "ExceptionConstructorProof.correctness",
                     Assembly: path), () => Console.WriteLine($"PASS {name}: every input and getter completion{suffix}"));
             continue;
@@ -217,9 +220,10 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
             queue.Add(new(selector, At("Examples/Proofs/Percent.lean"),
                 Path.Combine(root, "Percent-ZeroBudget" + suffix), Theorem: "ExampleProof.zeroBudget",
                 Assembly: assemblyPath), () => Console.WriteLine("PASS Percent: zero quota fails at newobj" + suffix));
-            verification.Verify(assemblyPath, "Examples", selector, rawProof, Path.Combine(root, "Percent-Raw" + suffix),
-                theorem: "CompiledPercent.verified");
-            Console.WriteLine("PASS Percent: decoded caller and CoreLib exception path at every heap quota" + suffix);
+            queue.Add(new(selector, rawProof, Path.Combine(root, "Percent-Raw" + suffix),
+                Theorem: "CompiledPercent.verified", Assembly: assemblyPath),
+                () => Console.WriteLine(
+                    "PASS Percent: decoded caller and CoreLib exception path at every heap quota" + suffix));
         }
         CheckPercentVariants(translated, translatedMethod, selector);
     }
@@ -532,8 +536,8 @@ void CheckPercentVariants(ModuleDefinition image, MethodDefinition method, strin
         #print axioms correctness
         end ExampleProof
         """);
-    verification.Verify(unboundImage, "Examples", selector, unbound, Path.Combine(root, "Percent-Type-Unbound"));
-    Console.WriteLine("PASS Percent: ArgumentNullException has no binding and supplies no counterexample");
+    queue.Add(new(selector, unbound, Path.Combine(root, "Percent-Type-Unbound"), Assembly: unboundImage),
+        () => Console.WriteLine("PASS Percent: ArgumentNullException has no binding and supplies no counterexample"));
 
     site.Operand = original;
     var threshold = method.Body.Instructions.Single(instruction =>

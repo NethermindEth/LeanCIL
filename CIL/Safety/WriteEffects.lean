@@ -56,21 +56,38 @@ theorem write_nextIdentity {memory result : Memory} {reference : Reference}
     result.nextIdentity = memory.nextIdentity :=
   (write_views_nextIdentity written).2
 
+/-- A successful write sets each covered cell to its input byte and preserves every other cell. -/
+theorem write_cells_eq {memory result : Memory} {reference : Reference}
+    {bytes : List (BitVec 8)} {alignment : Nat}
+    (written : write memory reference bytes alignment = .ok result) (id offset : Nat) :
+    result.cells id offset =
+      (if id = reference.allocation ∧ reference.offset ≤ offset then
+        match bytes[offset - reference.offset]? with
+        | some bits => ⟨bits, true⟩
+        | none => memory.cells id offset
+      else memory.cells id offset) := by
+  unfold write at written
+  cases allowed : access memory reference bytes.length alignment true <;>
+    simp only [allowed, Bind.bind, Except.bind, Pure.pure, Except.pure] at written
+  next => cases written
+  next =>
+    cases written
+    by_cases inside : id = reference.allocation ∧ reference.offset ≤ offset
+    · cases found : bytes[offset - reference.offset]? <;> simp [inside, initializedCellAt_eq, found]
+    · simp [inside]
+#print axioms write_cells_eq
+
 /-- A write leaves every cell outside its interval unchanged. -/
 theorem write_outside (m result : Memory) (r : Reference) (bytes : List (BitVec 8))
     (alignment id offset : Nat) (h : write m r bytes alignment = .ok result)
     (outside : id ≠ r.allocation ∨ offset < r.offset ∨ r.offset + bytes.length ≤ offset) :
     result.cells id offset = m.cells id offset := by
-  unfold write at h
-  cases ha : access m r bytes.length alignment true <;>
-    simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  · cases h
-  · cases h
-    rcases outside with different | before | after
-    · simp [different]
-    · simp [show ¬ r.offset ≤ offset by omega]
-    · have bound : bytes.length ≤ offset - r.offset := by omega
-      simp [List.getElem?_eq_none_iff.mpr bound]
+  rw [write_cells_eq h]
+  rcases outside with different | before | after
+  · simp [different]
+  · simp [show ¬ r.offset ≤ offset by omega]
+  · have bound : bytes.length ≤ offset - r.offset := by omega
+    simp [List.getElem?_eq_none_iff.mpr bound]
 
 theorem write_preserves_initialization (m result : Memory) (r : Reference)
     (bytes : List (BitVec 8))

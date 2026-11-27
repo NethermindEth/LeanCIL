@@ -14,7 +14,8 @@ const double AllowedKernelGrowth = 1.2;
 CheckDeclaredSignatureScaling();
 if (args.Contains("--declared-only", StringComparer.Ordinal)) return;
 
-BuildLeanTestLibraries("Generic owner index scaling library", "Tests.GenericOwnerScaling");
+BuildLeanTestLibraries("Generic owner and dispatch catalog scaling libraries",
+    "Tests.GenericOwnerScaling", "Tests.DispatchCatalogScaling");
 
 // Each method fits the default budget. Elaborator reduction of the entire six-method certificate fails.
 var directory = At("artifacts/TranslationScaling");

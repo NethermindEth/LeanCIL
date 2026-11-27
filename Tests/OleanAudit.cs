@@ -261,7 +261,8 @@ foreach (var count in new[] { 16, 128, 1024 })
     BindingPlan plan = new("", pins, 0);
     foreach (var pin in pins.DistinctBy(pin => pin.Module))
         Compile(pin.Module, "def " + pin.Module + ".image : Nat := 0\n");
-    Compile(ImagesModule, ImagesModuleSource(plan));
+    // The isolated native audit checks the generated pin list and theorem over a small image type.
+    Compile(ImagesModule, PinnedImagesSource(plan));
     AuditedAxioms(Audit(ImagesModule, [BindingRequests(plan)[1].Audit]).theorems[0]);
     var serialized = JsonSerializer.Serialize(BindingRequests(plan).Select(request => request.Audit), AuditJson);
     using var parsed = JsonDocument.Parse(serialized);

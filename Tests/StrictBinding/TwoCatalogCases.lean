@@ -22,11 +22,6 @@ private def checked (images : List PinnedImage) (items : List MethodEvidence) :=
 set_option maxRecDepth 16384
 set_option maxHeartbeats 16000000
 
-/-- The caller tests local, foreign and nested classes. Its callee tests its own class. -/
-theorem covered : (checked [app, library] Extracted.methodEvidence).toOption = some true :=
-  by decide +kernel
-#print axioms covered
-
 /-- The reference to Far.IScale on Near.First.Pick needs its defining image. -/
 private def missingInterface : Except AuditError Bool := do
   let home ← prepareOne app
@@ -53,19 +48,11 @@ private def wrongScope := changePick fun
     .apply (.apply (.objectConstructor app.identity name) left) right
   | type => type
 
-theorem wrongConstraintScope : checked [app, library] wrongScope =
-    .error (.dispatchMismatch Extracted.method0Original.token) := by cil_kernel_rfl
-#print axioms wrongConstraintScope
-
 /-- Swapping the arguments of the interface inside Box preserves both outer applications. -/
 private def crossedArguments := changePick fun
   | .apply (.apply outer (.apply box (.apply (.apply inner first) second))) right =>
     .apply (.apply outer (.apply box (.apply (.apply inner second) first))) right
   | type => type
-
-theorem wrongNestedArguments : checked [app, library] crossedArguments =
-    .error (.dispatchMismatch Extracted.method0Original.token) := by cil_kernel_rfl
-#print axioms wrongNestedArguments
 
 /-- Change only the result of the library's Label method from a string reference to an atom. -/
 private def wrongStringResult := Extracted.methodEvidence.modify 1 fun item =>
@@ -74,10 +61,6 @@ private def wrongStringResult := Extracted.methodEvidence.modify 1 fun item =>
       if method.name == "Label" then
         { method with returnType := .atom runtimeScope "System.String" .classType }
       else method } }
-
-theorem stringResultMismatch : checked [app, library] wrongStringResult =
-    .error (.dispatchMismatch Extracted.method1Original.token) := by cil_kernel_rfl
-#print axioms stringResultMismatch
 
 /-- Replace the final OBJECT parameter of Label with VOID in its physical signature blob. -/
 private def voidParameter : Option Bool := do
@@ -114,17 +97,64 @@ theorem missing : (checked [app] Extracted.methodEvidence).toOption = some false
 private def withCatalog (index : Nat) (catalog : List DispatchType) :=
   Extracted.methodEvidence.modify index (fun item => { item with dispatchTypes := catalog })
 
+/-- Outcomes for catalog changes checked against the same two physical images. -/
+private structure CatalogResults where
+  original : Except AuditError Bool
+  constraintScope : Except AuditError Bool
+  constraintArguments : Except AuditError Bool
+  stringResult : Except AuditError Bool
+  emptyCaller : Except AuditError Bool
+  emptyCallee : Except AuditError Bool
+  foreignCatalog : Except AuditError Bool
+
+/-- Checking these outcomes together lets the kernel share reductions of the original images. -/
+theorem catalogResults :
+    let check := checked [app, library]
+    let caller := Except.error (AuditError.dispatchMismatch Extracted.method0Original.token)
+    let callee := Except.error (AuditError.dispatchMismatch Extracted.method1Original.token)
+    CatalogResults.mk (check Extracted.methodEvidence) (check wrongScope) (check crossedArguments)
+      (check wrongStringResult) (check (withCatalog 0 [])) (check (withCatalog 1 []))
+      (check (withCatalog 0 Extracted.method1DispatchTypes)) =
+      ⟨.ok true, caller, caller, callee, caller, callee, caller⟩ := by
+  cil_kernel_rfl
+#print axioms catalogResults
+
+/-- The caller tests local, foreign and nested classes. Its callee tests its own class. -/
+theorem covered : (checked [app, library] Extracted.methodEvidence).toOption = some true :=
+  congrArg (fun cases => cases.original.toOption) catalogResults
+#print axioms covered
+
+/-- A constraint scoped to the caller contradicts the library's physical TypeRef. -/
+theorem wrongConstraintScope : checked [app, library] wrongScope =
+    .error (.dispatchMismatch Extracted.method0Original.token) :=
+  congrArg CatalogResults.constraintScope catalogResults
+#print axioms wrongConstraintScope
+
+/-- The library's nested interface arguments bind in their declared order. -/
+theorem wrongNestedArguments : checked [app, library] crossedArguments =
+    .error (.dispatchMismatch Extracted.method0Original.token) :=
+  congrArg CatalogResults.constraintArguments catalogResults
+#print axioms wrongNestedArguments
+
+/-- The physical string signature disagrees with a carried class atom. -/
+theorem stringResultMismatch : checked [app, library] wrongStringResult =
+    .error (.dispatchMismatch Extracted.method1Original.token) :=
+  congrArg CatalogResults.stringResult catalogResults
+#print axioms stringResultMismatch
+
 /-- Both declarations are required at their physical method tokens. -/
 theorem erased : checked [app, library] (withCatalog 0 []) =
       .error (.dispatchMismatch Extracted.method0Original.token) ∧
     checked [app, library] (withCatalog 1 []) =
-      .error (.dispatchMismatch Extracted.method1Original.token) := by
-  exact ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
+      .error (.dispatchMismatch Extracted.method1Original.token) :=
+  ⟨congrArg CatalogResults.emptyCaller catalogResults,
+   congrArg CatalogResults.emptyCallee catalogResults⟩
 #print axioms erased
 
 /-- The other selected assembly's catalog cannot substitute for this class token. -/
 theorem wrongImageCatalog : checked [app, library] (withCatalog 0 Extracted.method1DispatchTypes) =
-    .error (.dispatchMismatch Extracted.method0Original.token) := by cil_kernel_rfl
+    .error (.dispatchMismatch Extracted.method0Original.token) :=
+  congrArg CatalogResults.foreignCatalog catalogResults
 #print axioms wrongImageCatalog
 
 /-- Move the declaring pin without changing this method's own body or MethodDef token. -/

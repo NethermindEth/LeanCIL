@@ -4,6 +4,13 @@ open CIL CIL.Extraction
 
 namespace Tests.ExtractionParameters
 
+/-- A fixed-index load has no operand; an indexed argument instruction must carry its index. -/
+theorem argument_opcodes_reject_wrong_operands :
+    ([2, 3, 4, 5].all fun opcode => (argumentOperation ⟨0, opcode, .argument 0⟩).isNone) ∧
+    ([14, 15, 16, 65033, 65034, 65035].all fun opcode =>
+      (argumentOperation ⟨0, opcode, .none⟩).isNone) := by decide +kernel
+#print axioms argument_opcodes_reject_wrong_operands
+
 def raw : RawArguments := {
   arguments := List.replicate 4 (.field .unsigned32)
   locals := [.field .unsigned64]

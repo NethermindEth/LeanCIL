@@ -277,36 +277,74 @@ static partial class StrictBindingFacts
 
     /// <summary>
     /// A slice an extraction could carry for an image, as a Lean `CIL.Extraction.MetadataSlice`: the assembly block,
-    /// every row of the tables a slice carries with MethodDef RVAs zeroed, or only the rows whose tokens
-    /// <paramref name="tokens"/> holds, and the entries the rows other than Field rows name. A heap cell holds the key
-    /// of its entry, numbered as in <see cref="AssemblyBlock"/> over the slice's entries, 0 for offset 0, and the
-    /// omitted-entry marker for an entry only Field rows name.
+    /// every row of the carried tables with MethodDef RVAs zeroed, and the entries the rows other than Field rows
+    /// name. Entries are numbered as in <see cref="AssemblyBlock"/> within this slice. Offset 0 has key 0.
+    /// Entries named only by Field rows carry the omitted-entry marker.
     /// </summary>
-    internal static string Slice(byte[] file, IReadOnlySet<int>? tokens = null)
+    internal static string Slice(byte[] file)
+    {
+        var slice = Slices(file, perMethod: false).Single();
+        var carried = Packed(slice.Rows.Select(row => $"(0x{row.Token:x8}, {Packed(row.Row, "         ")})"), "      ",
+            oneEach: true);
+        return $$"""
+            { assembly := assemblyBlock,
+                rows :=
+                  {{carried}},
+                strings :=
+                  {{slice.Strings}},
+                blobs :=
+                  {{slice.Blobs}} }
+            """;
+    }
+
+    /// <summary>The independently numbered contents of one physical MethodDef row.</summary>
+    internal readonly record struct MethodSlice(int Token, string Row, string Strings, string Blobs);
+
+    /// <summary>One independently numbered slice per MethodDef, in physical row order.</summary>
+    internal static IEnumerable<MethodSlice> MethodSlices(byte[] file) =>
+        Slices(file, perMethod: true).Select(slice =>
+        {
+            var row = slice.Rows.Single();
+            return new MethodSlice(row.Token, Packed(row.Row, "         "), slice.Strings, slice.Blobs);
+        });
+
+    readonly record struct SliceRow(int Token, byte[] Row, (bool Blob, int Offset)[] Cells, int At);
+    readonly record struct NumberedSlice(SliceRow[] Rows, string Strings, string Blobs);
+
+    static IEnumerable<NumberedSlice> Slices(byte[] file, bool perMethod)
     {
         using PEReader pe = new(ImmutableArray.Create(file));
         var reader = pe.GetMetadataReader();
         var metadata = pe.PEHeaders.MetadataStartOffset;
         var streams = Streams(file, metadata);
         var (stringWidth, blobWidth) = HeapWidths(file[(int)streams["#~"].Start + HeapSizesAt]);
-        List<(int Token, byte[] Row, (bool Blob, int Offset)[] Cells, int At)> rows = [];
-        foreach (var table in SliceTables)
+        var (stringEntry, blobEntry) = EntryReaders(file, streams);
+        IEnumerable<SliceRow> ReadRows(TableIndex table)
         {
             var size = reader.GetTableRowSize(table);
-            for (var number = 1; number <= reader.GetTableRowCount(table); number++)
+            var start = metadata + reader.GetTableMetadataOffset(table);
+            var count = reader.GetTableRowCount(table);
+            for (var number = 1; number <= count; number++)
             {
                 var handle = MetadataTokens.EntityHandle(table, number);
-                if (tokens is not null && !tokens.Contains(MetadataTokens.GetToken(handle))) continue;
-                var row = file.AsSpan(metadata + reader.GetTableMetadataOffset(table) + (number - 1) * size, size)
-                    .ToArray();
+                var row = file.AsSpan(start + (number - 1) * size, size).ToArray();
                 if (table == TableIndex.MethodDef) Array.Clear(row, 0, RvaBytes);
                 var cells = HeapCells(reader, handle);
                 var widths = cells.Sum(cell => cell.Blob ? blobWidth : stringWidth);
-                rows.Add((MetadataTokens.GetToken(handle), row, cells, HeapColumnsAt(table) ?? size - widths));
+                yield return new(MetadataTokens.GetToken(handle), row, cells, HeapColumnsAt(table) ?? size - widths);
             }
         }
+        IEnumerable<SliceRow[]> groups = perMethod
+            ? ReadRows(TableIndex.MethodDef).Chunk(1)
+            : [SliceTables.SelectMany(ReadRows).ToArray()];
+        foreach (var rows in groups)
+            yield return NumberSlice(rows, stringWidth, blobWidth, stringEntry, blobEntry);
+    }
+
+    static NumberedSlice NumberSlice(SliceRow[] rows, int stringWidth, int blobWidth,
+        Func<int, byte[]> stringEntry, Func<int, byte[]> blobEntry)
+    {
         var named = rows.Where(row => row.Token >> 24 != (int)TableIndex.Field).SelectMany(row => row.Cells).ToArray();
-        var (stringEntry, blobEntry) = EntryReaders(file, streams);
         int[] Offsets(bool blob) => [.. named.Where(cell => cell.Blob == blob).Select(cell => cell.Offset)];
         var (stringKeys, strings) = Ranked(Offsets(false), stringEntry);
         var (blobKeys, blobs) = Ranked(Offsets(true), blobEntry);
@@ -321,17 +359,7 @@ static partial class StrictBindingFacts
                 column += width;
             }
         }
-        var carried = Packed(rows.Select(row => $"(0x{row.Token:x8}, {Packed(row.Row, "         ")})"), "      ",
-            oneEach: true);
-        return $$"""
-            { assembly := assemblyBlock,
-                rows :=
-                  {{carried}},
-                strings :=
-                  {{Entries(strings)}},
-                blobs :=
-                  {{Entries(blobs)}} }
-            """;
+        return new(rows, Entries(strings), Entries(blobs));
     }
 
     // Where the heap columns of a row start, for tables whose earlier columns have fixed widths; the heap

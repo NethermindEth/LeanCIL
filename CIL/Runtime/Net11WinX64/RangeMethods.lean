@@ -1,4 +1,5 @@
 import CIL.Runtime.Net11WinX64.CoreLib
+import CIL.Extraction.DecodedDefinition
 
 /-! Method bodies, metadata and constructor signatures from the .NET 11.0.0 Windows x64
 CoreLib image. Each body is replayed with the metadata tables reconstructed from its rows. -/
@@ -67,10 +68,12 @@ def rows : MethodMetadata := {
   others := []}
 
 /-- Metadata indexes reconstructed from the supplied rows. -/
-private def tables : List IndexTables := rows.tables.toOption.getD []
+cil_evaluated tables : List IndexTables := rows.tables.toOption
+#print axioms tables_eq
 
 /-- The reconstructed indexes match the carried metadata. -/
-theorem tables_valid : tablesMatch rows tables = true := by decide +kernel
+theorem tables_valid : tablesMatch rows tables = true :=
+  tablesMatch_of_result tables_eq
 #print axioms tables_valid
 
 /-- Original IL bytes and the scoped operands needed to decode them. -/
@@ -170,9 +173,8 @@ def names : MethodNames := {
   signature := bytesOf "System.Void System.ArgumentOutOfRangeException::.ctor(System.String,System.String)" }
 
 /-- The declared method with its decoded instructions. -/
-def definition := raw (checked.toOption.getD {
-  maxStack := 0, initLocals := false,
-  localSignature := 0, code := [], statics := [] })
+cil_evaluated definition : RawMethod := checked.toOption.map raw
+#print axioms definition_eq
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
 theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
@@ -222,10 +224,12 @@ def rows : MethodMetadata := {
   others := []}
 
 /-- Metadata indexes reconstructed from the supplied rows. -/
-private def tables : List IndexTables := rows.tables.toOption.getD []
+cil_evaluated tables : List IndexTables := rows.tables.toOption
+#print axioms tables_eq
 
 /-- The reconstructed indexes match the carried metadata. -/
-theorem tables_valid : tablesMatch rows tables = true := by decide +kernel
+theorem tables_valid : tablesMatch rows tables = true :=
+  tablesMatch_of_result tables_eq
 #print axioms tables_valid
 
 /-- Original IL bytes and the scoped operands needed to decode them. -/
@@ -305,9 +309,8 @@ def names : MethodNames := {
   signature := bytesOf "System.Void System.ArgumentException::.ctor(System.String,System.String)" }
 
 /-- The declared method with its decoded instructions. -/
-def definition := raw (checked.toOption.getD {
-  maxStack := 0, initLocals := false,
-  localSignature := 0, code := [], statics := [] })
+cil_evaluated definition : RawMethod := checked.toOption.map raw
+#print axioms definition_eq
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
 theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
@@ -352,10 +355,12 @@ def rows : MethodMetadata := {
   others := []}
 
 /-- Metadata indexes reconstructed from the supplied rows. -/
-private def tables : List IndexTables := rows.tables.toOption.getD []
+cil_evaluated tables : List IndexTables := rows.tables.toOption
+#print axioms tables_eq
 
 /-- The reconstructed indexes match the carried metadata. -/
-theorem tables_valid : tablesMatch rows tables = true := by decide +kernel
+theorem tables_valid : tablesMatch rows tables = true :=
+  tablesMatch_of_result tables_eq
 #print axioms tables_valid
 
 /-- Original IL bytes and the scoped operands needed to decode them. -/
@@ -432,9 +437,8 @@ def names : MethodNames := {
   signature := bytesOf "System.Void System.SystemException::.ctor(System.String)" }
 
 /-- The declared method with its decoded instructions. -/
-def definition := raw (checked.toOption.getD {
-  maxStack := 0, initLocals := false,
-  localSignature := 0, code := [], statics := [] })
+cil_evaluated definition : RawMethod := checked.toOption.map raw
+#print axioms definition_eq
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
 theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
@@ -476,10 +480,12 @@ def rows : MethodMetadata := {
   others := []}
 
 /-- Metadata indexes reconstructed from the supplied rows. -/
-private def tables : List IndexTables := rows.tables.toOption.getD []
+cil_evaluated tables : List IndexTables := rows.tables.toOption
+#print axioms tables_eq
 
 /-- The reconstructed indexes match the carried metadata. -/
-theorem tables_valid : tablesMatch rows tables = true := by decide +kernel
+theorem tables_valid : tablesMatch rows tables = true :=
+  tablesMatch_of_result tables_eq
 #print axioms tables_valid
 
 /-- Original IL bytes and the scoped operands needed to decode them. -/
@@ -535,9 +541,8 @@ def names : MethodNames := {
   signature := bytesOf "System.Void System.Exception::.ctor(System.String)" }
 
 /-- The declared method with its decoded instructions. -/
-def definition := raw (checked.toOption.getD {
-  maxStack := 0, initLocals := false,
-  localSignature := 0, code := [], statics := [] })
+cil_evaluated definition : RawMethod := checked.toOption.map raw
+#print axioms definition_eq
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
 theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
@@ -578,10 +583,12 @@ def rows : MethodMetadata := {
   others := []}
 
 /-- Metadata indexes reconstructed from the supplied rows. -/
-private def tables : List IndexTables := rows.tables.toOption.getD []
+cil_evaluated tables : List IndexTables := rows.tables.toOption
+#print axioms tables_eq
 
 /-- The reconstructed indexes match the carried metadata. -/
-theorem tables_valid : tablesMatch rows tables = true := by decide +kernel
+theorem tables_valid : tablesMatch rows tables = true :=
+  tablesMatch_of_result tables_eq
 #print axioms tables_valid
 
 /-- Original IL bytes and the scoped operands needed to decode them. -/
@@ -641,9 +648,8 @@ def names : MethodNames := {
   signature := bytesOf "System.Void System.Exception::.ctor()" }
 
 /-- The declared method with its decoded instructions. -/
-def definition := raw (checked.toOption.getD {
-  maxStack := 0, initLocals := false,
-  localSignature := 0, code := [], statics := [] })
+cil_evaluated definition : RawMethod := checked.toOption.map raw
+#print axioms definition_eq
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
 theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
@@ -671,10 +677,12 @@ def rows : MethodMetadata := {
   others := []}
 
 /-- Metadata indexes reconstructed from the supplied rows. -/
-private def tables : List IndexTables := rows.tables.toOption.getD []
+cil_evaluated tables : List IndexTables := rows.tables.toOption
+#print axioms tables_eq
 
 /-- The reconstructed indexes match the carried metadata. -/
-theorem tables_valid : tablesMatch rows tables = true := by decide +kernel
+theorem tables_valid : tablesMatch rows tables = true :=
+  tablesMatch_of_result tables_eq
 #print axioms tables_valid
 
 /-- Original IL bytes and the scoped operands needed to decode them. -/
@@ -712,9 +720,8 @@ def names : MethodNames := {
   signature := bytesOf "System.Void System.Object::.ctor()" }
 
 /-- The declared method with its decoded instructions. -/
-def definition := raw (checked.toOption.getD {
-  maxStack := 0, initLocals := false,
-  localSignature := 0, code := [], statics := [] })
+cil_evaluated definition : RawMethod := checked.toOption.map raw
+#print axioms definition_eq
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
 theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩
@@ -753,10 +760,12 @@ def rows : MethodMetadata := {
   others := []}
 
 /-- Metadata indexes reconstructed from the supplied rows. -/
-private def tables : List IndexTables := rows.tables.toOption.getD []
+cil_evaluated tables : List IndexTables := rows.tables.toOption
+#print axioms tables_eq
 
 /-- The reconstructed indexes match the carried metadata. -/
-theorem tables_valid : tablesMatch rows tables = true := by decide +kernel
+theorem tables_valid : tablesMatch rows tables = true :=
+  tablesMatch_of_result tables_eq
 #print axioms tables_valid
 
 /-- Original IL bytes and the scoped operands needed to decode them. -/
@@ -795,9 +804,8 @@ def names : MethodNames := {
   signature := bytesOf "System.Void System.Exception::set_HResult(System.Int32)" }
 
 /-- The declared method with its decoded instructions. -/
-def definition := raw (checked.toOption.getD {
-  maxStack := 0, initLocals := false,
-  localSignature := 0, code := [], statics := [] })
+cil_evaluated definition : RawMethod := checked.toOption.map raw
+#print axioms definition_eq
 
 /-- The typed declaration and instructions are bound to the original body and metadata. -/
 theorem bound : BodyDecodes [⟨coreLibraryAssembly⟩] {} ⟨coreLibraryAssembly⟩

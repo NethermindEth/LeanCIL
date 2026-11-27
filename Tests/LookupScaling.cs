@@ -2551,10 +2551,8 @@ string WithEvidenceCosts(string extracted)
     var shared = Path.Combine(output, "Shared");
     Run(["dotnet", ExtractorPath, "templates", shared, output]);
     var templates = File.ReadAllText(Path.Combine(shared, "Templates.lean"));
-    // Count the fixture's actual CIL sites independently of how the template spells its body.
-    var mask = extracted.Split('\n')
-        .Single(line => line.StartsWith("def method0Reachable :", StringComparison.Ordinal));
-    var instructions = mask.Count(character => character == ',') + 1;
+    using var module = Mono.Cecil.ModuleDefinition.ReadModule(assembly);
+    var instructions = module.GetType("Lookups").Methods.Single(method => method.Name == name).Body.Instructions.Count;
     var depth = LookupPatterns.RecursionDepth.Match(extracted);
     if (!depth.Success || !IsDecodedMethod(extracted, 0) || !LookupPatterns.FirstEquations.IsMatch(extracted) ||
         !templates.Contains("cil_template_code% (Input0.method0.code)", StringComparison.Ordinal) ||
@@ -2563,7 +2561,8 @@ string WithEvidenceCosts(string extracted)
     var last = instructions - 1;
     var extraction = Checked(Path.Combine(output, "Measured.lean"),
         WithEvidenceCosts(extracted) + $"\n#print axioms Extracted.method0_instruction{last}\n",
-        "", "Extracted.method0", $"Extracted.method0_instruction{last}", last);
+        "", "Extracted.method0", $"Extracted.method0_instruction{last}", last,
+        $"#guard Extracted.method0Reachable == List.replicate {instructions} true");
     const string Binder = "(profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) ";
     var statements = name == "Short" ? ShortStatements : LongStatements;
     var operations = string.Join(", ", Enumerable.Repeat(".ldarg 1, .mul, .ldarg 0, .add", statements));
@@ -2684,9 +2683,8 @@ Action TemplateChoiceCosts()
     }
     return () =>
     {
-        var samples = new Dictionary<(bool VaryInputs, int Size), (long Total, long Selection)>();
-        var extracted = new HashSet<string>(StringComparer.Ordinal);
-        var pcs = 0;
+        var cases = new List<(bool VaryInputs, int Size, int Flags, List<string> Paths)>();
+        var extractions = new Dictionary<string, GeneratedExtraction>(StringComparer.Ordinal);
         foreach (var varyInputs in new[] { true, false })
             foreach (var size in sizes)
             {
@@ -2698,50 +2696,54 @@ Action TemplateChoiceCosts()
                 foreach (var profile in profiles)
                 {
                     var path = Path.Combine(root, $"Read{flags}-{profile}");
-                    if (extracted.Add(path))
-                    {
-                        var specification = profile.StartsWith("profile", StringComparison.Ordinal)
-                            ? $"@{Path.Combine(root, $"{profile}.json")}" : profile;
-                        Run(Extract("extract", image, "Flags", $"Flags::Read{flags}(int)", path, specification));
-                    }
+                    var specification = profile.StartsWith("profile", StringComparison.Ordinal)
+                        ? $"@{Path.Combine(root, $"{profile}.json")}" : profile;
+                    extractions.TryAdd(path, new(image, $"Flags::Read{flags}(int)", path, specification));
                     paths.Add(path);
                 }
-                var shared = Path.Combine(root, varyInputs ? $"Inputs{size}" : $"Flags{size}");
-                Run(["dotnet", ExtractorPath, "templates", shared, .. paths]);
-                var module = File.ReadAllText(Path.Combine(shared, "Templates.lean")).ReplaceLineEndings("\n");
-                var start = module.IndexOf("/-- The stable managed identity", StringComparison.Ordinal);
-                var last = module.LastIndexOf("#print axioms method0_instruction", StringComparison.Ordinal);
-                using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(shared,
-                    "templates.json")));
-                var features = manifest.RootElement.GetProperty("methods")[0].GetProperty("flags").EnumerateArray()
-                    .Select(flag => flag.GetString()!)
-                    .Select(flag => $"{char.ToUpperInvariant(flag[0])}{flag[1..]}").ToArray();
-                var bindings = manifest.RootElement.GetProperty("profiles");
-                int ObservedFlags(System.Text.Json.JsonElement binding)
-                {
-                    var profile = binding.GetProperty("profile");
-                    return features.Aggregate(0, (bits, flag) =>
-                        2 * bits + (profile.GetProperty(flag).GetBoolean() ? 1 : 0));
-                }
-                var leaves = bindings.EnumerateArray().Select(ObservedFlags).Distinct().Count();
-                if (features.Length != flags || bindings.GetArrayLength() != paths.Count ||
-                    leaves != (varyInputs ? size : 2) || start < 0 || last < 0)
-                    throw new InvalidOperationException(
-                        $"Unexpected dimensions at {paths.Count} inputs, {flags} flags.");
-                var number = module[(last + "#print axioms method0_instruction".Length)..].Split('\n')[0];
-                var count = int.Parse(number, CultureInfo.InvariantCulture) + 1;
-                if (pcs != 0 && count != pcs)
-                    throw new InvalidOperationException("Template instruction counts differ.");
-                pcs = count;
-                var header = module.IndexOf("/-!", StringComparison.Ordinal);
-                var parts = new[] { module[..header], module[header..start], module[start..] };
-                var costs = PartHeartbeats(Path.Combine(shared, "Costs.lean"), parts);
-                samples.Add((varyInputs, size), (costs.Sum(), costs[1]));
-                Console.WriteLine($"""
-                    Template {Path.GetFileName(shared)}, {paths.Count} inputs, {flags} flags, {pcs} pcs:
-                      {costs.Sum()} total heartbeats, {costs[1]} for selection, leaf proofs and equations
-                    """);
+                cases.Add((varyInputs, size, flags, paths));
             }
+        ExtractBatch("extract", "Flags", extractions.Values);
+        var measured = Concurrently(cases, test =>
+        {
+            var (varyInputs, size, flags, paths) = test;
+            var shared = Path.Combine(root, varyInputs ? $"Inputs{size}" : $"Flags{size}");
+            Run(["dotnet", ExtractorPath, "templates", shared, .. paths]);
+            var module = File.ReadAllText(Path.Combine(shared, "Templates.lean")).ReplaceLineEndings("\n");
+            var start = module.IndexOf("/-- The stable managed identity", StringComparison.Ordinal);
+            var last = module.LastIndexOf("#print axioms method0_instruction", StringComparison.Ordinal);
+            using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(shared,
+                "templates.json")));
+            var features = manifest.RootElement.GetProperty("methods")[0].GetProperty("flags").EnumerateArray()
+                .Select(flag => flag.GetString()!)
+                .Select(flag => $"{char.ToUpperInvariant(flag[0])}{flag[1..]}").ToArray();
+            var bindings = manifest.RootElement.GetProperty("profiles");
+            int ObservedFlags(System.Text.Json.JsonElement binding)
+            {
+                var profile = binding.GetProperty("profile");
+                return features.Aggregate(0, (bits, flag) =>
+                    2 * bits + (profile.GetProperty(flag).GetBoolean() ? 1 : 0));
+            }
+            var leaves = bindings.EnumerateArray().Select(ObservedFlags).Distinct().Count();
+            if (features.Length != flags || bindings.GetArrayLength() != paths.Count ||
+                leaves != (varyInputs ? size : 2) || start < 0 || last < 0)
+                throw new InvalidOperationException(
+                    $"Unexpected dimensions at {paths.Count} inputs, {flags} flags.");
+            var number = module[(last + "#print axioms method0_instruction".Length)..].Split('\n')[0];
+            var count = int.Parse(number, CultureInfo.InvariantCulture) + 1;
+            var header = module.IndexOf("/-!", StringComparison.Ordinal);
+            var parts = new[] { module[..header], module[header..start], module[start..] };
+            var costs = PartHeartbeats(Path.Combine(shared, "Costs.lean"), parts);
+            Console.WriteLine($"""
+                Template {Path.GetFileName(shared)}, {paths.Count} inputs, {flags} flags, {count} pcs:
+                  {costs.Sum()} total heartbeats, {costs[1]} for selection, leaf proofs and equations
+                """);
+            return (test.VaryInputs, test.Size, Instructions: count, Total: costs.Sum(), Selection: costs[1]);
+        });
+        var pcs = measured[0].Instructions;
+        if (measured.Any(row => row.Instructions != pcs))
+            throw new InvalidOperationException("Template instruction counts differ.");
+        var samples = measured.ToDictionary(row => (row.VaryInputs, row.Size));
         foreach (var varyInputs in new[] { true, false })
             foreach (var selectionOnly in new[] { true, false })
             {
@@ -3119,46 +3121,54 @@ string MethodNumber(string extracted, string method, string name)
         .FirstOrDefault(match => match.Groups["method"].Value == method)?.Groups[1].Value
         ?? throw new InvalidOperationException($"Method {method} is not in the extraction {name}.");
 }
-// The heartbeats of the method's `method{n}_body_validated` and, for `tablesMethod`, of that method's
-// `tables_valid`, read in one file of the extraction narrowed to the body obligation. Each is read after the same
-// statement closed with `sorry`, which is subtracted.
+// Measure the body proof net of its statement, and the full cost of materializing and certifying the lookup trees.
 (long Body, long Tables) BodyChecks(string image, string name, string entry, string method,
-    string? tablesMethod = null)
+    string? tablesMethod = null, int? receiverBases = null)
 {
     var output = Path.Combine(directory, "Body" + name);
     Run(Extract("extract", image, "Bodies", entry.Contains('(') ? entry : $"Bodies::{entry}(ulong)", output));
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    var body = $"method{MethodNumber(extracted, method, name)}_body_validated";
+    var prefix = "method" + MethodNumber(extracted, method, name);
+    var body = prefix + "_body_validated";
     var narrowed = NarrowEvidence(extracted, body);
-    var obligations = new List<(Match Proof, string Kind)> { (Obligation(narrowed, body, decided: false), "body") };
+    var bodyProof = LookupPatterns.BodyObligation.Matches(narrowed).Single(match => match.Groups["name"].Value == body);
+    var commands = new List<(Match Command, string Audit)> { (bodyProof, body) };
     if (tablesMethod is not null)
-        obligations.Add((Obligation(narrowed, $"method{MethodNumber(extracted, tablesMethod, name)}_tables_valid",
-            decided: true), "tables"));
-    var parts = new List<string>();
-    var readAt = new Dictionary<string, int>();
-    var start = 0;
-    foreach (var (proof, kind) in obligations.OrderBy(obligation => obligation.Proof.Index))
     {
-        parts.Add(narrowed[start..proof.Index]);
-        var statement = proof.Groups["statement"].Value;
-        parts.Add($"theorem {proof.Groups["name"].Value}_open : {statement} := sorry\n");
-        readAt[kind] = parts.Count - 1;
-        parts.Add(proof.Value);
-        start = proof.Index + proof.Length;
+        var tableMethod = "method" + MethodNumber(extracted, tablesMethod, name);
+        var tableDefinition = LookupPatterns.EvaluatedTables.Matches(narrowed)
+            .Single(match => match.Groups["method"].Value == tableMethod);
+        var tableProof = LookupPatterns.TablesObligation.Matches(narrowed)
+            .Single(match => match.Groups["method"].Value == tableMethod);
+        commands.Add((tableDefinition, tableMethod + "Tables_eq"));
+        commands.Add((tableProof, tableMethod + "_tables_valid"));
     }
-    // Audit each measured proof; later declarations cannot contribute to its elaboration cost.
-    parts.Add(string.Join('\n', obligations.Select(obligation =>
-        $"#print axioms {obligation.Proof.Groups["name"].Value}")) + "\nend Extracted\n");
+    var parts = new List<string>();
+    int openAt = 0, bodyAt = 0;
+    var tablesAt = new List<int>();
+    var start = 0;
+    foreach (var (command, audit) in commands.OrderBy(entry => entry.Command.Index))
+    {
+        parts.Add(narrowed[start..command.Index]);
+        // PartHeartbeats excludes the header from its result.
+        if (audit == body)
+        {
+            openAt = parts.Count - 1;
+            parts.Add($"theorem {body}_open : {command.Groups["statement"].Value} := sorry\n");
+            bodyAt = parts.Count - 1;
+        }
+        else tablesAt.Add(parts.Count - 1);
+        parts.Add(command.Value);
+        start = command.Index + command.Length;
+    }
+    var baseCount = receiverBases is { } count
+        ? $"#guard {prefix}Original.objectBases.length == {count}\n#guard {prefix}Names.bases.length == {count}\n"
+        : "";
+    parts.Add(string.Join('\n', commands.Select(entry => $"#print axioms {entry.Audit}")) + "\n" +
+        baseCount + "end Extracted\n");
     var costs = PartHeartbeats(Path.Combine(output, "BodyChecked.lean"), parts);
-    long Cost(string kind) => costs[readAt[kind]] - costs[readAt[kind] - 1];
-    return (Cost("body"), tablesMethod is null ? 0 : Cost("tables"));
+    return (costs[bodyAt] - costs[openAt], tablesAt.Sum(index => costs[index]));
 }
-// The line of obligation `theorem` in `narrowed`, proved by `decide +kernel` when `decided` and by an anonymous
-// constructor otherwise.
-static Match Obligation(string narrowed, string theorem, bool decided) =>
-    LookupPatterns.ProvedObligation.Matches(narrowed).FirstOrDefault(match =>
-        match.Groups["name"].Value == theorem && match.Groups["decision"].Success == decided)
-    ?? throw new InvalidOperationException("Missing obligation " + theorem);
 long BodyCheck(string image, string name, string entry, string method) =>
     BodyChecks(image, name, entry, method).Body;
 void BodyCheckCosts()
@@ -3382,9 +3392,8 @@ void IndirectTargetCosts()
     }
 }
 
-// A method reading a field declared `depth` base classes up carries one row and one link per class of the chain, and
-// its body check walks the chain once. The cost is a fixed part plus a part linear in the depth, so the increment from
-// depth 8 to 16 is twice the increment from 4 to 8; a quadratic walk makes it four times.
+// The instance reader carries its receiver's full base chain. The static reader names only the argument and field.
+// Fixed-width identifiers keep longer UTF-8 names out of the measured cost difference.
 const double AllowedChainIncrementRatio = 2.5;
 int[] baseDepths = [4, 8, 16];
 var deepSource = Path.Combine(directory, "DeepAssembly");
@@ -3395,30 +3404,43 @@ File.WriteAllText(Path.Combine(deepSource, "Deep.csproj"), """
     <AssemblyName>Bodies</AssemblyName></PropertyGroup>
 </Project>
 """);
-string Deep(int depth) =>
-    $"public class Deep{depth}_0 {{ public ulong F; }} " +
-    Join(depth, index => $"public class Deep{depth}_{index + 1} : Deep{depth}_{index} {{ }} ") +
-    $"public static ulong ReadDeep{depth}(Deep{depth}_{depth} o) => o.F; ";
+string DeepType(int depth, int index) => $"Deep{depth:D2}_{index:D2}";
+string Deep(int depth)
+{
+    var classes = Join(depth, index =>
+    {
+        var reader = index + 1 == depth ? "public ulong ReadField() => F;" : "";
+        return $"public class {DeepType(depth, index + 1)} : {DeepType(depth, index)} {{ {reader} }} ";
+    });
+    return $"public class {DeepType(depth, 0)} {{ public ulong F; }} {classes}" +
+        $"public static ulong ReadDeep{depth:D2}({DeepType(depth, depth)} o) => o.F; ";
+}
 File.WriteAllText(Path.Combine(deepSource, "Deep.cs"),
     "public static class Bodies { " + string.Concat(baseDepths.Select(Deep)) + "}");
 Run(["dotnet", "build", Path.Combine(deepSource, "Deep.csproj"), "-c", "Release"]);
 var deepAssembly = Path.Combine(deepSource, "bin/Bodies.dll");
 void BaseDepthCosts()
 {
-    var depthCosts = Concurrently(baseDepths, depth => (double)BodyCheck(deepAssembly, "Deep" + depth,
-        $"Bodies::ReadDeep{depth}(Bodies/Deep{depth}_{depth})", $"ReadDeep{depth}"));
-    var incrementRatio = (depthCosts[2] - depthCosts[1]) / (depthCosts[1] - depthCosts[0]);
-    Console.WriteLine(FormattableString.Invariant(
-        $"PASS body check of a field read through {baseDepths[0]}, {baseDepths[1]} and ") +
-        FormattableString.Invariant($"{baseDepths[2]} base classes: ") +
-        FormattableString.Invariant($"{depthCosts[0]:F0}, {depthCosts[1]:F0} and {depthCosts[2]:F0} heartbeats, ") +
-        FormattableString.Invariant($"increments in the ratio {incrementRatio:F2} (linear 2, quadratic 4)"));
-    if (incrementRatio > AllowedChainIncrementRatio)
-        throw new Exception(FormattableString.Invariant(
-            $"The body check grows by {incrementRatio:F2} times as much from depth {baseDepths[1]} to ") +
-            FormattableString.Invariant($"{baseDepths[2]} ") +
-            FormattableString.Invariant(
-                $"as from {baseDepths[0]} to {baseDepths[1]}; the limit is {AllowedChainIncrementRatio}."));
+    foreach (var instance in new[] { false, true })
+    {
+        var receiver = instance ? "instance" : "static";
+        var costs = Concurrently(baseDepths, depth =>
+        {
+            var leaf = "Bodies/" + DeepType(depth, depth);
+            var method = instance ? "ReadField" : $"ReadDeep{depth:D2}";
+            var entry = instance ? $"{leaf}::{method}()" : $"Bodies::{method}({leaf})";
+            return BodyChecks(deepAssembly, $"Deep-{receiver}-{depth}", entry, method,
+                receiverBases: instance ? depth : 0).Body;
+        });
+        var first = costs[1] - costs[0];
+        var second = costs[2] - costs[1];
+        var result = $"{receiver} field read at depths {string.Join("/", baseDepths)}: " +
+            $"{string.Join("/", costs)} heartbeats";
+        if (second > Math.Max(0, first) * AllowedChainIncrementRatio)
+            throw new InvalidOperationException($"{result}; increments {first} and {second} exceed " +
+                $"the {AllowedChainIncrementRatio} growth limit.");
+        Console.WriteLine($"PASS {result}; increments {first} and {second} stay within {AllowedChainIncrementRatio}.");
+    }
 }
 
 // The kernel heartbeats of the scalar certificate of a body whose segments each address an array element, with
@@ -3980,12 +4002,15 @@ static partial class LookupPatterns
     [GeneratedRegex(@"\(\d+, \.call ")]
     internal static partial Regex CallToken { get; }
 
-    [GeneratedRegex("""def method(\d+)Signature : String := "[^"]*?Bodies::(?<method>[^"(]*)\(""")]
+    [GeneratedRegex("""def method(\d+)Signature : String := "[^"]*?Bodies(?:/[^":(]+)?::(?<method>[^"(]*)\(""")]
     internal static partial Regex BodySignature { get; }
 
-    const string ProofTerm = """(?:⟨[^\r\n]*⟩|(?<decision>by decide \+kernel))""";
+    [GeneratedRegex(@"(?m)^theorem (?<name>method\d+_body_validated) : (?<statement>[^\r\n]*?) := ⟨[^\r\n]*⟩\r?\n")]
+    internal static partial Regex BodyObligation { get; }
 
-    /// <summary>A one-line theorem proved by a constructor or, in its decision group, by the kernel.</summary>
-    [GeneratedRegex($"""(?m)^theorem (?<name>[\w?!']+) : (?<statement>[^\r\n]*?) := {ProofTerm}\r?\n""")]
-    internal static partial Regex ProvedObligation { get; }
+    [GeneratedRegex(@"(?m)^cil_evaluated (?<method>method\d+)Tables : [^\r\n]+\r?\n")]
+    internal static partial Regex EvaluatedTables { get; }
+
+    [GeneratedRegex(@"(?m)^theorem (?<method>method\d+)_tables_valid : [^\r\n]+\r?\n")]
+    internal static partial Regex TablesObligation { get; }
 }

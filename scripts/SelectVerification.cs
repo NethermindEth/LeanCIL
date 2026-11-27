@@ -44,10 +44,12 @@ if (eventName == "pull_request")
     if (process.ExitCode != 0) throw new InvalidOperationException(stderr.GetAwaiter().GetResult());
     paths = changed.Split('\0', StringSplitOptions.RemoveEmptyEntries);
 }
-var suites = VerificationSelection.Schedule(VerificationSelection.Select(paths, eventName));
+var inputs = VerificationSelection.SuiteInputs();
+var suites = VerificationSelection.Schedule(VerificationSelection.Select(inputs, paths, eventName));
 Console.WriteLine(JsonSerializer.Serialize(new { changed = paths, suites }, new JsonSerializerOptions { WriteIndented = true }));
 // GitHub validates the matrix even when the suite job is skipped.
-var groups = VerificationSelection.Groups(suites.Length == 0 ? ["core"] : suites);
+var planLibraries = eventName != "pull_request" || VerificationSuites.MeasureLibraries(paths);
+var groups = VerificationSelection.Groups(suites.Length == 0 ? ["core"] : suites, planLibraries: planLibraries);
 File.AppendAllText(output, "matrix=" + JsonSerializer.Serialize(new { include = groups },
     new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) +
     "\nhas-suites=" + (suites.Length > 0 ? "true" : "false") + "\n");

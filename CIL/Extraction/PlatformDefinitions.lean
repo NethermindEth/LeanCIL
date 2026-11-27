@@ -1,3 +1,4 @@
+import CIL.Extraction.MetadataBytes
 import CIL.Extraction.SearchTreeLiteral
 import Std.Data.HashSet
 

@@ -42,7 +42,65 @@ partial class Program
             File.WriteAllText(Path.Combine(root, "Published.lean"), "-- package source\n");
             Reject("Published");
             Console.WriteLine("PASS library/package roots and filesystem case rules");
+            CheckGeneratedImportSources(root);
+            CheckFrameworkSourceIdentity(root);
         }
         finally { Directory.Delete(root, true); }
+    }
+
+    static void CheckFrameworkSourceIdentity(string root)
+    {
+        var bundled = Path.Combine(root, "Bundled.lean");
+        var consumer = Path.Combine(root, "Consumer.lean");
+        const string source = "import CIL\n";
+        File.WriteAllText(bundled, source);
+        File.Copy(bundled, consumer);
+        var bundledHash = Sha(bundled);
+        if (!SameFrameworkSource(consumer, Sha(consumer), bundled, bundledHash))
+            throw new InvalidOperationException("Identical framework sources differ.");
+        File.WriteAllText(consumer, source.Replace("\n", "\r\n"), System.Text.Encoding.Unicode);
+        var consumerHash = Sha(consumer);
+        if (!SameFrameworkSource(consumer, consumerHash, bundled, bundledHash))
+            throw new InvalidOperationException("Equivalent framework text with a BOM and CRLF differs.");
+        File.AppendAllText(consumer, "-- changed");
+        if (SameFrameworkSource(consumer, Sha(consumer), bundled, bundledHash))
+            throw new InvalidOperationException("Changed framework source accepted.");
+        try { _ = SameFrameworkSource(consumer, consumerHash, bundled, bundledHash); }
+        catch (InvalidOperationException error) when (error.Message == "Inputs changed during consumer verification")
+        {
+            Console.WriteLine("PASS framework identity binds bytes and accepts equivalent encoded text");
+            return;
+        }
+        throw new InvalidOperationException("Framework comparison accepted bytes outside the snapshot.");
+    }
+
+    static void CheckGeneratedImportSources(string root)
+    {
+        var snapshot = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        string Source(string relative, string text)
+        {
+            var path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, text);
+            snapshot.Add("consumer:" + path, Sha(path));
+            return path;
+        }
+        var proof = Source("Proof.lean", "import Shared.Helper\nimport Alias\nimport Shared.Helper\n");
+        var first = Source("A/Shared/Helper.lean", "import Extracted.First\nimport Alias\n");
+        var second = Source("B/Shared/Helper.lean", "import ExtractedSymbols.Second\nimport Shared.Helper\n");
+        var alias = Source("Alias.lean", "import ExtractedSymbols\n");
+        Source("NotShared/Helper.lean", "import Extracted.Unrelated\n");
+        var graph = new ConsumerImports(snapshot, root);
+        if (!graph.Generated(proof).SequenceEqual([("Extracted.First", first),
+            ("ExtractedSymbols.Second", second), ("ExtractedSymbols", alias)]))
+            throw new InvalidOperationException("Ambiguous consumer imports lost a source or changed order.");
+        File.AppendAllText(second, "import Extracted.Changed\n");
+        try { _ = new ConsumerImports(snapshot, root).Generated(proof).ToArray(); }
+        catch (InvalidOperationException error) when (error.Message == "Inputs changed during consumer verification")
+        {
+            Console.WriteLine("PASS generated imports bind both roots, cycles and source contents");
+            return;
+        }
+        throw new InvalidOperationException("Import selection accepted source bytes outside the snapshot.");
     }
 }

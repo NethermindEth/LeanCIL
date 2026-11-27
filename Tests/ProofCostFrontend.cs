@@ -179,3 +179,51 @@ if (cycle.Rows.Count != 0 || cycle.Unmeasured.Count != 2 ||
     cycle.Unmeasured.Any(row => !row.Reason.Contains("import cycle", StringComparison.Ordinal)))
     throw new InvalidOperationException("Cyclic imports did not produce a bounded failure.");
 Console.WriteLine("PASS cyclic imports are rejected before measurement");
+
+// A stale digest discards only its consumer proof. Other proofs and extractions remain measurable.
+var scratch = Directory.CreateTempSubdirectory("leancil-proof-cost-receipts-");
+try
+{
+    var receipts = scratch.FullName;
+    File.Copy(At("lean-toolchain"), Path.Combine(receipts, "lean-toolchain"));
+    foreach (string group in new[] { "Valid", "ChangedSettings", "ChangedConfig" })
+    {
+        var output = Path.Combine(receipts, group);
+        Directory.CreateDirectory(output);
+        File.WriteAllText(Path.Combine(output, "Extracted.lean"), "def value := true\n");
+        var proof = Path.Combine(output, "ConsumerProof.lean");
+        File.WriteAllText(proof, "import Extracted\ntheorem verified : value = true := rfl\n#print axioms verified\n");
+        var settings = Path.Combine(output, "verification.json");
+        var config = Path.Combine(output, "lakefile.toml");
+        File.WriteAllText(settings, """{"proofRoot":"."}""");
+        File.WriteAllText(config, "name = \"proof_cost_fixture\"\n");
+        var inputs = new SortedDictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["proof:" + proof] = Sha(proof),
+            ["settings:" + settings] = Sha(settings),
+            ["consumer:" + config] = Sha(config)
+        };
+        var certificate = new Report(CertificateSchema, "assembly", "identity", "verified",
+            [], "audit", inputs, BindingSection.Default);
+        File.WriteAllText(Path.Combine(output, "verified.json"), JsonSerializer.Serialize(certificate));
+        if (group == "ChangedSettings") File.AppendAllText(settings, "\n");
+        if (group == "ChangedConfig") File.AppendAllText(config, "\n");
+    }
+    var mixed = ProofCostReport.Measure(tree, library, Path.Combine(tree, "mixed"), false, [receipts], [], 2, "receipts");
+    var expectedFailures = new[]
+    {
+        new ProofCostReport.Unmeasured("ChangedSettings/Proof", "verification settings changed after verification"),
+        new ProofCostReport.Unmeasured("ChangedConfig/Proof", "consumer configuration changed after verification: " +
+            Path.Combine(receipts, "ChangedConfig", "lakefile.toml"))
+    };
+    var proofGroups = mixed.Rows.Where(row => row.Group.EndsWith("/Proof", StringComparison.Ordinal))
+        .Select(row => row.Group).Distinct().ToArray();
+    if (mixed.Unmeasured.Count != 2 || !expectedFailures.All(mixed.Unmeasured.Contains) ||
+        proofGroups is not ["Valid/Proof"] ||
+        mixed.Rows.Count(row => row.Kind == ProofCostReport.ModuleKind &&
+            row.Group.EndsWith("/Extracted", StringComparison.Ordinal)) != 3)
+        throw new InvalidOperationException("Stale consumer settings or configuration lost the wrong proof rows: " +
+            JsonSerializer.Serialize(mixed.Unmeasured));
+    Console.WriteLine("PASS stale consumer settings and configuration withhold only their own proof rows");
+}
+finally { scratch.Delete(recursive: true); }

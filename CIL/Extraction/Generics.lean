@@ -2,6 +2,7 @@ import CIL.RuntimeModel
 import CIL.CallSite
 import CIL.Extraction.TypeStorage
 import CIL.Extraction.FlowIndex
+import CIL.Extraction.DistinctIndex
 import CIL.Extraction.LinkIndex
 import CIL.Imports
 import CIL.Extraction.Assemblies
@@ -346,17 +347,13 @@ theorem instantiateMethod_initLocals {layouts : List RawLayout} {original closed
 
 /-- Closed argument metadata is derived from this checked body, including short opcodes. -/
 def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
-  match instruction.opcode, instruction.operand with
-  -- `ldarg.0` to `ldarg.3`.
-  | 2, .none => some (.load 0) | 3, .none => some (.load 1)
-  | 4, .none => some (.load 2) | 5, .none => some (.load 3)
-  -- `ldarg`, `ldarga` and `starg`, short and long forms.
-  | 14, .argument index | 65033, .argument index => some (.load index)
-  | 15, .argument index | 65034, .argument index => some (.address index)
-  | 16, .argument index | 65035, .argument index => some (.store index)
-  -- An argument opcode with a malformed operand is rejected, not treated as `other`.
-  | opcode, _ =>
-    if opcode ∈ [2, 3, 4, 5, 14, 15, 16, 65033, 65034, 65035] then none else some .other
+  match instruction.opcode with
+  | 2 | 3 | 4 | 5 =>
+    if let .none := instruction.operand then some (.load (instruction.opcode - 2)) else none
+  | 14 | 65033 => if let .argument index := instruction.operand then some (.load index) else none
+  | 15 | 65034 => if let .argument index := instruction.operand then some (.address index) else none
+  | 16 | 65035 => if let .argument index := instruction.operand then some (.store index) else none
+  | _ => some .other
 
 /-- Whether `instruction` names `pc` as a branch destination or switch arm. -/
 def branchesTo (pc : Nat) (instruction : RawInstruction) : Bool :=
@@ -653,11 +650,148 @@ def managedAddressMatches (methods : Nat → Option SpecializedMethod)
     site.returnsValue == (signature.result != .void)
   | _ => false
 
+attribute [local instance] lexOrd
+
+/-- The direction of successive metadata tokens in a strictly ordered target table. -/
+private def tokenBefore (ascending : Bool) (left right : Nat) : Bool :=
+  if ascending then left < right else right < left
+
+/-- Every successive token follows its predecessor in the selected direction. -/
+private def orderedTokens (ascending : Bool) (previous : Nat) : List ManagedIdentity → Bool
+  | [] => true
+  | item :: rest => tokenBefore ascending previous item.token &&
+      orderedTokens ascending item.token rest
+
+/-- Strictly ordered tokens admit no duplicate identities in either direction. -/
+private theorem orderedTokens_nodup (ascending : Bool) (previous : Nat)
+    (members : List ManagedIdentity) (sorted : orderedTokens ascending previous members = true) :
+    members.Nodup ∧ ∀ item ∈ members, tokenBefore ascending previous item.token := by
+  induction members generalizing previous with
+  | nil => simp
+  | cons item rest ih =>
+    simp only [orderedTokens, Bool.and_eq_true] at sorted
+    obtain ⟨unique, later⟩ := ih item.token sorted.2
+    refine ⟨List.nodup_cons.mpr ⟨?_, unique⟩, ?_⟩
+    · intro member
+      have impossible := later item member
+      cases ascending <;> simp [tokenBefore] at impossible
+    · intro other member
+      rcases List.mem_cons.mp member with same | tail
+      · simpa [same] using sorted.1
+      · have follows := later other tail
+        cases ascending <;> simp [tokenBefore] at * <;> omega
+
+#print axioms orderedTokens_nodup
+
+/-- A word covers 64 metadata rows. Sparse or large tokens allocate only their own words. -/
+private def tokenWordWidth := 64
+
+/-- Whether an earlier target has the same metadata token. -/
+private def tokenSeen (words : Std.TreeMap Nat Nat) (token : Nat) : Bool :=
+  (words.getD (token / tokenWordWidth) 0).testBit (token % tokenWordWidth)
+
+/-- Record one metadata row in its word. -/
+private def markToken (words : Std.TreeMap Nat Nat) (token : Nat) : Std.TreeMap Nat Nat :=
+  let word := token / tokenWordWidth
+  words.insert word (words.getD word 0 ||| (1 <<< (token % tokenWordWidth)))
+
+/-- Marking a token preserves every previously occupied bit and sets its own. -/
+private theorem tokenSeen_mark (words : Std.TreeMap Nat Nat) (token query : Nat) :
+    (token = query ∨ tokenSeen words query) → tokenSeen (markToken words token) query := by
+  intro present
+  simp only [tokenSeen, markToken, Std.TreeMap.getD_insert, Nat.compare_eq_eq] at *
+  rcases present with rfl | present
+  · simp [Nat.shiftLeft_eq, Nat.testBit_two_pow_self]
+  · by_cases same : token / tokenWordWidth = query / tokenWordWidth
+    · simp [same, present]
+    · simp [same, present]
+
+#print axioms tokenSeen_mark
+
+/-- Different assemblies or generic instantiations may reuse a token, requiring a full key. -/
+private def distinctTokens (words : Std.TreeMap Nat Nat) : List ManagedIdentity → Bool
+  | [] => true
+  | member :: rest =>
+    !tokenSeen words member.token && distinctTokens (markToken words member.token) rest
+
+/-- A table with fresh token bits contains distinct identities and uses no previously seen token. -/
+private theorem distinctTokens_nodup (words : Std.TreeMap Nat Nat) (members : List ManagedIdentity)
+    (fresh : distinctTokens words members = true) :
+    members.Nodup ∧ ∀ member ∈ members, ¬tokenSeen words member.token := by
+  induction members generalizing words with
+  | nil => simp
+  | cons member rest ih =>
+    simp only [distinctTokens, Bool.and_eq_true, Bool.not_eq_true', Bool.eq_false_iff] at fresh
+    obtain ⟨unique, absent⟩ := ih _ fresh.2
+    refine ⟨List.nodup_cons.mpr ⟨?_, unique⟩, ?_⟩
+    · intro duplicate
+      exact absent member duplicate (tokenSeen_mark _ _ _ (Or.inl rfl))
+    · intro other present
+      rcases List.mem_cons.mp present with rfl | later
+      · exact fresh.1
+      · exact fun seen => absent other later (tokenSeen_mark _ _ _ (Or.inr seen))
+
+#print axioms distinctTokens_nodup
+
+/-- Small shared-token lists cost less to compare directly than to index. -/
+private def directIdentityLimit := 8
+
+/-- The general check distinguishes assembly owners and closed generic arguments. -/
+private def distinctManagedKeys (members : List ManagedIdentity) : Bool :=
+  if (members.drop directIdentityLimit).isEmpty then decide members.Nodup else
+  (distinctMembership? (fun identity : ManagedIdentity =>
+    (identity.token, keyBytes identity.owner, identity.arguments.map (typeKeyInto · [])))
+    members).isSome
+
+/-- The complete scoped key preserves exactly the ordinary identity check. -/
+private theorem distinctManagedKeys_iff (members : List ManagedIdentity) :
+    distinctManagedKeys members = true ↔ members.Nodup := by
+  unfold distinctManagedKeys
+  split
+  · simp
+  · rw [distinctMembership?_eq]
+    split <;> simp_all
+
+#print axioms distinctManagedKeys_iff
+
+/-- Token order or distinct token bits suffice. Reused tokens need the full identity index. -/
+private def managedIdentitiesDistinct : List ManagedIdentity → Bool
+  | [] | [_] => true
+  | first :: second :: rest =>
+    let members := first :: second :: rest
+    (first.token != second.token && (orderedTokens (first.token < second.token) first.token
+      (second :: rest) || distinctTokens ∅ members)) ||
+      distinctManagedKeys members
+
+/-- Every token shortcut certifies the same full-identity distinctness requirement. -/
+private theorem managedIdentitiesDistinct_iff (members : List ManagedIdentity) :
+    managedIdentitiesDistinct members = true ↔ members.Nodup := by
+  match members with
+  | [] => simp [managedIdentitiesDistinct]
+  | [_] => simp [managedIdentitiesDistinct]
+  | first :: second :: rest =>
+    let members := first :: second :: rest
+    let ascending := decide (first.token < second.token)
+    change ((_ && (orderedTokens ascending first.token (second :: rest) ||
+      distinctTokens ∅ members)) || distinctManagedKeys members) = true ↔ members.Nodup
+    rw [Bool.or_eq_true, Bool.and_eq_true, Bool.or_eq_true, distinctManagedKeys_iff]
+    refine ⟨?_, fun unique => Or.inr unique⟩
+    rintro (⟨_, sorted | fresh⟩ | unique)
+    · obtain ⟨unique, later⟩ := orderedTokens_nodup _ _ _ sorted
+      refine List.nodup_cons.mpr ⟨?_, unique⟩
+      intro duplicate
+      have impossible := later first duplicate
+      cases ascending <;> simp_all [tokenBefore]
+    · exact (distinctTokens_nodup _ _ fresh).1
+    · exact unique
+
+#print axioms managedIdentitiesDistinct_iff
+
 /-- Indirect calls bind the exact raw managed signature and every possible selected target. -/
 def managedIndirectMatches (methods : Nat → Option SpecializedMethod)
     (raw : RawInstruction) (signature : ManagedSignature) (catalog : List ManagedTarget) : Bool :=
   raw.opcode == 41 && !catalog.isEmpty &&
-    (catalog.map (·.identity)).Nodup &&
+    managedIdentitiesDistinct (catalog.map ManagedTarget.identity) &&
   match raw.operand with
   | .indirectCall result parameters false false 0 =>
     callableType result == signature.result && parameters.map callableType == signature.parameters &&

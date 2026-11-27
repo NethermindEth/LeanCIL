@@ -14,14 +14,15 @@ artifacts are kept for 14 days.
 
 | Job | Name | Limit | Does |
 | --- | --- | --- | --- |
-| `select` | `Select verification suites` | 5 minutes | Runs the static documentation check and the script self-tests, then selects suites and proof-cost sources |
+| `select` | `Select verification suites` | 5 minutes | Checks documentation, selection and library preparation, then selects suites and proof-cost sources |
 | `prepare` | `Prepare certified Lean library` | 20 minutes | Installs the toolchain and reuses or builds the [certified library](#certified-library) |
-| `tools` | `Build extractor, examples and shared fixtures` | 10 minutes | Builds the tools every suite job restores |
-| `suites` | `Verify (<suites>)` | 30, 90 or 120 minutes | Runs one group of suites; at most eight jobs run at once |
+| `tools` | `Build extractor, examples and shared fixtures` | 10 minutes | Tests suite helpers and builds the tools every suite job restores |
+| `suites` | `Verify (<suites>)` | Per group, at least 30 minutes | Runs one group of suites; at most eight jobs run at once |
 | `proof-cost` | `Proof cost` | 10 minutes | Compares or publishes [proof cost](#proof-cost) rows |
 | `verify` | `Build and verify` | 5 minutes | The [required check](#required-check) |
 
-`prepare`, `tools` and `suites` are skipped when selection reports that no suite is needed.
+`prepare`, `tools` and `suites` are skipped when selection reports that no suite is needed. In that case,
+the suite helper tests run in `select`.
 
 ## Suite selection
 
@@ -52,20 +53,21 @@ individual matrix jobs may be absent on a PR.
 
 ## Suite jobs
 
-Every job spends about a minute on checkout, toolchain, library and tool restores and uploads
-before and after its suites, so suites are packed into as few jobs as a target allows. The target
-is one runner's share of a round: the measured time of all suites divided by the eight runners
-and by the fewest rounds that keep a job no longer than the longest suite, which is two rounds with
-the checked-in durations. The longest suite is then the longest job and the runners finish
-together. Suites go longest first into the fullest job that still has room, at most eight to a job,
-and jobs start longest first. The runners are shared, so do not raise the limit of eight
-concurrent jobs.
+Selection assigns the longest remaining suite to the runner with the least estimated work. It
+charges each job for setup and adds the measured library time to the shortest selected suite
+when the change calls for library measurement. The library step has a 20-minute timeout.
+Each job holds up to eight suites.
+Its target duration is the smaller of 110% of the longest suite and one eighth of the full run's
+suite time. A short suite can share the longest job within that allowance.
+Small selections use fewer runners. Jobs start longest first, with up to eight running at once.
 
-- The duration table `scripts/verification-durations.json` holds verification time, excluding
-  setup, which a job's summary and each member's transcript report per suite. A suite without a
-  measured time runs alone.
+- The duration table `scripts/verification-durations.json` includes each suite's full elapsed
+  time from its log group and the time to measure its verified outputs from the proof-cost log.
+  The table records the source run and its library measurement. The setup estimate is the
+  median time per job after subtracting suite and library work.
+  A suite without a measured time runs alone.
 - `dotnet run --file scripts/EstimateVerificationSchedule.cs -- --jobs` prints the jobs of a full
-  run with their estimated minutes.
+  run with their estimated minutes, including the library measurement.
 - A job's time limit is the largest of its members' (90 minutes for `imports`, 120 for each
   `exports` partition and 30 for any other suite) and at least twice the job's measured time,
   rounded up to ten minutes.
@@ -78,6 +80,10 @@ the checkout a full local run shares between all suites. A failure does not skip
 and any member failure fails the job. The log folds each member's output under its name, a failed
 member raises an error annotation that names it, and the job summary lists every member with its
 result and time.
+
+Within a generated proof batch, requests with the same extraction manifest, proof path and
+assembled Lean source share one elaboration and kernel replay. The verifier audits each requested
+theorem, writes its verification report and checks each output against its assembly.
 
 The generated outline checks run in `outlines-control`, `outlines-objects` and `outlines-buffers`.
 Each selects its cases from the shared `Tests/ProofOutlines.cs` runner with `--group`, prepares its
@@ -138,6 +144,9 @@ reuse of it replays. These checks do not rely on the branch filters of the donor
 When reuse fails and a donor was restored, CI tries `--incremental`, which authenticates every
 donor file, rebuilds what the changed sources affect and kernel-replays every module of the
 result. If that fails, or there is no donor, CI builds from source and replays everything.
+The interpreter imports the numeric search tree and assembly-name spelling independently of the
+metadata row decoder. A change confined to the decoder rebuilds its extraction and binding
+dependents. Changes to either shared definition also rebuild the interpreter modules that use it.
 [Certified library preparation](VALIDATION-COVERAGE.md#certified-library-preparation) describes
 the `PrepareLibrary.cs` modes and their tests.
 
@@ -173,6 +182,10 @@ refs, unknown merge bases and other runs.
 
 ## Toolchain and shared tools
 
+The preparation job searches for a certified library donor while it installs and packages Lean.
+Each suite job downloads the toolchain, certified library and shared tools concurrently into
+separate directories. It waits for both authenticated restores before starting verification.
+
 The `prepare` job installs elan 4.2.4 from its Linux x64 release archive and checks the pinned
 SHA-256 before extracting or executing the installer; it uses no moving installer script or
 release alias. The archive download retries once after 30 seconds, and each attempt is limited to
@@ -203,8 +216,9 @@ and there is no checked-in baseline.
 
 ### Measures
 
-`scripts/ProofCost.cs measure` elaborates a module one command at a time on one thread, through
-the frontend `scripts/ProofCost.lean`, and writes one row per command and one per module:
+`scripts/ProofCost.cs measure` builds `scripts/ProofCost.lean` once with the checkout's Lean
+toolchain. Each module runs in a fresh process on one thread. The report records one row per
+command and one per module.
 
 | Measure | Meaning | Decides the result |
 | --- | --- | --- |
@@ -253,9 +267,11 @@ measured alone. Before measuring, the job checks that ownership accounts for eve
 verified: the group runner records when each member started, and an owned directory whose report
 another member wrote, or a report a proof suite wrote outside its directories, stops the
 measurement of the suites involved. A proof suite that gains an output directory declares it
-there. The shortest `Verify` job also measures `libraries`, which needs only the certified
-library. Neither measuring step can fail its job: a source without rows fails the comparison
-instead.
+there. The job containing the shortest selected suite also measures `libraries`, which needs
+only the certified library. The profiler queues independent imports together, measures each
+checkout module once and waits for its imports before compiling it. The worker limit applies
+to the Lean processes. A failed measurement leaves its source without rows. A PR that
+compares that source fails the comparison.
 
 A run measures only its own tree. A push to `main` measures every source, and its `Proof cost` job
 gathers the sources that hold rows into one artifact and logs its digest; the artifact omits a
@@ -263,10 +279,10 @@ suite that failed on `main` or left no rows and holds the rows of the suites tha
 run takes those rows as its base when the push run of its merge base published them: the run must
 be a push of that commit on `main`, which is what reusing a certified library without replay
 requires of its producer, the file must have the digest that job logged, and its rows must come
-from the same measurer and from that commit. The measurer is `scripts/ProofCost.lean`,
-`scripts/ProofCostReport.cs`, the shared selection helpers in `scripts/Verification.cs`, the row
-schema and the two workflow steps that measure. No other run supplies a base, and no pull request
-run measures a base.
+from the same measurer and from that commit. The measurer includes `scripts/ProofCost.lean`,
+`scripts/ProofProfiler.cs`, `scripts/ProofCostReport.cs`, the shared helpers in
+`scripts/Verification.cs`, the row schema and the two workflow steps that measure. No other run
+supplies a base, and no pull request run measures a base.
 
 ### Comparison
 

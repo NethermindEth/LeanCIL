@@ -1,5 +1,6 @@
 import CIL.Extraction.Assemblies
 import CIL.Extraction.Folds
+import CIL.Extraction.ParentIndex
 import CIL.Extraction.FlowIndex
 import Std.Data.TreeSet.Lemmas
 import Std.Data.TreeMap.Lemmas
@@ -278,6 +279,46 @@ def classChain (find : TypeExpr → Option DispatchType) : Nat → TypeExpr → 
     | .void => none
     | base => (entry :: ·) <$> classChain find fuel base root
 
+/-- The non-generic virtual slot introduced by the declaring class. -/
+private def virtualSlot (find : TypeExpr → Option DispatchType) (site : CallSite) :
+    Option DispatchMethod := do
+  let .managed token := site.target | none
+  if !site.hasThis || !site.typeArguments.isEmpty then none else pure ()
+  let declaring ← find site.declaringType
+  let slot ← unique (declaring.methods.filter fun method => method.token == token)
+  if !slot.isVirtual || !slot.isNewSlot || slot.name != site.name ||
+      !signatureMatches slot site then none else some slot
+
+/-- A class with a matching declaration hides all more distant declarations, even on ambiguity. -/
+private def virtualChoice (site : CallSite) (slot : DispatchMethod) (entry : DispatchType) :
+    Option (TypeExpr × Option DispatchMethod) :=
+  if entry.identity == site.declaringType then some (entry.identity, some slot) else
+  match entry.methods.filter fun method =>
+      method.isVirtual && method.name == slot.name && signatureMatches method site with
+  | [] => none
+  | [method] => some (entry.identity, if method.isNewSlot then none else some method)
+  | _ => some (entry.identity, none)
+
+/-- A selected virtual declaration must have a concrete body. -/
+private def virtualBody : TypeExpr × Option DispatchMethod → Option (TypeExpr × DispatchMethod)
+  | (owner, some method) =>
+    if method.isAbstract || !method.hasBody then none else some (owner, method)
+  | _ => none
+
+/-- The type identities named by the class's explicit overrides. -/
+private def overrideOwners (entry : DispatchType) : List TypeExpr :=
+  entry.methods.flatMap fun method => method.overrides.map Prod.snd
+
+/-- Virtual lookup can visit only pinned reference classes. -/
+private def virtualClass (entry : DispatchType) : Bool :=
+  entry.pinned && !entry.valueType && !entry.interfaceType
+
+/-- Every class on the path is admissible, and no explicit override names a class on the path. -/
+private def virtualChainValid (chain : List DispatchType) : Bool :=
+  let classes := chain.map (·.identity)
+  chain.all fun entry => virtualClass entry &&
+    (overrideOwners entry).all fun owner => !classes.contains owner
+
 /-- The body `callvirt` of the class slot `site` names runs on an instance of exactly `runtime`,
     with the class declaring it: the nearest class from `runtime` up to the slot's class with a
     virtual method of the slot's name and signature (ECMA-335 II.10.3.2). The slot must
@@ -287,31 +328,198 @@ def classChain (find : TypeExpr → Option DispatchType) : Nat → TypeExpr → 
     than select a less specific body. -/
 def resolveVirtualWith (find : TypeExpr → Option DispatchType) (fuel : Nat) (runtime : TypeExpr)
     (site : CallSite) : Option (TypeExpr × DispatchMethod) := do
-  let .managed token := site.target | none
-  if !site.hasThis || !site.typeArguments.isEmpty then none else pure ()
-  let declaring ← find site.declaringType
-  let slot ← unique (declaring.methods.filter fun method => method.token == token)
-  if !slot.isVirtual || !slot.isNewSlot || slot.name != site.name ||
-      !signatureMatches slot site then none else pure ()
+  let slot ← virtualSlot find site
   let chain ← classChain find fuel runtime site.declaringType
-  let classes := chain.map (·.identity)
-  if !(chain.all fun entry => entry.pinned && !entry.valueType && !entry.interfaceType &&
-      entry.methods.all fun method =>
-        method.overrides.all fun (_, owner) => !classes.contains owner)
-    then none else pure ()
-  let selected ← chain.findSome? fun entry =>
-    if entry.identity == site.declaringType then some (entry.identity, some slot) else
-    match entry.methods.filter fun method =>
-        method.isVirtual && method.name == slot.name && signatureMatches method site with
-    | [] => none
-    | [method] => some (entry.identity, if method.isNewSlot then none else some method)
-    | _ => some (entry.identity, none)
-  let (owner, some method) := selected | none
-  if method.isAbstract || !method.hasBody then none else pure (owner, method)
+  if !virtualChainValid chain then none else
+    (chain.findSome? (virtualChoice site slot)).bind virtualBody
 
 /-- Exactly one catalog entry with this identity, as dispatch reads it. -/
 def findDispatchType (types : List DispatchType) (identity : TypeExpr) : Option DispatchType :=
   unique (types.filter fun type => type.identity == identity)
+
+attribute [local instance] lexOrd
+
+/-- Class buckets compare their names before their often-shared assembly scope. -/
+private def classKey (identity : TypeExpr) : List (Nat × Nat) × List (List UInt8) :=
+  match identity with
+  | .object scope name =>
+    let levelKey (level : TypeLevel) := (level.name.code, level.typeNamespace.code)
+    (name.levels.map levelKey, [keyBytes scope])
+  | type => ([], typeKeyInto type [])
+
+
+private abbrev ClassSet := Std.TreeMap (List (Nat × Nat) × List (List UInt8)) (List TypeExpr)
+
+/-- Exact membership within the bucket selected by the class key. -/
+private def ClassSet.has (classes : ClassSet) (id : TypeExpr) : Bool :=
+  (classes.getD (classKey id) []).contains id
+
+/-- Add one identity to its bucket. -/
+private def ClassSet.add (classes : ClassSet) (id : TypeExpr) : ClassSet :=
+  classes.insert (classKey id) (id :: classes.getD (classKey id) [])
+
+/-- Adding an identity preserves every unrelated membership answer. -/
+private theorem ClassSet.has_add (classes : ClassSet) (id query : TypeExpr) :
+    (classes.add id).has query = (query == id || classes.has query) := by
+  simp only [has, add, Std.TreeMap.getD_insert, Std.compare_eq_iff_eq]
+  by_cases same : classKey id = classKey query
+  · simp only [same, ↓reduceIte]
+    by_cases equal : query = id <;> simp [equal]
+  · have different : query ≠ id := fun equal => same (congrArg classKey equal.symm)
+    simp [same, different]
+
+#print axioms ClassSet.has_add
+
+/-- A sequence of inserted identities adds exactly those identities to the set. -/
+private theorem ClassSet.has_fold (classes : ClassSet) (ids : List TypeExpr) (query : TypeExpr) :
+    (ids.foldl ClassSet.add classes).has query = (ids.contains query || classes.has query) := by
+  induction ids generalizing classes with
+  | nil => simp
+  | cons id rest ih =>
+    simp only [List.foldl_cons, ih, ClassSet.has_add, List.contains_cons]
+    grind
+
+#print axioms ClassSet.has_fold
+
+/-- Facts about the chain to the declaring class, including owners mentioned by MethodImpl. -/
+private structure ClassSummary where
+  classes : ClassSet := ∅
+  overrides : ClassSet := ∅
+  valid : Bool := true
+  selected : Option (TypeExpr × Option DispatchMethod) := none
+
+/-- Extending a parent chain checks both directions of the class/override exclusion. -/
+private def ClassSummary.extend (site : CallSite) (slot : DispatchMethod) (entry : DispatchType)
+    (parent : ClassSummary) : ClassSummary :=
+  let classes := parent.classes.add entry.identity
+  let owners := overrideOwners entry
+  { classes, overrides := owners.foldl ClassSet.add parent.overrides
+    valid := parent.valid && virtualClass entry && !parent.overrides.has entry.identity &&
+      owners.all fun owner => !classes.has owner
+    selected := (virtualChoice site slot entry).or parent.selected }
+
+/-- The summary for a materialized chain is its fold from the declaring class outwards. -/
+private def summarize (site : CallSite) (slot : DispatchMethod) (chain : List DispatchType) :=
+  chain.foldr (ClassSummary.extend site slot) {}
+
+/-- The summary retains exactly the class identities in the chain. -/
+private theorem summaryClasses (site : CallSite) (slot : DispatchMethod) (chain : List DispatchType)
+    (query : TypeExpr) :
+    (summarize site slot chain).classes.has query = (chain.map (·.identity)).contains query := by
+  induction chain with
+  | nil => simp [summarize, ClassSet.has]
+  | cons entry rest ih =>
+    change ((summarize site slot rest).classes.add entry.identity).has query = _
+    rw [ClassSet.has_add, ih]
+    by_cases equal : query = entry.identity <;> simp [equal]
+
+#print axioms summaryClasses
+
+/-- The summary retains exactly the named override owners in the chain. -/
+private theorem summaryOverrides (site : CallSite) (slot : DispatchMethod)
+    (chain : List DispatchType) (query : TypeExpr) :
+    (summarize site slot chain).overrides.has query =
+      (chain.flatMap overrideOwners).contains query := by
+  induction chain with
+  | nil => simp [summarize, ClassSet.has]
+  | cons entry rest ih =>
+    change ((overrideOwners entry).foldl ClassSet.add
+      (summarize site slot rest).overrides).has _ = _
+    rw [ClassSet.has_fold, ih]
+    simp
+
+#print axioms summaryOverrides
+
+/-- The incremental exclusions check each override against every class on exactly this chain. -/
+private theorem summaryValid (site : CallSite) (slot : DispatchMethod) (chain : List DispatchType) :
+    (summarize site slot chain).valid = virtualChainValid chain := by
+  induction chain with
+  | nil => rfl
+  | cons entry rest ih =>
+    change ((summarize site slot rest).valid && virtualClass entry &&
+      !(summarize site slot rest).overrides.has entry.identity &&
+      (overrideOwners entry).all (fun owner =>
+        !((summarize site slot rest).classes.add entry.identity).has owner)) = _
+    simp only [ih, summaryOverrides, ClassSet.has_add, summaryClasses]
+    apply Bool.eq_iff_iff.mpr
+    simp [virtualChainValid, List.all_eq_true]
+    grind
+
+#print axioms summaryValid
+
+/-- The nearest declaration, including an ambiguity or hiding declaration, takes precedence. -/
+private theorem summarySelected (site : CallSite) (slot : DispatchMethod)
+    (chain : List DispatchType) :
+    (summarize site slot chain).selected = chain.findSome? (virtualChoice site slot) := by
+  induction chain with
+  | nil => rfl
+  | cons entry rest ih =>
+    change (virtualChoice site slot entry).or (summarize site slot rest).selected = _
+    cases choice : virtualChoice site slot entry <;> simp [choice, ih]
+
+#print axioms summarySelected
+
+/-- The parent link for one bounded class lookup stops exactly at the slot's declaring class. -/
+private def virtualParent (find : TypeExpr → Option DispatchType) (site : CallSite)
+    (slot : DispatchMethod) (id : TypeExpr) : ParentLink TypeExpr ClassSummary :=
+  match find id with
+  | none => .absent
+  | some entry =>
+    let extend := ClassSummary.extend site slot entry
+    if id == site.declaringType then .root (extend {}) else
+    match entry.base with
+    | .void => .absent
+    | base => .parent base extend
+
+/-- A bounded walk through the summary links folds precisely the ordinary class chain. -/
+private theorem virtualParent_walk (find : TypeExpr → Option DispatchType) (site : CallSite)
+    (slot : DispatchMethod) (fuel : Nat) (id : TypeExpr) :
+    ParentLink.walk (virtualParent find site slot) fuel id =
+      (classChain find fuel id site.declaringType).map (summarize site slot) := by
+  induction fuel generalizing id with
+  | zero => rfl
+  | succ fuel ih =>
+    cases found : find id with
+    | none => simp [ParentLink.walk, virtualParent, classChain, found]
+    | some entry =>
+      by_cases root : id = site.declaringType
+      · subst id
+        simp [ParentLink.walk, virtualParent, classChain, found, summarize]
+      · cases base : entry.base <;>
+          simp [ParentLink.walk, virtualParent, classChain, found, root, base, ih, Option.map_map,
+            Function.comp_def, summarize]
+
+#print axioms virtualParent_walk
+
+/-- Shared ancestor facts for every class identity supplied by the catalog. -/
+private def virtualSummaries (types : List DispatchType) (find : TypeExpr → Option DispatchType)
+    (site : CallSite) (slot : DispatchMethod) : TypeExpr → Option ClassSummary :=
+  ParentLink.indexed classKey (virtualParent find site slot) (types.map (·.identity)) types.length
+
+/-- Summaries exist exactly for the classes whose bounded chains reach the declaring class. -/
+private theorem virtualSummaries_eq (types : List DispatchType)
+    (find : TypeExpr → Option DispatchType) (site : CallSite) (slot : DispatchMethod) (id : TypeExpr) :
+    virtualSummaries types find site slot id =
+      (classChain find types.length id site.declaringType).map (summarize site slot) := by
+  rw [virtualSummaries, ParentLink.indexed_eq, virtualParent_walk]
+
+#print axioms virtualSummaries_eq
+
+/-- Resolve the slot from the nearest declaration in an admissible class chain. -/
+private def ClassSummary.body (summary : ClassSummary) : Option (TypeExpr × DispatchMethod) :=
+  if !summary.valid then none else summary.selected.bind virtualBody
+
+/-- Indexed resolution selects exactly the ordinary virtual body, with all failures preserved. -/
+private theorem virtualSummaries_body (types : List DispatchType)
+    (find : TypeExpr → Option DispatchType) (site : CallSite) (slot : DispatchMethod)
+    (checked : virtualSlot find site = some slot) (id : TypeExpr) :
+    (virtualSummaries types find site slot id).bind ClassSummary.body =
+      resolveVirtualWith find types.length id site := by
+  rw [virtualSummaries_eq]
+  cases path : classChain find types.length id site.declaringType <;>
+    simp [resolveVirtualWith, checked, path, ClassSummary.body, summaryValid, summarySelected]
+
+#print axioms virtualSummaries_body
 
 /-- Every class a virtual call's table lists is bound to the body `resolveVirtualWith` selects:
     an extracted, non-generic instance method of the selecting class with the site's signature.
@@ -320,11 +528,12 @@ def findDispatchType (types : List DispatchType) (identity : TypeExpr) : Option 
 def virtualTableValid (types : List DispatchType) (find : TypeExpr → Option DispatchType)
     (methods : Nat → Option SpecializedMethod) (site : CallSite)
     (targets : List (TypeExpr × Nat)) (count : Nat) : Bool :=
-  let fuel := types.length
-  !targets.isEmpty && decide (targets.map Prod.fst).Nodup &&
-  count == site.parameterCount + 1 &&
+  !targets.isEmpty && count == site.parameterCount + 1 &&
+  (distinctMembership? classKey (targets.map Prod.fst)).any fun contains =>
+  (virtualSlot find site).any fun slot =>
+  let summaries := virtualSummaries types find site slot
   (targets.all fun (runtime, index) =>
-    match resolveVirtualWith find fuel runtime site, methods index with
+    match (summaries runtime).bind ClassSummary.body, methods index with
     | some (owner, method), some callee =>
       callee.arguments.isEmpty && callee.closed.token == method.token &&
       managedOwner owner == some (callee.closed.owner, []) &&
@@ -334,8 +543,8 @@ def virtualTableValid (types : List DispatchType) (find : TypeExpr → Option Di
       callee.closed.parameters == site.parameterTypes
     | _, _ => false) &&
   types.all fun entry => entry.abstractType ||
-    (classChain find fuel entry.identity site.declaringType).isNone ||
-    targets.any (·.1 == entry.identity)
+    contains entry.identity ||
+    (summaries entry.identity).isNone
 
 /-- A class `castclass` and `isinst` may test against: a pinned, non-generic catalog class other
     than `System.Object`. An instance's runtime lineage lists exactly its own and its admitted
@@ -394,16 +603,16 @@ def DispatchTypeIndex.ofType (type : DispatchType) : DispatchTypeIndex :=
     multiGroup (fun method => method.overrides.map Prod.fst) type.methods⟩
 
 /-- Dispatch type buckets; exact identity filtering preserves duplicate ambiguity. -/
-def DispatchIndex := Std.TreeMap (List (List UInt8)) (List DispatchTypeIndex)
+def DispatchIndex := Std.TreeMap (List (Nat × Nat) × List (List UInt8)) (List DispatchTypeIndex)
 
 /-- Construct all type and method indexes once for a metadata catalog. -/
 def DispatchIndex.ofTypes (types : List DispatchType) : DispatchIndex :=
-  groupIndex (fun entry => typeKeyInto entry.raw.identity []) (types.map DispatchTypeIndex.ofType)
+  groupIndex (fun entry => classKey entry.raw.identity) (types.map DispatchTypeIndex.ofType)
 
 /-- Select exactly one type with the requested full identity, including aggregate position. -/
 def DispatchIndex.findType (index : DispatchIndex) (identity : TypeExpr) :
     Option DispatchTypeIndex :=
-  unique ((index.getD (typeKeyInto identity []) []).filter fun entry =>
+  unique ((index.getD (classKey identity) []).filter fun entry =>
     entry.raw.identity == identity)
 
 /-- Mapping candidates preserves the exactly-one requirement. -/
@@ -423,7 +632,7 @@ theorem DispatchIndex.findType_ofTypes (types : List DispatchType) (identity : T
   simp only [DispatchIndex.findType, DispatchIndex.ofTypes, groupIndex_get, List.filter_filter,
     List.filter_map, Function.comp_def, DispatchTypeIndex.ofType]
   have predicates : (fun type : DispatchType =>
-      (type.identity == identity && typeKeyInto type.identity [] == typeKeyInto identity [])) =
+      (type.identity == identity && classKey type.identity == classKey identity)) =
       (fun type => type.identity == identity) := by
     funext type
     by_cases same : type.identity = identity <;> simp [same]

@@ -28,6 +28,21 @@ Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
 using var verifier = new Program();
 try
 {
+    if (OperatingSystem.IsWindows())
+    {
+        var staged = Directory.CreateDirectory(Path.Combine(directory, "staged")).FullName;
+        var target = Path.Combine(directory, "published");
+        var stagedReceipt = Path.Combine(staged, "receipt.json");
+        File.WriteAllText(stagedReceipt, "{}");
+        using var reader = File.Open(stagedReceipt, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var release = Task.Run(() => { Thread.Sleep(100); reader.Dispose(); });
+        MoveCacheDirectory(staged, target);
+        release.GetAwaiter().GetResult();
+        if (File.ReadAllText(Path.Combine(target, "receipt.json")) != "{}" || Directory.Exists(staged))
+            throw new InvalidOperationException("The complete staged receipt did not move into place.");
+        Console.WriteLine("PASS an active Windows reader can release a staged receipt before publication");
+    }
+
     var source = Path.Combine(directory, "source");
     var destination = Path.Combine(directory, "destination");
     Directory.CreateDirectory(source);
@@ -100,8 +115,8 @@ try
     CheckPromotion("changed-artifact", false,
         mutateEntry: entry => File.AppendAllText(Path.Combine(entry, "files", "Proof.olean"), "corruption"));
     var privateLibraryDirectory = Path.Combine(directory, "private-library");
-    Directory.CreateDirectory(privateLibraryDirectory);
-    var privateArtifact = Path.Combine(privateLibraryDirectory, "CIL.olean");
+    var compiled = Directory.CreateDirectory(Path.Combine(privateLibraryDirectory, CompiledLibraryPrefix));
+    var privateArtifact = Path.Combine(compiled.FullName, "CIL.olean");
     File.WriteAllText(privateArtifact, "certified");
     using (var privateLibrary = new Program
     {
@@ -112,6 +127,14 @@ try
         if (privateLibrary.libraryStamps is not null)
             throw new Exception("Private library fixture unexpectedly has a read-in-place guard");
         CheckPromotion("private-library", true, requireStable: privateLibrary.RequireCertifiedLibraryContents);
+        var checkedLibrary = privateLibrary.CheckCertifiedLibraryContents();
+        if (!Same(ModuleArtifacts(privateLibraryDirectory), ModuleArtifacts(privateLibraryDirectory, checkedLibrary)))
+            throw new Exception("A whole-library check changed the compiled module inventory");
+        var otherLibrary = Path.Combine(directory, "other-library");
+        var otherModules = Directory.CreateDirectory(Path.Combine(otherLibrary, CompiledLibraryPrefix)).FullName;
+        File.WriteAllText(Path.Combine(otherModules, "CIL.olean"), "different library");
+        if (!Same(ModuleArtifacts(otherLibrary), ModuleArtifacts(otherLibrary, checkedLibrary)))
+            throw new Exception("One library reused another library's compiled module hash");
         var timestamp = File.GetLastWriteTimeUtc(privateArtifact);
         File.WriteAllText(privateArtifact, "corrupted");
         File.SetLastWriteTimeUtc(privateArtifact, timestamp);
@@ -124,6 +147,9 @@ try
         File.WriteAllText(privateArtifact + ".private", "unchecked");
         CheckPromotion("added-private-artifact", false,
             requireStable: privateLibrary.RequireCertifiedLibraryContents);
+        File.WriteAllText(Path.Combine(compiled.FullName, "Orphan.olean.private"), "new companion");
+        if (!Same(ModuleArtifacts(privateLibraryDirectory), ModuleArtifacts(privateLibraryDirectory, checkedLibrary)))
+            throw new Exception("Compiled module discovery lost added companions after a whole-library check");
     }
     Console.WriteLine("PASS complete-library promotion preserves exact families, identity and " +
         "authenticated artifacts");

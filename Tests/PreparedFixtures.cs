@@ -85,8 +85,11 @@ try
         "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
     if (!isolated.TrimEnd().EndsWith(Path.GetFullPath(corpus), StringComparison.Ordinal))
         throw new Exception("Source-built child inherited the prepared fixture's checkout root: " + isolated);
-    File.AppendAllText(include, "// changed\n");
+    File.WriteAllText(include, "using System.Net.Http.Headers;\n" + File.ReadAllText(include));
     if (PreparedFixtureCommand(relative, []) is not null) throw new Exception("Changed include reused output");
+    var unusedImport = Execute(["dotnet", "run", "--file", source, "--", "unused-import"]);
+    if (unusedImport.Code == 0 || !unusedImport.Output.Contains("error IDE0005", StringComparison.Ordinal))
+        throw new Exception("Source-built fixture accepted an unused import: " + unusedImport.Output);
     File.WriteAllText(include, "static class Example { public const string Message = \"prepared:\"; }\n");
     foreach (var name in new[] { "Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props",
                  "Directory.Packages.targets", ".editorconfig", "NuGet.Config", "global.json",

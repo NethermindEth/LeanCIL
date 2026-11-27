@@ -11,7 +11,10 @@ internal static class VerificationSelection
         Regex.Matches(text, pattern, options).Select(match => match.Groups[1].Value);
     static string Relative(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
 
-    internal static Dictionary<string, double> ReadDurations(string? root = null)
+    internal sealed record RunDurations(string WorkflowRun, Dictionary<string, double> Suites,
+        int SetupSeconds, int LibrarySeconds);
+
+    internal static RunDurations ReadDurations(string? root = null)
     {
         using var data = JsonDocument.Parse(File.ReadAllText(Path.Combine(root ?? Root, "scripts/verification-durations.json")));
         var durations = new Dictionary<string, double>(StringComparer.Ordinal);
@@ -23,12 +26,15 @@ internal static class VerificationSelection
             durations[property.Name] = seconds;
         }
         if (durations.Count == 0) throw new InvalidDataException("Suite durations must be positive numbers");
-        return durations;
+        var setup = data.RootElement.GetProperty("setupSeconds").GetInt32();
+        var library = data.RootElement.GetProperty("librarySeconds").GetInt32();
+        if (setup <= 0 || library <= 0) throw new InvalidDataException("Job and library durations must be positive");
+        return new(data.RootElement.GetProperty("workflowRun").GetString()!, durations, setup, library);
     }
 
     internal static string[] Schedule(IEnumerable<string> suites, string? root = null)
     {
-        var durations = ReadDurations(root);
+        var durations = ReadDurations(root).Suites;
         // Unknown suites start first rather than leaving a potentially long job at the tail.
         var unknown = durations.Values.Max() + 1;
         return suites.OrderByDescending(name => durations.GetValueOrDefault(name, unknown))
@@ -45,44 +51,59 @@ internal static class VerificationSelection
     // More members than this make a job's summary long and its name useless for finding a failure.
     internal const int GroupMembers = 8;
 
-    // A job is filled to the share of all measured time that one runner takes in one round, with the
-    // fewest rounds that keep a job no longer than the longest suite. That suite then stays the
-    // longest job, and every runner finishes its last job at about the same time.
-    internal static double GroupSeconds(IReadOnlyDictionary<string, double> durations)
-    {
-        var rounds = 1;
-        while (durations.Values.Sum() / (Runners * rounds) > durations.Values.Max()) rounds++;
-        return durations.Values.Sum() / (Runners * rounds);
-    }
+    // Allow a short suite to share the longest job while capping each group at one runner's share.
+    const double LongestSuiteAllowance = 1.10;
+    internal static double GroupSeconds(IReadOnlyDictionary<string, double> durations) =>
+        Math.Min(durations.Values.Max() * LongestSuiteAllowance, durations.Values.Sum() / Runners);
 
     // A job's suites when few enough to read, else its longest suite and how many more it runs.
     static string Name(List<string> group) => group.Count <= 3 ? string.Join("+", group)
         : $"{group[0]}+{group.Count - 1}more";
 
-    // Each job costs setup and restores before its first suite, so suites are packed into as few jobs
-    // as the target allows, longest first into the fullest job that still has room. A suite without
-    // a measured time runs alone.
-    internal static Group[] Groups(IEnumerable<string> suites, string? root = null)
+    // Give the next suite to the runner with the least work, including each job's setup.
+    // Short selections share a job. Unknown suites start first and run alone.
+    internal static Group[] Groups(IEnumerable<string> suites, string? root = null, bool planLibraries = true)
     {
-        var durations = ReadDurations(root);
+        var run = ReadDurations(root);
+        var durations = run.Suites;
         var target = GroupSeconds(durations);
-        double Seconds(List<string> group) =>
-            group.Sum(name => durations.GetValueOrDefault(name, double.PositiveInfinity));
-        var groups = new List<List<string>>();
-        foreach (var suite in Schedule(suites.Distinct(StringComparer.Ordinal), root))
+        var selected = suites.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        if (selected.Length == 0) return [];
+        double Seconds(string suite) => durations.GetValueOrDefault(suite, double.PositiveInfinity);
+        var carrier = selected.MinBy(Seconds)!;
+        double Work(string suite) =>
+            Seconds(suite) + (planLibraries && suite == carrier ? run.LibrarySeconds : 0);
+        var measured = selected.Where(durations.ContainsKey).OrderByDescending(Work).ToArray();
+        var workers = (int)Math.Clamp(Math.Ceiling(measured.Sum(Work) / target), 1, Runners);
+        var loads = new double[workers];
+        var assigned = Enumerable.Range(0, workers).Select(_ => new List<List<string>>()).ToArray();
+        var groups = selected.Where(suite => !durations.ContainsKey(suite))
+            .Select(suite => new List<string> { suite }).ToList();
+        foreach (var suite in measured)
         {
-            var seconds = durations.GetValueOrDefault(suite, double.PositiveInfinity);
-            var group = groups.Where(group => group.Count < GroupMembers && Seconds(group) + seconds <= target)
-                .OrderByDescending(Seconds).FirstOrDefault();
-            if (group is null) groups.Add([suite]);
-            else group.Add(suite);
+            bool Fits(List<string> group) => group.Count < GroupMembers &&
+                group.Sum(Work) + Work(suite) <= target;
+            var worker = Enumerable.Range(0, workers).MinBy(i =>
+                loads[i] + (assigned[i].Any(Fits) ? 0 : run.SetupSeconds));
+            var group = assigned[worker].LastOrDefault(Fits);
+            if (group is null)
+            {
+                group = [];
+                assigned[worker].Add(group);
+                groups.Add(group);
+                loads[worker] += run.SetupSeconds;
+            }
+            group.Add(suite);
+            loads[worker] += Work(suite);
         }
-        var ordered = groups.OrderByDescending(Seconds).ToArray();
-        // The shortest job carries the libraries: it starts last and has the most room before the
-        // other jobs of its round finish.
-        var carrier = ordered.LastOrDefault();
-        return ordered.Select(group => new Group(Name(group), group.ToArray(), Timeout(group, Seconds(group)),
-                group.Any(VerificationSuites.ProofSuites.Contains), group == carrier)).ToArray();
+        return groups.OrderByDescending(group => group.Sum(Work))
+            .Select(group => group.OrderByDescending(Seconds).ToList()).Select(group =>
+            {
+                var libraries = group.Contains(carrier);
+                var budget = group.Sum(Seconds) + (libraries ? run.LibrarySeconds : 0);
+                return new Group(Name(group), group.ToArray(), Timeout(group, budget),
+                    group.Any(VerificationSuites.ProofSuites.Contains), libraries);
+            }).ToArray();
     }
 
     const int TimeoutStepMinutes = 10;
@@ -143,6 +164,7 @@ internal static class VerificationSelection
             "Tests/ReturnMetadataBinding.lean", "Tests/ReferenceArrays.lean", "Tests/ArrayFields.lean",
             "Tests/RetainedNumericLocals.lean", "Tests/ProfileEmbedding.lean", "Tests/FullTransfer.lean",
             "Tests/Crypto.lean", "Tests/MetadataAssemblies.lean", "Tests/PinnedIndexScaling.lean",
+            "Tests/PinnedIndexScaling/Construction.lean",
             "Tests/FieldRef.lean", "Tests/FieldShape.lean", "Tests/RuntimeModels.lean",
             "Tests/PlatformDefinitions.lean", "Tests/BitModels.lean", "Tests/SpanHomes.lean"
         };
@@ -175,46 +197,56 @@ internal static class VerificationSelection
         inputs["blockers"].UnionWith(Matches(File.ReadAllText(Path.Combine(root, "Extractor/Extractor.csproj")),
             @"<Compile Include=""\.\./([^""]+\.cs)""").Select(path => path.Replace('\\', '/')));
 
-        // Follow literal source paths, file-based includes and Lean imports.
-        // Dynamic/new paths absent from this graph still fall back to the full matrix.
+        // Each suite owns its transitive inputs. Shared files have the same direct references in this checkout.
+        var referencesByPath = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (var paths in inputs.Values)
         {
             var pending = new Stack<string>(paths);
             while (pending.TryPop(out var path))
             {
-                // Registries name every fixture; including their types does not execute those fixtures.
-                if (path is "scripts/ExportVerificationSuites.cs" or "scripts/VerificationSuites.cs") continue;
-                var source = Path.Combine(root, path);
-                if (!File.Exists(source)) continue;
-                var text = File.ReadAllText(source);
-                var references = new HashSet<string>(
-                    Matches(text, @"""((?:Tests|Examples)/[^""{}\n]+\.(?:cs|lean(?:\.in)?))"""), StringComparer.Ordinal);
-                foreach (var pattern in Matches(text, @"""(Examples/Proofs/[^""\n]*\{[^""\n]+\.lean)"""))
+                if (!referencesByPath.TryGetValue(path, out var references))
                 {
-                    var glob = Regex.Replace(pattern, @"\{[^}]+\}", "*");
-                    var matcher = new Regex(@"\A" + Regex.Escape(glob).Replace(@"\*", "[^/]*") + @"\z");
-                    foreach (var file in Directory.EnumerateFiles(Path.Combine(root, "Examples/Proofs"), "*.lean", SearchOption.AllDirectories))
-                    {
-                        var relative = Relative(root, file);
-                        if (matcher.IsMatch(relative)) references.Add(relative);
-                    }
-                }
-                references.UnionWith(Matches(text, @"^import\s+([\w.]+)", RegexOptions.Multiline)
-                    .Select(name => name.Replace('.', '/') + ".lean"));
-                references.UnionWith(Matches(text, @"""(Tests\.[\w.]+)""")
-                    .Select(name => name.Replace('.', '/') + ".lean"));
-                foreach (var include in Matches(text, @"^#:include\s+(\S+)", RegexOptions.Multiline))
-                {
-                    var relative = Relative(root, Path.GetFullPath(include, Path.GetDirectoryName(source)!));
-                    if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith("../", StringComparison.Ordinal))
-                        throw new InvalidDataException("Source include escapes the repository: " + include);
-                    references.Add(relative);
+                    references = DirectReferences(root, path);
+                    referencesByPath.Add(path, references);
                 }
                 foreach (var reference in references)
                     if (paths.Add(reference)) pending.Push(reference);
             }
         }
         return inputs;
+    }
+
+    static HashSet<string> DirectReferences(string root, string path)
+    {
+        // Registries name every fixture; including their types does not execute those fixtures.
+        if (path is "scripts/ExportVerificationSuites.cs" or "scripts/VerificationSuites.cs") return [];
+        var source = Path.Combine(root, path);
+        if (!File.Exists(source)) return [];
+        var text = File.ReadAllText(source);
+        var references = new HashSet<string>(
+            Matches(text, @"""((?:Tests|Examples)/[^""{}\n]+\.(?:cs|lean(?:\.in)?))"""), StringComparer.Ordinal);
+        foreach (var pattern in Matches(text, @"""(Examples/Proofs/[^""\n]*\{[^""\n]+\.lean)"""))
+        {
+            var glob = Regex.Replace(pattern, @"\{[^}]+\}", "*");
+            var matcher = new Regex(@"\A" + Regex.Escape(glob).Replace(@"\*", "[^/]*") + @"\z");
+            foreach (var file in Directory.EnumerateFiles(Path.Combine(root, "Examples/Proofs"), "*.lean", SearchOption.AllDirectories))
+            {
+                var relative = Relative(root, file);
+                if (matcher.IsMatch(relative)) references.Add(relative);
+            }
+        }
+        references.UnionWith(Matches(text, @"^import\s+([\w.]+)", RegexOptions.Multiline)
+            .Select(name => name.Replace('.', '/') + ".lean"));
+        references.UnionWith(Matches(text, @"""(Tests\.[\w.]+)""")
+            .Select(name => name.Replace('.', '/') + ".lean"));
+        foreach (var include in Matches(text, @"^#:include\s+(\S+)", RegexOptions.Multiline))
+        {
+            var relative = Relative(root, Path.GetFullPath(include, Path.GetDirectoryName(source)!));
+            if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith("../", StringComparison.Ordinal))
+                throw new InvalidDataException("Source include escapes the repository: " + include);
+            references.Add(relative);
+        }
+        return references;
     }
 
     // The docs suite runs the commands its documents mark `sh run`, so the example files they name are its inputs.
@@ -224,9 +256,9 @@ internal static class VerificationSelection
             .SelectMany(block => Documentation.CommandLines(block))
             .SelectMany(entry => Matches(entry.Command, @"(Examples/[\w./-]+\.(?:lean|cs))"));
 
-    internal static string[] Select(IEnumerable<string> paths, string eventName = "pull_request", string? root = null)
+    internal static string[] Select(IReadOnlyDictionary<string, HashSet<string>> inputs,
+        IEnumerable<string> paths, string eventName = "pull_request")
     {
-        var inputs = SuiteInputs(root);
         var all = inputs.Keys.Order(StringComparer.Ordinal).ToArray();
         if (eventName != "pull_request") return all;
         var selected = new HashSet<string>(StringComparer.Ordinal);

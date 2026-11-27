@@ -8,6 +8,8 @@ namespace Nethermind.LeanCIL;
 // ParameterStorage/MethodArguments and the translated instruction strings.
 internal static class ParameterEvidence
 {
+    const int CompactReachabilityLength = 128;
+
     static string Type(TypeReference type, ModuleDefinition module, LayoutEvidence layouts)
     {
         if (ManagedPointers.Signature(type) is { } signature)
@@ -62,7 +64,13 @@ internal static class ParameterEvidence
             Code.Ldarga or Code.Ldarga_S => $".address {Index(method, instruction)}",
             _ => ".other"
         });
-        lean.AppendLine($"def method{number}RawArguments : Extraction.RawArguments := {{ arguments := [{string.Join(", ", arguments)}], locals := [{string.Join(", ", locals)}], code := [{string.Join(", ", code)}] }}");
-        lean.AppendLine($"def method{number}Reachable : List Bool := [{string.Join(", ", method.Body.Instructions.Select(instruction => reachable.Contains(instruction).ToString().ToLowerInvariant()))}]");
+        lean.AppendLine($"def method{number}RawArguments : Extraction.RawArguments := " +
+            $"{{ arguments := [{string.Join(", ", arguments)}], locals := [{string.Join(", ", locals)}], " +
+            $"code := cil_list%[{string.Join(", ", code)}] }}");
+        var instructions = method.Body.Instructions;
+        var mask = instructions.Count >= CompactReachabilityLength && instructions.All(reachable.Contains)
+            ? $"List.replicate {instructions.Count} true"
+            : $"[{string.Join(", ", instructions.Select(site => LeanText.Bool(reachable.Contains(site))))}]";
+        lean.AppendLine($"def method{number}Reachable : List Bool := {mask}");
     }
 }

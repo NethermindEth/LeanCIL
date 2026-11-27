@@ -400,6 +400,31 @@ def pairBodySizes : List Nat := [5120, 10240, 20480]
     at the size before: a cost quadratic in the numerals doubles per byte. -/
 def pairGrowthPercent : Nat := 115
 
+/-- A short branch to the following instruction, followed by `count` nops and a return. -/
+private def branchMethod (count : Nat) : RawMethod :=
+  { method0Original with
+    code := { offset := 0, opcode := 0x2B, operand := .target 1 } ::
+      (List.range count).map (fun n => { offset := n + 2, opcode := 0, operand := .none }) ++
+      [{ offset := count + 2, opcode := 0x2A, operand := .none }] }
+
+open Lean Elab Command Meta in
+set_option maxHeartbeats 0 in
+run_cmd do
+  let cost (count : Nat) := do
+    let bytes := fatHeader (count + 3) ++ [0x2B, 0] ++ List.replicate count 0 ++ [0x2A]
+    let literal ← liftMacroM (chunkedLiteral bytes)
+    kernelHeartbeats (← `(bodyMatches { method0Body with bytes := $literal }
+      (branchMethod $(quote count)) [] = true))
+  let small ← cost 64
+  let medium ← cost 256
+  let large ← cost 1024
+  -- The second interval adds four times as many instructions and resolves the same one target.
+  let maxGrowthPercent := 115
+  logInfo m!"single branch body check: {small}, {medium}, {large} heartbeats"
+  if medium ≤ small || large ≤ medium ||
+      (large - medium) * 100 > 4 * (medium - small) * maxGrowthPercent then
+    throwError "single branch decode cost per added instruction grew by more than 15%"
+
 open Lean Elab Command Meta in
 set_option maxHeartbeats 0 in
 run_cmd do
