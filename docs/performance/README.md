@@ -126,8 +126,9 @@ lake env sh -c "LEAN_PATH=\"\$LEAN_PATH$sep$dir\" lean -Dprofiler=true $dir/Boun
 
 ### ItemPool.Rent
 
-`ItemPool::Rent()` binds its caller to six CoreLib rows. The kernel checks equations for the
-bound caller and runtime rows. The evidence, attribution and translation proofs read the
+`ItemPool::Rent()` binds its caller to six CoreLib rows. The kernel checks the bound caller and
+the runtime rows, then derives each constructor's decoder equation from its validated row at
+the corresponding program index. The evidence, attribution and translation proofs read the
 caller's original method, body and links from that checked value.
 
 Run the pool suite to generate the extraction, then collect the per-command profile:

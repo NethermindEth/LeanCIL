@@ -1,6 +1,7 @@
 import Lean
 import CIL.Extraction.DecodedMethod
 import CIL.Extraction.ManagedPackage
+import CIL.Interface.Closure
 import CIL.KernelReduction
 import CIL.Runtime.Net11WinX64.BoundCaller
 import CIL.SymbolicExecution
@@ -454,15 +455,40 @@ private def decoderFields (decoder : Expr) : MetaM (Array Expr) := do
 /-- The field and type constants a decoded method names in its operands. -/
 syntax decodedOperands := "[" ident,* "]"
 
+/-- The construction and validation proofs for a constructor image's checked runtime rows. -/
+syntax decodedRows := "from_rows " ident ident
+
+/-- The image and physical-row checks imply the same decoder equation as direct reduction. -/
+private def proveFromRows (name : Name) (doc : String) (equation : Expr)
+    (rows : TSyntax ``decodedRows) : TermElabM Unit := do
+  let `(decodedRows| from_rows $built:ident $validated:ident) := rows
+    | throwUnsupportedSyntax
+  for evidence in [built, validated] do
+    let constant ← realizeGlobalConstNoOverloadWithInfo evidence
+    for axiomName in ← collectAxioms constant do
+      unless CIL.Interface.approvedAxioms.contains axiomName do
+        throwErrorAt evidence
+          "cil_decoded_method: {constant} depends on unapproved axiom {axiomName}"
+  let bridge := mkIdent `_root_.CIL.Runtime.Net11WinX64.ConstructorImage.rowMethod?_of_validated
+  let derived ← `($bridge $built $validated (by cil_kernel_rfl))
+  let proof ← Term.elabTermEnsuringType derived equation
+  Term.synthesizeSyntheticMVarsNoPostponing
+  let proof ← instantiateMVars proof
+  withOptions (Elab.async.set · false) <| withCurrHeartbeats <| addDecl (.thmDecl {
+    name, levelParams := [], type := equation, value := proof })
+  addDocStringCore name doc
+
 /-- `cil_decoded_method name [operand, ...] := decoder` defines `name` as the method the closed
     decoder evaluates to, with each listed field or type operand
     written as its constant and each zero-initialized struct local as `List.replicate size 0`.
-    It proves the successful decoder equation and one tagged fact for each field in `factFields`. -/
+    It proves the successful decoder equation and one tagged fact for each field in `factFields`.
+    `from_rows built validated` derives that equation from a constructor image's checked rows. -/
 syntax (name := decodedMethod)
-  "cil_decoded_method " ident (decodedOperands)? " := " term : command
+  "cil_decoded_method " ident (decodedOperands)? " := " term (decodedRows)? : command
 
 elab_rules : command
-  | `(cil_decoded_method $nameSyntax:ident $[$fieldsSyntax:decodedOperands]? := $decoderSyntax) =>
+  | `(cil_decoded_method $nameSyntax:ident $[$fieldsSyntax:decodedOperands]? :=
+      $decoderSyntax $[$rowsSyntax:decodedRows]?) =>
     liftTermElabM do
     let methodType := mkConst ``CIL.Method
     let optionType := mkApp (mkConst ``Option [.zero]) methodType
@@ -526,8 +552,13 @@ elab_rules : command
     addDeclarationRangesFromSyntax name (← getRef) nameSyntax
     addDocStringCore name s!"The method `{decoderSyntax}` decodes to."
     let method := mkConst name
-    proveByReduction (name.appendAfter "_decoder_eq") s!"`{name}` is the decoded method."
-      (← mkEq decoder (mkApp success method))
+    let equation ← mkEq decoder (mkApp success method)
+    let equationName := name.appendAfter "_decoder_eq"
+    let equationDoc := s!"`{name}` is the decoded method."
+    if let some rows := rowsSyntax then
+      proveFromRows equationName equationDoc equation rows
+    else
+      proveByReduction equationName equationDoc equation
     for field in factFields do
       let some position := fields.idxOf? field
         | throwError "cil_decoded_method: CIL.Method has no field {field}"

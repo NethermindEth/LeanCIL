@@ -45,6 +45,22 @@ for (var index = 0; index < profiled.Length; index++)
     var bindings = File.ReadAllText(Path.Combine(shared, binding + ".lean"));
     if (Regex.Matches(bindings, @"theorem method\d+_template :").Count != BoundProgramLength)
         throw new InvalidOperationException($"Expected a binding for each of Rent's {BoundProgramLength} methods");
+    if (index == 0)
+    {
+        const int firstRuntime = 3;
+        bindings += "\nopen Extracted\n";
+        for (var method = firstRuntime; method < BoundProgramLength; method++)
+            bindings += $"example : constructorImage.rowMethod? localMethods profile environment " +
+                $"{method - firstRuntime} = some method{method} := method{method}_decoder_eq\n";
+        bindings += """
+            example : True := by
+              fail_if_success
+                have wrong : constructorImage.rowMethod? localMethods profile environment 1 = some method3 :=
+                  CIL.Runtime.Net11WinX64.ConstructorImage.rowMethod?_of_validated runtimeRows_eq
+                    runtime_validated (by cil_kernel_rfl)
+              trivial
+            """;
+    }
     File.WriteAllText(Path.Combine(profiled[index], binding + ".lean"), bindings);
     CompileModule(profiled[index], binding, path);
 }

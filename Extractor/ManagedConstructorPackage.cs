@@ -112,21 +112,23 @@ internal static class ManagedConstructorPackage
     internal static void EmitRuntimeMethods(StringBuilder lean, int locals, int count, StringBuilder? decoderInputs)
     {
         var names = Enumerable.Range(locals, count).Select(n => $"method{n}").ToArray();
+        lean.AppendLine("""
+            theorem runtime_validated : runtimeRows.1.all (Extraction.ManagedPackage.rowValid environment assemblies
+                platformDefinitions callableMethods) = true := by cil_kernel_rfl
+            """);
         for (var index = 0; index < count; index++)
         {
             var decoded = $"cil_decoded_method {names[index]} := " +
                 $"constructorImage.rowMethod? localMethods profile environment {index}";
             decoderInputs?.AppendLine(decoded);
             lean.AppendLine($"""
-                {decoded}
+                {decoded} from_rows runtimeRows_eq runtime_validated
                 cil_instruction_equations {names[index]}
                 cil_resolution_facts {names[index]}
                 """);
         }
         lean.AppendLine($$"""
             theorem runtime_methods : runtimeRows.1.map Prod.snd = [{{string.Join(", ", names)}}] := by cil_kernel_rfl
-            theorem runtime_validated : runtimeRows.1.all (Extraction.ManagedPackage.rowValid environment assemblies
-                platformDefinitions callableMethods) = true := by cil_kernel_rfl
             """);
     }
 
