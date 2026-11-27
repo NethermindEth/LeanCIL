@@ -62,7 +62,7 @@ internal sealed class ExternalIdentityEvidence
                 var chunkBytes = string.Join(", ", chunk.ToArray()
                     .Select(value => value.ToString(CultureInfo.InvariantCulture)));
                 var proof = chunk.ContainsAnyInRange((byte)128, byte.MaxValue) ? "by decide +kernel" :
-                    $"by exact ({IdentityText.Quote(Encoding.UTF8.GetString(chunk))}).isValidUTF8";
+                    $"({IdentityText.Quote(Encoding.UTF8.GetString(chunk))}).isValidUTF8";
                 lean.AppendLine($"def {chunkName} : ByteArray := ⟨#[{chunkBytes}]⟩");
                 lean.AppendLine($"theorem {chunkName}_valid : {chunkName}.IsValidUTF8 := {proof}");
                 lean.AppendLine($"#print axioms {chunkName}_valid");
