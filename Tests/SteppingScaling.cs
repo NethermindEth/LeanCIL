@@ -86,9 +86,16 @@ if (selectedWorkloads is not null)
         throw new ArgumentException("Unknown or empty stepping workload selection.");
     workloads = workloads.Where(row => selectedWorkloads.Contains(row.Name, StringComparer.Ordinal)).ToArray();
 }
-foreach (var (workload, sizes, full) in workloads)
-    foreach (var requested in sizes)
-        rows.Add(Measure(workload, requested, full));
+var buildDirectory = Directory.CreateTempSubdirectory("leancil-stepping-profiler-");
+string profiler;
+try
+{
+    profiler = BuildProfiler(buildDirectory.FullName);
+    foreach (var (workload, sizes, full) in workloads)
+        foreach (var requested in sizes)
+            rows.Add(Measure(workload, requested, full));
+}
+finally { buildDirectory.Delete(recursive: true); }
 
 var report = new
 {
@@ -103,7 +110,7 @@ var report = new
         Runtime = RuntimeInformation.FrameworkDescription, Environment.ProcessorCount },
     Concurrency = 1,
     Repetitions,
-    CacheState = "Compiled library; fresh generated proof modules; OS caches unspecified",
+    CacheState = "Compiled library and profiler; fresh process and module per sample; OS caches unspecified",
     TimingIsolation = "External machine load is not controlled; wall times are observations",
     Measurement = "Frontend includes its initial kernel check; kernel columns are separate rechecks. " +
         "Module command time excludes imports. Compiled proof bytes subtract the same body without its proof.",
@@ -911,12 +918,29 @@ static SteppingMeasurement WithoutSetup(SteppingMeasurement row, CommandSample s
     FrontendMs = Math.Max(0, row.FrontendMs - setup.ElapsedMs)
 };
 
+// Compile the measurement driver from this checkout once. Each sample loads its own Lean environment.
+static string BuildProfiler(string directory)
+{
+    File.Copy(At("scripts/ProofCost.lean"), Path.Combine(directory, "ProofCost.lean"));
+    File.Copy(At("lean-toolchain"), Path.Combine(directory, "lean-toolchain"));
+    File.WriteAllText(Path.Combine(directory, "lakefile.toml"), """
+        name = "stepping_measurement"
+        [[lean_exe]]
+        name = "stepping-profiler"
+        root = "ProofCost"
+        supportInterpreter = true
+        """);
+    Run(["lake", "build", "stepping-profiler"], cwd: directory, progress: "Building the stepping profiler");
+    return Path.Combine(directory, ".lake", "build", "bin",
+        OperatingSystem.IsWindows() ? "stepping-profiler.exe" : "stepping-profiler");
+}
+
 CompiledSample Compile(string module, string source, string suffix)
 {
     var report = Path.Combine(directory, module + "." + suffix + ".json");
     var compiled = Path.Combine(directory, module + "." + suffix + ".olean");
     var timer = Stopwatch.StartNew();
-    Run(["lake", "env", "lean", "--run", At("scripts/ProofCost.lean"), module, source, report, compiled], cwd: package);
+    Run(["lake", "env", profiler, module, source, report, compiled], cwd: package);
     timer.Stop();
     using var document = JsonDocument.Parse(File.ReadAllText(report));
     var commands = document.RootElement.GetProperty("commands").EnumerateArray().Select(command => new CommandSample(

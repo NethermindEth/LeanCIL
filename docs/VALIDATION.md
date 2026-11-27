@@ -299,7 +299,8 @@ body up to 256 instructions, and one compilation for every other body.
   between the smallest and the largest size. A lookup that tries to unify with every equation
   hypothesis adds 600 to 1,950 and fails that limit, as does a direct lookup that builds an index
   of the hypotheses, which adds about 410; reading each hypothesis once adds about 25.
-- Heartbeats and bytes must repeat exactly across the three runs.
+- The suite builds the measurement driver once from `scripts/ProofCost.lean` with the pinned toolchain.
+  Each sample runs in a fresh process. Heartbeats and bytes must repeat exactly across the three runs.
 - Frontend heartbeats include the initial kernel check; the kernel columns measure a separate
   recheck. Compiled proof bytes subtract the same module containing only the body and its lookup
   equations.
