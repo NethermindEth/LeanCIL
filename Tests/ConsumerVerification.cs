@@ -800,9 +800,6 @@ try
 finally
 {
     foreach (var (name, value) in savedUnionEnvironment) Environment.SetEnvironmentVariable(name, value);
-    File.Delete(portableX);
-    File.Delete(portableY);
-    File.Delete(proofX);
-    File.Delete(proofY);
+    // The two batch certificates retain their proof and imported support for the proof-cost measurement.
     File.Delete(proofXY);
 }
