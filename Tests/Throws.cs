@@ -220,9 +220,10 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
             queue.Add(new(selector, At("Examples/Proofs/Percent.lean"),
                 Path.Combine(root, "Percent-ZeroBudget" + suffix), Theorem: "ExampleProof.zeroBudget",
                 Assembly: assemblyPath), () => Console.WriteLine("PASS Percent: zero quota fails at newobj" + suffix));
-            verification.Verify(assemblyPath, "Examples", selector, rawProof, Path.Combine(root, "Percent-Raw" + suffix),
-                theorem: "CompiledPercent.verified");
-            Console.WriteLine("PASS Percent: decoded caller and CoreLib exception path at every heap quota" + suffix);
+            queue.Add(new(selector, rawProof, Path.Combine(root, "Percent-Raw" + suffix),
+                Theorem: "CompiledPercent.verified", Assembly: assemblyPath),
+                () => Console.WriteLine(
+                    "PASS Percent: decoded caller and CoreLib exception path at every heap quota" + suffix));
         }
         CheckPercentVariants(translated, translatedMethod, selector);
     }
@@ -535,8 +536,8 @@ void CheckPercentVariants(ModuleDefinition image, MethodDefinition method, strin
         #print axioms correctness
         end ExampleProof
         """);
-    verification.Verify(unboundImage, "Examples", selector, unbound, Path.Combine(root, "Percent-Type-Unbound"));
-    Console.WriteLine("PASS Percent: ArgumentNullException has no binding and supplies no counterexample");
+    queue.Add(new(selector, unbound, Path.Combine(root, "Percent-Type-Unbound"), Assembly: unboundImage),
+        () => Console.WriteLine("PASS Percent: ArgumentNullException has no binding and supplies no counterexample"));
 
     site.Operand = original;
     var threshold = method.Body.Instructions.Single(instruction =>
