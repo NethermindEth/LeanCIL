@@ -347,17 +347,13 @@ theorem instantiateMethod_initLocals {layouts : List RawLayout} {original closed
 
 /-- Closed argument metadata is derived from this checked body, including short opcodes. -/
 def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
-  match instruction.opcode, instruction.operand with
-  -- `ldarg.0` to `ldarg.3`.
-  | 2, .none => some (.load 0) | 3, .none => some (.load 1)
-  | 4, .none => some (.load 2) | 5, .none => some (.load 3)
-  -- `ldarg`, `ldarga` and `starg`, short and long forms.
-  | 14, .argument index | 65033, .argument index => some (.load index)
-  | 15, .argument index | 65034, .argument index => some (.address index)
-  | 16, .argument index | 65035, .argument index => some (.store index)
-  -- An argument opcode with a malformed operand is rejected, not treated as `other`.
-  | opcode, _ =>
-    if opcode ∈ [2, 3, 4, 5, 14, 15, 16, 65033, 65034, 65035] then none else some .other
+  match instruction.opcode with
+  | 2 | 3 | 4 | 5 =>
+    if let .none := instruction.operand then some (.load (instruction.opcode - 2)) else none
+  | 14 | 65033 => if let .argument index := instruction.operand then some (.load index) else none
+  | 15 | 65034 => if let .argument index := instruction.operand then some (.address index) else none
+  | 16 | 65035 => if let .argument index := instruction.operand then some (.store index) else none
+  | _ => some .other
 
 /-- Whether `instruction` names `pc` as a branch destination or switch arm. -/
 def branchesTo (pc : Nat) (instruction : RawInstruction) : Bool :=
