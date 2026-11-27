@@ -103,7 +103,7 @@ theorem write_initializes (m result : Memory) (r : Reference) (bytes : List (Bit
     simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   · cases h
   · cases h
-    simp [hi]
+    simp [snapshotCellAt_eq, hi]
 
 theorem write_preserves_write_permission (m result : Memory) (r q : Reference)
     (bytes : List (BitVec 8)) (alignment : Nat)
