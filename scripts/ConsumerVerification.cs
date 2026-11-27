@@ -564,7 +564,8 @@ partial class Program
         }).ToArray();
     }
 
-    static SortedDictionary<string, string> ConsumerSnapshot(string root, string? output, ConsumerDependency[]? bundled = null)
+    static SortedDictionary<string, string> ConsumerSnapshot(string root, string? output,
+        ConsumerDependency[]? bundled = null, SortedDictionary<string, string>? frameworkInputs = null)
     {
         var inputs = new SortedDictionary<string, string>(StringComparer.Ordinal);
         ConsumerDependency[] dependencies = bundled ?? ConsumerDependencies(root);
@@ -575,24 +576,35 @@ partial class Program
             throw new InvalidDataException("Extracted.lean is reserved for the selected extraction artifact; remove stale generated sources from the consumer package.");
         var framework = dependencies.SingleOrDefault(d => d.Name == "leancil")
             ?? throw new InvalidDataException("Consumer package must depend on leancil. Run lake update first.");
-        RequireBundledFramework(framework.Source, root);
+        RequireBundledFramework(framework.Source, root, inputs, frameworkInputs);
         return inputs;
     }
 
     /// <summary>Rejects a framework at `source` or a toolchain pin at `root` that differs from the tool's.</summary>
-    static void RequireBundledFramework(string source, string root)
+    static void RequireBundledFramework(string source, string root,
+        SortedDictionary<string, string>? consumerInputs = null, SortedDictionary<string, string>? frameworkInputs = null)
     {
         foreach (var path in Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories)
             .Append(At("CIL.lean")).Append(At("lean-toolchain")))
         {
-            var consumer = Path.Combine(source, Path.GetRelativePath(Root, path));
-            if (!File.Exists(consumer) || File.ReadAllText(consumer).ReplaceLineEndings("\n") != File.ReadAllText(path).ReplaceLineEndings("\n"))
-                throw new InvalidDataException("Consumer leancil sources differ from the verifier's bundled framework: " + consumer +
-                    (SourceRevision is { } revision ? $"\n  Pin leancil to rev \"{revision}\" (see leancil --version)." : ""));
+            var relative = Path.GetRelativePath(Root, path);
+            var consumer = Path.Combine(source, relative);
+            var bundledHash = frameworkInputs?.GetValueOrDefault(relative.Replace('\\', '/'));
+            var consumerHash = bundledHash is null ? null : consumerInputs?.GetValueOrDefault("consumer:" + consumer);
+            if (!File.Exists(consumer) || !SameFrameworkSource(consumer, consumerHash, path, bundledHash))
+                throw new InvalidDataException("Consumer leancil sources differ from the verifier's bundled framework: " +
+                    consumer + (SourceRevision is { } revision
+                        ? $"\n  Pin leancil to rev \"{revision}\" (see leancil --version)." : ""));
         }
         if (File.ReadAllText(Path.Combine(root, "lean-toolchain")).Trim() != File.ReadAllText(At("lean-toolchain")).Trim())
             throw new InvalidDataException("Consumer and verifier Lean toolchains differ.");
     }
+
+    // Git checkouts may encode identical Lean text with different line endings.
+    static bool SameFrameworkSource(string consumer, string? consumerHash, string bundled, string? bundledHash) =>
+        consumerHash is not null && consumerHash == bundledHash ||
+        SnapshotText(consumer, consumerHash).ReplaceLineEndings("\n") ==
+            SnapshotText(bundled, bundledHash).ReplaceLineEndings("\n");
 
     static SortedDictionary<string, string> RequestInputs(SortedDictionary<string, string> common, string proof, string? settings)
     {
@@ -600,6 +612,17 @@ partial class Program
         inputs["proof:" + proof] = Sha(proof);
         if (settings is not null) inputs["settings:" + settings] = Sha(settings);
         return inputs;
+    }
+
+    /// <summary>Read a source as text, checking the same bytes against its snapshot when supplied.</summary>
+    static string SnapshotText(string path, string? expected)
+    {
+        if (expected is null) return File.ReadAllText(path);
+        var bytes = File.ReadAllBytes(path);
+        if (Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)) != expected)
+            throw new InvalidOperationException("Inputs changed during consumer verification");
+        using StreamReader reader = new(new MemoryStream(bytes));
+        return reader.ReadToEnd();
     }
 
     /// <summary>Consumer import paths and source imports for one input snapshot.</summary>
@@ -628,12 +651,8 @@ partial class Program
         string[] ReadImports(string path)
         {
             if (imports.TryGetValue(path, out var names)) return names;
-            var bytes = File.ReadAllBytes(path);
-            var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
-            if (hash != snapshot["consumer:" + path])
-                throw new InvalidOperationException("Inputs changed during consumer verification");
-            using StreamReader reader = new(new MemoryStream(bytes));
-            names = SourceImport.Matches(reader.ReadToEnd()).Select(match => match.Groups[1].Value).ToArray();
+            var source = SnapshotText(path, snapshot["consumer:" + path]);
+            names = SourceImport.Matches(source).Select(match => match.Groups[1].Value).ToArray();
             imports.Add(path, names);
             return names;
         }
@@ -1545,11 +1564,10 @@ partial class Program
 
         // A batch shares one snapshot, so no output may be part of the consumer sources.
         string? excluded = batch ? null : outputs[live[0]];
-        SortedDictionary<string, string> Common(SortedDictionary<string, string> snapshot)
+        SortedDictionary<string, string> ReadInputs(out SortedDictionary<string, string> snapshot)
         {
-            var common = new SortedDictionary<string, string>(Inputs(At("CIL.lean")).Where(pair =>
-                !pair.Key.StartsWith("proof:", StringComparison.Ordinal) && !pair.Key.StartsWith("settings:", StringComparison.Ordinal))
-                .ToDictionary(), StringComparer.Ordinal);
+            var common = CommonInputs();
+            snapshot = ConsumerSnapshot(root, excluded, fullBundleDependencies, common);
             foreach (var (key, value) in snapshot) common[key] = value;
             return common;
         }
@@ -1558,8 +1576,7 @@ partial class Program
         Stage(live, "consumer source snapshot");
         try
         {
-            snapshot = ConsumerSnapshot(root, excluded, fullBundleDependencies);
-            var common = Common(snapshot);
+            var common = ReadInputs(out snapshot);
             // Each source is resolved once, so a batch costs one pass over the sources per request.
             string[] consumerSources = batch
                 ? snapshot.Keys.Where(key => key.StartsWith("consumer:", StringComparison.Ordinal))
@@ -1610,7 +1627,7 @@ partial class Program
             if (members.Length == 0) return;
             try
             {
-                SortedDictionary<string, string> common = Common(ConsumerSnapshot(root, excluded, fullBundleDependencies));
+                var common = ReadInputs(out _);
                 foreach (var i in members)
                     if (!Same(before[i], BoundRequestInputs(i, common)) ||
                         (symbols[i] is not null && (!File.Exists(Path.Combine(outputs[i], "Symbols.lean")) ||

@@ -713,6 +713,8 @@ writes `failed.json`.
 The session takes one source snapshot, restores certified support once and checks each
 extraction's integrity. Requests share work as follows:
 
+- The verifier compares the source hashes from each fresh snapshot to check the pinned LeanCIL
+  framework. When the bytes differ, it checks the decoded text with normalized line endings.
 - To find keyed extraction imports and symbol dependencies, the verifier indexes the source
   paths in the snapshot. It reads imports once per reached file and follows every matching
   path when several package roots provide the same module.

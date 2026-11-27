@@ -43,8 +43,35 @@ partial class Program
             Reject("Published");
             Console.WriteLine("PASS library/package roots and filesystem case rules");
             CheckGeneratedImportSources(root);
+            CheckFrameworkSourceIdentity(root);
         }
         finally { Directory.Delete(root, true); }
+    }
+
+    static void CheckFrameworkSourceIdentity(string root)
+    {
+        var bundled = Path.Combine(root, "Bundled.lean");
+        var consumer = Path.Combine(root, "Consumer.lean");
+        const string source = "import CIL\n";
+        File.WriteAllText(bundled, source);
+        File.Copy(bundled, consumer);
+        var bundledHash = Sha(bundled);
+        if (!SameFrameworkSource(consumer, Sha(consumer), bundled, bundledHash))
+            throw new InvalidOperationException("Identical framework sources differ.");
+        File.WriteAllText(consumer, source.Replace("\n", "\r\n"), System.Text.Encoding.Unicode);
+        var consumerHash = Sha(consumer);
+        if (!SameFrameworkSource(consumer, consumerHash, bundled, bundledHash))
+            throw new InvalidOperationException("Equivalent framework text with a BOM and CRLF differs.");
+        File.AppendAllText(consumer, "-- changed");
+        if (SameFrameworkSource(consumer, Sha(consumer), bundled, bundledHash))
+            throw new InvalidOperationException("Changed framework source accepted.");
+        try { _ = SameFrameworkSource(consumer, consumerHash, bundled, bundledHash); }
+        catch (InvalidOperationException error) when (error.Message == "Inputs changed during consumer verification")
+        {
+            Console.WriteLine("PASS framework identity binds bytes and accepts equivalent encoded text");
+            return;
+        }
+        throw new InvalidOperationException("Framework comparison accepted bytes outside the snapshot.");
     }
 
     static void CheckGeneratedImportSources(string root)
