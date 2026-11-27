@@ -1,3 +1,4 @@
+#:include ProofProfiler.cs
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
@@ -478,7 +479,8 @@ internal static partial class ProofCostReport
     // Measures the modules of one checkout against one compiled library.
     sealed class Measurer(string tree, string library, string work, int jobs)
     {
-        readonly string frontend = Path.Combine(ScriptDirectory(), "ProofCost.lean");
+        readonly Lazy<Program.ProofProfiler> profiler = new(() => Program.BuildProofProfiler(
+            Path.Combine(work, "profiler"), Path.Combine(ScriptDirectory(), "ProofCost.lean"), tree));
         readonly string shared = Path.Combine(work, "modules");
         readonly SemaphoreSlim slots = new(jobs);
         readonly ModuleTasks modules = new();
@@ -512,8 +514,11 @@ internal static partial class ProofCostReport
             try
             {
                 var path = string.Join(Path.PathSeparator, new[] { root, shared, library }.Distinct());
-                var result = await Task.Run(() => Execute(["lean", "--run", frontend, module, source, report, olean],
-                    tree, new Dictionary<string, string> { ["LEAN_PATH"] = path, ["LEAN_NUM_THREADS"] = "1" }));
+                var driver = profiler.Value;
+                var environment = new Dictionary<string, string>(driver.Runtime)
+                    { ["LEAN_PATH"] = path, ["LEAN_NUM_THREADS"] = "1" };
+                var result = await Task.Run(() => Execute([driver.Executable, module, source, report, olean],
+                    tree, environment));
                 if (result.Code != 0 || !File.Exists(report)) return Diagnostic(result.Code, result.Output);
             }
             finally { slots.Release(); }
@@ -813,6 +818,7 @@ internal static partial class ProofCostReport
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"{Schema}\n{Sha(Path.Combine(ScriptDirectory(), "ProofCost.lean"))}\n" +
             $"{Sha(Path.Combine(ScriptDirectory(), "ProofCostReport.cs"))}\n" +
+            $"{Sha(Path.Combine(ScriptDirectory(), "ProofProfiler.cs"))}\n" +
             $"{Sha(Path.Combine(ScriptDirectory(), "Verification.cs"))}\n" +
             string.Join('\n', MeasuringSteps.Select(step => WorkflowStep(workflow, step))))));
     }

@@ -6,6 +6,7 @@
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
+#:include ../scripts/ProofProfiler.cs
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -90,7 +91,7 @@ var buildDirectory = Directory.CreateTempSubdirectory("leancil-stepping-profiler
 string profiler;
 try
 {
-    profiler = BuildProfiler(buildDirectory.FullName);
+    profiler = BuildProofProfiler(buildDirectory.FullName, At("scripts/ProofCost.lean"), package).Executable;
     foreach (var (workload, sizes, full) in workloads)
         foreach (var requested in sizes)
             rows.Add(Measure(workload, requested, full));
@@ -917,23 +918,6 @@ static SteppingMeasurement WithoutSetup(SteppingMeasurement row, CommandSample s
     KernelHeartbeats = row.KernelHeartbeats - setup.KernelHeartbeats,
     FrontendMs = Math.Max(0, row.FrontendMs - setup.ElapsedMs)
 };
-
-// Compile the measurement driver from this checkout once. Each sample loads its own Lean environment.
-static string BuildProfiler(string directory)
-{
-    File.Copy(At("scripts/ProofCost.lean"), Path.Combine(directory, "ProofCost.lean"));
-    File.Copy(At("lean-toolchain"), Path.Combine(directory, "lean-toolchain"));
-    File.WriteAllText(Path.Combine(directory, "lakefile.toml"), """
-        name = "stepping_measurement"
-        [[lean_exe]]
-        name = "stepping-profiler"
-        root = "ProofCost"
-        supportInterpreter = true
-        """);
-    Run(["lake", "build", "stepping-profiler"], cwd: directory, progress: "Building the stepping profiler");
-    return Path.Combine(directory, ".lake", "build", "bin",
-        OperatingSystem.IsWindows() ? "stepping-profiler.exe" : "stepping-profiler");
-}
 
 CompiledSample Compile(string module, string source, string suffix)
 {

@@ -210,8 +210,9 @@ and there is no checked-in baseline.
 
 ### Measures
 
-`scripts/ProofCost.cs measure` elaborates a module one command at a time on one thread, through
-the frontend `scripts/ProofCost.lean`, and writes one row per command and one per module:
+`scripts/ProofCost.cs measure` builds `scripts/ProofCost.lean` once with the checkout's Lean
+toolchain. Each module runs in a fresh process on one thread. The report records one row per
+command and one per module.
 
 | Measure | Meaning | Decides the result |
 | --- | --- | --- |
@@ -272,10 +273,10 @@ suite that failed on `main` or left no rows and holds the rows of the suites tha
 run takes those rows as its base when the push run of its merge base published them: the run must
 be a push of that commit on `main`, which is what reusing a certified library without replay
 requires of its producer, the file must have the digest that job logged, and its rows must come
-from the same measurer and from that commit. The measurer is `scripts/ProofCost.lean`,
-`scripts/ProofCostReport.cs`, the shared selection helpers in `scripts/Verification.cs`, the row
-schema and the two workflow steps that measure. No other run supplies a base, and no pull request
-run measures a base.
+from the same measurer and from that commit. The measurer includes `scripts/ProofCost.lean`,
+`scripts/ProofProfiler.cs`, `scripts/ProofCostReport.cs`, the shared helpers in
+`scripts/Verification.cs`, the row schema and the two workflow steps that measure. No other run
+supplies a base, and no pull request run measures a base.
 
 ### Comparison
 
