@@ -60,9 +60,18 @@ and subtracts the heartbeats of the imports alone. Each row prints one line:
 PASS compiling an extracted method costs <n> heartbeats per instruction at 502 instructions and <n> at 2002, <ratio> times as many
 ```
 
-The suite fails when a ratio exceeds 1.15. The ratios are 0.98 for the extraction, 1.02 for the
-hand-written body and 0.95 for the decoded template. At 502 and 2,002 instructions the template
-costs 52,427 and 49,854 heartbeats per instruction. The suite also fails when a `cil_lookup` at a
+The suite fails when the cost per instruction at 2,002 sites exceeds 1.15 times the cost at 502.
+
+| Fixture | Heartbeats per instruction at 502 sites | At 2,002 sites | Ratio |
+| --- | ---: | ---: | ---: |
+| Extracted method | 193,540 | 188,376 | 0.97 |
+| Hand-written body | 12,802 | 13,033 | 1.02 |
+| Decoded template | 41,094 | 40,231 | 0.98 |
+
+For a method with at least 128 instructions, the extractor emits `List.replicate n true` when
+all `n` sites are reachable. For a shorter method or one with unreachable sites, it emits one
+Boolean per site. The fixture reads the instruction count from the assembly and checks the full
+reachability mask after measuring the extraction. The suite also fails when a `cil_lookup` at a
 computed pc costs more than 1.15 times as much per case at 16 repeated segments as at 4.
 
 The lookup fixture checks the hand-written multiply-add code against the entire decoded template
