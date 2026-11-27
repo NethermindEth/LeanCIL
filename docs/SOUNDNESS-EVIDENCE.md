@@ -140,15 +140,19 @@ and locals against the metadata it carries ([Metadata binding](#metadata-binding
   inside a region, no `localloc` in a handler, control to enter a region only at the first
   instruction of a protected range and to leave one only by `leave`, `endfinally` only in a
   finally handler, no `leave` out of a finally handler and no instruction falling out of a
-  region.
+  region. For a body with handlers, it sorts the clause ranges once and counts the instructions
+  once. After sorting, the check takes linear work in the ranges, instructions and branch targets.
 - Every opcode of the ECMA-335 table has one operand encoding. The table is transcribed from the
   standard; `operand_kinds_agree_with_cecil` in `Tests/BodyDecoding.lean` compares it with a
   static list generated once from `Mono.Cecil.Cil.OpCodes`. An unknown opcode byte, a truncated
   operand or a token missing from the table is an error.
-- A branch must land on the first byte of an instruction inside the body, and its operand
-  becomes that instruction's index. A target outside the body, inside an instruction or on the
-  instruction after a prefix opcode (`unaligned.`, `volatile.`, `tail.`, `constrained.`, `no.`,
-  `readonly.`) is an error, whether or not any path reaches the branch. Decoded code therefore
+- The decoder builds a balanced index from instruction offsets in byte order. Construction takes
+  O(n) work for n instructions. Branches, switch targets and exception boundaries share the
+  index, with O(log n) comparisons per offset lookup. A branch must land on the first byte of an
+  instruction inside the body, and its operand becomes that instruction's index.
+  The decoder rejects targets outside the body, inside an instruction or at the instruction
+  immediately following a prefix opcode (`unaligned.`, `volatile.`, `tail.`, `constrained.`,
+  `no.`, `readonly.`). It applies these checks to unreachable branches too. Decoded code therefore
   satisfies `PrefixEntryFree` over instruction indices (`checkBody_prefixEntryFree`), and so
   does the instantiated code of every method whose evidence is valid
   (`MethodEvidenceValid.prefixEntryFree`). The extractor refuses such a body with the blocker

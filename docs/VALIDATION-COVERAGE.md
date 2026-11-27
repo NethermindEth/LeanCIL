@@ -142,6 +142,9 @@ workflow.
   switch, two-byte opcodes, token operands and float constants, rejects each kind of malformed
   body separately with its specific error, and compares the operand table with a static list
   generated once from the opcodes of Mono.Cecil.
+  The body literal fixture decodes one short branch followed by 64, 256 or 1,024 nops and a
+  return. Kernel heartbeats per additional instruction may grow by at most 15% from the first
+  interval to the second.
   `Tests/BodyEncoding.lean` writes bytes and the metadata slice for the hand-built methods of
   other Lean fixtures.
   `Tests/MetadataDecoding.lean` decodes rows, headers, heap entries, signature blobs and

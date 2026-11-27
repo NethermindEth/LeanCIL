@@ -61,6 +61,40 @@ private def build : Nat → Nat → List (Nat × α) → SearchTree α × List (
 def ofSorted (entries : List (Nat × α)) : SearchTree α :=
   (build entries.length entries.length entries).1
 
+/-- The in-order entries of a partial build followed by its unused input recover the input. -/
+private theorem build_preserves (fuel count : Nat) (entries : List (Nat × α)) :
+    (build fuel count entries).1.toList ++ (build fuel count entries).2 = entries := by
+  induction fuel generalizing count entries with
+  | zero => rfl
+  | succ fuel ih =>
+    by_cases empty : count == 0
+    · simp [build, empty, toList]
+    · cases leftBuilt : build fuel (count / 2) entries with
+      | mk left afterLeft =>
+        have leftRest := ih (count / 2) entries
+        rw [leftBuilt] at leftRest
+        cases afterLeft with
+        | nil => simpa [build, empty, leftBuilt] using leftRest
+        | cons entry rest =>
+          obtain ⟨key, value⟩ := entry
+          cases rightBuilt : build fuel (count - 1 - count / 2) rest with
+          | mk right afterRight =>
+            have rightRest := ih (count - 1 - count / 2) rest
+            rw [rightBuilt] at rightRest
+            change right.toList ++ afterRight = rest at rightRest
+            simpa [build, empty, leftBuilt, rightBuilt, toList, List.append_assoc, rightRest]
+              using leftRest
+
+#print axioms build_preserves
+
+/-- Every entry of the balanced tree comes from the supplied list. -/
+theorem mem_ofSorted {entries : List (Nat × α)} {entry : Nat × α}
+    (member : entry ∈ (ofSorted entries).toList) : entry ∈ entries := by
+  rw [← build_preserves entries.length entries.length entries]
+  exact List.mem_append_left _ member
+
+#print axioms mem_ofSorted
+
 /-- The first key that does not ascend strictly from its predecessor. -/
 def firstOutOfOrder : Option Nat → List (Nat × α) → Option Nat
   | _, [] => none
