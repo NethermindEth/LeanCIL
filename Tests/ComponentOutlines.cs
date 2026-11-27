@@ -8,13 +8,12 @@
 #:include ../scripts/DeepCheckInputs.cs
 
 // Consolidated component outline suite covering struct, receiver-loop, word-reader and saved-local outlines.
-foreach (var (name, script) in new[]
-{
-    ("struct outlines", "Tests/StructOutlines.cs"),
-    ("receiver loop outlines", "Tests/ReceiverLoopOutlines.cs"),
-    ("word reader outlines", "Tests/WordReaderOutlines.cs"),
-    ("saved word reader outlines", "Tests/SavedWordReaderOutlines.cs")
-})
-    Run(["dotnet", "run", "--file", script], streamOutput: true, progress: name);
+RunFixturesConcurrently(
+[
+    ("Tests/StructOutlines.cs", "struct outlines"),
+    ("Tests/ReceiverLoopOutlines.cs", "receiver loop outlines"),
+    ("Tests/WordReaderOutlines.cs", "word reader outlines"),
+    ("Tests/SavedWordReaderOutlines.cs", "saved word reader outlines")
+]);
 
 Console.WriteLine("PASS consolidated component outlines (struct, receiver, wordreader, savedwordreader)");

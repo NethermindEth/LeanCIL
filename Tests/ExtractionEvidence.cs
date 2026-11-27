@@ -22,23 +22,21 @@ fixtures.PrepareLeanFixtures(
     "Tests.ReadOnlyArrayReferences", "Tests.ExtractionGenerics", "Tests.ReferenceTests", "Tests.PointerOperations",
     "Tests.Objects");
 if (args is ["--prepare-only"]) return;
-Run(["dotnet", "run", "--file", "Tests/PreparedLeanFixturesTests.cs"]);
-Run(["dotnet", "run", "--file", "Tests/RejectedEvidenceTests.cs"]);
-Run(["dotnet", "run", "--file", "Tests/PrimitiveArrays.cs"], streamOutput: true,
-    progress: "Supplied primitive arrays");
-Run(["dotnet", "run", "--file", "Tests/ArrayElementReferences.cs"], streamOutput: true,
-    progress: "Array element references");
-Run(["dotnet", "run", "--file", "Tests/ReadOnlyArrayReferences.cs"], streamOutput: true,
-    progress: "Readonly array references");
-Run(["dotnet", "run", "--file", "Tests/SpanHomeReads.cs"], streamOutput: true,
-    progress: "Span locals read through their addresses");
-Run(["dotnet", "run", "--file", "Tests/ExternalIdentityEncoding.cs"], streamOutput: true,
-    progress: "UTF-8 metadata identity certificates");
-foreach (var name in new[]
-{
-    "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "Throws", "SpanTables",
-    "MemorySpans", "ReferenceInstructions", "PointerOperations", "Objects", "StaticValues", "StaticScalarValues",
-    "TranslationAudit", "MetadataDifferential", "Guards", "CallSiteAgreement"
-})
-    Run(["dotnet", "run", "--file", $"Tests/{name}.cs"], streamOutput: true, progress: name);
+(string Script, string Progress)[] fixturesToRun =
+[
+    ("Tests/PreparedLeanFixturesTests.cs", "PreparedLeanFixturesTests"),
+    ("Tests/RejectedEvidenceTests.cs", "RejectedEvidenceTests"),
+    ("Tests/PrimitiveArrays.cs", "Supplied primitive arrays"),
+    ("Tests/ArrayElementReferences.cs", "Array element references"),
+    ("Tests/ReadOnlyArrayReferences.cs", "Readonly array references"),
+    ("Tests/SpanHomeReads.cs", "Span locals read through their addresses"),
+    ("Tests/ExternalIdentityEncoding.cs", "UTF-8 metadata identity certificates"),
+    .. new[]
+    {
+        "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "Throws",
+        "SpanTables", "MemorySpans", "ReferenceInstructions", "PointerOperations", "Objects", "StaticValues",
+        "StaticScalarValues", "TranslationAudit", "MetadataDifferential", "Guards", "CallSiteAgreement"
+    }.Select(name => ($"Tests/{name}.cs", name))
+];
+RunFixturesConcurrently(fixturesToRun);
 Console.WriteLine("PASS complete extraction evidence, compiled fixtures, mutations and mandatory certificate audit");

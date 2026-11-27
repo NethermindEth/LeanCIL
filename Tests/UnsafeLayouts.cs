@@ -156,23 +156,24 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
 }
 
 Console.WriteLine($"PASS {cases} layout-based Unsafe checks");
-Run(["dotnet", "run", "--file", "Tests/SkipInitialization.cs"], streamOutput: true, progress: "SkipInit checks");
-Run(["dotnet", "run", "--file", "Tests/NullReferences.cs"], streamOutput: true, progress: "Null reference checks");
-Run(["dotnet", "run", "--file", "Tests/UnsafeReferences.cs"], streamOutput: true, progress: "Unsafe byref reinterpretation checks");
-Run(["dotnet", "run", "--file", "Tests/ValueBitCasts.cs"], streamOutput: true, progress: "Value BitCast checks");
-Run(["dotnet", "run", "--file", "Tests/StaticSpans.cs"], streamOutput: true, progress: "Static byte span checks");
-
-Run(["dotnet", "run", "--file", "Tests/VectorFields.cs"], streamOutput: true, progress: "Vector field checks");
-Run(["dotnet", "run", "--file", "Tests/VectorStorage.cs"], streamOutput: true, progress: "Vector storage checks");
-Run(["dotnet", "run", "--file", "Tests/UnalignedMemory.cs"], streamOutput: true, progress: "Unaligned transfer checks");
-Run(["dotnet", "run", "--file", "Tests/MarshaledMemory.cs"], streamOutput: true, progress: "Byte-span transfer checks");
-Run(["dotnet", "run", "--file", "Tests/ReinterpretedSpans.cs"], streamOutput: true, progress: "Span reinterpretation checks");
-Run(["dotnet", "run", "--file", "Tests/SpanCopies.cs"], streamOutput: true, progress: "Span copy checks");
-Run(["dotnet", "run", "--file", "Tests/ViewAccessors.cs"], streamOutput: true, progress: "View accessor checks");
-Run(["dotnet", "run", "--file", "Tests/BinarySpans.cs"], streamOutput: true, progress: "Endian span checks");
-
-Run(["dotnet", "run", "--file", "Tests/AggregateSpans.cs"], streamOutput: true, progress: "Aggregate span checks");
-Run(["dotnet", "run", "--file", "Tests/SpanConstructors.cs"], streamOutput: true, progress: "Span constructor checks");
-Run(["dotnet", "run", "--file", "Tests/AggregateSpanFill.cs"], streamOutput: true, progress: "Aggregate fill checks");
-Run(["dotnet", "run", "--file", "Tests/AggregateArrays.cs"], streamOutput: true, progress: "Aggregate array checks");
-Run(["dotnet", "run", "--file", "Tests/SpanReferences.cs"], streamOutput: true, progress: "Span reference checks");
+RunFixturesConcurrently(
+[
+    ("Tests/SkipInitialization.cs", "SkipInit checks"),
+    ("Tests/NullReferences.cs", "Null reference checks"),
+    ("Tests/UnsafeReferences.cs", "Unsafe byref reinterpretation checks"),
+    ("Tests/ValueBitCasts.cs", "Value BitCast checks"),
+    ("Tests/StaticSpans.cs", "Static byte span checks"),
+    ("Tests/VectorFields.cs", "Vector field checks"),
+    ("Tests/VectorStorage.cs", "Vector storage checks"),
+    ("Tests/UnalignedMemory.cs", "Unaligned transfer checks"),
+    ("Tests/MarshaledMemory.cs", "Byte-span transfer checks"),
+    ("Tests/ReinterpretedSpans.cs", "Span reinterpretation checks"),
+    ("Tests/SpanCopies.cs", "Span copy checks"),
+    ("Tests/ViewAccessors.cs", "View accessor checks"),
+    ("Tests/BinarySpans.cs", "Endian span checks"),
+    ("Tests/AggregateSpans.cs", "Aggregate span checks"),
+    ("Tests/SpanConstructors.cs", "Span constructor checks"),
+    ("Tests/AggregateSpanFill.cs", "Aggregate fill checks"),
+    ("Tests/AggregateArrays.cs", "Aggregate array checks"),
+    ("Tests/SpanReferences.cs", "Span reference checks")
+]);

@@ -217,6 +217,25 @@ partial class Program : IDisposable
     /// <summary>Runs independent checks at once, as <see cref="Concurrently{TItem, TResult}"/> runs them.</summary>
     static void Concurrently(params Action[] checks) => Concurrently(checks, check => check());
 
+    /// <summary>
+    /// Precompiles independent file-based test fixtures concurrently, then runs them in parallel under
+    /// <see cref="Concurrently{TItem}(IReadOnlyList{TItem}, Action{TItem})"/> memory and processor bounds.
+    /// </summary>
+    static void RunFixturesConcurrently(IReadOnlyList<(string Script, string Progress)> fixtures)
+    {
+        var unbuilt = fixtures.Select(fixture => fixture.Script).Distinct(StringComparer.Ordinal)
+            .Where(script => PreparedFixtureCommand(script, []) is null).ToArray();
+        if (unbuilt.Length > 0)
+            ReservingMemory(1L << 30, () => Concurrently(unbuilt, script =>
+                Run(["dotnet", "build", script, "-c", "Release", EnforceStyle, GenerateDocumentation],
+                    progress: "Building " + script)));
+        Concurrently(fixtures, fixture =>
+        {
+            var output = Run(FixtureCommand(fixture.Script, [], prepared: true), progress: fixture.Progress);
+            if (!string.IsNullOrWhiteSpace(output)) Console.WriteLine(output.TrimEnd());
+        });
+    }
+
     /// <summary>Runs `check` with each child process it starts reserving `memory` bytes; 0 keeps the default.
     /// </summary>
     static TResult ReservingMemory<TResult>(long memory, Func<TResult> check)
