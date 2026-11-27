@@ -336,8 +336,8 @@ These regressions cover joint replay:
 - The `evidence` runner compiles its test modules once against the authenticated CIL library,
   without asking Lake to rebuild that library from copied build traces. Child fixtures validate
   the parent's source/output hashes before reusing a completed test; a standalone fixture
-  invocation builds on its own. The `dispatch` runner prepares its modules the
-  same way. Run this preparation alone with
+  invocation builds on its own. Both `evidence` and `dispatch` compile up to two test modules
+  at once. Each module can start as soon as its imports finish. Run preparation alone with
   `dotnet run --file Tests/ExtractionEvidence.cs -- --prepare-only` or
   `Tests/DispatchEvidence.cs -- --prepare-only`.
 - Generated rejection batches keep each mutation's expected diagnostic markers. A Lean command
