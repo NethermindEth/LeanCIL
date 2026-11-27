@@ -17,8 +17,8 @@ Use these commands to measure LeanCIL's proofs, library modules and CI artifacts
 
 ## Reading a measurement
 
-- Heartbeats, olean bytes, kernel heartbeats and proof objects do not depend on machine load.
-  Compare them between any two runs on one toolchain.
+- Compare heartbeats, olean bytes, kernel heartbeats and proof objects on the same toolchain.
+  Frontend heartbeats can vary by a few dozen between runs of the same tree.
 - Wall and CPU time depend on the machine and its load. Compare two times only when both were
   taken in one session on one machine with nothing else running, and repeat each at least once.
 - Stage times inside a suite overlap (a fixture time includes its Lean calls), and modules

@@ -62,9 +62,7 @@ PASS compiling an extracted method costs <n> heartbeats per instruction at 502 i
 
 The suite fails when a ratio exceeds 1.15. The ratios are 0.98 for the extraction, 1.02 for the
 hand-written body and 0.95 for the decoded template. At 502 and 2,002 instructions the template
-costs 52,427 and 49,854 heartbeats per instruction. Proving each equation against the whole list
-costs 3.09 times as much per instruction for the extraction and about 3.7 for the hand-written
-body at the longer length. The suite also fails when a `cil_lookup` at a
+costs 52,427 and 49,854 heartbeats per instruction. The suite also fails when a `cil_lookup` at a
 computed pc costs more than 1.15 times as much per case at 16 repeated segments as at 4.
 
 The lookup fixture checks the hand-written multiply-add code against the entire decoded template
@@ -303,10 +301,8 @@ compiled resolver that proposes each shape evaluates the environment once. The f
 about 269,000, 280,000 and 326,000 heartbeats per field in one struct, where each fact walks the
 struct's field list to its index, and 269,000, 271,000, 272,000 and 272,000 with a struct per
 field; most of a field fact is the kernel deciding the storage of the field's `int32` type. The
-value facts cost about 13,300, 15,900, 16,000 and 16,100 heartbeats per type. Facts that walk the
-layout lists to the struct instead cost 293,000, 313,000, 386,000 and 672,000 heartbeats per
-field and 38,000, 58,000, 131,000 and 417,000 per type. The reads cost 11,100 to 14,700
-heartbeats per operand at every size.
+value facts cost about 13,300, 15,900, 16,000 and 16,100 heartbeats per type. The reads cost
+11,100 to 14,700 heartbeats per operand at every size.
 
 The suite locates a field of the furthest base on a fresh instance whose class has 2, 8 and 32
 bases, and rejects a field whose owner is outside that lineage, deciding membership in the
