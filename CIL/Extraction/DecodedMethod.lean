@@ -82,6 +82,25 @@ private def insertConstructorLink (link : MetadataLink) : List MetadataLink → 
       link :: head :: tail
     else head :: insertConstructorLink link tail
 
+/-- Resolve each distinct constructor MemberRef in first-site order. A repeated token must
+name the same complete specialization as its first occurrence. -/
+private def distinctConstructorSites? (body : BodyEvidence) (arity ownerArity : Nat)
+    (sites : List (Nat × SpecializedMethod)) :
+    Option (List (Nat × CallSite × SpecializedMethod)) := do
+  let reader ← body.constructorTokenReader? arity ownerArity (indexed := !sites.tail.isEmpty)
+  let (_, reversed) ← sites.foldlM
+    (init := ((∅ : Std.TreeMap Nat SpecializedMethod), [])) fun (seen, kept) (pc, callee) => do
+      let token ← reader pc
+      if let some first := seen[token]? then
+        guard (first == callee)
+        return (seen, kept)
+      let .call external ← body.tokens.operands.lookup token | none
+      let .external _ := external.target | none
+      guard (external.method.name == name!".ctor" && callee.arguments.isEmpty &&
+        callee.closed.genericParameters.isEmpty && callee.closed.ownerParameters.isEmpty)
+      return (seen.insert token callee, (token, external, callee) :: kept)
+  return reversed.reverse
+
 /-- Bind external class constructors in the original caller to managed definitions. For each
 `(pc, callee)` the added rows resolve the MemberRef of the `newobj` at `pc`; its defining
 assembly, MethodDef and signature must match `callee`. A MemberRef several sites name binds once,
@@ -92,17 +111,8 @@ def BodyEvidence.bindConstructors? (body : BodyEvidence) (source : RawMethod)
     Option BodyEvidence := do
   let arity := source.genericParameters.length
   let ownerArity := source.ownerParameters.length
-  let resolved ← sites.mapM fun (pc, callee) => do
-    let token ← body.constructorTokenAt? arity ownerArity pc
-    let .call external ← body.tokens.operands.lookup token | none
-    let .external _ := external.target | none
-    guard (external.method.name == name!".ctor" && callee.arguments.isEmpty &&
-      callee.closed.genericParameters.isEmpty && callee.closed.ownerParameters.isEmpty)
-    return (token, external, callee)
-  let distinct := resolved.foldl (fun kept entry =>
-    if kept.any (·.1 == entry.1) then kept else kept ++ [entry]) []
-  guard (resolved.all fun (token, _, callee) =>
-    distinct.any fun (other, _, bound) => other == token && bound == callee)
+  guard (!sites.isEmpty)
+  let distinct ← distinctConstructorSites? body arity ownerArity sites
   let (first, _, _) ← distinct.head?
   let slices := body.metadata.others ++ dependencies
   let initial := { body.metadata with others := slices }

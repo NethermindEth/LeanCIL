@@ -696,6 +696,18 @@ private def decodeCode (env : MetadataEnv) (arity ownerArity : Nat) (body : Body
         localSignature := header.localSignature, code := instructions, statics := statics,
         handlers := handlers }
 
+/-- The header and its payload, after checking every carried byte fits in eight bits. -/
+private def checkedHeader (body : BodyEvidence) : Except BodyError (BodyHeader × List Nat) := do
+  if !body.bytes.all (· < 256) then throw .invalidByte
+  decodeHeader body.bytes
+
+/-- The checked instructions and sections belonging to one header. -/
+private def decodePayload (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence)
+    (header : BodyHeader) (payload : List Nat) : Except BodyError DecodedBody :=
+  let (code, sectionBytes) :=
+    if header.moreSections then payload.splitAt header.codeSize else (payload, [])
+  decodeCode env arity ownerArity body header code sectionBytes
+
 /-- Decode a method body: its header, its instructions, with branch operands as instruction
     indices and every token operand checked against the metadata, and its exception clauses.
     `arity` is the number of generic parameters of the method and `ownerArity` that of its
@@ -703,11 +715,8 @@ private def decodeCode (env : MetadataEnv) (arity ownerArity : Nat) (body : Body
     header announces. -/
 def decodeBody (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence) :
     Except BodyError DecodedBody := do
-  if !body.bytes.all (· < 256) then throw .invalidByte
-  let (header, payload) ← decodeHeader body.bytes
-  let (code, sectionBytes) :=
-    if header.moreSections then payload.splitAt header.codeSize else (payload, [])
-  decodeCode env arity ownerArity body header code sectionBytes
+  let (header, payload) ← checkedHeader body
+  decodePayload env arity ownerArity body header payload
 
 /-- The metadata environment and imported layouts used to check the body's own tokens. -/
 def BodyEvidence.environment (body : BodyEvidence) : Except MetadataError MetadataEnv := do
@@ -715,17 +724,61 @@ def BodyEvidence.environment (body : BodyEvidence) : Except MetadataError Metada
   return { env with publishedLayouts := body.imports.layouts,
                     layoutDeclarations := some body.layoutDeclarations }
 
+/-- Read the little-endian operand at an indexed byte position. -/
+private def indexedUnsigned? (bytes : Array Nat) : Nat → Nat → Option Nat
+  | 0, _ => some 0
+  | width + 1, offset => do
+    let byte ← indexedRead? bytes offset
+    let high ← indexedUnsigned? bytes width (offset + 1)
+    return byte + 256 * high
+
+/-- An indexed operand agrees with the physical byte reader, including truncated operands. -/
+private theorem indexedUnsigned?_eq (bytes : List Nat) (width offset site : Nat) :
+    indexedUnsigned? bytes.toArray width offset =
+      ((readUnsigned site width (bytes.drop offset)).toOption.map Prod.fst) := by
+  induction width generalizing offset with
+  | zero => rfl
+  | succ width ih =>
+    rw [indexedUnsigned?, indexedRead?_eq, List.getElem?_toArray, ih]
+    rw [← List.head?_drop, ← List.tail_drop]
+    cases tail : bytes.drop offset with
+    | nil => rfl
+    | cons byte rest =>
+      simp only [List.head?_cons, List.tail_cons, readUnsigned, bind, Option.bind, Except.bind]
+      cases readUnsigned site width rest <;> rfl
+#print axioms indexedUnsigned?_eq
+
+/-- A reader for the physical tokens at decoded `newobj` instructions of one checked body.
+Multiple sites share indexed instructions and bytes. A single site reads the two lists directly. -/
+def BodyEvidence.constructorTokenReader? (body : BodyEvidence) (arity ownerArity : Nat)
+    (indexed : Bool) : Option (Nat → Option Nat) := do
+  let env ← body.environment.toOption
+  let (header, bytes) ← (checkedHeader body).toOption
+  let decoded ← (decodePayload env arity ownerArity body header bytes).toOption
+  let lookup := if indexed then indexedRead? decoded.code.toArray else (decoded.code[·]?)
+  let operand := if indexed then
+      let indexedBytes := bytes.toArray
+      fun offset => indexedUnsigned? indexedBytes 4 (offset + 1)
+    else fun offset => (readUnsigned offset 4 (bytes.drop (offset + 1))).toOption.map Prod.fst
+  return fun pc => do
+    let site ← lookup pc
+    guard (site.opcode == 0x73)
+    operand site.offset
+
+/-- An indexed reader returns the same tokens and failures as individual list reads. -/
+theorem BodyEvidence.constructorTokenReader?_indexed (body : BodyEvidence)
+    (arity ownerArity : Nat) :
+    body.constructorTokenReader? arity ownerArity true =
+      body.constructorTokenReader? arity ownerArity false := by
+  simp [BodyEvidence.constructorTokenReader?, ← indexedUnsigned?_eq]
+#print axioms BodyEvidence.constructorTokenReader?_indexed
+
 /-- The metadata token encoded at a decoded `newobj` instruction. The byte offset comes from
 the decoder, so an earlier call or a matching byte inside another operand cannot select it. -/
 def BodyEvidence.constructorTokenAt? (body : BodyEvidence) (arity ownerArity pc : Nat) :
     Option Nat := do
-  let env ← body.environment.toOption
-  let decoded ← (decodeBody env arity ownerArity body).toOption
-  let site ← decoded.code[pc]?
-  guard (site.opcode == 0x73)
-  let (_, code) ← (decodeHeader body.bytes).toOption
-  let (token, _) ← (readUnsigned site.offset 4 (code.drop (site.offset + 1))).toOption
-  return token
+  let reader ← body.constructorTokenReader? arity ownerArity false
+  reader pc
 
 /-- The method's definition, its locals and its body, each checked against the metadata the
     body carries: the decoded body, when everything agrees with the method instantiated at
@@ -923,7 +976,7 @@ theorem decodeBody_prefixEntryFree {env : MetadataEnv} {arity ownerArity : Nat}
     {body : BodyEvidence} {decoded : DecodedBody}
     (ok : decodeBody env arity ownerArity body = .ok decoded) : PrefixEntryFree decoded.code := by
   unfold decodeBody at ok
-  simp only [decodeCode, bind, Except.bind] at ok
+  simp only [checkedHeader, decodePayload, decodeCode, bind, Except.bind] at ok
   repeat' split at ok
   all_goals first
     | (simp only [Except.ok.injEq] at ok; subst ok; exact resolved_prefixEntryFree ‹_›)
@@ -951,7 +1004,7 @@ private theorem decodeBody_checkedTable {env : MetadataEnv} {arity ownerArity : 
     ∃ frame table, env.frame arity ownerArity = .ok frame ∧
       checkTable env frame body.imports.byIdentity body.tokens.operands ∅ = .ok table := by
   unfold decodeBody at ok
-  simp only [decodeCode, bind, Except.bind] at ok
+  simp only [checkedHeader, decodePayload, decodeCode, bind, Except.bind] at ok
   repeat' split at ok
   all_goals first
     | contradiction
@@ -1096,7 +1149,7 @@ private theorem decodeBody_call {env arity ownerArity body decoded}
     (fetched : decoded.code[pc]? = some instruction) (called : instruction.operand = .call call) :
     ∃ token, (token, RawOperand.call call) ∈ body.tokens.operands := by
   unfold decodeBody at ok
-  simp only [decodeCode, bind, Except.bind] at ok
+  simp only [checkedHeader, decodePayload, decodeCode, bind, Except.bind] at ok
   repeat' split at ok
   all_goals first
     | contradiction

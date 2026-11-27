@@ -114,6 +114,12 @@ A single caller whose throw is bound to a CoreLib constructor defines `boundPack
 rows in `Extracted.translation_valid`. Consumer proofs can read the checked literal through
 `boundPackage`. Reducing `managedPackage` evaluates the binding again. See [proof binding](../PROOFS-BINDING.md).
 
+Binding several constructor sites in one caller checks its header, instruction stream and operand
+table once. Each site selects a decoded `newobj` and reads the four token bytes at its physical
+offset. A single site reads the instruction and byte lists directly. Multiple sites share indexed
+instructions and bytes. The binder checks each distinct MemberRef in first-use order and requires
+repeated occurrences to name the same complete method specialization.
+
 After the `evidence` suite has written `artifacts/Throws/Percent`, time the extraction and its
 boundary proof:
 
