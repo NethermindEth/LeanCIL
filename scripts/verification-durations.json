@@ -60,20 +60,15 @@
     "native": 118,
     "nested": 60,
     "outcomes": 56,
-    "outlines-buffers": 325,
-    "outlines-control": 445,
-    "outlines-objects": 409,
+    "outlines": 380,
+    "outlines-components": 319,
     "pool": 271,
     "primitive": 100,
-    "receiveroutlines": 57,
-    "savedwordreader": 110,
     "scaling": 525,
     "stepping": 765,
-    "structoutlines": 76,
     "symbols": 60,
     "templates": 177,
     "unsafe": 1289,
-    "wordreader": 76,
     "workspace": 207
   }
 }

@@ -161,13 +161,12 @@ Test("test entry points", () =>
     Equal(Select(["Tests/ExceptionLint.cs"]), []);
     foreach (var module in new[] { "OperationFacts", "VectorLocalCalls", "SimdCarryCalls" })
         Equal(Select([$"Tests/{module}.lean"]), ["core"]);
-    Equal(Select(["Tests/ProofOutlines.cs"]),
-        ["outlines-buffers", "outlines-control", "outlines-objects"]);
-    Equal(Select(["Tests/StructOutlines.cs"]), ["structoutlines"]);
-    Equal(Select(["Tests/ReceiverLoopOutlines.cs"]), ["receiveroutlines"]);
-    Equal(Select(["Tests/WordReaderOutlines.cs"]), ["wordreader"]);
-    Equal(Select(["Tests/SavedWordReaderOutlines.cs"]), ["savedwordreader"]);
-    Equal(Select(["Tests/WordReaderOutlineSupport.cs"]), ["savedwordreader", "wordreader"]);
+    Equal(Select(["Tests/ProofOutlines.cs"]), ["outlines"]);
+    Equal(Select(["Tests/StructOutlines.cs"]), ["outlines-components"]);
+    Equal(Select(["Tests/ReceiverLoopOutlines.cs"]), ["outlines-components"]);
+    Equal(Select(["Tests/WordReaderOutlines.cs"]), ["outlines-components"]);
+    Equal(Select(["Tests/SavedWordReaderOutlines.cs"]), ["outlines-components"]);
+    Equal(Select(["Tests/WordReaderOutlineSupport.cs"]), ["outlines-components"]);
     Equal(Select(["Tests/ProgramClosures/Proof.lean"]), ["closures"]);
     Equal(Select(["Tests/SkipInitialization.cs"]), ["unsafe"]);
     Equal(Select(["Tests/NullReferences.cs"]), ["unsafe"]);

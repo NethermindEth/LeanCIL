@@ -27,8 +27,7 @@ internal static class VerificationSuites
     /// </summary>
     internal static readonly string[] ProofSuites =
     [
-        Core, "loops", "outlines-control", "outlines-objects", "outlines-buffers", "structoutlines",
-        "receiveroutlines", "wordreader", "savedwordreader"
+        Core, "loops", "outlines", "outlines-components"
     ];
 
     /// <summary>
@@ -48,13 +47,9 @@ internal static class VerificationSuites
             "VerificationReuse", "WrongAdd"
         ],
         ["loops"] = ["Loops", "WordArrayOutlines"],
-        ["outlines-control"] = ["ProofOutlines/control"],
-        ["outlines-objects"] = ["ProofOutlines/objects"],
-        ["outlines-buffers"] = ["ProofOutlines/buffers"],
-        ["structoutlines"] = ["StructOutlines"],
-        ["receiveroutlines"] = ["ReceiverLoopOutlines"],
-        ["wordreader"] = ["WordReaderOutlines"],
-        ["savedwordreader"] = ["SavedWordReaderOutlines"]
+        ["outlines"] = ["ProofOutlines/core"],
+        ["outlines-components"] =
+            ["StructOutlines", "ReceiverLoopOutlines", "WordReaderOutlines", "SavedWordReaderOutlines"]
     };
 
     /// <summary>The single-fixture suites in the order a full run executes them.</summary>
@@ -81,16 +76,10 @@ internal static class VerificationSuites
             "constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage"),
         new("loops", "Tests/Loops.cs",
             "cyclic control-flow validation, universal termination and negative contracts"),
-        new("outlines-control", "Tests/ProofOutlines.cs",
-            "control-flow and value proof outlines", ["--group", "control"]),
-        new("outlines-objects", "Tests/ProofOutlines.cs",
-            "object and reference-array proof outlines", ["--group", "objects"]),
-        new("outlines-buffers", "Tests/ProofOutlines.cs",
-            "word-array, span and array-field proof outlines", ["--group", "buffers"]),
-        new("structoutlines", "Tests/StructOutlines.cs", "struct value and field proof outlines"),
-        new("receiveroutlines", "Tests/ReceiverLoopOutlines.cs", "struct receiver loop proof outlines"),
-        new("wordreader", "Tests/WordReaderOutlines.cs", "class helper and array-read component proofs"),
-        new("savedwordreader", "Tests/SavedWordReaderOutlines.cs", "numeric local homes across class helper calls"),
+        new("outlines", "Tests/ProofOutlines.cs",
+            "representative control-flow, object and buffer proof outlines", ["--group", "core"]),
+        new("outlines-components", "Tests/ComponentOutlines.cs",
+            "struct, receiver-loop, word-reader and saved-local component proof outlines"),
         new("generics", "Tests/GenericMethods.cs",
             "C# and F# generic method specialization, provenance and rejection proofs"),
         new("blocks", "Tests/Blocks.cs", "block memory, alignment prefixes, runtime comparisons and safety faults"),

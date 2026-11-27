@@ -89,11 +89,10 @@ Within a generated proof batch, requests with the same extraction manifest, proo
 assembled Lean source share one elaboration and kernel replay. The verifier audits each requested
 theorem, writes its verification report and checks each output against its assembly.
 
-The generated outline checks run in `outlines-control`, `outlines-objects` and `outlines-buffers`.
-Each selects its cases from the shared `Tests/ProofOutlines.cs` runner with `--group`, prepares its
-own extractions and checks its completed proofs and rejection cases; `--case name[,name...]`
-narrows a local run to the named cases of that group. `loops`, `structoutlines`,
-`receiveroutlines`, `wordreader` and `savedwordreader` each run their own fixture.
+The generated outline checks run in `outlines` (representative control, object and buffer cases
+selected from `Tests/ProofOutlines.cs` with `--group core`; `--group control|objects|buffers` and
+`--case name[,name...]` remain available locally) and `outlines-components` (struct, receiver-loop,
+word-reader and saved-local component outlines).
 
 ## Certified library
 
@@ -249,8 +248,7 @@ A source is measured on each tree by the run that verifies it:
 - `libraries` is every test library of `lakefile.toml`, meaning each `[[lean_lib]]` table that
   only names a library, with the checkout modules it imports. It is compared when the PR changes
   a Lean file, the lakefile, the toolchain pin or the Lake manifest.
-- A proof suite (`core`, `loops`, `outlines-control`, `outlines-objects`, `outlines-buffers`,
-  `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader`) is compared when
+- A proof suite (`core`, `loops`, `outlines`, `outlines-components`) is compared when
   selection chose that suite. Its rows are every output directory the suite verified: its
   `Extracted.lean`, its `Symbols.lean` when present, keyed re-export modules imported by the
   proof, and the proof that `verified.json` names, provided the proof is unchanged since.
@@ -469,7 +467,7 @@ the suite.
 Run the `docs` suite locally with `dotnet run --file scripts/Test.cs -- --suite docs`;
 `scripts/TestCheckDocReferences.cs` tests the static rules and the output comparison.
 
-Separately, the `Countdown` case of the `outlines-control` suite fails unless the first
+Separately, the `Countdown` case of the `outlines` suite fails unless the first
 `lean extracted` block of `docs/CLI.md` that starts by importing an extraction is, byte for byte,
 the generated `Countdown` proof outline.
 

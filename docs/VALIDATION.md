@@ -13,7 +13,7 @@ Run the smallest suite covering the changed behavior, then the checks required b
 dotnet run --file scripts/Test.cs -- --suite core
 dotnet run --file scripts/Test.cs -- --suite evidence
 dotnet run --file scripts/Test.cs -- --suite loops
-dotnet run --file scripts/Test.cs -- --suite outlines-objects
+dotnet run --file scripts/Test.cs -- --suite outlines
 ```
 
 - Omit `--suite` to run everything; the [suite table](#suites) lists each name.
@@ -59,8 +59,8 @@ takes about 2.7 hours of CPU time.
 | Referenced assemblies and pins | `assemblies`, `evidence`, `dispatch`, `exportstyped` |
 | Class-instance proofs over linked objects | `pool`, `evidence` |
 | Loop contracts, runtime comparisons and control-flow validation | `loops` |
-| Generated proof outlines | `outlines-control`, `outlines-objects`, `outlines-buffers`, `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader` |
-| Shared stepping, return and contract tactics | All loop and outline suites above, examples, and `Tests.Automation`, `Tests.StoreFacts`, `Tests.MethodContract`, `Tests.CodeAt`; compare [proof cost](#proof-cost) with the base |
+| Generated proof outlines | `outlines`, `outlines-components` |
+| Shared stepping, return and contract tactics | `loops`, `outlines`, `outlines-components`, examples, and `Tests.Automation`, `Tests.StoreFacts`, `Tests.MethodContract`, `Tests.CodeAt`; compare [proof cost](#proof-cost) with the base |
 | CLI, artifact identity and theorem selection | `core`, `cli`, `failures`, `workspace`, `audit` |
 | Admission reports and self-admission of the extractor | `blockers`; see [self-admission](COMPILER-COVERAGE.md#self-admission) |
 | Exported interfaces and implementation checks | The affected `exports` partition in the [suite table](#suites) |
@@ -85,13 +85,8 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `evidence` | independent extraction certificates, malformed evidence rejection, the metadata decoder's method names against Cecil's and framework argument guards |
 | `dispatch` | constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage |
 | `loops` | cyclic control flow, universal termination, divergence and wrong-return refutations of the same contracts, and class/word-array composition |
-| `outlines-control` | generated outlines for control flow, arithmetic and value types, completed proofs and rejection checks |
-| `outlines-objects` | generated outlines for objects and reference arrays, completed proofs and rejection checks |
-| `outlines-buffers` | generated outlines for word arrays, spans and array-valued fields, completed proofs and rejection checks |
-| `structoutlines` | generated struct outlines, repeated field stores, nested values and narrow fields |
-| `receiveroutlines` | struct receiver loop outlines with completed invariants and mutation rejection |
-| `wordreader` | class cursor reads and skip/peek consumption, array separation and semantic mutation rejection |
-| `savedwordreader` | saved numeric locals across class helper calls, 64-bit results, frame boundaries and semantic mutation rejection |
+| `outlines` | representative control-flow, object and buffer proof outlines, completed proofs and rejection checks |
+| `outlines-components` | struct, receiver-loop, word-reader and saved-local component proof outlines and mutation rejections |
 | `generics` | C# and F# generic method specialization, provenance and rejection proofs |
 | `blocks` | block memory, alignment prefixes, runtime comparisons and safety faults |
 | `unsafe` | layout-based Unsafe sizes, reference offsets and metadata validation |

@@ -270,12 +270,12 @@ Require(rows.Select(row => row.Name).SequenceEqual(["example", "example #2", "Te
 // Measuring costs a second verification of each suite, so only what the change can affect is measured.
 const string selection = """
     {"include":[{"suite":"core","suites":["core"],"timeout":30},
-      {"suite":"wordreader","suites":["wordreader"],"timeout":30},
+      {"suite":"outlines-components","suites":["outlines-components"],"timeout":30},
       {"suite":"docs+cli","suites":["docs","cli"],"timeout":30}]}
     """;
-Require(Sources(selection, ["Tests/Loops.cs"]) is ["core", "wordreader"],
+Require(Sources(selection, ["Tests/Loops.cs"]) is ["core", "outlines-components"],
     "selected proof suites are measured and other suites are not");
-Require(Sources(selection, ["CIL/Safety/Stepping.lean"]) is [LibrariesSource, "core", "wordreader"] &&
+Require(Sources(selection, ["CIL/Safety/Stepping.lean"]) is [LibrariesSource, "core", "outlines-components"] &&
     Sources(selection, ["lakefile.toml"]) is [LibrariesSource, ..],
     "a Lean or build change also measures the test libraries");
 Require(Sources("""{"include":[{"suite":"docs","suites":["docs"],"timeout":30}]}""", ["docs/CI.md"]) is [],
@@ -292,16 +292,16 @@ string RowsFile(string directory, string source, params Row[] rows)
     return Path.Combine(scratch, directory);
 }
 RowsFile("measured", "core", Proof("slow", 10_000_000));
-RowsFile("measured", "wordreader", Proof("read", 10_000_000));
+RowsFile("measured", "outlines-components", Proof("read", 10_000_000));
 RowsFile("measured", "loops");
 var bundle = Path.Combine(scratch, "proof-cost-rows.json");
 var published = Publish(Path.Combine(scratch, "measured"), "measurer", "base commit");
-Require(published.Sources.Keys.SequenceEqual(["core", "wordreader"]),
+Require(published.Sources.Keys.SequenceEqual(["core", "outlines-components"]),
     "a source main measured without rows is not published as a base");
 File.WriteAllText(bundle, JsonSerializer.Serialize(published, ProofCostReport.Json));
 var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(bundle)));
 var baseRows = PublishedRows(bundle, digest, "measurer", "base commit");
-Require(baseRows.Keys.Order().SequenceEqual(["core", "wordreader"]) && baseRows["core"].Rows.Single().Name == "slow",
+Require(baseRows.Keys.Order().SequenceEqual(["core", "outlines-components"]) && baseRows["core"].Rows.Single().Name == "slow",
     "published rows are the base of the sources they hold");
 Require(PublishedRows(null, null, "measurer", "base commit").Count == 0 &&
     PublishedRows(bundle, digest, "another measurer", "base commit").Count == 0 &&
@@ -330,10 +330,10 @@ Require(MeasurerKey(workflow) == MeasurerKey() &&
 // counted for the wrong suite, or for none, and stops the measurement.
 Require(VerificationSuites.ProofOutputs.Keys.Order().SequenceEqual(VerificationSuites.ProofSuites.Order()),
     "every proof suite declares its output directories");
-Require(Owner("ProofOutlines/control/Outlines/Choose") == "outlines-control" &&
+Require(Owner("ProofOutlines/core/Outlines/Choose") == "outlines" &&
     Owner("ConsumerSupportUnion-7c43a93156a9/Extraction0") == "core" && Owner("AddModel") == "core" &&
     Owner("AddContract") == "core" && Owner("ConsumerBatchContract-7c43a93156a9") == "core" &&
-    Owner("StructOutlines/Narrow") == "structoutlines" && Owner("CheckedConversions/conv_ovf_i1-32") is null &&
+    Owner("StructOutlines/Narrow") == "outlines-components" && Owner("CheckedConversions/conv_ovf_i1-32") is null &&
     Owner("Additional") is null, "an output belongs to the one suite that declares its directory");
 var noon = new DateTime(2026, 11, 10, 12, 0, 0, DateTimeKind.Utc);
 Require(Owner("CertificateReuse-56769cb9/OtherExtraction") == "core" &&
@@ -346,36 +346,36 @@ Require(Owner("ProofBindingFamilies/Equal32_scalar") == "core" &&
     "certified binding families are included in core proof measurements");
 VerificationGroupRunner.SuiteRun[] members =
 [
-    new("conversions", noon, 0), new("receiveroutlines", noon.AddMinutes(1), 0),
+    new("conversions", noon, 0), new("outlines-components", noon.AddMinutes(1), 0),
     new("exportsprotected", noon.AddMinutes(2), 0)
 ];
 Require(Misattributed(members,
     [
         ("CheckedConversions/conv_ovf_i1-32", noon.AddSeconds(30)), ("ReceiverLoopOutlines/Drain", noon.AddSeconds(90)),
         ("ContractExport-95758c4a/Package", noon.AddMinutes(3)),
-        ("suite-caches/receiveroutlines/x", noon.AddSeconds(95))
+        ("suite-caches/outlines-components/x", noon.AddSeconds(95))
     ]).Count == 0, "a grouped job whose members wrote only their own outputs is measured");
 Require(Misattributed(members, [("ReceiverLoopOutlines/Drain", noon.AddMinutes(3))]).Single() is
-    { Suite: "receiveroutlines", Problem: var twice } &&
-    twice.Contains("belongs to receiveroutlines and was written while exportsprotected ran"),
+    { Suite: "outlines-components", Problem: var twice } &&
+    twice.Contains("belongs to outlines-components and was written while exportsprotected ran"),
     "an output of a proof suite that another member wrote is attributed to two suites and fails that suite");
 Require(Misattributed(members, [("Undeclared/Drain", noon.AddSeconds(90))]).Single() is
-    { Suite: "receiveroutlines", Problem: var undeclared } &&
-    undeclared.Contains("verified by receiveroutlines, which does not declare it"),
+    { Suite: "outlines-components", Problem: var undeclared } &&
+    undeclared.Contains("verified by outlines-components, which does not declare it"),
     "an output a proof suite wrote outside its directories cannot be attributed and fails that suite");
 
 // One job reports every source. Without published base rows a source is not compared and cannot fail,
 // which is the only way to pass uncompared: with a base, missing head rows are a failure.
 RowsFile("head", "core", Proof("slow", 12_000_000));
 RowsFile("head", "loops", Proof("fresh", 9_000_000));
-var reports = Report(["core", "loops", "libraries", "wordreader"], baseRows, Path.Combine(scratch, "head"), [],
+var reports = Report(["core", "loops", "libraries", "outlines-components"], baseRows, Path.Combine(scratch, "head"), [],
     DefaultThresholdPercent).ToDictionary(report => report.Source, report => report.Comparison);
 Require(reports["core"] is { } core && core.Regressions.Single().Name == "slow" && Markdown(core, "core")
     .StartsWith("## Proof cost of core against the merge base", StringComparison.Ordinal),
     "each source is compared with its own base and titled by its name");
 Require(reports["loops"] is null && reports["libraries"] is null,
     "a source main published no rows for is not compared, with or without head rows");
-Require(reports["wordreader"] is { Failed: true } unmeasured &&
+Require(reports["outlines-components"] is { Failed: true } unmeasured &&
     unmeasured.Failures.Contains("nothing was measured at the head"),
     "a source with a published base and no head rows fails");
 Require(Report(["core", "loops"], PublishedRows(null, null, "measurer", "base commit"),
