@@ -346,22 +346,28 @@ theorem folded_argument_index (localCount index : Nat) (argumentAt : Nat → Opt
   cases found : argumentAt index <;> cases emitted <;> simp [validateArgumentOpAt, found]
 #print axioms folded_argument_index
 
-/-- Raw instructions over every one-byte and two-byte opcode with each operand kind the value
-    family reads, plus text, a type, a class field and a call site; `ofRaw?` must give `none`
-    for every opcode outside `Instruction.valueOpcode`. -/
+/-- The one-byte opcodes and the extended opcode range from `0xFE00` through `0xFE1F`. -/
+private def probeOpcodes : List Nat := List.range 256 ++ (List.range 32).map (65024 + ·)
+
+/-- Bit `opcode` records whether that opcode occurs, including when several forms share it. -/
+private def opcodeMask (opcodes : List Nat) : Nat :=
+  opcodes.foldl (fun mask opcode => mask ||| (1 <<< opcode)) 0
+
+/-- Raw instructions over the probe opcodes with each operand kind the value family reads,
+    plus text, a type, a class field and a call site. -/
 def probes : List RawInstruction :=
-  ((List.range 256 ++ (List.range 32).map (65024 + ·)).flatMap fun opcode =>
+  probeOpcodes.flatMap fun opcode =>
     ([.none, .integer 1, .argument 1, .local 1, .target 1, .targets [1], .text "",
       .type (.primitive .int32), classOperand, .call callSite] : List RawOperand).map
-      fun operand => { offset := 0, opcode, operand })
+      fun operand => { offset := 0, opcode, operand }
 
 /-- `ofRaw?` decodes only value opcodes, every value opcode is named, and every named form
     decodes to exactly the instruction ECMA-335 assigns it. -/
 theorem ofRaw?_exact :
     probes.all (fun raw =>
       (Instruction.ofRaw? none raw).isNone || Instruction.valueOpcode raw.opcode) = true ∧
-    probes.all (fun raw => !Instruction.valueOpcode raw.opcode ||
-      named.any (·.1.opcode == raw.opcode)) = true ∧
+    opcodeMask (probeOpcodes.filter Instruction.valueOpcode) =
+      opcodeMask (named.map (·.1.opcode)) ∧
     named.all (fun (raw, expected) => valueEncodingMatches (predecessor raw) raw expected) =
       true := by
   decide +kernel
