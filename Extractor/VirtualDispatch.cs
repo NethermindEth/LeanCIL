@@ -77,14 +77,30 @@ internal static class VirtualDispatch
 
     /// <summary>Every class in the modules, including nested classes, that derives from the slot's class.</summary>
     internal static IEnumerable<TypeDefinition> DerivedClasses(IEnumerable<ModuleDefinition> modules,
-        TypeDefinition declaring) => modules.SelectMany(module => module.GetTypes())
-        .Where(type => type is { IsValueType: false, IsInterface: false } && Derives(type, declaring));
-
-    static bool Derives(TypeDefinition candidate, TypeDefinition declaring)
+        TypeDefinition declaring)
     {
-        for (TypeDefinition? current = candidate; current is not null; current = current.BaseType?.Resolve())
-            if (current == declaring) return true;
-        return false;
+        var derives = new Dictionary<TypeDefinition, bool?> { [declaring] = true };
+        var path = new List<TypeDefinition>();
+        foreach (var module in modules)
+        foreach (var candidate in module.GetTypes())
+        {
+            if (candidate.IsValueType || candidate.IsInterface) continue;
+            bool reachesOwner = false;
+            for (var current = candidate; current is not null; current = current.BaseType?.Resolve())
+            {
+                if (derives.TryGetValue(current, out bool? known))
+                {
+                    reachesOwner = known ?? throw new InvalidDataException("Cyclic base class: " + current.FullName);
+                    break;
+                }
+                // A pending answer belongs to this path until the chain reaches a known base or ends.
+                derives.Add(current, null);
+                path.Add(current);
+            }
+            foreach (var type in path) derives[type] = reachesOwner;
+            path.Clear();
+            if (reachesOwner) yield return candidate;
+        }
     }
 
     // The body the runtime selects for `concrete`: the nearest class from `concrete` up to the slot's declarer with
