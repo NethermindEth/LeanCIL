@@ -82,6 +82,9 @@ name = "Tests.StaticFieldSites"
 name = "Tests.GenericOwnerScaling"
 
 [[lean_lib]]
+name = "Tests.DispatchCatalogScaling"
+
+[[lean_lib]]
 name = "Tests.LiteralDisplay"
 
 [[lean_lib]]

@@ -656,13 +656,58 @@ def managedAddressMatches (methods : Nat → Option SpecializedMethod)
 
 attribute [local instance] lexOrd
 
+/-- Strictly increasing method tokens certify the identities of a token-ordered table. -/
+private def increasingTokens (previous : Nat) : List ManagedIdentity → Bool
+  | [] => true
+  | item :: rest => previous < item.token && increasingTokens item.token rest
+
+/-- Monotone tokens are all larger than the predecessor, and admit no duplicate identities. -/
+private theorem increasingTokens_nodup (previous : Nat) (members : List ManagedIdentity)
+    (sorted : increasingTokens previous members = true) :
+    members.Nodup ∧ ∀ item ∈ members, previous < item.token := by
+  induction members generalizing previous with
+  | nil => simp
+  | cons item rest ih =>
+    simp only [increasingTokens, Bool.and_eq_true, decide_eq_true_eq] at sorted
+    obtain ⟨unique, larger⟩ := ih item.token sorted.2
+    refine ⟨List.nodup_cons.mpr ⟨fun member => Nat.lt_irrefl _ (larger item member), unique⟩, ?_⟩
+    intro other member
+    rcases List.mem_cons.mp member with same | tail
+    · simpa [same] using sorted.1
+    · exact Nat.lt_trans sorted.1 (larger other tail)
+
+#print axioms increasingTokens_nodup
+
+/-- Sorted tokens suffice. Unsorted targets use their complete metadata identities. -/
+private def managedIdentitiesDistinct : List ManagedIdentity → Bool
+  | [] => true
+  | first :: rest => increasingTokens first.token rest ||
+      (distinctMembership? (fun identity : ManagedIdentity =>
+        (identity.token, keyBytes identity.owner, identity.arguments.map (typeKeyInto · [])))
+        (first :: rest)).isSome
+
+/-- A differently ordered table must satisfy exactly the same identity requirement. -/
+private theorem managedIdentitiesDistinct_iff (members : List ManagedIdentity) :
+    managedIdentitiesDistinct members = true ↔ members.Nodup := by
+  cases members with
+  | nil => simp [managedIdentitiesDistinct]
+  | cons first rest =>
+    rw [managedIdentitiesDistinct, Bool.or_eq_true, distinctMembership?_eq]
+    by_cases clean : (first :: rest).Nodup
+    · simp [clean]
+    · have unsorted : increasingTokens first.token rest ≠ true := by
+        intro sorted
+        obtain ⟨unique, larger⟩ := increasingTokens_nodup first.token rest sorted
+        exact clean (List.nodup_cons.mpr ⟨fun mem => Nat.lt_irrefl _ (larger first mem), unique⟩)
+      simp [clean, unsorted]
+
+#print axioms managedIdentitiesDistinct_iff
+
 /-- Indirect calls bind the exact raw managed signature and every possible selected target. -/
 def managedIndirectMatches (methods : Nat → Option SpecializedMethod)
     (raw : RawInstruction) (signature : ManagedSignature) (catalog : List ManagedTarget) : Bool :=
-  let key := fun (identity : ManagedIdentity) =>
-    (identity.token, keyBytes identity.owner, identity.arguments.map (typeKeyInto · []))
   raw.opcode == 41 && !catalog.isEmpty &&
-    (distinctMembership? key (catalog.map ManagedTarget.identity)).isSome &&
+    managedIdentitiesDistinct (catalog.map ManagedTarget.identity) &&
   match raw.operand with
   | .indirectCall result parameters false false 0 =>
     callableType result == signature.result && parameters.map callableType == signature.parameters &&

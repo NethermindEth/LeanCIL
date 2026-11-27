@@ -34,7 +34,7 @@ These suites check how verification cost grows with the size of the input. Run o
 | `core` | Frontend or kernel heartbeats per byte for a checked initialized aggregate store and load grow more than 1.25 times from 16 to 64 or from 64 to 256 bytes. Compiled reads of a 4,096-byte store exceed twice the time per cell of a 16-byte store in at least two of three paired samples. |
 | `lookups` | Heartbeats per instruction grow more than 1.15 times from about 500 to about 2,000 instructions, kernel heartbeats per array element address grow more than 1.15 times from 128 to 512 addresses, kernel heartbeats per instruction of the scalar certificate or closed argument storage of bodies of 128 to 512 loaded, addressed or `calli` pointer locals grow more than 1.25 times, kernel heartbeats per instruction of the feature certificate of local loads, stores and addresses grow more than 1.25 times from 256 to 4,096 instructions or from 16 to 256 locals at a fixed length, the feature certificate's cost grows more than 4.5 times as much from 16 to 64 known local facts as from 4 to 16, the kernel heartbeats of one native method table step or one load of its first entry at 64 or 256 entries exceed 1.15 times those at 16 entries, the kernel heartbeats per index of a load of its last entry grow more than 1.15 times from 16 to 256 entries, the kernel heartbeats per byte of the call check's method name clause or of a metadata name's encoding grow more than 1.15 times from 20 to 80 or from 80 to 320 bytes, the kernel heartbeats per call of an embedding grow more than 1.15 times at four times the calls, or the heartbeats per call site of the managed-call check grow more than 1.35 times at four times the call sites; see [instruction lookups](InstructionLookups.md) |
 | `stepping` | Checked stepping exceeds its per-instruction growth budgets; see [validation](../VALIDATION.md#proof-cost) |
-| `scaling` | The certificate of a six-method call graph exceeds the default heartbeat limit, kernel heartbeats per layout of the header struct layout check over nested or over generic structs, or of a method's layout check over nested structs, grow more than 1.5 times from 64 to 512 structs, or 512 structs of either kind do not check within 8 GiB |
+| `scaling` | The certificate of a six-method call graph exceeds the default heartbeat limit, kernel heartbeats per layout of the header struct layout check over nested or over generic structs, or of a method's layout check over nested structs, grow more than 1.5 times from 64 to 512 structs, 512 structs of either kind do not check within 8 GiB, or a fourfold increase in virtual or indirect target entries (8, 32, 128) costs more than six times the kernel heartbeats |
 | `excluded` | Certificates with hundreds of excluded and live sites exceed the default heartbeat limit |
 
 ## Suite times
@@ -69,11 +69,22 @@ graph. A balanced map bounds classification at O(n log n) for *n* physical rows.
 queries reuse the owner's bitmap. The auditor reads members in physical row order and checks
 the target table at each reachable call site. Exact-class queries select the owner directly.
 
-Run the gate and dispatch fixtures with these commands.
+The translation checker shares virtual slot resolution across a class hierarchy. Each reachable
+class summary records its nearest matching declaration, its class identities and the owners named
+by explicit overrides. Extending a summary checks overrides in both directions. On an acyclic
+catalog with distinct identity keys and bounded signature and name sizes, the ordered-map work is
+O(N log N), where N counts classes, method declarations, override entries and virtual targets.
+Indirect-call catalogs with strictly increasing tokens take one pass to certify distinctness.
+Other token orders use an ordered index with exact equality inside each identity bucket.
+The default certificate checks the supplied catalog. The physical metadata covered by the deep
+binding audit is described in [soundness evidence](../SOUNDNESS-EVIDENCE.md).
+
+Run the gate, dispatch and scaling fixtures with these commands.
 
 ```sh
 dotnet run --file scripts/Test.cs -- --suite gates
 dotnet run --file scripts/Test.cs -- --suite dispatch
+dotnet run --file scripts/Test.cs -- --suite scaling
 ```
 
 ## Fold discovery
