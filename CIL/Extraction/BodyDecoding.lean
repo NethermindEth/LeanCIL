@@ -481,6 +481,41 @@ private def resolveBranches (starts : SearchTree (Nat × Bool)) (codeLength : Na
     let indices ← targets.mapM (instructionIndex starts codeLength instruction.offset)
     .ok { instruction with operand := .targets indices }
   | _ => .ok instruction
+
+/-- A target operand needs translation from byte offsets to instruction indices. -/
+private def hasBranch (instruction : RawInstruction) : Bool :=
+  match instruction.operand with
+  | .target _ | .targets _ => true
+  | _ => false
+
+/-- Resolve instruction targets, reusing a body whose operands carry no offsets. -/
+private def resolveCodeBranches (starts : Thunk (SearchTree (Nat × Bool))) (size : Nat)
+    (raw : List RawInstruction) : Except BodyError (List RawInstruction) :=
+  if raw.any hasBranch then raw.mapM (resolveBranches starts.get size) else .ok raw
+
+/-- Resolving a body without target operands leaves every instruction intact. -/
+private theorem resolveCodeBranches_eq (starts : Thunk (SearchTree (Nat × Bool))) (size : Nat)
+    (raw : List RawInstruction) :
+    resolveCodeBranches starts size raw = raw.mapM (resolveBranches starts.get size) := by
+  unfold resolveCodeBranches
+  split
+  · rfl
+  · rename_i noBranches
+    have same (instruction : RawInstruction) (member : instruction ∈ raw) :
+        resolveBranches starts.get size instruction = .ok instruction := by
+      have absent : hasBranch instruction ≠ true := fun present =>
+        noBranches (List.any_eq_true.mpr ⟨instruction, member, present⟩)
+      cases operand : instruction.operand <;> simp_all [hasBranch, resolveBranches]
+    clear noBranches
+    induction raw with
+    | nil => rfl
+    | cons head tail ih =>
+      rw [List.mapM_cons, same head (by simp), ← ih (fun i member =>
+        same i (List.mem_cons_of_mem _ member))]
+      rfl
+
+#print axioms resolveCodeBranches_eq
+
 /-- The fields of a method body header. -/
 structure BodyHeader where
   maxStack : Nat
@@ -661,7 +696,7 @@ private def fatTable : Nat := 0x41
     instructions, when the header announces one: padding to a four-byte boundary, then one small
     or fat table that holds at least one clause and ends the body. -/
 private def decodeSection (tokens : Std.TreeMap Nat (RawOperand × TokenFacts))
-    (starts : SearchTree (Nat × Bool)) (codeLength count : Nat) (header : BodyHeader)
+    (starts : Thunk (SearchTree (Nat × Bool))) (codeLength count : Nat) (header : BodyHeader)
     (sectionBytes : List Nat) : Except BodyError (List ExceptionClause) := do
   if !header.moreSections then return []
   let padding := (4 - codeLength % 4) % 4
@@ -674,7 +709,7 @@ private def decodeSection (tokens : Std.TreeMap Nat (RawOperand × TokenFacts))
   let width := if fat then 24 else 12
   unless padding ≤ sectionBytes.length && size == 4 + fields.length && 0 < fields.length &&
       fields.length % width == 0 do throw .invalidSection
-  decodeClauses tokens starts codeLength count fat (fields.length / width) 0 fields
+  decodeClauses tokens starts.get codeLength count fat (fields.length / width) 0 fields
 
 /-- Decode the complete instruction stream under the checked header and operand table, then the
     exception section after it, whose clauses must pass `checkRegions`. -/
@@ -688,8 +723,8 @@ private def decodeCode (env : MetadataEnv) (arity ownerArity : Nat) (body : Body
   let (raw, statics) ← decodeInstructions tokens code.length 0 0 code
   if !body.imports.calls.isEmpty && !body.imports.checkUses imports raw then
     throw (.metadata (.operandMismatch 0))
-  let starts := indexStarts raw
-  let instructions ← raw.mapM (resolveBranches starts code.length)
+  let starts := Thunk.mk fun _ => indexStarts raw
+  let instructions ← resolveCodeBranches starts code.length raw
   let handlers ← decodeSection tokens starts code.length raw.length header sectionBytes
   (checkRegions instructions handlers).mapError BodyError.regions
   .ok { maxStack := header.maxStack, initLocals := header.initLocals,
@@ -976,7 +1011,8 @@ theorem decodeBody_prefixEntryFree {env : MetadataEnv} {arity ownerArity : Nat}
     {body : BodyEvidence} {decoded : DecodedBody}
     (ok : decodeBody env arity ownerArity body = .ok decoded) : PrefixEntryFree decoded.code := by
   unfold decodeBody at ok
-  simp only [checkedHeader, decodePayload, decodeCode, bind, Except.bind] at ok
+  simp only [checkedHeader, decodePayload, decodeCode, resolveCodeBranches_eq,
+    bind, Except.bind] at ok
   repeat' split at ok
   all_goals first
     | (simp only [Except.ok.injEq] at ok; subst ok; exact resolved_prefixEntryFree ‹_›)
@@ -1004,7 +1040,8 @@ private theorem decodeBody_checkedTable {env : MetadataEnv} {arity ownerArity : 
     ∃ frame table, env.frame arity ownerArity = .ok frame ∧
       checkTable env frame body.imports.byIdentity body.tokens.operands ∅ = .ok table := by
   unfold decodeBody at ok
-  simp only [checkedHeader, decodePayload, decodeCode, bind, Except.bind] at ok
+  simp only [checkedHeader, decodePayload, decodeCode, resolveCodeBranches_eq,
+    bind, Except.bind] at ok
   repeat' split at ok
   all_goals first
     | contradiction
@@ -1149,7 +1186,8 @@ private theorem decodeBody_call {env arity ownerArity body decoded}
     (fetched : decoded.code[pc]? = some instruction) (called : instruction.operand = .call call) :
     ∃ token, (token, RawOperand.call call) ∈ body.tokens.operands := by
   unfold decodeBody at ok
-  simp only [checkedHeader, decodePayload, decodeCode, bind, Except.bind] at ok
+  simp only [checkedHeader, decodePayload, decodeCode, resolveCodeBranches_eq,
+    bind, Except.bind] at ok
   repeat' split at ok
   all_goals first
     | contradiction

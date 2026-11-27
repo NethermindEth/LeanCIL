@@ -423,6 +423,18 @@ theorem rejects_a_missing_exception_section :
   decide +kernel
 #print axioms rejects_a_missing_exception_section
 
+/-- A branchless try still resolves the finally boundaries past a five-byte instruction. -/
+theorem branchless_finally_decodes :
+    let bytes := [0x0B, 0x30, 1, 0, 10, 0, 0, 0, 0, 0, 0, 0,
+      0x20, 1, 0, 0, 0, 0x26, 0x14, 0x7A, 0xDC, 0x2A, 0, 0,
+      1, 16, 0, 0, 2, 0, 0, 0, 8, 8, 0, 1, 0, 0, 0, 0]
+    let code := [instr 0 0x20 (.integer 1), instr 5 0x26, instr 6 0x14, instr 7 0x7A,
+      instr 8 0xDC, instr 9 0x2A]
+    bodyMatches (evidence bytes)
+      { method 1 false [] code with handlers := [⟨0, 4, 4, 5, .finally⟩] } [] = true := by
+  decide +kernel
+#print axioms branchless_finally_decodes
+
 /-- The class the fixture's catch clauses name. -/
 private def boxType : TypeExpr := .object libScope "Lib.Box"
 
