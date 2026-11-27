@@ -145,7 +145,8 @@ workflow.
   `Tests/BodyDecoding.lean` decodes hand-made tiny and fat bodies with short and long branches, a
   switch, two-byte opcodes, token operands and float constants, rejects each kind of malformed
   body separately with its specific error, and compares the operand table with a static list
-  generated once from the opcodes of Mono.Cecil.
+  generated once from the opcodes of Mono.Cecil. A branchless try/finally case checks that
+  exception boundaries after a five-byte instruction resolve to the correct instruction indices.
   The body literal fixture decodes one short branch followed by 64, 256 or 1,024 nops and a
   return. Kernel heartbeats per additional instruction may grow by at most 15% from the first
   interval to the second.

@@ -120,6 +120,11 @@ offset. A single site reads the instruction and byte lists directly. Multiple si
 instructions and bytes. The binder checks each distinct MemberRef in first-use order and requires
 repeated occurrences to name the same complete method specialization.
 
+For the seven CoreLib methods in the range-exception constructor chain, the library stores the
+decoded methods and their metadata indexes as literals. Lean checks each literal against the
+decoder when it builds the library. Caller proofs can then read the method or look up an index
+without decoding CoreLib again.
+
 After the `evidence` suite has written `artifacts/Throws/Percent`, time the extraction and its
 boundary proof:
 

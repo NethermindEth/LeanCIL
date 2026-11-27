@@ -62,3 +62,7 @@ observer guard simplified.
 Use a memory instruction's dispatch equation to rewrite its step directly. In
 `instructionResult`, rewrite the outer guard and try the write correspondence first. Trying the
 read lemma on a write forces the kernel to reduce the write while matching the lemma.
+
+The `allocation_fixed_step` tactic applies `ResultRenamed.ofUnsupportedGuard` to the
+observer check shared by fixed instructions. When the operand shape determines the fallback
+branch, the tactic applies its existing proof before inspecting more of the stack.
