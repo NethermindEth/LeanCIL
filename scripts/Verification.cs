@@ -152,10 +152,9 @@ partial class Program : IDisposable
         var separator = Array.IndexOf(command, "--", 4);
         var options = command[4..(separator < 0 ? command.Length : separator)];
         // Only the repository's standard Release build options match the producer.
-        if (options.Length != 0 && !options.SequenceEqual(new[] { "-c", "Release", "--no-build",
-                "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true" }) &&
-            !options.SequenceEqual(new[] { "-c", "Release",
-                "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true" })) return command;
+        if (options is not ([] or ["-c", "Release", "--no-build", EnforceStyle, GenerateDocumentation] or
+            ["-c", "Release", EnforceStyle, GenerateDocumentation] or
+            ["-c", "Release", EnforceStyle, GenerateDocumentation, RejectUnusedImports])) return command;
         var arguments = separator < 0 ? [] : command[(separator + 1)..];
         // Nested fixtures share the parent's Release configuration but still rebuild changed sources.
         return PreparedFixtureCommand(Path.GetFullPath(command[3], cwd), arguments) ??
@@ -299,12 +298,15 @@ partial class Program : IDisposable
     }
 #endif
 
+    const string EnforceStyle = "-p:EnforceCodeStyleInBuild=true";
+    const string GenerateDocumentation = "-p:GenerateDocumentationFile=true";
+    const string RejectUnusedImports = "-p:WarningsAsErrors=IDE0005";
+
     static string[] FixtureCommand(string script, string[] arguments, bool prepared)
     {
         string[] buildArguments = prepared
-            ? ["-c", "Release", "--no-build", "-p:EnforceCodeStyleInBuild=true",
-                "-p:GenerateDocumentationFile=true"]
-            : ["-c", "Release", "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"];
+            ? ["-c", "Release", "--no-build", EnforceStyle, GenerateDocumentation]
+            : ["-c", "Release", EnforceStyle, GenerateDocumentation, RejectUnusedImports];
         return ["dotnet", "run", "--file", script, .. buildArguments, "--", .. arguments];
     }
 
