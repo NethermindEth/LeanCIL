@@ -33,7 +33,8 @@ internal static class FeatureEvidence
             return $"some {{ stack := [{string.Join(", ", state.Stack.Reverse().Select(Fact))}], " +
                 $"locals := [{KnownLocals(state.KnownLocals)}] }}";
         });
-        lean.AppendLine($"def method{number}FeatureStates : Extraction.FeatureCertificate := [{string.Join(", ", states)}]");
+        LeanEmitter.EmitCertificate(lean, $"method{number}FeatureStates", "FeatureCertificate",
+            "Option Extraction.FeatureState", states);
     }
 
     // Follows `methodEvidence`, whose callee certificates supply the words constant calls push. The obligation

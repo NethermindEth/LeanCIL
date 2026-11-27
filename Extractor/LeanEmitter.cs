@@ -12,6 +12,29 @@ internal static class LeanEmitter
         IReadOnlyList<ClassViews.Access> ClassFields,
         ComputedLayout[] Layouts, string TemplateInputs, int ImageRows);
 
+    /// <summary>Writes a certificate with one list entry per instruction, sharing repeated state terms.</summary>
+    internal static void EmitCertificate(StringBuilder lean, string name, string type, string elementType,
+        IEnumerable<string> entries)
+    {
+        var states = entries.ToArray();
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        lean.Append($"def {name} : Extraction.{type} := ");
+        // Bound the nesting of lets even for methods with many distinct states.
+        const int maximumBindings = 8;
+        foreach (var (state, count) in states.CountBy(state => state, StringComparer.Ordinal))
+        {
+            var local = $"state{names.Count}";
+            if (count == 1 || state.Length <= local.Length) continue;
+            var binding = $"let {local} : {elementType} := {state}; ";
+            if ((long)count * (state.Length - local.Length) <= binding.Length) continue;
+            names.Add(state, local);
+            lean.Append(binding);
+            if (names.Count == maximumBindings) break;
+        }
+        lean.Append('[').AppendJoin(", ", states.Select(state => names.GetValueOrDefault(state, state)))
+            .AppendLine("]");
+    }
+
     internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
         "System.SByte" => Narrowing.Signed8,

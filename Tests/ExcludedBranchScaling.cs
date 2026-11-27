@@ -29,27 +29,16 @@ var output = Path.Combine(directory, "Extraction");
 Run(Extract("extract", assembly, "Excluded", "Excluded::Accumulate(ulong,ulong)", output));
 var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 
-// Split a generated Lean list literal at its top-level commas.
-List<string> Entries(string name)
+string[] Reachability(string source)
 {
-    var line = extracted.Split('\n').Single(l => l.StartsWith($"def {name} ", StringComparison.Ordinal));
-    var body = line[(line.IndexOf(":= [", StringComparison.Ordinal) + 4)..line.LastIndexOf(']')];
-    var entries = new List<string>();
-    int depth = 0, start = 0;
-    for (var i = 0; i < body.Length; i++)
-    {
-        if (body[i] is '[' or '{' or '(') depth++;
-        else if (body[i] is ']' or '}' or ')') depth--;
-        else if (body[i] == ',' && depth == 0) { entries.Add(body[start..i].Trim()); start = i + 1; }
-    }
-    entries.Add(body[start..].Trim());
-    return entries;
+    const string prefix = "def method0Reachable : List Bool := [";
+    var mask = source.Split('\n').Single(line => line.StartsWith(prefix, StringComparison.Ordinal)).TrimEnd();
+    return mask[prefix.Length..^1].Split(", ");
 }
-var reachable = Entries("method0Reachable");
-var states = Entries("method0FeatureStates");
+var reachable = Reachability(extracted);
 var closed = ClosedBody(extracted, 0).Literal;
 var excluded = reachable.Count(live => live == "false");
-if (excluded < 700 || states.Count != reachable.Count || extracted.Contains("set_option maxHeartbeats"))
+if (excluded < 700 || extracted.Contains("set_option maxHeartbeats"))
     throw new InvalidOperationException($"Expected a large excluded branch checked at the default budget; found {excluded} excluded sites.");
 const string featureObligation = "method0_features_validated";
 const string parameterObligation = "method0_parameters_validated";
@@ -61,7 +50,7 @@ var controls =
 var liveOutput = Path.Combine(directory, "Live");
 Run(Extract("extract", assembly, "Excluded", "Excluded::Accumulate(ulong,ulong)", liveOutput, "x64-v3"));
 var liveExtracted = File.ReadAllText(Path.Combine(liveOutput, "Extracted.lean"));
-var liveSites = liveExtracted.Split('\n').Single(l => l.StartsWith("def method0Reachable ", StringComparison.Ordinal)).Split("true").Length - 1;
+var liveSites = Reachability(liveExtracted).Count(site => site == "true");
 if (liveSites < 800 || liveExtracted.Contains("set_option maxHeartbeats"))
     throw new InvalidOperationException($"Expected a long live branch checked at the default budget; found {liveSites} live sites.");
 Run(["lake", "env", "lean", Path.Combine(liveOutput, "Extracted.lean")], cwd: FixturePackage());
@@ -69,30 +58,30 @@ Console.WriteLine($"PASS {liveSites} live sites validate at the default heartbea
 
 // Each validator must still reach and reject a forged claim at the last pruned site it checks. A decoded method
 // decodes the mask it is given, so a pinned run decodes the extracted mask and keeps its holes.
-void Reject(string name, string validator, string obligation, Func<int, bool> site, bool forgeState,
-    bool pinnedCode = false)
+void Reject(string name, string validator, string obligation, Func<int, bool> site, bool pinnedCode = false)
 {
-    var live = Entries("method0Reachable");
-    var facts = Entries("method0FeatureStates");
-    var pc = Enumerable.Range(0, live.Count).Last(i => live[i] == "false" && site(i));
+    var live = (string[])reachable.Clone();
+    var pc = Enumerable.Range(0, live.Length).Last(i => live[i] == "false" && site(i));
     live[pc] = "true";
     // The method has no locals, so the forged state is well shaped and only the check at the claimed site rejects it.
-    if (forgeState && !closed.Contains("], locals := [], initLocals", StringComparison.Ordinal))
+    if (!closed.Contains("], locals := [], initLocals", StringComparison.Ordinal))
         throw new InvalidOperationException(
             "The excluded-branch method has locals; the forged state may be badly shaped.");
-    if (forgeState) facts[pc] = "some { stack := [], locals := [] }";
     var tampered = Path.Combine(directory, name + ".lean");
-    var changed = string.Join('\n', extracted.Split('\n').Select(line =>
-        line.StartsWith("def method0Reachable ", StringComparison.Ordinal) ? $"def method0Reachable : List Bool := [{string.Join(", ", live)}]" :
-        line.StartsWith("def method0FeatureStates ", StringComparison.Ordinal) ? $"def method0FeatureStates : Extraction.FeatureCertificate := [{string.Join(", ", facts)}]" :
-        line));
+    const string statePrefix = "def method0FeatureStates : Extraction.FeatureCertificate := ";
+    var originalMask = extracted.Split('\n').Single(line => line.StartsWith("def method0Reachable ",
+        StringComparison.Ordinal));
+    var originalStates = extracted.Split('\n').Single(line => line.StartsWith(statePrefix, StringComparison.Ordinal));
+    var changed = extracted.Replace(originalMask, $"def method0Reachable : List Bool := [{string.Join(", ", live)}]",
+        StringComparison.Ordinal).Replace(originalStates,
+            statePrefix + $"({originalStates[statePrefix.Length..].TrimEnd()} : Extraction.FeatureCertificate)" +
+            $".set {pc} (some {{ stack := [], locals := [] }})", StringComparison.Ordinal);
     if (pinnedCode)
     {
         var decoder = DecodedDefinition(changed, 0);
         if (!decoder.Success) throw new InvalidOperationException("The excluded-branch method is not decoded.");
-        var mask = extracted.Split('\n').Single(l => l.StartsWith("def method0Reachable ", StringComparison.Ordinal));
         changed = changed.Replace(decoder.Value, $"""
-            {mask.Replace("def method0Reachable ", "def method0ExtractedReachable ", StringComparison.Ordinal)}
+            {originalMask.Replace("def method0Reachable ", "def method0ExtractedReachable ", StringComparison.Ordinal)}
             {decoder.Value.Replace(" method0Reachable ", " method0ExtractedReachable ", StringComparison.Ordinal)}
             """, StringComparison.Ordinal);
     }
@@ -106,11 +95,10 @@ void Reject(string name, string validator, string obligation, Func<int, bool> si
 var argumentCode = extracted.Split('\n').Single(l => l.StartsWith("def method0RawArguments ", StringComparison.Ordinal));
 var operations = argumentCode[(argumentCode.LastIndexOf("code := [", StringComparison.Ordinal) + 9)..argumentCode.LastIndexOf(']')].Split(", ");
 bool ArgumentLoad(int pc) => operations[pc].StartsWith(".load", StringComparison.Ordinal);
-Reject("ForgedFeatureSite", "FeatureFlowValid", featureObligation, _ => true, forgeState: true);
+Reject("ForgedFeatureSite", "FeatureFlowValid", featureObligation, _ => true);
 // Code decoded from the forged mask loads the argument there, so the feature flow refuses the site.
-Reject("ForgedArgumentFeatures", "FeatureFlowValid", featureObligation, ArgumentLoad, forgeState: true);
-Reject("ForgedArgumentSite", "ParameterHomesValid", parameterObligation, ArgumentLoad, forgeState: true,
-    pinnedCode: true);
+Reject("ForgedArgumentFeatures", "FeatureFlowValid", featureObligation, ArgumentLoad);
+Reject("ForgedArgumentSite", "ParameterHomesValid", parameterObligation, ArgumentLoad, pinnedCode: true);
 
 var consumer = Path.Combine(directory, "Consumer");
 Directory.CreateDirectory(consumer);
@@ -121,6 +109,7 @@ File.Copy(At("lean-toolchain"), Path.Combine(consumer, "lean-toolchain"), true);
 var proof = Path.Combine(consumer, "Proof.lean");
 File.WriteAllText(proof, """
 import Extracted
+#guard Extracted.method0FeatureStates.length == Extracted.method0Reachable.length
 namespace ExampleProof
 def empty : CIL.Safety.Memory := { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩, views := [], nextIdentity := 0 }
 -- Only this user proof's `rfl` needs depth to reach the scalar path ~800 instructions in; generated evidence keeps the defaults.
