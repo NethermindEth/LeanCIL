@@ -602,40 +602,54 @@ partial class Program
         return inputs;
     }
 
-    // Read from source text before any build, so the proof key can bind PDB names; Lean's
-    // compiled import headers confirm it after the build. Ambiguous module paths all count.
-    static bool ConsumerImportsSymbols(string proof, SortedDictionary<string, string> snapshot, string root) =>
-        ConsumerGeneratedImports(proof, snapshot, root).Any(import =>
-            import.Module == "ExtractedSymbols" || SelectionModules.IsSymbols(import.Module));
-
-    /// <summary>
-    /// The keyed extraction modules the proof's import closure names, after rejecting a key of another extraction.
-    /// </summary>
-    static string[] ConsumerSelectedModules(string proof, SortedDictionary<string, string> snapshot, string root,
-        JsonElement identity) =>
-        [.. ConsumerGeneratedImports(proof, snapshot, root).Where(import => SelectionModules.Is(import.Module))
-            .GroupBy(import => import.Module, StringComparer.Ordinal)
-            .SelectMany(group => SelectionModules.Selected([group.Key], identity, group.First().Source))];
-
-    // Imports of the proof's closure that no consumer source provides, with the source naming each.
-    static IEnumerable<(string Module, string Source)> ConsumerGeneratedImports(string proof,
-        SortedDictionary<string, string> snapshot, string root)
+    /// <summary>Consumer import paths and source imports for one input snapshot.</summary>
+    sealed class ConsumerImports(SortedDictionary<string, string> snapshot, string root)
     {
-        var sources = snapshot.Keys.Where(key => key.StartsWith("consumer:", StringComparison.Ordinal) && key.EndsWith(".lean", StringComparison.Ordinal))
-            .Select(key => (Path: key["consumer:".Length..], Relative: "/" + Path.GetRelativePath(root, key["consumer:".Length..]).Replace('\\', '/'))).ToArray();
-        var pending = new Queue<string>([proof]);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        while (pending.TryDequeue(out var path))
+        // Multiple package or library roots can provide the same module. Keep snapshot order for diagnostics.
+        readonly ILookup<string, string> sources = snapshot.Keys
+            .Where(key => key.StartsWith("consumer:", StringComparison.Ordinal) &&
+                key.EndsWith(".lean", StringComparison.Ordinal))
+            .SelectMany(key => ModulePaths(root, key["consumer:".Length..]))
+            .ToLookup(entry => entry.Module, entry => entry.Path, StringComparer.Ordinal);
+        readonly Dictionary<string, string[]> imports = new(StringComparer.Ordinal);
+
+        static IEnumerable<(string Module, string Path)> ModulePaths(string root, string path)
         {
-            if (!seen.Add(path)) continue;
-            foreach (Match import in SourceImport.Matches(File.ReadAllText(path)))
+            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+            for (var start = 0; start < relative.Length;)
             {
-                var name = import.Groups[1].Value;
-                if (name == "ExtractedSymbols" || SelectionModules.Is(name)) yield return (name, path);
-                var module = "/" + name.Replace('.', '/') + ".lean";
-                foreach (var source in sources.Where(source => source.Relative.EndsWith(module, StringComparison.Ordinal)))
-                    pending.Enqueue(source.Path);
+                yield return (relative[start..], path);
+                var separator = relative.IndexOf('/', start);
+                if (separator < 0) yield break;
+                start = separator + 1;
             }
+        }
+
+        string[] ReadImports(string path)
+        {
+            if (imports.TryGetValue(path, out var names)) return names;
+            var bytes = File.ReadAllBytes(path);
+            var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+            if (hash != snapshot["consumer:" + path])
+                throw new InvalidOperationException("Inputs changed during consumer verification");
+            using StreamReader reader = new(new MemoryStream(bytes));
+            names = SourceImport.Matches(reader.ReadToEnd()).Select(match => match.Groups[1].Value).ToArray();
+            imports.Add(path, names);
+            return names;
+        }
+
+        // Lean's compiled import headers confirm the source-level selection after the build.
+        internal IEnumerable<(string Module, string Source)> Generated(string proof)
+        {
+            var pending = new Queue<string>([proof]);
+            var seen = new HashSet<string>(StringComparer.Ordinal) { proof };
+            while (pending.TryDequeue(out var path))
+                foreach (var name in ReadImports(path))
+                {
+                    if (name == "ExtractedSymbols" || SelectionModules.Is(name)) yield return (name, path);
+                    foreach (var source in sources[name.Replace('.', '/') + ".lean"])
+                        if (seen.Add(source)) pending.Enqueue(source);
+                }
         }
     }
 
@@ -1551,6 +1565,7 @@ partial class Program
                 ? snapshot.Keys.Where(key => key.StartsWith("consumer:", StringComparison.Ordinal))
                     .Select(key => ResolvedPath(key["consumer:".Length..])).ToArray()
                 : [];
+            var imports = new ConsumerImports(snapshot, root);
             foreach (var i in live)
                 try
                 {
@@ -1561,8 +1576,12 @@ partial class Program
                     before[i] = BoundRequestInputs(i, common);
                     if (!before[i].ContainsKey("consumer:" + proofs[i]))
                         throw new InvalidDataException("Proof must be a Lean source under the consumer root, outside excluded build/artifact directories.");
-                    if (ConsumerImportsSymbols(proofs[i], snapshot, root))
+                    List<(string Module, string Source)> keyed = [];
+                    foreach (var import in imports.Generated(proofs[i]))
                     {
+                        if (SelectionModules.Is(import.Module)) keyed.Add(import);
+                        if (symbols[i] is not null ||
+                            import.Module != "ExtractedSymbols" && !SelectionModules.IsSymbols(import.Module)) continue;
                         var path = Path.Combine(outputs[i], "Symbols.lean");
                         if (!File.Exists(path))
                         {
@@ -1571,7 +1590,9 @@ partial class Program
                         }
                         symbols[i] = Sha(path);
                     }
-                    selections[i] = ConsumerSelectedModules(proofs[i], snapshot, root, extractions[i].Root);
+                    selections[i] = [.. keyed.DistinctBy(import => import.Module, StringComparer.Ordinal)
+                        .SelectMany(import =>
+                            SelectionModules.Selected([import.Module], extractions[i].Root, import.Source))];
                 }
                 catch (Exception error) { Fail([i], error); }
         }

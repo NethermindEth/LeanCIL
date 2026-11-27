@@ -713,6 +713,9 @@ writes `failed.json`.
 The session takes one source snapshot, restores certified support once and checks each
 extraction's integrity. Requests share work as follows:
 
+- To find keyed extraction imports and symbol dependencies, the verifier indexes the source
+  paths in the snapshot. It reads imports once per reached file and follows every matching
+  path when several package roots provide the same module.
 - Requests whose `Extracted.lean` is identical share one Lake workspace: one `lake build` of all
   their proof modules, one extraction certificate audit and one kernel replay of the union of
   non-certified modules. Requests with different extractions use separate workspaces.
