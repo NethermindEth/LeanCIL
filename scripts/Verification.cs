@@ -4921,7 +4921,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
         string? settings = null, Action<string>? stage = null, DeepCheckInputs? deepChecks = null,
         DeepCheckRun? deepRun = null, Func<Sha256Digest, Sha256Digest>? receiveDigest = null,
-        StatementRequest? statement = null)
+        StatementRequest? statement = null, Action<string>? onCleanExtractionCompiled = null)
     {
         Sha256Digest RunCheck(string[] command) => CheckManifest(command, receiveDigest);
         deepRun = DeepCheckRun.Claim(deepChecks, deepRun);
@@ -5122,6 +5122,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             var extractionSuffix = "\n" + Sha(Path.Combine(fresh, "Extracted.lean"));
             var extractedKey = StandaloneExtractionKey(environmentKey, extractionSuffix);
             string? extractionPublication = null;
+            bool cleanExtractionCompiled = false;
             if (RestoreSuccess(extractedKey, fresh))
             {
                 extractionCacheHits++;
@@ -5131,8 +5132,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             {
                 // The native audit checks this theorem's exact type after independent kernel replay.
                 stage?.Invoke("proof checking");
-                Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, "Extracted.olean"),
+                var diagnostics = Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, "Extracted.olean"),
                     Path.Combine(fresh, "Extracted.lean")], leanPath: leanPath, progress: "Checking Extracted: " + entry);
+                cleanExtractionCompiled = onCleanExtractionCompiled is not null &&
+                    !diagnostics.Contains("sorryAx", StringComparison.Ordinal);
                 var publication = Path.Combine(fresh, "extraction-cache");
                 Directory.CreateDirectory(publication);
                 foreach (var path in Directory.EnumerateFiles(fresh).Where(path =>
@@ -5502,7 +5505,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             standaloneCachePromotion = completesLibrary && deep is null && UseSuccessCache
                 ? new(fullLibraryKey!, new(currentModules, StringComparer.Ordinal),
                     extractedKey, extractionSuffix, proofKey, proofSuffix) : null;
-
+            // A fixture can reuse the frontend and its axiom diagnostics only after the module passes audit.
+            if (cleanExtractionCompiled) onCleanExtractionCompiled?.Invoke(extractedKey);
             return report;
         }
         catch (Exception error)
