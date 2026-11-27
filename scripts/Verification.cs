@@ -472,7 +472,7 @@ partial class Program : IDisposable
             File.WriteAllBytes(Path.Combine(staging, "receipt.hmac"), HMACSHA256.HashData(ReceiptKey, Encoding.UTF8.GetBytes(key).Concat(manifest).ToArray()));
             try
             {
-                Directory.Move(staging, cached);
+                MoveCacheDirectory(staging, cached);
                 return;
             }
             catch (IOException) when (Directory.Exists(cached)) { }
@@ -481,8 +481,8 @@ partial class Program : IDisposable
             var invalid = cached + ".invalid-" + Guid.NewGuid().ToString("N");
             try
             {
-                Directory.Move(cached, invalid);
-                Directory.Move(staging, cached);
+                MoveCacheDirectory(cached, invalid);
+                MoveCacheDirectory(staging, cached);
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
             finally
@@ -492,6 +492,27 @@ partial class Program : IDisposable
             }
         }
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+    }
+
+    // A reader without delete sharing on Windows can briefly block an atomic cache-directory rename.
+    static void MoveCacheDirectory(string source, string destination)
+    {
+        const int accessDenied = unchecked((int)0x80070005);
+        const int sharingViolation = unchecked((int)0x80070020);
+        const int retryLimit = 20;
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                Directory.Move(source, destination);
+                return;
+            }
+            catch (IOException error) when (OperatingSystem.IsWindows() && attempt < retryLimit &&
+                error.HResult is accessDenied or sharingViolation && !Directory.Exists(destination))
+            {
+                Thread.Sleep(50);
+            }
+        }
     }
 
     string LeanExecutable => Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");

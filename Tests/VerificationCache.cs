@@ -28,6 +28,21 @@ Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
 using var verifier = new Program();
 try
 {
+    if (OperatingSystem.IsWindows())
+    {
+        var staged = Directory.CreateDirectory(Path.Combine(directory, "staged")).FullName;
+        var target = Path.Combine(directory, "published");
+        var stagedReceipt = Path.Combine(staged, "receipt.json");
+        File.WriteAllText(stagedReceipt, "{}");
+        using var reader = File.Open(stagedReceipt, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var release = Task.Run(() => { Thread.Sleep(100); reader.Dispose(); });
+        MoveCacheDirectory(staged, target);
+        release.GetAwaiter().GetResult();
+        if (File.ReadAllText(Path.Combine(target, "receipt.json")) != "{}" || Directory.Exists(staged))
+            throw new InvalidOperationException("The complete staged receipt did not move into place.");
+        Console.WriteLine("PASS an active Windows reader can release a staged receipt before publication");
+    }
+
     var source = Path.Combine(directory, "source");
     var destination = Path.Combine(directory, "destination");
     Directory.CreateDirectory(source);

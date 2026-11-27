@@ -364,7 +364,7 @@ partial class Program
                 File.Copy(Within(export.Staging, file), target);
             }
             Directory.CreateDirectory(staging);
-            try { Directory.Move(staging, directory); }
+            try { MoveCacheDirectory(staging, directory); }
             catch (IOException) when (Directory.Exists(directory)) { }
         }
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
