@@ -1628,21 +1628,30 @@ elab_rules : tactic
       else if !instructionFacts.isEmpty then
         `(tactic| cil_strict (cil_checked_instruction_from_fact [$facts:term,*]))
       else if let #[link, model] := linkFacts then
+        let modelValue? ← (← getMainGoal).withContext do
+          let type ← inferType (← Term.elabTerm model none)
+          let some (_, _, result) := type.consumeMData.eq? | return none
+          let some #[_, value] := argumentsOf? result ``Option.some 2 | return none
+          return some value
+        -- A known memory call can use its operation equation with the caller's memory facts.
+        let result ← if operation == ``CIL.Instruction.call &&
+            modelValue?.any (·.isAppOf ``CIL.RuntimeModel.memory) then
+            `(tactic| first | cil_checked_step_normalized [$facts:term,*] | rfl)
+          else `(tactic| rfl)
         let evaluate ← `(tactic| (
           refine Eq.trans (CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl _) ?_
-          rfl))
+          $result:tactic))
         let intrinsic ← `(tactic| (
           refine Eq.trans (CIL.Safety.step_call_intrinsic _ _ _ _ _ $link $model rfl) ?_
           cil_checked_intrinsic [$facts:term,*]))
         -- Scalar results can reduce directly. Vector steps normalize lanes, and supplied
         -- evaluation facts must rewrite before reduction unfolds their symbolic operands.
-        let preferIntrinsic ← (← getMainGoal).withContext do
-          let type ← inferType (← Term.elabTerm model none)
-          let some (_, _, result) := type.consumeMData.eq? | return false
-          let some #[_, value] := argumentsOf? result ``Option.some 2 | return false
-          let some #[op, _] := argumentsOf? value ``CIL.RuntimeModel.intrinsic 2 | return false
-          return !op.isAppOf ``CIL.Intrinsic.scalar || !facts.getElems.isEmpty
-        let (firstStep, secondStep) := if preferIntrinsic then (intrinsic, evaluate) else (evaluate, intrinsic)
+        let preferIntrinsic := modelValue?.any fun value =>
+          match argumentsOf? value ``CIL.RuntimeModel.intrinsic 2 with
+          | some #[op, _] => !op.isAppOf ``CIL.Intrinsic.scalar || !facts.getElems.isEmpty
+          | _ => false
+        let (firstStep, secondStep) :=
+          if preferIntrinsic then (intrinsic, evaluate) else (evaluate, intrinsic)
         `(tactic| cil_strict (first
           | $firstStep:tactic
           | $secondStep:tactic

@@ -809,6 +809,7 @@ private def addUInt64 : CIL.Extraction.MethodRef :=
 
 cil_runtime_models addBody
 
+set_option maxHeartbeats 4500 in
 open CIL.Safety in
 theorem add_run (memory : Memory) (source moved : Reference)
     (formed : form memory source = .ok source)
