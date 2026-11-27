@@ -564,6 +564,30 @@ partial class Program
         }).ToArray();
     }
 
+    /// <summary>Resolved locations where a batch output would overlap a consumer source.</summary>
+    static HashSet<string> ConsumerSourceLocations(SortedDictionary<string, string> snapshot)
+    {
+        var locations = new HashSet<string>(CollidingLocationComparer);
+        var parents = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var key in snapshot.Keys)
+        {
+            if (!key.StartsWith("consumer:", StringComparison.Ordinal)) continue;
+            var source = key["consumer:".Length..];
+            var parent = Path.GetDirectoryName(source)!;
+            if (!parents.TryGetValue(parent, out var resolved))
+                parents.Add(parent, resolved = ResolvedPath(parent));
+            string? location = Path.Join(resolved, Path.GetFileName(source));
+            // A source may have become a link since the snapshot read it.
+            if (new FileInfo(location).LinkTarget is not null) location = ResolvedPath(source);
+            while (location is not null && locations.Add(location))
+                location = Path.GetDirectoryName(location);
+        }
+        foreach (var (parent, resolved) in parents)
+            if (!string.Equals(ResolvedPath(parent), resolved, StringComparison.Ordinal))
+                throw new InvalidDataException("Consumer source directory changed during verification: " + parent);
+        return locations;
+    }
+
     static SortedDictionary<string, string> ConsumerSnapshot(string root, string? output,
         ConsumerDependency[]? bundled = null, SortedDictionary<string, string>? frameworkInputs = null)
     {
@@ -1577,16 +1601,12 @@ partial class Program
         try
         {
             var common = ReadInputs(out snapshot);
-            // Each source is resolved once, so a batch costs one pass over the sources per request.
-            string[] consumerSources = batch
-                ? snapshot.Keys.Where(key => key.StartsWith("consumer:", StringComparison.Ordinal))
-                    .Select(key => ResolvedPath(key["consumer:".Length..])).ToArray()
-                : [];
+            var sourceLocations = batch ? ConsumerSourceLocations(snapshot) : null;
             var imports = new ConsumerImports(snapshot, root);
             foreach (var i in live)
                 try
                 {
-                    if (consumerSources.Any(source => MayLieBelow(locations[i], source)))
+                    if (sourceLocations?.Contains(locations[i]) == true)
                         throw new InvalidDataException(
                             "Batch outputs must lie outside the consumer sources, for example under artifacts/: " +
                             outputs[i]);

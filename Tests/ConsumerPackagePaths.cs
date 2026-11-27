@@ -108,6 +108,15 @@ partial class Program
             Reject(linkedPackage, "escape/Secret.lean", "a link");
             Require(ResolvedRelativePath(outside, Path.Combine(package, "escape", "Secret.lean")) == "Secret.lean",
                 "A location inside a directory reached through a link was not found inside it.");
+            var source = Path.Combine(linkedPackage, "escape", "Secret.lean");
+            var blocked = ConsumerSourceLocations(new(StringComparer.Ordinal)
+            {
+                ["consumer:" + source] = "", ["revision:leancil"] = ""
+            });
+            Require(blocked.Contains(ResolvedPath(source)) && blocked.Contains(ResolvedPath(outside)) &&
+                blocked.Contains(ResolvedPath(work)) && !blocked.Contains(ResolvedPath(linkedPackage)) &&
+                !blocked.Contains(ResolvedPath(Path.Combine(outside, "Other.lean"))),
+                "Batch output overlap changed for a source reached through two directory links.");
             // A dangling link still names where a write through it would land.
             var gone = Path.Combine(work, "gone");
             Directory.CreateDirectory(gone);

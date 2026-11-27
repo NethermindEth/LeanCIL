@@ -937,13 +937,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     internal static string? RelativeBelow(string root, string path) => RelativeBelow(root, path, NameCaseIn);
 
     /// <summary>
-    /// Whether `path` may lie below `root` (both resolved): as <see cref="RelativeBelow(string, string)"/>, but a
-    /// name differing only in case matches where the case rule is unknown, for checks that must keep outputs apart.
-    /// </summary>
-    internal static bool MayLieBelow(string root, string path) =>
-        RelativeBelow(root, path, NameCaseIn, unknownMatches: true) is not null;
-
-    /// <summary>
     /// `path` relative to `root` (`.` when they are equal), or null when it lies outside; both are full paths
     /// without `.` or `..` components. `nameCaseIn` gives the rule by which a directory matches entry names, and a
     /// name differing only in case where that rule is unknown matches only when `unknownMatches` is set.
