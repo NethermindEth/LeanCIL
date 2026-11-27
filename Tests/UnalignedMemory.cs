@@ -169,7 +169,7 @@ foreach (var (name, lowered) in new[]
     var mutated = $$"""{ method0 with code := method0.code.set {{pc}} ({{lowered}}) }""";
     var replacement = $"Extraction.RuntimeModelsAgree method0Closed method0Reachable {mutated}";
     Reject(name, source, "theorem method0_models_validated", statement, replacement, "RuntimeModelsAgree");
-    Reject(name, source, "def method0Closed", "declared := { convention := 16",
+    Reject(name, SeparateClosedBody(source, 0), "def method0Closed", "declared := { convention := 16",
         "declared := { convention := 17", "RuntimeModelsAgree");
 }
 foreach (var name in new[] { "ReadWord", "ReadPointerWord", "ReadAlignedWord" }
@@ -177,7 +177,7 @@ foreach (var name in new[] { "ReadWord", "ReadPointerWord", "ReadAlignedWord" }
 {
     var generated = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
     var source = NarrowEvidence(generated, "method0_body_validated");
-    Reject(name, source, "def method0Original", "target := .external externalIdentity0",
+    Reject(name, SeparateClosedBody(source, 0), "def method0Original", "target := .external externalIdentity0",
         "target := .external \"forged\"", "the decoded method does not match its body bytes or metadata");
 }
 rejected.Check();

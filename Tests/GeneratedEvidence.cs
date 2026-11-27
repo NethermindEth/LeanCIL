@@ -39,7 +39,7 @@ partial class Program
     [GeneratedRegex($"""{DecodedMethodHead}{DecoderCall}{DecoderInput}(?=\r?$)""")]
     internal static partial Regex DecodedMethod { get; }
 
-    [GeneratedRegex(@"(?m)^def method(\d+)Original : Extraction\.RawMethod := [^\r\n]*")]
+    [GeneratedRegex(@"(?m)^def method(\d+)Original : Extraction\.RawMethod := (?<body>[^\r\n]*)")]
     private static partial Regex RawDefinition { get; }
 
     [GeneratedRegex(@"(?m)^def method(\d+)Closed : Extraction\.RawMethod := (?<body>[^\r\n]+)")]
@@ -164,11 +164,29 @@ partial class Program
             .FirstOrDefault(match => match.Groups[1].Value == $"{method}")?.Value ?? "";
     }
 
+    /// <summary>The emitted closed body and the literal it denotes when shared with its original.</summary>
+    static (Group Body, string Literal) ClosedBody(string source, int method)
+    {
+        var closed = ClosedDefinition.Matches(source).Single(match => match.Groups[1].Value == $"{method}");
+        var body = closed.Groups["body"];
+        if (body.Value != $"method{method}Original") return (body, body.Value);
+        var original = RawDefinition.Matches(source).Single(match => match.Groups[1].Value == $"{method}");
+        return (body, original.Groups["body"].Value);
+    }
+
+    /// <summary>The closed input can be mutated independently of the original input and vice versa.</summary>
+    static string SeparateClosedBody(string source, int method)
+    {
+        var (body, literal) = ClosedBody(source, method);
+        return body.Value == literal ? source : source[..body.Index] + literal + source[(body.Index + body.Length)..];
+    }
+
     /// <summary>
     /// Decodes the forged original so the emitted code differs from the closed evidence used by the checks.
     /// </summary>
     static string ForgeDecodedOriginal(string source, int method, string before, string after)
     {
+        source = SeparateClosedBody(source, method);
         var original = DecodedOriginal(source, method);
         if (!original.Contains(before, StringComparison.Ordinal))
             throw new InvalidOperationException($"method{method}Original has no {before}");
@@ -213,6 +231,7 @@ partial class Program
     /// </summary>
     static string ForgeDecodedReturnType(string source, int method, string atom, string replacement)
     {
+        source = SeparateClosedBody(source, method);
         var closed = ClosedReturnType.Matches(source)
             .FirstOrDefault(match => match.Groups["number"].Value == $"{method}");
         var returnType = closed?.Groups["type"].Value ?? "";

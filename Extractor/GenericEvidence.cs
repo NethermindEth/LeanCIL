@@ -628,11 +628,12 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         lean.AppendLine(typeArguments);
         // The appended rows' call table lists every local method with its type arguments.
         if (appendsRows) decoderInputs?.AppendLine(typeArguments);
-        // A bound caller is not generic, so its closed definition is its original.
-        var closed = binding is null ? $"def method{number}Closed : Extraction.RawMethod := {closedEvidence}"
-            : $"def method{number}Closed : Extraction.RawMethod := method{number}Original";
-        lean.AppendLine(closed);
-        decoderInputs?.AppendLine(closed);
+        var closedHeader = $"def method{number}Closed : Extraction.RawMethod := ";
+        var originalName = $"method{number}Original";
+        var sameMethod = binding is not null || originalEvidence == closedEvidence;
+        lean.AppendLine(closedHeader + (sameMethod ? originalName : closedEvidence));
+        // Decoder inputs for an unbound method can be used without its original declaration.
+        decoderInputs?.AppendLine(closedHeader + (binding is null ? closedEvidence : originalName));
         lean.AppendLine($"def method{number}DispatchTypes : List Extraction.DispatchType := {DispatchTypes(method)}");
         // Direct equality proofs avoid a separate structural decision over the raw metadata.
         lean.AppendLine(string.Join(" ",

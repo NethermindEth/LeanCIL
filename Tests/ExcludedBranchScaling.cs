@@ -47,6 +47,7 @@ List<string> Entries(string name)
 }
 var reachable = Entries("method0Reachable");
 var states = Entries("method0FeatureStates");
+var closed = ClosedBody(extracted, 0).Literal;
 var excluded = reachable.Count(live => live == "false");
 if (excluded < 700 || states.Count != reachable.Count || extracted.Contains("set_option maxHeartbeats"))
     throw new InvalidOperationException($"Expected a large excluded branch checked at the default budget; found {excluded} excluded sites.");
@@ -76,7 +77,6 @@ void Reject(string name, string validator, string obligation, Func<int, bool> si
     var pc = Enumerable.Range(0, live.Count).Last(i => live[i] == "false" && site(i));
     live[pc] = "true";
     // The method has no locals, so the forged state is well shaped and only the check at the claimed site rejects it.
-    var closed = extracted.Split('\n').Single(l => l.StartsWith("def method0Closed ", StringComparison.Ordinal));
     if (forgeState && !closed.Contains("], locals := [], initLocals", StringComparison.Ordinal))
         throw new InvalidOperationException(
             "The excluded-branch method has locals; the forged state may be badly shaped.");
