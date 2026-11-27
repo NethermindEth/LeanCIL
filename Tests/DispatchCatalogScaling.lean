@@ -104,11 +104,26 @@ theorem overrideExclusion :
 
 #print axioms overrideExclusion
 
+/-- Classes with self-cycles outside the selected hierarchy cannot contribute a target. -/
+private def unrelatedCycles (count : Nat) : Bool :=
+  let others := (List.range count).map fun index =>
+    let item := entry (index + 1)
+    { item with base := item.identity }
+  virtual (entry 0 :: others) [entry 0]
+
+/-- Tangled ancestors outside the slot's hierarchy never resolve to its body. -/
+theorem cyclicTargets :
+    let cycle := [{ entry 1 with base := classId 2 }, { entry 2 with base := classId 1 }, entry 3]
+    let catalog := entry 0 :: cycle
+    virtual catalog [entry 0] = true ∧ virtual catalog catalog = false := by decide +kernel
+
+#print axioms cyclicTargets
+
 open Lean Elab Command Meta in
 run_cmd do
   let maxFourfoldGrowth := 6
   for (label, check) in [("virtual chain", ``virtualChain), ("indirect table", ``indirect),
-      ("reversed indirect table", ``reversedIndirect)] do
+      ("reversed indirect table", ``reversedIndirect), ("unrelated cycles", ``unrelatedCycles)] do
     let mut previous := 0
     for count in [8, 32, 128] do
       let (claim, proof) ← liftTermElabM do

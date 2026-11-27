@@ -71,8 +71,9 @@ the target table at each reachable call site. Exact-class queries select the own
 
 The translation checker shares virtual slot resolution across a class hierarchy. Each reachable
 class summary records its nearest matching declaration, its class identities and the owners named
-by explicit overrides. Extending a summary checks overrides in both directions. On an acyclic
-catalog with distinct identity keys and bounded signature and name sizes, the ordered-map work is
+by explicit overrides. Extending a summary checks overrides in both directions. Cycle detection
+marks each cyclic path as unable to reach the slot. For a finite catalog with distinct identity
+keys and bounded signature and name sizes, the ordered-map work is
 O(N log N), where N counts classes, method declarations, override entries and virtual targets.
 Indirect-call catalogs with strictly increasing tokens take one pass to certify distinctness.
 Other token orders use an ordered index with exact equality inside each identity bucket.
