@@ -68,15 +68,15 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     var target = VerificationSelection.GroupSeconds(durations);
     var longest = durations.MaxBy(suite => suite.Value);
     Require(groups.Length <= allSuites.Length / 3, "Suites were not packed: " + groups.Length + " jobs");
-    Require(target == Math.Min(longest.Value, durations.Values.Sum() / VerificationSelection.Runners),
-        "Packed jobs must fit under the longest suite and one runner's share");
+    Require(target == Math.Min(longest.Value * 1.10, durations.Values.Sum() / VerificationSelection.Runners),
+        "Packed jobs must fit within the longest suite's 10% allowance and one runner's share");
     // A refreshed table moves the target; the longest suites may then swap places without unbalancing a run.
     var refreshed = new Dictionary<string, double>(durations) { ["evidence"] = longest.Value - 100 };
-    Require(VerificationSelection.GroupSeconds(refreshed) <= longest.Value &&
+    Require(VerificationSelection.GroupSeconds(refreshed) <= longest.Value * 1.10 &&
         VerificationSelection.GroupSeconds(new Dictionary<string, double> { ["only"] = 90 }) == 90.0 / 8,
         "The target follows the measured total, not one suite");
-    // The longest suite alone bounds the run; no packed job may outlast it or approach its timeout.
-    Require(groups[0].Suites is [var alone] && alone == longest.Key, "The longest suite shares its job");
+    Require(groups.Select(Seconds).SequenceEqual(groups.Select(Seconds).OrderDescending()),
+        "Groups must start in descending order of estimated work");
     foreach (var group in groups.Where(group => group.Suites.Length > 1))
         Require(group.Suites.Length <= VerificationSelection.GroupMembers && Seconds(group) <= target,
             "Unbounded group: " + group.Suite);

@@ -51,9 +51,10 @@ internal static class VerificationSelection
     // More members than this make a job's summary long and its name useless for finding a failure.
     internal const int GroupMembers = 8;
 
-    // A packed job fits within both one runner's share of a full run and the longest measured suite.
+    // Allow a short suite to share the longest job while capping each group at one runner's share.
+    const double LongestSuiteAllowance = 1.10;
     internal static double GroupSeconds(IReadOnlyDictionary<string, double> durations) =>
-        Math.Min(durations.Values.Max(), durations.Values.Sum() / Runners);
+        Math.Min(durations.Values.Max() * LongestSuiteAllowance, durations.Values.Sum() / Runners);
 
     // A job's suites when few enough to read, else its longest suite and how many more it runs.
     static string Name(List<string> group) => group.Count <= 3 ? string.Join("+", group)

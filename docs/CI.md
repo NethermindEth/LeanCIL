@@ -57,7 +57,8 @@ Selection assigns the longest remaining suite to the runner with the least estim
 charges each job for setup and adds the measured library time to the shortest selected suite
 when the change calls for library measurement. The library step has a 20-minute timeout.
 Each job holds up to eight suites.
-Its target duration is the smaller of the longest suite and one eighth of the full run's suite time.
+Its target duration is the smaller of 110% of the longest suite and one eighth of the full run's
+suite time. A short suite can share the longest job within that allowance.
 Small selections use fewer runners. Jobs start longest first, with up to eight running at once.
 
 - The duration table `scripts/verification-durations.json` includes each suite's full elapsed
