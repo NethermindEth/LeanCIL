@@ -43,17 +43,17 @@ def restating (table : PlatformTable) (name : String) (kind : PlatformKind) : Pl
   editPlatform (fun entry =>
     some (if entry.parts.getLastD [] == bytesOf name then { entry with kind } else entry)) table
 
-/-- The entries added so far. -/
+/-- The fixture's rows, heaps and links in reverse insertion order, with the next heap offsets. -/
 structure Builder where
-  rows : List ByteEntry := []
-  strings : List ByteEntry := [(0, [0])]
-  blobs : List ByteEntry := [(0, [0])]
-  userStrings : List ByteEntry := []
+  reversedRows : List ByteEntry := []
+  reversedStrings : List ByteEntry := [(0, [0])]
+  reversedBlobs : List ByteEntry := [(0, [0])]
+  reversedUserStrings : List ByteEntry := []
   stringEnd : Nat := 1
   blobEnd : Nat := 1
   userEnd : Nat := 1
   counts : List (Nat × Nat) := []
-  links : List MetadataLink := []
+  reversedLinks : List MetadataLink := []
   corlib : Nat := 0
 
 /-- The column widths of an image whose tables are all small. -/
@@ -81,7 +81,7 @@ def Builder.addString : Builder → List Nat → Builder × Nat
   | ⟨rows, strings, blobs, userStrings, stringEnd, blobEnd, userEnd, counts, links, corlib⟩,
     text =>
     let bytes := text ++ [0]
-    (⟨rows, strings ++ [(stringEnd, bytes)], blobs, userStrings, stringEnd + bytes.length, blobEnd,
+    (⟨rows, (stringEnd, bytes) :: strings, blobs, userStrings, stringEnd + bytes.length, blobEnd,
       userEnd, counts, links, corlib⟩, stringEnd)
 
 /-- Add a `#Blob` entry with the length prefix and return its offset. -/
@@ -89,7 +89,7 @@ def Builder.addBlob : Builder → List Nat → Builder × Nat
   | ⟨rows, strings, blobs, userStrings, stringEnd, blobEnd, userEnd, counts, links, corlib⟩,
     payload =>
     let bytes := compressedLength payload.length ++ payload
-    (⟨rows, strings, blobs ++ [(blobEnd, bytes)], userStrings, stringEnd, blobEnd + bytes.length,
+    (⟨rows, strings, (blobEnd, bytes) :: blobs, userStrings, stringEnd, blobEnd + bytes.length,
       userEnd, counts, links, corlib⟩, blobEnd)
 
 /-- Add a `#US` entry with the length prefix and terminal byte, and return its offset. -/
@@ -98,7 +98,7 @@ def Builder.addUserString : Builder → List Nat → Builder × Nat
     units =>
     let payload := units.flatMap (littleEndian 2) ++ [if units.any userStringFlag then 1 else 0]
     let bytes := compressedLength payload.length ++ payload
-    (⟨rows, strings, blobs, userStrings ++ [(userEnd, bytes)], stringEnd, blobEnd,
+    (⟨rows, strings, blobs, (userEnd, bytes) :: userStrings, stringEnd, blobEnd,
       userEnd + bytes.length, counts, links, corlib⟩, userEnd)
 
 /-- Add a row of a table and return its token. -/
@@ -107,7 +107,7 @@ def Builder.addRow : Builder → Nat → List Nat → Builder × Nat
     table, columns =>
     let count := ((counts.lookup table).getD 0) + 1
     let token := tokenOf table count
-    (⟨rows ++ [(token, encodeRow table columns)], strings, blobs, userStrings, stringEnd, blobEnd,
+    (⟨(token, encodeRow table columns) :: rows, strings, blobs, userStrings, stringEnd, blobEnd,
       userEnd, (counts.filter (·.1 != table)) ++ [(table, count)], links, corlib⟩, token)
 
 /-- Add a link. -/
@@ -115,7 +115,7 @@ def Builder.addLink : Builder → Nat → Nat → Nat → Nat → Builder
   | ⟨rows, strings, blobs, userStrings, stringEnd, blobEnd, userEnd, counts, links, corlib⟩,
     kind, source, slice, target =>
     ⟨rows, strings, blobs, userStrings, stringEnd, blobEnd, userEnd, counts,
-      links ++ [⟨kind, source, slice, target⟩], corlib⟩
+      ⟨kind, source, slice, target⟩ :: links, corlib⟩
 /-- A builder step, so a world reads as a sequence of additions. -/
 abbrev Step := StateM Builder
 
@@ -161,15 +161,35 @@ def assemblyBlock (builder : Builder) (name : List Nat) (version : Nat) :
   (builder, { tableHeader := tableHeader counts, assemblyRow := row,
               strings := [(0, [0]), (nameOffset, name ++ [0])], blobs := [(0, [0])] })
 
-/-- Insert `item` before the first item whose key is not smaller, keeping equal keys in order. -/
-def insertByKey {α : Type} (key : α → Nat) (item : α) : List α → List α
-  | [] => [item]
-  | other :: rest =>
-    if key item ≤ key other then item :: other :: rest else other :: insertByKey key item rest
+/-- The ascending runs in insertion order. Each added item precedes the current run in the
+    fixture, so ties stay in their original order. -/
+private def ascendingRuns {α : Type} (key : α → Nat) :
+    List α → α → List α → List (List α) → List (List α)
+  | [], first, rest, runs => (first :: rest) :: runs
+  | item :: items, first, rest, runs =>
+    if key item ≤ key first then ascendingRuns key items item (first :: rest) runs
+    else ascendingRuns key items item [] ((first :: rest) :: runs)
 
-/-- The items in ascending key order, as the extractor carries rows and links. -/
-def sortByKey {α : Type} (key : α → Nat) (items : List α) : List α :=
-  items.foldr (insertByKey key) []
+/-- The stable merge of each adjacent pair of ascending runs. -/
+private def mergePairs {α : Type} (key : α → Nat) : List (List α) → List (List α)
+  | first :: second :: rest =>
+    mergeBy (fun left right => key left ≤ key right) (first.length + second.length) first second ::
+      mergePairs key rest
+  | runs => runs
+
+/-- Sort the runs in at most logarithmically many passes, with their count as a recursion bound. -/
+private def mergeRuns {α : Type} (key : α → Nat) : Nat → List (List α) → List α
+  | _, [] => []
+  | _, [sorted] => sorted
+  | 0, runs => runs.flatten
+  | fuel + 1, runs => mergeRuns key fuel (mergePairs key runs)
+
+/-- Order the accumulated rows or links by key, preserving insertion order for equal keys. -/
+private def ordered {α : Type} (key : α → Nat) : List α → List α
+  | [] => []
+  | first :: rest =>
+    let runs := ascendingRuns key rest first [] []
+    mergeRuns key runs.length runs
 
 /-- The slice a builder describes, with the `Assembly` row of the given name and version. -/
 def finish (builder : Builder) (name : List Nat) (version : Nat) :
@@ -178,9 +198,10 @@ def finish (builder : Builder) (name : List Nat) (version : Nat) :
   { assembly := { assembly with
         tableHeader := tableHeader (builder.counts.filter (·.1 != Table.assembly) ++
           [(Table.assembly, 1)]) },
-    rows := sortByKey (·.1) builder.rows, strings := builder.strings, blobs := builder.blobs,
-    userStrings := builder.userStrings, corlib := builder.corlib,
-    links := sortByKey (fun link => link.kind * 0x100000000 + link.source) builder.links }
+    rows := ordered (·.1) builder.reversedRows, strings := builder.reversedStrings.reverse,
+    blobs := builder.reversedBlobs.reverse, userStrings := builder.reversedUserStrings.reverse,
+    corlib := builder.corlib,
+    links := ordered (fun link => link.kind * 0x100000000 + link.source) builder.reversedLinks }
 
 /-- The slice that `step` builds, and what it returns. -/
 def build {α : Type} (step : Step α) (name : List Nat) (version : Nat := 1) :
