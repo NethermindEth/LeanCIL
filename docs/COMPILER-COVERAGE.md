@@ -19,9 +19,10 @@ Run `dotnet run --file Tests/CompilerCoverage.cs` after building the Release ext
 construction, single-reference span locals, slices, unaligned reads and integer array allocation.
 It includes null constructor arguments, branch variants, implicit array-to-span conversions,
 span-to-read-only-span conversions and reused span locals. Unsupported floating-point array
-allocation is a rejection control. Each supported compiler/language column must accept the
-other cases. Accepted translations are checked by the Lean evidence validator; byte-identical
-generated evidence is checked once across columns.
+allocation is a rejection control. Each supported compiler/language column extracts the
+positive methods in one batch and checks the rejection separately. A failed batch fails the
+column and triggers individual extractions to report each method's diagnostic. The Lean evidence
+validator checks each distinct generated translation across the columns.
 
 `artifacts/CompilerCoverage/coverage.json` records compiler versions and hashes, source hash,
 reference-pack version, acceptance and rejection diagnostics.
