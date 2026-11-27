@@ -1605,36 +1605,35 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static SortedDictionary<string, string> Inputs(string proof, string? settings = null)
         => Inputs(CommonInputs(), proof, settings);
 
-    static SortedDictionary<string, string> CommonInputs()
+    static SortedDictionary<string, string> CommonInputs(bool libraryOnly = false)
     {
-        var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
-
-        foreach (var name in CertifiedLibraryRoots.Select(root => root + ".lean")
-            .Prepend("lake-manifest.json").Prepend("lean-toolchain"))
-            result[name] = Sha(At(name));
-        // Checkout identities see every declaration; the certified library sees only what builds it.
-        var lakefile = File.ReadAllBytes(At("lakefile.toml"));
-        result[CheckoutLakefileInput] = Convert.ToHexStringLower(SHA256.HashData(lakefile));
-        result["lakefile.toml"] = ContentKey(LibraryLakefile(Encoding.UTF8.GetString(lakefile)));
-
+        var files = CertifiedLibraryRoots.Select(root => root + ".lean")
+            .Prepend("lake-manifest.json").Prepend("lean-toolchain").Select(name => (name, At(name))).ToList();
         var folders = CertifiedLibraryRoots.Select(root => (root, new[] { ".lean" })).ToList();
 #if !LEANCIL_TOOL
-        // The repository's examples and tests are checkout inputs; the tool ships only the framework.
-        foreach (var name in new[] { "global.json", "Directory.Build.props", "Directory.Packages.props", ".editorconfig" })
-            result[name] = Sha(At(name));
-        folders.AddRange([("Examples", [".lean"]), ("Tests", [".lean"]), ("Extractor", [".cs", ".csproj"]),
-            ("scripts", [".cs"])]);
+        if (!libraryOnly)
+        {
+            foreach (var name in new[] { "global.json", "Directory.Build.props", "Directory.Packages.props",
+                ".editorconfig" })
+                files.Add((name, At(name)));
+            folders.AddRange([("Examples", [".lean"]), ("Tests", [".lean"]), ("Extractor", [".cs", ".csproj"]),
+                ("scripts", [".cs"])]);
+        }
 #endif
-
         foreach (var (folder, extensions) in folders)
             foreach (var path in Directory.EnumerateFiles(At(folder), "*", SearchOption.AllDirectories))
             {
+                if (!extensions.Contains(Path.GetExtension(path))) continue;
                 var relative = Path.GetRelativePath(Root, path).Replace('\\', '/');
-
-                if (extensions.Contains(Path.GetExtension(path)) && !relative.Split('/').Any(p => p is "bin" or "obj"))
-                    result[relative] = Sha(path);
+                if (!relative.Contains("/bin/", StringComparison.Ordinal) &&
+                    !relative.Contains("/obj/", StringComparison.Ordinal))
+                    files.Add((relative, path));
             }
-
+        var result = HashFiles(files);
+        // The checkout key also covers test declarations omitted from the certified library.
+        var lakefile = File.ReadAllBytes(At("lakefile.toml"));
+        if (!libraryOnly) result[CheckoutLakefileInput] = Convert.ToHexStringLower(SHA256.HashData(lakefile));
+        result["lakefile.toml"] = ContentKey(LibraryLakefile(Encoding.UTF8.GetString(lakefile)));
         return result;
     }
 
@@ -1815,7 +1814,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     void InstallReleasedLibrary(string archive, string staging, string cached, CertifiedReleaseAsset asset)
     {
-        var (key, _) = LibraryIdentity(CommonInputs());
+        var (key, _) = LibraryIdentity(CommonInputs(libraryOnly: true));
         if (!ValidReleaseAsset(asset, key) || new FileInfo(archive).Length != asset.ArchiveBytes ||
             Sha(archive) != asset.ArchiveSha256)
             throw new InvalidDataException("Release archive identity or integrity mismatch");
@@ -2824,7 +2823,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 // An incremental build replays donor modules too: an unchanged olean may import changed ones.
                 ReplayLibrary(library, (incrementalLibrary is null ? "fresh" : "incremental") +
                     " Lean verification library");
-                if (!Same(sources, LibrarySources(CommonInputs())))
+                if (!Same(sources, CommonInputs(libraryOnly: true)))
                     throw new InvalidDataException("Library sources changed during preparation");
                 libraryBuild = incrementalLibrary is null ? "fresh" : "incremental";
                 manifest = CacheFiles(library);
@@ -3090,7 +3089,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 throw new InvalidOperationException("Lake built other modules than the import closure it was given.");
             ReplayLibrary(build, "the framework modules the proof imports");
             var manifest = CacheFiles(build);
-            if (!ClosureManifest(manifest, LibrarySources(CommonInputs()), modules))
+            if (!ClosureManifest(manifest, CommonInputs(libraryOnly: true), modules))
                 throw new InvalidDataException("Library sources changed during preparation");
             File.WriteAllText(Path.Combine(build, "cache-manifest.json"), JsonSerializer.Serialize(manifest, Json));
             var manifestBytes = File.ReadAllBytes(Path.Combine(build, "cache-manifest.json"));
@@ -3488,8 +3487,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             ?? throw new InvalidDataException("Missing certified base manifest");
         var oldSources = LibrarySources(manifest);
         var (oldKey, _) = LibraryIdentity(oldSources);
-        var snapshot = Inputs(At("CIL.lean"));
-        var (newKey, newSources) = LibraryIdentity(snapshot);
+        var (newKey, newSources) = LibraryIdentity(CommonInputs(libraryOnly: true));
         if (oldSources.Any(pair => !newSources.TryGetValue(pair.Key, out var hash) || hash != pair.Value))
             throw new InvalidDataException("Source extension changed or removed an existing certified source");
         var additions = newSources.Where(pair => !oldSources.ContainsKey(pair.Key)).ToArray();
@@ -3525,7 +3523,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (Sha(target) != hash)
                     throw new InvalidDataException("Added source changed while copying: " + name);
             }
-            if (!Same(newSources, LibrarySources(Inputs(At("CIL.lean")))))
+            if (!Same(newSources, CommonInputs(libraryOnly: true)))
                 throw new InvalidDataException("Source extension changed during preparation");
             // Carry the producer's authenticated hashes forward; rehashing here could
             // otherwise authorize an old artifact that changed after its private copy.
@@ -3557,7 +3555,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var manifest = Path.Combine(directory, "cache-manifest.json");
         if (string.IsNullOrWhiteSpace(trustedDigest) || !File.Exists(manifest) || Sha(manifest) != trustedDigest)
             return null;
-        var (key, sources) = LibraryIdentity(CommonInputs());
+        var (key, sources) = LibraryIdentity(CommonInputs(libraryOnly: true));
         return ValidCertifiedLibrary(directory, trustedDigest, key, sources) ? trustedDigest : null;
     }
 

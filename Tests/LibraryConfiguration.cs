@@ -63,6 +63,8 @@ Console.WriteLine("PASS package, CIL, auditor, dependency and CIL-claiming libra
 
 // Checkout identities, such as session cache keys, still see the complete lakefile.
 var common = CommonInputs();
+Require(Same(CommonInputs(libraryOnly: true), LibrarySources(common)),
+    "Direct and checkout-derived certified library sources differ");
 Require(common[CheckoutLakefileInput] == Sha(At("lakefile.toml")) &&
     common["lakefile.toml"] == ContentKey(LibraryLakefile(File.ReadAllText(At("lakefile.toml")))) &&
     !LibrarySources(common).ContainsKey(CheckoutLakefileInput),

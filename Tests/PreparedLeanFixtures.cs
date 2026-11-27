@@ -75,7 +75,7 @@ partial class Program
         if (records.Count != importsRemaining.Count)
             throw new InvalidOperationException("Test fixture imports contain a cycle");
         var sources = LibrarySources(inputs);
-        if (!Same(sources, LibrarySources(CommonInputs())))
+        if (!Same(sources, CommonInputs(libraryOnly: true)))
             throw new InvalidOperationException("Library sources changed while checking fixtures");
         var manifest = Path.Combine(session, "prepared-test-fixtures.json");
         File.WriteAllText(manifest,
@@ -107,7 +107,7 @@ partial class Program
             throw new InvalidOperationException("Prepared Lean fixture manifest changed");
         var manifest = JsonSerializer.Deserialize<PreparedLeanManifest>(File.ReadAllText(path))!;
         // Compare snapshot keys, not raw files: the lakefile's key covers only its library view.
-        var current = LibrarySources(CommonInputs());
+        var current = CommonInputs(libraryOnly: true);
         if (manifest.LibrarySources.Count != current.Count)
             throw new InvalidOperationException("Prepared Lean library sources changed");
         foreach (var (source, hash) in manifest.LibrarySources)
