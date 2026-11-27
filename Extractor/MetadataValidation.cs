@@ -539,7 +539,8 @@ internal static class MetadataValidation
         // 1 while visiting, 2 once admitted to the walk, 3 when its body could not be analysed.
         Dictionary<MethodDefinition, int> state = [];
         List<MethodDefinition> ordered = [];
-        Dictionary<MethodDefinition, MethodDefinition[]> chains = [];
+        Dictionary<MethodDefinition, MethodDefinition> callers = [];
+        Dictionary<MethodDefinition, MethodDefinition[]> reportedChains = [];
         Dictionary<MethodDefinition, List<(MethodDefinition Method, bool Deferred)>> dependencies = [];
         MethodReference[]? addressedMethods = null;
         Dictionary<StructuralSignatures.Signature, MethodDefinition[]> indirectTargets = [];
@@ -556,7 +557,15 @@ internal static class MetadataValidation
             try { check(); return true; }
             catch (Exception error)
             {
-                blocked.Add(new(method, at, error, chains[method]));
+                if (!reportedChains.TryGetValue(method, out var chain))
+                {
+                    var path = new Stack<MethodDefinition>();
+                    path.Push(method);
+                    while (callers.TryGetValue(path.Peek(), out var caller)) path.Push(caller);
+                    chain = path.ToArray();
+                    reportedChains.Add(method, chain);
+                }
+                blocked.Add(new(method, at, error, chain));
                 return false;
             }
         }
@@ -588,8 +597,8 @@ internal static class MetadataValidation
                         throw new InvalidDataException($"Recursive managed dependency: {item.Method.FullName}");
                     continue;
                 }
-                chains[item.Method] = item.Caller is { } caller
-                    ? [.. chains[caller], item.Method] : [item.Method];
+                // Diagnostics use the first traversal path to a method, including shared callees.
+                if (blocked is not null && item.Caller is { } caller) callers.Add(item.Method, caller);
                 dependencies[item.Method] = [];
                 Walk(item.Method);
                 if (state[item.Method] == 3) continue;
