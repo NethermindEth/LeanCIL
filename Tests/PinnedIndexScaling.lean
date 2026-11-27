@@ -1,5 +1,6 @@
 import CIL.Extraction.BodyDecoding
 import Lean
+import Tests.PinnedIndexScaling.Construction
 
 /-! Package pin construction and independent method checks have separate cost bounds. -/
 
@@ -118,6 +119,9 @@ run_cmd do
     | .ok _ => pure ()
     let construction := (← IO.getNumHeartbeats) - start
     logInfo m!"pin construction: {pinCount} pins, {construction} heartbeats"
+    let constructionBudgetPerPin := 10000
+    if construction > pinCount * constructionBudgetPerPin then
+      throwError "ordered pin construction exceeded {constructionBudgetPerPin} heartbeats per pin"
     if previousConstruction != 0 && construction > previousConstruction * 6 then
       throwError "pin construction grew faster than indexed construction"
     previousConstruction := construction
@@ -162,5 +166,22 @@ theorem omitted_name_rejected : ({} : PinnedNames) ≠ indexPinNames [pin 0] := 
   have impossible : false = true := query
   cases impossible
 #print axioms omitted_name_rejected
+
+/-- Mixed-order pins can share a name while retaining distinct assembly versions. -/
+private def mixedPins : List AssemblyName :=
+  identities 8 ++ [pin 2, { pin 2 with version := ⟨2, 0, 0, 0⟩ }, pin 0]
+
+/-- The checked index of an unordered package with repeated pins. -/
+private def mixed : PinnedIndex := cil_pin_index mixedPins
+#print axioms mixed
+
+/-- Repeated identities collapse, and only the two listed versions of the shared name are pinned. -/
+theorem mixed_versions_present :
+    mixed.identities = mixedPins ∧ mixed.names.size = 8 ∧ mixed.exact.size = 9 ∧
+    mixed.exact.contains (pin 2) = true ∧
+    mixed.exact.contains { pin 2 with version := ⟨2, 0, 0, 0⟩ } = true ∧
+    mixed.exact.contains { pin 2 with version := ⟨3, 0, 0, 0⟩ } = false ∧
+    mixed.names.contains (pin 8).name = false := by decide +kernel
+#print axioms mixed_versions_present
 
 end Tests.PinnedIndexScaling

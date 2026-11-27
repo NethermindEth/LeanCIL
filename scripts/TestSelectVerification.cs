@@ -167,6 +167,7 @@ Test("test entry points", () =>
     Equal(Select(["Tests/NullReferences.cs"]), ["unsafe"]);
     foreach (var name in new[] { "BatchVerification", "VerificationCache", "VerificationReuse" })
         Equal(Select([$"Tests/{name}.cs"]), ["core"]);
+    Equal(Select(["Tests/PinnedIndexScaling/Construction.lean"]), ["core"]);
     Equal(Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
     Equal(Select(["Tests/MetadataDifferential.cs"]), ["evidence"]);
     Equal(Select(["Tests/GeneratedEvidence.cs"]),

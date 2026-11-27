@@ -163,6 +163,7 @@ internal static class VerificationSelection
             "Tests/ReturnMetadataBinding.lean", "Tests/ReferenceArrays.lean", "Tests/ArrayFields.lean",
             "Tests/RetainedNumericLocals.lean", "Tests/ProfileEmbedding.lean", "Tests/FullTransfer.lean",
             "Tests/Crypto.lean", "Tests/MetadataAssemblies.lean", "Tests/PinnedIndexScaling.lean",
+            "Tests/PinnedIndexScaling/Construction.lean",
             "Tests/FieldRef.lean", "Tests/FieldShape.lean", "Tests/RuntimeModels.lean",
             "Tests/PlatformDefinitions.lean", "Tests/BitModels.lean", "Tests/SpanHomes.lean"
         };

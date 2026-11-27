@@ -37,6 +37,16 @@ These suites check how verification cost grows with the size of the input. Run o
 | `scaling` | The certificate of a six-method call graph exceeds the default heartbeat limit, kernel heartbeats per layout of the header struct layout check over nested or over generic structs, or of a method's layout check over nested structs, grow more than 1.5 times from 64 to 512 structs, 512 structs of either kind do not check within 8 GiB, or a fourfold increase in virtual or indirect target entries (8, 32, 128) costs more than six times the kernel heartbeats |
 | `excluded` | Certificates with hundreds of excluded and live sites exceed the default heartbeat limit |
 
+### Package pin indexes
+
+The `core` suite measures the kernel cost of constructing both indexes for an ordered package.
+The 128-, 512- and 2,048-pin fixtures each allow 10,000 heartbeats per pin. Separate checks
+measure how the cost of querying a shared index grows with the number of methods.
+
+```sh
+lake build Tests.PinnedIndexScaling
+```
+
 ## Suite times
 
 `scripts/verification-durations.json` includes each suite's verification and verified-output
