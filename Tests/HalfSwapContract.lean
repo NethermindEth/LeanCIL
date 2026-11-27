@@ -62,15 +62,11 @@ def highWritten (data : Nat → BitVec 8) := put (savedLow data) 0 0 (bytes data
 def lowWritten (data : Nat → BitVec 8) := put (highWritten data) 0 16 (bytes data 0)
 
 private theorem highWrite (data : Nat → BitVec 8) :
-    write (savedLow data) ⟨0, 0⟩ (bytes data 16) 1 = .ok (highWritten data) := by
-  simp only [write, highWritten, put, snapshotCellAt_eq]
-  with_unfolding_all rfl
+    write (savedLow data) ⟨0, 0⟩ (bytes data 16) 1 = .ok (highWritten data) := by with_unfolding_all rfl
 #print axioms highWrite
 
 private theorem lowWrite (data : Nat → BitVec 8) :
-    write (highWritten data) ⟨0, 16⟩ (bytes data 0) 1 = .ok (lowWritten data) := by
-  simp only [write, lowWritten, put, snapshotCellAt_eq]
-  with_unfolding_all rfl
+    write (highWritten data) ⟨0, 16⟩ (bytes data 0) 1 = .ok (lowWritten data) := by with_unfolding_all rfl
 #print axioms lowWrite
 
 /-- Retiring the frame preserves caller allocations, permissions and bytes outside the span. -/
