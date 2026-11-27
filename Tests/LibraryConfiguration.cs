@@ -23,7 +23,7 @@ Require(!library.Contains("Tests.", StringComparison.Ordinal), "Library lakefile
 Console.WriteLine("PASS library lakefile keeps the package, CIL, StrictBinding and auditor and omits test libraries");
 
 const string added = "\n[[lean_lib]]\nname = \"Tests.Added\"\n";
-const string firstTest = "[[lean_lib]]\nname = \"Tests.Support\"\n\n";
+const string firstTest = "[[lean_lib]]\nname = \"Tests\"\n";
 Require(checkout.Contains(firstTest, StringComparison.Ordinal), "Fixture lakefile moved");
 foreach (var (label, edited) in new[]
 {
@@ -49,7 +49,7 @@ foreach (var (label, edited) in new[]
     ("the auditor", checkout.Replace("root = \"CIL.OleanAudit\"", "root = \"CIL.Replay\"")),
     ("a library under CIL", checkout + "\n[[lean_lib]]\nname = \"CIL.Extra\"\n"),
     ("a test library with roots", checkout + "\n[[lean_lib]]\nname = \"Tests.Rooted\"\nroots = [\"CIL\"]\n"),
-    ("a default test target", checkout.Replace("defaultTargets = [\"CIL\"]", "defaultTargets = [\"Tests.Support\"]")),
+    ("a default test target", checkout.Replace("defaultTargets = [\"CIL\"]", "defaultTargets = [\"Tests\"]")),
     ("a dependency", checkout + "\n[[require]]\nname = \"other\"\npath = \"../other\"\n"),
     ("a multi-line string", checkout + "\ndescription = \"\"\"\n[[lean_lib]]\n\"\"\"\n"),
 })
@@ -57,8 +57,8 @@ foreach (var (label, edited) in new[]
     Require(edited != checkout, "Mutation did not apply: " + label);
     Require(LibraryLakefile(edited) != library, "Library lakefile ignored " + label);
 }
-Require(LibraryLakefile(checkout.Replace("defaultTargets = [\"CIL\"]", "defaultTargets = [\"Tests.Support\"]"))
-    .Contains("name = \"Tests.Support\"", StringComparison.Ordinal), "A default target lost its declaration");
+Require(LibraryLakefile(checkout.Replace("defaultTargets = [\"CIL\"]", "defaultTargets = [\"Tests\"]"))
+    .Contains("name = \"Tests\"", StringComparison.Ordinal), "A default target lost its declaration");
 Console.WriteLine("PASS package, CIL, auditor, dependency and CIL-claiming library edits change the library lakefile");
 
 // Checkout identities, such as session cache keys, still see the complete lakefile.

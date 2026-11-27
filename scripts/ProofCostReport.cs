@@ -338,12 +338,45 @@ internal static partial class ProofCostReport
     private static partial Regex LibraryName { get; }
 
     // Test libraries are the tables that only name a library: no source directory, roots or facets.
-    internal static string[] TestLibraries(string lakefile) => LibraryTable.Matches(lakefile)
-        .Select(table => table.Groups["body"].Value.Split('\n').Select(line => line.Trim())
-            .Where(line => line.Length > 0 && !line.StartsWith('#')).ToArray())
-        .Where(body => body.Length == 1 && LibraryName.IsMatch(body[0]))
-        .Select(body => LibraryName.Match(body[0]).Groups["name"].Value)
-        .Where(name => name != "CIL").ToArray();
+    // When `Tests` is declared as a single consolidated library without a root `Tests.lean`, expand it to
+    // the checked-in standalone `Tests/*.lean` library modules (excluding standalone scaling/contract scripts
+    // and intentionally invalid discovery fixtures).
+    internal static string[] TestLibraries(string lakefile, string? tree = null)
+    {
+        var declared = LibraryTable.Matches(lakefile)
+            .Select(table => table.Groups["body"].Value.Split('\n').Select(line => line.Trim())
+                .Where(line => line.Length > 0 && !line.StartsWith('#')).ToArray())
+            .Where(body => body.Length == 1 && LibraryName.IsMatch(body[0]))
+            .Select(body => LibraryName.Match(body[0]).Groups["name"].Value)
+            .Where(name => name != "CIL").ToArray();
+        if (tree is null || !declared.Contains("Tests", StringComparer.Ordinal) ||
+            File.Exists(Path.Combine(tree, "Tests.lean")))
+            return declared;
+        var expanded = new List<string>();
+        foreach (var name in declared)
+        {
+            if (name != "Tests") { expanded.Add(name); continue; }
+            var directory = Path.Combine(tree, "Tests");
+            if (!Directory.Exists(directory)) continue;
+            var nonLibraryScaling = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "ArgumentSlotScaling", "AuditKeyScaling", "CallIndexScaling", "CertificateBranchScaling",
+                "CertificateFlowScaling", "DispatchScaling", "ExtractionGenerics", "FeatureLocalScaling",
+                "FlowIndexScaling", "HomeEnumerationScaling", "LayoutAccumulationScaling", "LayoutProjectionScaling",
+                "ProofCostDiscovery", "RegionScaling", "SnapshotWriteScaling", "StreamingValidationScaling"
+            };
+            foreach (var file in Directory.EnumerateFiles(directory, "*.lean").Order(StringComparer.Ordinal))
+            {
+                var stem = Path.GetFileNameWithoutExtension(file);
+                if (nonLibraryScaling.Contains(stem)) continue;
+                if (Imports(File.ReadAllText(file)).Any(import => import == "Extracted" ||
+                    import.StartsWith("Extracted.", StringComparison.Ordinal)))
+                    continue;
+                expanded.Add("Tests." + stem);
+            }
+        }
+        return [.. expanded];
+    }
 
     [GeneratedRegex("""^(?:(?:public|meta|private)[ \t]+)*import[ \t]+(?:all[ \t]+)?(?<modules>[^-/]+)""")]
     private static partial Regex ImportLine { get; }
@@ -742,7 +775,7 @@ internal static partial class ProofCostReport
         var measurer = new Measurer(tree, LibraryPath(tree, library), work, jobs);
         var tasks = new List<Task>();
         var roots = modules.ToList();
-        if (libraries) roots.AddRange(TestLibraries(File.ReadAllText(Path.Combine(tree, "lakefile.toml"))));
+        if (libraries) roots.AddRange(TestLibraries(File.ReadAllText(Path.Combine(tree, "lakefile.toml")), tree));
         foreach (var module in roots.Distinct(StringComparer.Ordinal))
         {
             var source = Path.Combine(tree, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
