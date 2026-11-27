@@ -38,16 +38,6 @@ jobs:
           dotnet run --file scripts/TestVerificationGroup.cs -c Release
           dotnet run --file scripts/TestFindCertifiedLibrary.cs
           dotnet run --file scripts/TestLibraryArchive.cs -c Release
-          dotnet run --file scripts/TestSummarizeVerification.cs
-          dotnet run --file scripts/TestProofCost.cs
-          dotnet run --file scripts/TestLeanDiagnostics.cs
-          dotnet run --file Tests/ConsumerTraceRetention.cs
-          dotnet run --file Tests/FileHashing.cs
-          dotnet run --file Tests/BatchInputs.cs
-          dotnet run --file Tests/LibraryConfiguration.cs
-          dotnet run --file Tests/ConsumerArtifactSnapshot.cs
-          dotnet run --file Tests/ConsumerSupportCandidates.cs
-          dotnet run --file Tests/PreparedFixtures.cs
       - name: Select affected suites
         id: select
         env:
@@ -70,6 +60,19 @@ jobs:
           else
             dotnet run --file scripts/ProofCost.cs -- sources --matrix "$MATRIX" --output "$GITHUB_OUTPUT"
           fi
+      - name: Test suite helpers when the tools job will not run
+        if: ${{ !cancelled() && (failure() || steps.select.outputs.has-suites != 'true') }}
+        run: &suite-helper-checks |
+          dotnet run --file scripts/TestSummarizeVerification.cs
+          dotnet run --file scripts/TestProofCost.cs
+          dotnet run --file scripts/TestLeanDiagnostics.cs
+          dotnet run --file Tests/ConsumerTraceRetention.cs
+          dotnet run --file Tests/FileHashing.cs
+          dotnet run --file Tests/BatchInputs.cs
+          dotnet run --file Tests/LibraryConfiguration.cs
+          dotnet run --file Tests/ConsumerArtifactSnapshot.cs
+          dotnet run --file Tests/ConsumerSupportCandidates.cs
+          dotnet run --file Tests/PreparedFixtures.cs
 
   prepare:
     name: Prepare certified Lean library
@@ -278,6 +281,8 @@ jobs:
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
+      - name: Test suite helpers
+        run: *suite-helper-checks
       - name: Build the extractor and example assembly
         run: dotnet run --file scripts/Test.cs -- --build-tools
       - name: Build shared verification fixtures

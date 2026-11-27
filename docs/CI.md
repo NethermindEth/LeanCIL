@@ -14,14 +14,15 @@ artifacts are kept for 14 days.
 
 | Job | Name | Limit | Does |
 | --- | --- | --- | --- |
-| `select` | `Select verification suites` | 5 minutes | Runs the static documentation check and the script self-tests, then selects suites and proof-cost sources |
+| `select` | `Select verification suites` | 5 minutes | Checks documentation, selection and library preparation, then selects suites and proof-cost sources |
 | `prepare` | `Prepare certified Lean library` | 20 minutes | Installs the toolchain and reuses or builds the [certified library](#certified-library) |
-| `tools` | `Build extractor, examples and shared fixtures` | 10 minutes | Builds the tools every suite job restores |
+| `tools` | `Build extractor, examples and shared fixtures` | 10 minutes | Tests suite helpers and builds the tools every suite job restores |
 | `suites` | `Verify (<suites>)` | Per group, at least 30 minutes | Runs one group of suites; at most eight jobs run at once |
 | `proof-cost` | `Proof cost` | 10 minutes | Compares or publishes [proof cost](#proof-cost) rows |
 | `verify` | `Build and verify` | 5 minutes | The [required check](#required-check) |
 
-`prepare`, `tools` and `suites` are skipped when selection reports that no suite is needed.
+`prepare`, `tools` and `suites` are skipped when selection reports that no suite is needed. In that case,
+the suite helper tests run in `select`.
 
 ## Suite selection
 
