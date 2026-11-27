@@ -519,6 +519,7 @@ info: 'Tests.Automation.static_load_from_fact' depends on axioms: [propext, Quot
 def twoStoresMethod : CIL.Method := {
   code := [.stobj Tests.IntrinsicMethods.vector256UInt64, .stobj Tests.IntrinsicMethods.vector256UInt64, .ret], locals := [], returnsValue := false }
 
+set_option maxHeartbeats 5000 in
 open CIL.Safety in
 /-- Facts at both levels in one run: each store takes the retry for its own fact's level, so
     neither retry may exclude the other. -/

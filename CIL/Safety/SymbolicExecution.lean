@@ -1363,6 +1363,15 @@ elab_rules : tactic
               evalTactic (← `(tactic| cil_checked_step_equations [$facts,*]))
               return
             catch _ => saved.restore
+        if let some equation ← typedObjectStep? body op pc args frame stack memory then
+          let some (_, _, resolved) := (← inferType equation).eq? | throwError "expected a step equation"
+          let stated ← withLocalDeclD `stepped (← inferType step) fun stepped => do
+            mkLambdaFVars #[stepped] (← mkEq stepped result)
+          let rewritten ← mkCongrArg stated equation
+          let target ← mkEq resolved result
+          replaceMainGoal [← (← getMainGoal).replaceTargetEq target rewritten]
+          evalTactic (← `(tactic| cil_checked_step_normalized [$facts:term,*]))
+          return
         if op.isAppOfArity ``CIL.Instruction.ldobj 1 then
           let saved ← saveState
           try
@@ -1397,15 +1406,6 @@ elab_rules : tactic
               all_goals simp [cil_guard, cil_checked, referenceAt, checkedAt, $[$facts:term],*] <;> rfl)))
             return
           catch _ => saved.restore
-        if let some equation ← typedObjectStep? body op pc args frame stack memory then
-          let some (_, _, resolved) := (← inferType equation).eq? | throwError "expected a step equation"
-          let stated ← withLocalDeclD `stepped (← inferType step) fun stepped => do
-            mkLambdaFVars #[stepped] (← mkEq stepped result)
-          let rewritten ← mkCongrArg stated equation
-          let target ← mkEq resolved result
-          replaceMainGoal [← (← getMainGoal).replaceTargetEq target rewritten]
-          evalTactic (← `(tactic| cil_checked_step_normalized [$facts:term,*]))
-          return
     if let some (_, pending, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq? then
       let opcodeHead := (argument? pending 1).bind (·.getAppFn.constName?)
       if pending.isAppOfArity ``CIL.Safety.step 7 &&
