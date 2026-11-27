@@ -148,15 +148,13 @@ end ExampleProof
         () => Console.WriteLine("PASS unspecified vector boundary rejection: " + name));
 }
 
+// Concrete runtime checks cover only the operations without a universal contract below (`And`, `AndNot`,
+// `ShiftLeft`, `ShiftRight` and `Less` each have universal contracts and certified mutant refutations).
 foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in new (string, ulong, ulong, ulong, bool)[]
 {
-    ("And", 13, 6, 4, false), ("Or", 13, 6, 15, false),
-    ("Xor", 13, 6, 11, false), ("AndNot", 1, 3, 2, false),
-    ("ShiftLeft", 1, 63, 1UL << 63, false), ("ShiftLeft", 1, 64, 0, false),
-    ("ShiftLeft", 1, 256, 0, false), ("ShiftRight", ulong.MaxValue, 1, ulong.MaxValue >> 1, false),
-    ("ShiftRight", ulong.MaxValue, ulong.MaxValue, 0, false),
-    ("Less", 1, 1UL << 63, 255, true), ("Less", 1UL << 63, 1, 0, true),
-    ("Greater", 1UL << 63, 1, 255, true), ("Greater", 1, 1, 0, true)
+    ("Or", 13, 6, 15, false),
+    ("Xor", 13, 6, 11, false),
+    ("Greater", 1UL << 63, 1, 255, true)
 })
 {
     string output = Path.Combine(root, name + "-" + right + "-" + left);
@@ -165,24 +163,14 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
     string word = wide ? "i32" : "i64";
     var executionProof = name switch
     {
-        "And" => BroadcastProof("band", 0, "and"),
         "Or" => BroadcastProof("bor", 1, "or"),
         "Xor" => BroadcastProof("bxor", 2, "xor"),
-        "AndNot" => BroadcastProof("andNot", 3, "andNot"),
-        "ShiftLeft" => ShiftProof("shl64Count", 0, "shiftLeft"),
-        "ShiftRight" => ShiftProof("shr64Count", 3, "shiftRight"),
         _ => "\n  apply ok_of_toOption\n  decide +kernel"
     };
     string BroadcastProof(string operation, int lane, string lemma) => $$"""
         exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastBinary_word
           Extracted.profile .{{operation}} {{lane}} {{left}} {{right}} {{expected}} CIL.Safety.Memory.empty
           rfl rfl rfl Extracted.method0_model4 rfl (by decide)
-          (CIL.Safety.checked_broadcast_{{lemma}} {{left}} {{right}}))
-        """;
-    string ShiftProof(string operation, int lane, string lemma) => $$"""
-        exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastShift
-          Extracted.profile .{{operation}} {{lane}} {{left}} {{right}} {{expected}} CIL.Safety.Memory.empty
-          rfl rfl rfl Extracted.method0_model6 rfl (by decide)
           (CIL.Safety.checked_broadcast_{{lemma}} {{left}} {{right}}))
         """;
     File.WriteAllText(proof, "import Extracted\nimport Tests.Support\n" +

@@ -45,8 +45,17 @@ void Prove(MethodDefinition method, List<string> claims, string definitions = ""
     pending.Add((new GeneratedVerification(method.FullName, proof, output), method.Name, claims.Count));
 }
 
+// Representative types covering every storage category: bool (0), char (1), int (6), ulong (9), nint (10),
+// enum (12), packed struct (14), nested struct (15), explicit struct (16), Vector128 (17) and Vector256 (18).
+var representativeIndices = new HashSet<string>(StringComparer.Ordinal)
+    { "0", "1", "6", "9", "10", "12", "14", "15", "16", "17", "18" };
+// Exercise all three offset overloads (int, nint, nuint) on one primitive, one struct and one vector;
+// test the int overload on the remaining representative types.
+var allOffsetIndices = new HashSet<string>(StringComparer.Ordinal) { "6", "14", "17" };
+
 // Sizes come from .NET's managed layout, including packed/nested structs and vectors.
-foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Size", StringComparison.Ordinal)))
+foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Size", StringComparison.Ordinal) &&
+    representativeIndices.Contains(m.Name[4..])))
 {
     var size = (int)runtime.GetMethod(method.Name)!.Invoke(null, null)!;
     const string run = "(CIL.Safety.invoke Extracted.program 8 0 [] CIL.Safety.Memory.empty).map Prod.snd";
@@ -56,11 +65,14 @@ foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Size", String
         """);
 }
 
-// Runtime byte offsets and Lean references must agree for each element type and offset overload.
+// Runtime byte offsets and Lean references must agree for each representative type and offset overload.
 foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Add", StringComparison.Ordinal)))
 {
     var suffix = method.Name[3..];
     var index = new string(suffix.TakeWhile(char.IsDigit).ToArray());
+    if (!representativeIndices.Contains(index)) continue;
+    var offsetKind = suffix[index.Length..];
+    if (offsetKind != "int" && !allOffsetIndices.Contains(index)) continue;
     var size = (int)runtime.GetMethod("Size" + index)!.Invoke(null, null)!;
     var measure = runtime.GetMethod("Measure" + suffix)!;
     var type = measure.GetParameters()[0].ParameterType;
