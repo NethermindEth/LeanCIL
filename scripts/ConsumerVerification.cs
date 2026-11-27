@@ -2202,8 +2202,10 @@ partial class Program
             SortedDictionary<string, string> DirectoryArtifacts(string directory) =>
                 LocationComparer.Equals(directory, frameworkModules) ? BaseModuleArtifacts()
                     : ConsumerArtifactSnapshot(directory);
-            var artifactSnapshots = importDirectories.Where(Directory.Exists)
-                .Select(directory => (Directory: directory, Artifacts: DirectoryArtifacts(directory))).ToArray();
+            var existingDirectories = importDirectories.Where(Directory.Exists).ToArray();
+            (string Directory, SortedDictionary<string, string> Artifacts)[] ReadArtifacts() =>
+                existingDirectories.Select(directory => (directory, DirectoryArtifacts(directory))).ToArray();
+            var artifactSnapshots = ReadArtifacts();
             DeepSessionContribution? deep = null;
             if (deepChecks is not null)
             {
@@ -2220,14 +2222,15 @@ partial class Program
                 if (Directory.Exists(Path.Combine(session, "BindingAudit")) ||
                     File.Exists(Path.Combine(session, "BindingAudit.lean")))
                     throw new InvalidDataException("Consumer source uses the reserved BindingAudit namespace.");
-                SortedDictionary<string, string> PhysicalArtifacts() => new(artifactSnapshots
-                    .SelectMany(snapshot => DirectoryArtifacts(snapshot.Directory).Select(pair =>
+                static SortedDictionary<string, string> PhysicalArtifacts(
+                    (string Directory, SortedDictionary<string, string> Artifacts)[] snapshots) => new(snapshots
+                    .SelectMany(snapshot => snapshot.Artifacts.Select(pair =>
                         KeyValuePair.Create(Path.GetFullPath(Path.Combine(snapshot.Directory, pair.Key)), pair.Value)))
                     .ToDictionary(), StringComparer.Ordinal);
-                var priorArtifacts = PhysicalArtifacts();
+                var priorArtifacts = PhysicalArtifacts(artifactSnapshots);
                 Stage(proceeding, "deep checks");
                 RequireDeepBindingStable();
-                RequireOnlyAdded(priorArtifacts, PhysicalArtifacts());
+                RequireOnlyAdded(priorArtifacts, PhysicalArtifacts(ReadArtifacts()));
                 var deepRoot = Path.Combine(session, ".deep-checks");
                 Directory.CreateDirectory(deepRoot);
                 leanPath += Path.PathSeparator + deepRoot;
@@ -2240,10 +2243,8 @@ partial class Program
                     CacheProgress("certified consumer deep checks: " + requests[members[0]].Theorem);
                 }
                 importDirectories = [.. importDirectories, deepRoot];
-                artifactSnapshots = [.. artifactSnapshots.Select(snapshot =>
-                    (snapshot.Directory, Artifacts: DirectoryArtifacts(snapshot.Directory))),
-                    (deepRoot, ConsumerArtifactSnapshot(deepRoot))];
-                RequireOnlyAdded(priorArtifacts, PhysicalArtifacts(), [.. deep.Artifacts
+                artifactSnapshots = [.. ReadArtifacts(), (deepRoot, ConsumerArtifactSnapshot(deepRoot))];
+                RequireOnlyAdded(priorArtifacts, PhysicalArtifacts(artifactSnapshots), [.. deep.Artifacts
                     .Where(pair => pair.Key != "Extracted").Select(pair => Path.ChangeExtension(pair.Value, null)!) ]);
                 RequireDeepBindingStable();
             }
@@ -2305,7 +2306,15 @@ partial class Program
                 .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
             var checkedArtifacts = JsonSerializer.Serialize(mainArtifacts.OrderBy(pair => pair.Name, StringComparer.Ordinal)
                 .ToDictionary(pair => pair.Name, pair => pair.Parts));
-            var checkedPhysicalArtifacts = deep is null ? null : BindingArtifactHashes(currentArtifacts.Values);
+            // Every deep stability check independently verifies the prepared library and contribution files.
+            // Keep checking every family name, including companions those inventories do not cover.
+            var guardedFiles = deep is null ? null : bindingPreparation!.BaseArtifacts.Keys
+                .Select(name => Path.GetFullPath(Path.Combine(frameworkModules, name)))
+                .Concat(deep.Hashes.Keys).ToHashSet(StringComparer.Ordinal);
+            SortedDictionary<string, string> OtherArtifactHashes() =>
+                HashFiles(ModuleFamilyParts(currentArtifacts.Values)
+                    .Where(path => !guardedFiles!.Contains(path)).Select(path => (path, path)));
+            var checkedPhysicalArtifacts = deep is null ? null : OtherArtifactHashes();
             void RequireDeepStable()
             {
                 if (deep is null) return;
@@ -2314,7 +2323,7 @@ partial class Program
                 RequireExtractionArtifacts();
                 RequireGeneratedArtifacts();
                 RequireInterfaceArtifacts();
-                if (!Same(checkedPhysicalArtifacts!, BindingArtifactHashes(currentArtifacts.Values)) ||
+                if (!Same(checkedPhysicalArtifacts!, OtherArtifactHashes()) ||
                     checkedArtifacts != JsonSerializer.Serialize(ImportArtifactParts()) ||
                     prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
                     throw new InvalidDataException("Deep-check consumer sources or compiled artifacts changed.");
@@ -2553,10 +2562,10 @@ partial class Program
             foreach (int i in proceeding)
                 if (fullImportAudit is not null)
                     fullResults.Add(i, fullImportAudit(outputs[i], session, requestModules[i], leanPath));
-            RequireDeepStable();
-            if (contractExportAudit || fullImportAudit is not null)
+            if (contractExportAudit || fullResults.Count > 0)
             {
                 // Only callbacks can run further verification code after the first recheck.
+                RequireDeepStable();
                 Recheck(proceeding);
                 proceeding = Pending(proceeding);
                 if (proceeding.Length == 0) return;
