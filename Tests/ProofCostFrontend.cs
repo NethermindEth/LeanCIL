@@ -185,6 +185,7 @@ var scratch = Directory.CreateTempSubdirectory("leancil-proof-cost-receipts-");
 try
 {
     var receipts = scratch.FullName;
+    File.Copy(At("lean-toolchain"), Path.Combine(receipts, "lean-toolchain"));
     foreach (string group in new[] { "Valid", "ChangedSettings", "ChangedConfig" })
     {
         var output = Path.Combine(receipts, group);
