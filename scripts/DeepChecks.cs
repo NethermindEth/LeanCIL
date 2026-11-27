@@ -287,15 +287,16 @@ partial class Program
             return new BindingImagePin(pin.Identity, pin.Image.Digest, snapshot);
         }).ToArray();
         var survey = SurveyEvidence(leanPath);
-        var unpinnedLayouts = UnpinnedImportedLayouts(identity, pins);
-        var uncovered = UncoveredEvidence(survey, pins);
+        var pinsByIdentity = pins.ToLookup(pin => pin.Identity, StringComparer.Ordinal);
+        var unpinnedLayouts = UnpinnedImportedLayouts(identity, pinsByIdentity);
+        var uncovered = UncoveredEvidence(survey, pinsByIdentity);
         if (unpinnedLayouts is { Length: > 0 })
             uncovered.Add(BindingFact.ImportedLayouts, "no supplied image is pinned under the implementation digest " +
                 "the import records for the assemblies of its selected layouts: " + string.Join("; ", unpinnedLayouts));
         BindingPlan plan = new(session, pins, survey.Methods, matchedPins.FirstOrDefault(pin =>
                 pin.ObjectCoverage.HasValue)?.ObjectCoverage, matchedPins.FirstOrDefault(pin =>
                 pin.TupleCoverage.HasValue)?.TupleCoverage, matchedPins.FirstOrDefault(pin =>
-                pin.KeyCoverage.HasValue)?.KeyCoverage, ReadPublishedImports(identity, pins, checkedClosures),
+                pin.KeyCoverage.HasValue)?.KeyCoverage, ReadPublishedImports(identity, pinsByIdentity, checkedClosures),
             unpinnedLayouts is { Length: 0 }, uncovered);
         var directory = Path.Combine(session, "BindingAudit");
         if (Directory.Exists(directory))
@@ -873,6 +874,7 @@ partial class Program
     /// <summary>Prints the evidence size and the identities its bodies and metadata slices name.</summary>
     const string EvidenceSurveySource = """
         import Extracted
+        import Std.Data.HashSet.Basic
 
         #eval show IO Unit from do
           let evidence := Extracted.methodEvidence ++ Extracted.managedDeclarations
@@ -883,8 +885,11 @@ partial class Program
             | .ok identity => pure identity
             | .error error => throw (IO.userError s!"A carried Assembly block names no assembly: {repr error}")
           let named := evidence.map (fun item => item.assembly.identity) ++ carried
-          for identity in named.eraseDups do
-            IO.println s!"identity {identity.display}"
+          let mut seen : Std.HashSet CIL.AssemblyName := {}
+          for identity in named do
+            let (known, next) := seen.containsThenInsert identity
+            seen := next
+            unless known do IO.println s!"identity {identity.display}"
 
         """;
 
@@ -917,9 +922,10 @@ partial class Program
     /// Why a whole-evidence fact is not checked: the evidence names an assembly no image is pinned under, or
     /// managed declarations carry bodies and rows that no claim reads. No entry means every such fact is checked.
     /// </summary>
-    static Dictionary<BindingFact, string> UncoveredEvidence(EvidenceSurvey survey, BindingImagePin[] pins)
+    static Dictionary<BindingFact, string> UncoveredEvidence(EvidenceSurvey survey,
+        ILookup<string, BindingImagePin> pinsByIdentity)
     {
-        var missing = survey.Identities.Where(identity => !pins.Any(pin => pin.Identity == identity)).ToArray();
+        var missing = survey.Identities.Where(identity => !pinsByIdentity.Contains(identity)).ToArray();
         var unpinned = missing.Length == 0 ? null
             : "the method evidence names assemblies no supplied image is pinned under: " + string.Join("; ", missing);
         var declared = survey.Declarations == 0 ? null
@@ -938,7 +944,8 @@ partial class Program
     /// The assemblies of the layouts import slots selected that no supplied image is pinned under with the digest
     /// its import records, so the imported layout check would read other bytes; null when no import selected one.
     /// </summary>
-    static string[]? UnpinnedImportedLayouts(ExtractionIdentity identity, BindingImagePin[] pins)
+    static string[]? UnpinnedImportedLayouts(ExtractionIdentity identity,
+        ILookup<string, BindingImagePin> pinsByIdentity)
     {
         var selected = identity.Imports.SelectMany(import =>
             import.TryGetProperty("actualLayouts", out var layouts) && layouts.ValueKind == JsonValueKind.Array
@@ -949,13 +956,13 @@ partial class Program
             var digest = Sha256Digest.Parse(entry.Import.GetProperty("implementationSha256").GetString(),
                 "the extraction identity");
             var scope = entry.Layout.GetProperty("scope").GetString();
-            return !pins.Any(pin => pin.Identity == scope && pin.Digest == digest);
+            return !pinsByIdentity[scope!].Any(pin => pin.Digest == digest);
         }).Select(entry => entry.Layout.GetProperty("scope").GetString()!).Distinct(StringComparer.Ordinal)];
     }
 
     /// <summary>Only a selected physical producer and a replayed interface can supply a publication.</summary>
-    static BindingPublication[]? ReadPublishedImports(ExtractionIdentity identity, BindingImagePin[] pins,
-        Dictionary<string, AuditedClosure>? closures)
+    static BindingPublication[]? ReadPublishedImports(ExtractionIdentity identity,
+        ILookup<string, BindingImagePin> pinsByIdentity, Dictionary<string, AuditedClosure>? closures)
     {
         var imports = identity.Imports;
         if (imports.Length == 0 || closures is null) return null;
@@ -973,7 +980,7 @@ partial class Program
             if (!signature.TryGetProperty("owner", out var owner) || owner.ValueKind != JsonValueKind.Object ||
                 !owner.TryGetProperty("scope", out var scopeName)) return null;
             var scope = scopeName.GetString();
-            var producer = pins.SingleOrDefault(pin => pin.Identity == scope &&
+            var producer = pinsByIdentity[scope!].SingleOrDefault(pin =>
                 pin.Digest.ToString() == Field("implementationSha256"));
             if (producer is null || !closures.TryGetValue(constant, out var closure)) return null;
             string path = ExtractionIdentity.Resolve(identity.Output, Field("sidecarPath"));
