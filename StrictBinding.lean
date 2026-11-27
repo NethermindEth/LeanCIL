@@ -23,6 +23,7 @@ import StrictBinding.ImportedLayouts
 import StrictBinding.DispatchCatalogs
 import StrictBinding.GenericImports
 import StrictBinding.MemberLinks
+import StrictBinding.PreparedImages
 
 /-!
 # Deep verification

@@ -43,8 +43,8 @@ partial class Program
                     $"{BindingPageSize(methods)}, not {pages} x {size}");
         Console.WriteLine("PASS the body proof pages at about 250 methods up to 8 pages");
         var package = FixturePackage();
-        Run(["lake", "build", "StrictBinding.Evidence", "StrictBinding.Sha256"], package,
-            progress: "Building the strict binding library");
+        Run(["lake", "build", "StrictBinding.Evidence", "StrictBinding.PreparedImages", "StrictBinding.Sha256"],
+            package, progress: "Building the strict binding library");
         CheckGeneratedPagedModulesElaborate(root, package);
         CheckAssemblyBlockScaling(root, package);
         CheckSliceRowsScaling(root, package);
@@ -367,6 +367,7 @@ partial class Program
         var path = Path.Combine(root, $"MetadataRows{methods}x{images}.lean");
         File.WriteAllText(path, $$"""
             import StrictBinding.Evidence
+            import StrictBinding.PreparedImages
 
             namespace {{name}}
             {{definitions}}{{lists}}def claims : List CIL.Extraction.MethodMetadata := {{joined}}
@@ -375,6 +376,9 @@ partial class Program
             theorem preparedOnce : StrictBinding.ok (StrictBinding.prepare BindingAudit.images) = true := by
               decide +kernel
             {{report}}
+            namespace BindingAudit
+            {{PreparedImagesSource.Replace("set_option debug.skipKernelTC true in", "", StringComparison.Ordinal)}}
+            end BindingAudit
             {{module}}
             {{report}}
             #print axioms BindingAudit.metadataRows
@@ -885,13 +889,15 @@ partial class Program
     static void CheckGeneratedPagedModulesElaborate(string root, string package)
     {
         const string imports = "import BindingAudit.Images\nimport Extracted\nimport StrictBinding.Evidence\n";
-        const string stubs = """
+        var stubs = $$"""
             import StrictBinding.Evidence
+            import StrictBinding.PreparedImages
             namespace Extracted
             def methodEvidence : List CIL.Extraction.MethodEvidence := []
             end Extracted
             namespace BindingAudit
             def images : List StrictBinding.PinnedImage := []
+            {{PreparedImagesSource}}
             end BindingAudit
 
             """;

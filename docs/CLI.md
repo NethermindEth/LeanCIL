@@ -464,9 +464,10 @@ block's identity must be the image's, its key token must be the token Lean compu
 the public key in the image's Assembly row (none for an unsigned assembly), and the core library a
 slice names must be an AssemblyRef row of a neutral core library with its publisher's token. The
 links, the `#GUID` heap, the `Module` table and the RVAs of MethodDefs outside the evidence are not
-part of that check. Both facts are checked in pages
-of about 250 methods, capped at eight pages, and each page decodes the pinned images again; the
-metadata check also checks each distinct Assembly block once, in one more lemma. These
+part of that check. Lean checks both facts in pages of about 250 methods, with at most eight
+pages per fact. The kernel verifies that the recorded image layouts equal the result of decoding
+the pinned images. The body, metadata, member-link and static-data checks reuse those layouts and
+read the original image bytes. A separate lemma checks each distinct Assembly block once. These
 theorems join the extraction certificate and the selected proof for kernel replay, expected-type
 checks and axiom checks. Source, artifact, identity and toolchain guards run before successful
 publication.

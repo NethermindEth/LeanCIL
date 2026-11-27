@@ -641,11 +641,9 @@ partial class Program
     /// <summary>The method bodies per page until the page cap applies; each page is one kernel evaluation.</summary>
     const int PageMethodsTarget = 250;
 
-    /// <summary>The most pages; each page prepares the image again, so this bounds the preparation work.</summary>
+    /// <summary>The maximum number of separately replayed page lemmas for a binding fact.</summary>
     const int MaximumPages = 8;
 
-    // Pages number ceil(methods / 250) up to 8, and then grow as methods / 8, so the image is prepared at most
-    // nine times whatever the method count.
     static int BindingPageCount(int methods) =>
         Math.Clamp((methods + PageMethodsTarget - 1) / PageMethodsTarget, 1, MaximumPages);
 
@@ -750,7 +748,7 @@ partial class Program
     /// <summary>Derives a coverage bit from the physical checks and proves its value for the selected methods.</summary>
     static string CoverageSource(string check, string proposition, string theorem, string macro, string module,
         string arguments = "Extracted.platformDefinitions Extracted.methodEvidence",
-        string additionalImports = "", string declarations = "") => $$"""
+        string additionalImports = "", string declarations = "", string proof = "by decide +kernel") => $$"""
             import BindingAudit.Images
             import Extracted
             import StrictBinding.{{module}}
@@ -764,7 +762,7 @@ partial class Program
 
             set_option debug.skipKernelTC true in
             /-- Supplied definitions pass the physical check. The last argument records completeness. -/
-            theorem {{theorem}} : StrictBinding.{{proposition}} images {{arguments}} {{macro}}% := by decide +kernel
+            theorem {{theorem}} : StrictBinding.{{proposition}} images {{arguments}} {{macro}}% := {{proof}}
 
             end BindingAudit
 
@@ -789,7 +787,9 @@ partial class Program
             "GenericConstraints", "Extracted.methodEvidence Extracted.rawLayouts Extracted.imports"));
         File.WriteAllText(ModuleSource(plan.Output, MemberLinksModule), CoverageSource(
             "MemberLinks.checkMemberLinks", "MemberLinksChecked", "memberLinks", "linkCoverage",
-            "MemberLinks", "Extracted.methodEvidence"));
+            "MemberLinks", "Extracted.methodEvidence", proof:
+                "by\n  unfold StrictBinding.MemberLinksChecked StrictBinding.MemberLinks.checkMemberLinks\n" +
+                "  unfold StrictBinding.MemberLinks.checkMetadataLinks\n  rw [prepare_eq] <;> decide +kernel"));
         File.WriteAllText(ModuleSource(plan.Output, PlatformKindsModule), CoverageSource(
             "checkPlatformKinds", "PlatformKindsChecked", "platformKinds", "kindCoverage", "PlatformKinds"));
         if (plan.EvidenceFacts.Contains(BindingFact.StaticData))
@@ -803,7 +803,8 @@ partial class Program
             set_option debug.skipKernelTC true in
             /-- The complete RVA data of each static site agrees with the pinned assembly. -/
             theorem staticData : StrictBinding.StaticDataBound images Extracted.methodEvidence := by
-              decide +kernel
+              unfold StrictBinding.StaticDataBound StrictBinding.checkStaticData
+              rw [prepare_eq] <;> decide +kernel
 
             end BindingAudit
 
@@ -1051,7 +1052,11 @@ partial class Program
         end {{image.Module}}
         """;
 
-    static string ImagesModuleSource(BindingPlan plan)
+    static string ImagesModuleSource(BindingPlan plan) =>
+        "import StrictBinding.PreparedImages\n" + PinnedImagesSource(plan, PreparedImagesSource);
+
+    /// <summary>The exact pinned-image list and the theorem restating its identities and constants.</summary>
+    static string PinnedImagesSource(BindingPlan plan, string declarations = "")
     {
         var imports = string.Concat(plan.Images.DistinctBy(image => image.Digest)
             .Select(image => $"import {image.Module}\n"));
@@ -1082,6 +1087,7 @@ partial class Program
             def images : List StrictBinding.PinnedImage :=
               pinnedImages%[{entries}]
 
+            {declarations}
             /-- The identities and image constants of `images`, as the driver states them. -/
             theorem images_eq : images =
               pinnedImages%[{entries}] := rfl
@@ -1089,6 +1095,29 @@ partial class Program
             end BindingAudit
             """;
     }
+
+    /// <summary>The image layouts that the kernel checks against StrictBinding.prepare.</summary>
+    const string PreparedImagesSource = """
+        open Lean in
+        elab "recordedHeaders%" : term =>
+          pure <| StrictBinding.PreparedImages.resultExpr images (mkConst ``images)
+
+        /-- The decoded metadata and MethodDef columns of every pin in order. -/
+        private def recordedHeaders : Except StrictBinding.AuditError
+            (List StrictBinding.PreparedImages.Header) := recordedHeaders%
+
+        /-- Each checked header restored with its pin's original byte view. -/
+        def preparedImages : Except StrictBinding.AuditError (List StrictBinding.PreparedImage) :=
+          StrictBinding.PreparedImages.restore images recordedHeaders
+
+        set_option debug.skipKernelTC true in
+        /-- Preparing the pinned bytes returns exactly the recorded layouts or error. -/
+        theorem prepare_eq : StrictBinding.prepare images = preparedImages :=
+          StrictBinding.PreparedImages.prepare_eq_of_checked (by decide +kernel)
+
+        #print axioms prepare_eq
+
+        """;
 
     /// <summary>
     /// The module of a paged fact: one theorem per page of the claims the method evidence makes, each its own kernel
@@ -1105,7 +1134,8 @@ partial class Program
             /-- The claims of page {{page}} hold in the pinned images. -/
             theorem page{{page}} : StrictBinding.ClaimsHold {{paged.Check}} images
                 (StrictBinding.claimPage ({{paged.Claims}} Extracted.methodEvidence) {{size}} {{page}}) := by
-              decide +kernel
+              unfold StrictBinding.ClaimsHold StrictBinding.checkAll
+              rw [prepare_eq] <;> decide +kernel
 
 
             """));
@@ -1117,7 +1147,8 @@ partial class Program
             set_option debug.skipKernelTC true in
             /-- {{whole.Docstring}} -/
             theorem {{whole.Theorem}} : {{whole.Proposition}} := by
-              decide +kernel
+              unfold StrictBinding.ClaimsHold StrictBinding.checkAll
+              rw [prepare_eq] <;> decide +kernel
 
 
             """ : "";
@@ -1142,7 +1173,8 @@ partial class Program
 
             set_option debug.skipKernelTC true in
             /-- The pinned images decode and spell the identities they are pinned under. -/
-            theorem prepared : StrictBinding.ok (StrictBinding.prepare images) = true := by decide +kernel
+            theorem prepared : StrictBinding.ok (StrictBinding.prepare images) = true := by
+              rw [prepare_eq] <;> decide +kernel
 
             {{once}}{{lemmas}}end {{paged.Pages}}
 
