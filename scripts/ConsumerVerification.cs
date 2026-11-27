@@ -1073,7 +1073,7 @@ partial class Program
         if (methods.Count < 2 || aggregate <= methods[^1].Index)
             return new(ContentKey(source), source, new(StringComparer.Ordinal));
         var localValidation = new Regex(@"(?m)^theorem method([0-9]+)_" +
-            @"(?:coverage|shape|declared|unsafe|division|opaque|object_operands)_validated[^\r\n]*\r?\n");
+            @"(?:coverage|shape|declared|division|opaque|object_operands)_validated[^\r\n]*\r?\n");
         var tail = source[aggregate..];
         var validations = localValidation.Matches(tail).GroupBy(match => int.Parse(match.Groups[1].Value))
             .ToDictionary(group => group.Key, group => string.Concat(group.Select(match => match.Value)));
