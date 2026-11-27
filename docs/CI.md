@@ -181,6 +181,10 @@ refs, unknown merge bases and other runs.
 
 ## Toolchain and shared tools
 
+The preparation job searches for a certified library donor while it installs and packages Lean.
+Each suite job downloads the toolchain, certified library and shared tools concurrently into
+separate directories. It waits for both authenticated restores before starting verification.
+
 The `prepare` job installs elan 4.2.4 from its Linux x64 release archive and checks the pinned
 SHA-256 before extracting or executing the installer; it uses no moving installer script or
 release alias. The archive download retries once after 30 seconds, and each attempt is limited to
