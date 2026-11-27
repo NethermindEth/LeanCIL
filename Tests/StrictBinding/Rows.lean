@@ -2,6 +2,7 @@ import CIL.Extraction.KernelEquation
 import StrictBinding.Rows
 import StrictBinding.MemberLinks
 import Tests.StrictBinding.Fixture
+import Tests.StrictBinding.PreparedData
 import Tests.StrictBinding.Mutation
 
 /-!
@@ -40,14 +41,6 @@ open CIL.Extraction (AssemblyMetadata ByteEntry MetadataSlice stringsHeap blobHe
 /-- Prepared data paired with its equality to the audit's preparation of the pin. -/
 private abbrev Preparation (pin : PinnedImage) :=
   { data : Except AuditError PreparedImage // prepareOne pin = data }
-
-open Lean Elab Term Meta in
-/-- The constructor data of a closed image preparation. -/
-scoped elab "prepared_data% " value:term : term => do
-  let term ← Term.elabTermAndSynthesize value none
-  -- The image stores its bytes in 512-bit chunks.
-  withOptions (exponentiation.threshold.set · 512) do
-    withTransparency .all (reduce (← instantiateMVars term))
 
 /-- The materialized preparation of a pin with the equation checked by the kernel. -/
 local macro "prepare_fixture% " pin:term : term =>
