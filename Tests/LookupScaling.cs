@@ -2551,10 +2551,8 @@ string WithEvidenceCosts(string extracted)
     var shared = Path.Combine(output, "Shared");
     Run(["dotnet", ExtractorPath, "templates", shared, output]);
     var templates = File.ReadAllText(Path.Combine(shared, "Templates.lean"));
-    // Count the fixture's actual CIL sites independently of how the template spells its body.
-    var mask = extracted.Split('\n')
-        .Single(line => line.StartsWith("def method0Reachable :", StringComparison.Ordinal));
-    var instructions = mask.Count(character => character == ',') + 1;
+    using var module = Mono.Cecil.ModuleDefinition.ReadModule(assembly);
+    var instructions = module.GetType("Lookups").Methods.Single(method => method.Name == name).Body.Instructions.Count;
     var depth = LookupPatterns.RecursionDepth.Match(extracted);
     if (!depth.Success || !IsDecodedMethod(extracted, 0) || !LookupPatterns.FirstEquations.IsMatch(extracted) ||
         !templates.Contains("cil_template_code% (Input0.method0.code)", StringComparison.Ordinal) ||
@@ -2563,7 +2561,8 @@ string WithEvidenceCosts(string extracted)
     var last = instructions - 1;
     var extraction = Checked(Path.Combine(output, "Measured.lean"),
         WithEvidenceCosts(extracted) + $"\n#print axioms Extracted.method0_instruction{last}\n",
-        "", "Extracted.method0", $"Extracted.method0_instruction{last}", last);
+        "", "Extracted.method0", $"Extracted.method0_instruction{last}", last,
+        $"#guard Extracted.method0Reachable == List.replicate {instructions} true");
     const string Binder = "(profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) ";
     var statements = name == "Short" ? ShortStatements : LongStatements;
     var operations = string.Join(", ", Enumerable.Repeat(".ldarg 1, .mul, .ldarg 0, .add", statements));
