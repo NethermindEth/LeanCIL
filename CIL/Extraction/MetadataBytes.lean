@@ -1,5 +1,7 @@
 import CIL.Extraction.KernelEquation
 import CIL.Extraction.ByteLiterals
+import CIL.Extraction.AssemblySpelling
+import CIL.Extraction.SearchTree
 import CIL.Extraction.MetadataToken
 
 /-!
@@ -438,66 +440,9 @@ structure MethodSpecRow where
 
 /-! ## Search trees -/
 
-/-- A binary search tree keyed by number, built balanced from entries in ascending key order, so a
-    lookup costs the logarithm of the entry count and the tree can be written out as a literal. -/
-inductive SearchTree (α : Type) where
-  | leaf
-  | node (left : SearchTree α) (key : Nat) (value : α) (right : SearchTree α)
-  deriving DecidableEq, Repr
-
 namespace SearchTree
 
 variable {α : Type}
-
-/-- The value stored under `wanted`. -/
-def find? : SearchTree α → Nat → Option α
-  | .leaf, _ => none
-  | .node left key value right, wanted =>
-    match compare wanted key with
-    | .lt => find? left wanted
-    | .gt => find? right wanted
-    | .eq => some value
-
-/-- The entry with the least key above `wanted`. -/
-def above? : SearchTree α → Nat → Option (Nat × α)
-  | .leaf, _ => none
-  | .node left key value right, wanted =>
-    if wanted < key then
-      match above? left wanted with
-      | some entry => some entry
-      | none => some (key, value)
-    else above? right wanted
-
-/-- The entries in ascending key order. -/
-def toList : SearchTree α → List (Nat × α)
-  | .leaf => []
-  | .node left key value right => left.toList ++ (key, value) :: right.toList
-
-/-- The tree of the first `count` entries, taking `count / 2` of them to the left of the root, and
-    the entries left over. `fuel` bounds the depth. -/
-private def build : Nat → Nat → List (Nat × α) → SearchTree α × List (Nat × α)
-  | 0, _, rest => (.leaf, rest)
-  | fuel + 1, count, rest =>
-    if count == 0 then (.leaf, rest)
-    else
-      let leftCount := count / 2
-      let (left, afterLeft) := build fuel leftCount rest
-      match afterLeft with
-      | [] => (left, [])
-      | (key, value) :: afterRoot =>
-        let (right, remaining) := build fuel (count - 1 - leftCount) afterRoot
-        (.node left key value right, remaining)
-
-/-- The balanced tree of entries in ascending key order. -/
-def ofSorted (entries : List (Nat × α)) : SearchTree α :=
-  (build entries.length entries.length entries).1
-
-/-- The first key that does not ascend strictly from its predecessor. -/
-def firstOutOfOrder : Option Nat → List (Nat × α) → Option Nat
-  | _, [] => none
-  | none, (key, _) :: rest => firstOutOfOrder (some key) rest
-  | some previous, (key, _) :: rest =>
-    if previous < key then firstOutOfOrder (some key) rest else some key
 
 /-- The balanced tree of the entries, which must have strictly ascending keys. -/
 def ofEntries (entries : List (Nat × α)) : Except MetadataError (SearchTree α) :=
@@ -541,9 +486,6 @@ structure MetadataIndex extends IndexTables where
 def indexEntries (entries : List ByteEntry) : Except MetadataError (SearchTree (List Nat)) :=
   if !entries.all (fun entry => entry.2.all (· < 256)) then .error .invalidByte
   else SearchTree.ofEntries entries
-/-- The bytes of a string literal, for comparison with heap entries. -/
-def bytesOf (text : String) : List Nat := text.toByteArray.data.toList.map UInt8.toNat
-
 /-- A name tied to bytes by `spelled?` has exactly those bytes, so an equation
     `spelled? bytes = some name` accepts the same names as comparing `bytesOf name` with them. -/
 theorem bytesOf_of_spelled {bytes : List Nat} {text : String}
@@ -851,62 +793,6 @@ def MetadataIndex.userString (index : MetadataIndex) (offset : Nat) :
   userStringUnits index.userStrings offset
 
 /-! ## The identity of an assembly -/
-
-/-- The decimal ASCII digits of a number below `10 ^ fuel`. -/
-def decimalDigits : Nat → Nat → List Nat
-  | 0, _ => []
-  | fuel + 1, value =>
-    if value < 10 then [48 + value] else decimalDigits fuel (value / 10) ++ [48 + value % 10]
-
-/-- The 16 lowercase hexadecimal digits of the eight bytes of a public key token. -/
-def hexDigits : List Nat → List Nat
-  | [] => []
-  | byte :: rest =>
-    let digit (value : Nat) : Nat := if value < 10 then 48 + value else 87 + value
-    digit (byte / 16) :: digit (byte % 16) :: hexDigits rest
-
-/-- The fixed words of an assembly identity as bytes: `, Version=`, `, Culture=`, `neutral`,
-    `, PublicKeyToken=` and `null`. They are byte lists, not strings, so the kernel never
-    evaluates a string literal to read an identity. -/
-def versionMarker : List Nat := [44, 32, 86, 101, 114, 115, 105, 111, 110, 61]
-def cultureMarker : List Nat := [44, 32, 67, 117, 108, 116, 117, 114, 101, 61]
-def neutralCulture : List Nat := [110, 101, 117, 116, 114, 97, 108]
-def tokenMarker : List Nat :=
-  [44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101, 110, 61]
-def nullToken : List Nat := [110, 117, 108, 108]
-
-/-- The text of an assembly name as Cecil writes it:
-    `Name, Version=a.b.c.d, Culture=culture, PublicKeyToken=token`. -/
-def assemblySpelling (name : List Nat) (major minor build revision : Nat)
-    (culture token : List Nat) :
-    List Nat :=
-  name ++ versionMarker ++ decimalDigits 5 major ++ [46] ++ decimalDigits 5 minor ++ [46] ++
-    decimalDigits 5 build ++ [46] ++ decimalDigits 5 revision ++ cultureMarker ++
-    (if culture.isEmpty then neutralCulture else culture) ++ tokenMarker ++ token
-
-/-- The eight bytes of a public key token, in the order an `AssemblyRef` row stores them. -/
-def tokenBytes (token : Nat) : List Nat :=
-  (List.range 8).reverse.map fun index => (token >>> (8 * index)) % 256
-
-/-- The display bytes of an assembly as Cecil writes them:
-    `Name, Version=a.b.c.d, Culture=culture, PublicKeyToken=token`. Spelled type heads carry
-    them as their scope; slices and pins are compared as `AssemblyName` values instead. -/
-def _root_.CIL.AssemblyName.spelling (assembly : AssemblyName) : List Nat :=
-  let version := assembly.version
-  assemblySpelling (assembly.name.bytes?.getD []) version.major version.minor version.build
-    version.revision (assembly.culture.bytes?.getD [])
-    (match assembly.publicKeyToken with
-     | some token => hexDigits (tokenBytes token)
-     | none => nullToken)
-
-/-- The spelling has no colon, so `spelling ++ "::"` begins the type names of one spelling only. -/
-def _root_.CIL.AssemblyName.colonFree (assembly : AssemblyName) : Bool :=
-  !assembly.spelling.contains 58
-
-/-- `scope` is `assembly`'s colon-free spelling, as a scoped type identity's text names its
-    assembly. -/
-def _root_.CIL.AssemblyName.spelledAs (assembly : AssemblyName) (scope : String) : Bool :=
-  assembly.colonFree && assembly.spelling == bytesOf scope
 
 /-- Decoded identity columns of an assembly reference. -/
 private structure AssemblyRefParts where

@@ -80,8 +80,8 @@ member raises an error annotation that names it, and the job summary lists every
 result and time.
 
 Within a generated proof batch, requests with the same extraction manifest, proof path and
-assembled Lean source share one elaboration and kernel replay. Each requested theorem still has
-its own audit and verification report. Each output is checked against its assembly.
+assembled Lean source share one elaboration and kernel replay. The verifier audits each requested
+theorem, writes its verification report and checks each output against its assembly.
 
 The generated outline checks run in `outlines-control`, `outlines-objects` and `outlines-buffers`.
 Each selects its cases from the shared `Tests/ProofOutlines.cs` runner with `--group`, prepares its
@@ -142,6 +142,9 @@ reuse of it replays. These checks do not rely on the branch filters of the donor
 When reuse fails and a donor was restored, CI tries `--incremental`, which authenticates every
 donor file, rebuilds what the changed sources affect and kernel-replays every module of the
 result. If that fails, or there is no donor, CI builds from source and replays everything.
+The interpreter imports the numeric search tree and assembly-name spelling independently of the
+metadata row decoder. A change confined to the decoder rebuilds its extraction and binding
+dependents. Changes to either shared definition also rebuild the interpreter modules that use it.
 [Certified library preparation](VALIDATION-COVERAGE.md#certified-library-preparation) describes
 the `PrepareLibrary.cs` modes and their tests.
 

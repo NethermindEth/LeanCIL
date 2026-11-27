@@ -1,4 +1,4 @@
-import CIL.Extraction.MetadataBytes
+import CIL.Extraction.AssemblySpelling
 import CIL.Extraction.MetadataNames
 
 /-!
