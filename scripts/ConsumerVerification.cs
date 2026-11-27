@@ -1935,8 +1935,11 @@ partial class Program
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 File.Copy(Within(support, file), target, true);
             }
-            if (restoredArtifacts.Count > 0) CacheProgress("certified consumer support library");
-            RequireDeepBindingStable();
+            if (restoredArtifacts.Count > 0)
+            {
+                CacheProgress("certified consumer support library");
+                RequireDeepBindingStable();
+            }
             var certificateRestoration = new SortedDictionary<string, string>(restoredArtifacts, StringComparer.Ordinal);
             // Not part of restoredArtifacts: these are rebuilt only if stale and always replayed.
             SortedDictionary<string, string> RestoreCertificateSupport(string key, bool? dependent,
