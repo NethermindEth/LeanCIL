@@ -926,16 +926,12 @@ partial class Program
         // A claim count beyond the bodies the image has repeats them, so the claims can outgrow a fixed image.
         var bodies = Enumerable.Range(0, claims ?? read.Count).Select(index => read[index % read.Count]).ToArray();
         var size = BindingPageSize(bodies.Length);
-        // One definition per claim keeps each list literal small enough for the elaborator's recursion limit.
         var parts = bodies.Select(body =>
-            $"{{ identity := {name}, token := 0x{body.Token:x8}, " +
-            $"bytes := [{string.Join(", ", body.Bytes)}] }}")
+            $"{{ identity := claimIdentity, token := 0x{body.Token:x8}, " +
+            $"bytes := {Nethermind.LeanCIL.ByteLiterals.Of(body.Bytes)} }}")
             .Chunk(size).ToArray();
         var defs = string.Concat(parts.Select((part, index) =>
-            string.Concat(part.Select((claim, at) =>
-                $"def claim{index}_{at} : StrictBinding.BodyClaim := {claim}\n")) +
-            $"def claims{index} : List StrictBinding.BodyClaim :=\n  " +
-            $"[{string.Join(", ", part.Select((_, at) => $"claim{index}_{at}"))}]\n\n"));
+            $"def claims{index} : List StrictBinding.BodyClaim :=\n  [{string.Join(",\n   ", part)}]\n\n"));
         var joined = Enumerable.Range(0, parts.Length - 1).Reverse().Aggregate($"claims{parts.Length - 1}",
             (rest, index) => $"(claims{index} ++ {rest})");
         var lemmas = string.Concat(parts.Select((_, index) => $"theorem bodiesOf{index} : " +
@@ -952,6 +948,8 @@ partial class Program
 
             {{BindingImage.Definitions(file)}}
             def pinned : List StrictBinding.PinnedImage := [{ identity := "{{identity}}", image := image }]
+
+            def claimIdentity : CIL.AssemblyName := {{name}}
 
             {{defs}}def claims : List StrictBinding.BodyClaim := {{joined}}
 
