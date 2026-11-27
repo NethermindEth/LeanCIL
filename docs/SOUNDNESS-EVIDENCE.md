@@ -340,7 +340,14 @@ What `MetadataResolution` and `MetadataBinding` check:
   field operand as its `field`. For ordinary statics, `Method.ofClosed?` reads the descriptor
   from `RawMethod.staticFields` and checks its owner, field index, type, name and scalar storage.
   It checks a literal against its bytes. An initializer call needs the complete program, where
-  `StaticValuesValid` executes the recorded callee and checks the result against those bytes.
+  `StaticValuesValid` checks that all sites for one storage identity carry the same descriptor,
+  including its bytes, initializer, field, scalar signedness, alignment and opaque flag. It executes
+  each distinct field's initializer once and compares the result to the descriptor's bytes.
+  Calls and constructors share a program with constructor-fixed sites removed.
+  The extractor is trusted to identify the single store to that field in its owner's type
+  initializer and to record the literal, callee and arguments that produced its value. Lean
+  checks the recorded computation. Its link to that store in the pinned type initializer's
+  body remains trusted.
   Both `decodedProgram?` and `TranslationValid` require `StaticValuesValid` and
   `StaticIdentitiesValid` for the complete program. A standalone closure must include each
   initializer needed to reproduce its static bytes at the index the descriptor records.
