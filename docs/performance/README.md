@@ -25,7 +25,6 @@ changing before and after the change.
   taken in one session on one machine with nothing else running, and repeat each at least once.
 - Stage times inside a suite overlap (a fixture time includes its Lean calls), and modules
   compile concurrently. Do not add stage or module savings to predict a job's time.
-- A local time does not predict a hosted runner's time. Use the suite times below for CI.
 
 ## Scaling suites
 
