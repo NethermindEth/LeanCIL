@@ -125,11 +125,14 @@ void Prove(string name, int width, int offset = 0, bool copy = false, bool allMa
         $"  allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨{size}, 1, []⟩, true, [{size}]⟩ else none\n" +
         $"  cells := fun _ _ => ⟨173, true⟩\n  views := [⟨0, 0, {size}, true, true⟩]\n  nextIdentity := 1 }}\n";
     var claims = new List<string>();
-    var proofs = new List<string>();
+    var proofs = new List<(string Term, bool Pair)>();
     foreach (var mask in allMasks ? new[] { "full", "partial", "unknown" } : ["full"])
     {
-        var cells = "[" + string.Join(", ", Enumerable.Range(0, width).Select(index =>
+        var cells = mask + "Bytes";
+        var literal = "[" + string.Join(", ", Enumerable.Range(0, width).Select(index =>
             $"({index * 7 % 256}, {(mask == "full" || mask == "partial" && index % 3 != 0 ? "true" : "false")})")) + "]";
+        definitions += "/-- The concrete bytes and initialization flags supplied to this invocation. -/\n" +
+            $"private def {cells} : List (BitVec 8 × Bool) := {literal}\n";
         var value = $"CIL.Safety.snapshotValue .vector{width * 8} {cells}";
         var arguments = $"[Tests.reference, .scalar ({value})]";
         var initial = "memory";
@@ -138,7 +141,10 @@ void Prove(string name, int width, int offset = 0, bool copy = false, bool allMa
             var inputMemory = "source" + mask;
             definitions += $"def {inputMemory} : CIL.Safety.Memory := {{ memory with\n" +
                 $"  allocations := fun id => if id < 2 then some ⟨.callerStack, ⟨{width}, 1, []⟩, true, [{width}]⟩ else none\n" +
-                $"  cells := fun id index => if id = 1 then let cell := {cells}[index]?.getD (0, false); ⟨cell.1, cell.2⟩ else ⟨173, true⟩\n" +
+                $"  cells := let atIndex := CIL.Safety.snapshotCellAt {cells}.toArray\n" +
+                "    fun id index => if id = 1 then\n" +
+                "      let cell := (atIndex index).getD (0, false)\n" +
+                "      ⟨cell.1, cell.2⟩ else ⟨173, true⟩\n" +
                 $"  views := [⟨0, 0, {width}, true, true⟩, ⟨1, 0, {width}, true, true⟩]\n  nextIdentity := 2 }}\n";
             arguments = "[Tests.reference, .reference (.address ⟨1, 0⟩)]";
             initial = inputMemory;
@@ -148,24 +154,37 @@ void Prove(string name, int width, int offset = 0, bool copy = false, bool allMa
         {
             claims.Add($"({invocation}).map Prod.snd = " +
                 $".error ⟨0, 2, .memory .uninitialized (.address ⟨1, 0⟩) {width}⟩");
-            proofs.Add("by rfl");
+            proofs.Add(("rfl", false));
             continue;
         }
         claims.Add($"({invocation}).map Prod.snd = .ok [.scalar ({value})]");
         claims.Add($"({invocation}).map (fun result => (CIL.Safety.readSnapshot result.1 ⟨0, 0⟩ {size} 1).toOption) = " +
             $".ok (some (List.replicate {offset} (173, true) ++ {cells}))");
-        proofs.Add("by apply result_of_toOption; decide +kernel");
-        proofs.Add("by apply result_of_toOption; decide +kernel");
+        proofs.Add(("result_observations (by decide +kernel)", true));
     }
+    var proofTerm = proofs[^1].Term;
+    foreach (var (term, pair) in proofs.SkipLast(1).Reverse())
+        proofTerm = pair ? $"and_assoc.mp ⟨{term}, {proofTerm}⟩" : $"⟨{term}, {proofTerm}⟩";
     File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" + """
-        private theorem result_of_toOption {error value : Type} {result : Except error value}
-            {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
-          cases result <;> simp_all [Except.toOption]
-        #print axioms result_of_toOption
+        /-- Both observations hold for the same successful invocation. -/
+        private theorem result_observations {error state first second : Type} {run : Except error state}
+            {observeFirst : state → first} {observeSecond : state → second} {expectedFirst : first}
+            {expectedSecond : second}
+            (both : (run.map (fun result => (observeFirst result, observeSecond result))).toOption =
+              some (expectedFirst, expectedSecond)) :
+            run.map observeFirst = .ok expectedFirst ∧ run.map observeSecond = .ok expectedSecond := by
+          cases run with
+          | error _ => cases both
+          | ok result =>
+            change some (observeFirst result, observeSecond result) =
+              some (expectedFirst, expectedSecond) at both
+            obtain ⟨firstEq, secondEq⟩ := Prod.mk.inj (Option.some.inj both)
+            exact ⟨congrArg Except.ok firstEq, congrArg Except.ok secondEq⟩
+        #print axioms result_observations
 
         """ + definitions +
-        "theorem correctness :\n" + string.Join(" ∧\n", claims) + " := by exact ⟨" +
-        string.Join(", ", proofs) + "⟩\n#print axioms correctness\nend ExampleProof\n");
+        "theorem correctness :\n" + string.Join(" ∧\n", claims) + " := by exact " + proofTerm +
+        "\n#print axioms correctness\nend ExampleProof\n");
     pending.Add(new(selectors[name], proof, output), () => Console.WriteLine("PASS vector storage masks: " + name));
 }
 
