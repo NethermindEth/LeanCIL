@@ -49,7 +49,9 @@ var suites = VerificationSelection.Schedule(VerificationSelection.Select(inputs,
 Console.WriteLine(JsonSerializer.Serialize(new { changed = paths, suites }, new JsonSerializerOptions { WriteIndented = true }));
 // GitHub validates the matrix even when the suite job is skipped.
 var planLibraries = eventName != "pull_request" || VerificationSuites.MeasureLibraries(paths);
-var groups = VerificationSelection.Groups(suites.Length == 0 ? ["core"] : suites, planLibraries: planLibraries);
+var planProofs = eventName != "pull_request" || VerificationSuites.MeasureProofOutputs(paths);
+var groups = VerificationSelection.Groups(suites.Length == 0 ? ["core"] : suites,
+    planLibraries: planLibraries, planProofs: planProofs);
 File.AppendAllText(output, "matrix=" + JsonSerializer.Serialize(new { include = groups },
     new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) +
     "\nhas-suites=" + (suites.Length > 0 ? "true" : "false") + "\n");

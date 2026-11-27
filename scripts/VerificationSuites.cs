@@ -16,10 +16,17 @@ internal static class VerificationSuites
     internal static readonly string[] ManualSuites =
         ["lookups", "stepping", "scaling", "excluded", "exceptionlint"];
 
-    /// <summary>Inputs that select the test libraries for proof-cost measurement.</summary>
+    /// <summary>Inputs that can change library/tactic proof cost and therefore select the test libraries for measurement.</summary>
     internal static bool MeasureLibraries(IEnumerable<string> paths) => paths.Any(path =>
-        path.EndsWith(".lean", StringComparison.Ordinal) ||
-        path is "lakefile.toml" or "lean-toolchain" or "lake-manifest.json");
+        path.StartsWith("CIL/", StringComparison.Ordinal) ||
+        path.StartsWith("StrictBinding/", StringComparison.Ordinal) ||
+        path is "CIL.lean" or "StrictBinding.lean" or "lakefile.toml" or "lean-toolchain" or "lake-manifest.json");
+
+    /// <summary>Inputs that can change elaborated proof cost of verified outputs.</summary>
+    internal static bool MeasureProofOutputs(IEnumerable<string> paths) => MeasureLibraries(paths) || paths.Any(path =>
+        path.StartsWith("Extractor/", StringComparison.Ordinal) ||
+        path.StartsWith("Examples/", StringComparison.Ordinal) ||
+        path.EndsWith(".lean", StringComparison.Ordinal));
 
     /// <summary>
     /// The suites whose verified outputs are proofs about extracted methods: examples and generated

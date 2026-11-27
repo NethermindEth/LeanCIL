@@ -767,16 +767,19 @@ internal static partial class ProofCostReport
 
     internal const string LibrariesSource = "libraries";
 
-    // What a change needs measured: the test libraries when Lean inputs changed, and each selected proof suite.
+    // What a change needs measured: the test libraries when core library/build inputs changed, and each selected
+    // proof suite when core library, extractor, example or Lean proof sources changed.
     internal static string[] Sources(string selectionMatrix, IEnumerable<string> changedPaths)
     {
+        var paths = changedPaths as string[] ?? [.. changedPaths];
         using var matrix = JsonDocument.Parse(selectionMatrix);
         var selected = matrix.RootElement.GetProperty("include").EnumerateArray()
             .SelectMany(group => group.GetProperty("suites").EnumerateArray()).Select(suite => suite.GetString())
             .ToHashSet(StringComparer.Ordinal);
-        var lean = VerificationSuites.MeasureLibraries(changedPaths);
-        return [.. lean ? [LibrariesSource] : Array.Empty<string>(),
-            .. VerificationSuites.ProofSuites.Where(selected.Contains)];
+        var libraries = VerificationSuites.MeasureLibraries(paths);
+        var proofs = VerificationSuites.MeasureProofOutputs(paths);
+        return [.. libraries ? [LibrariesSource] : Array.Empty<string>(),
+            .. proofs ? VerificationSuites.ProofSuites.Where(selected.Contains) : Array.Empty<string>()];
     }
 
     internal static Measurement Read(IEnumerable<string> paths)

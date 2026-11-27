@@ -245,11 +245,12 @@ keyword and a hash of its source, so rows keep their identity when code around t
 
 A source is measured on each tree by the run that verifies it:
 
-- `libraries` is every test library of `lakefile.toml`, meaning each `[[lean_lib]]` table that
-  only names a library, with the checkout modules it imports. It is compared when the PR changes
-  a Lean file, the lakefile, the toolchain pin or the Lake manifest.
+- `libraries` is every test library of `lakefile.toml`, with the checkout modules it imports. It
+  is compared when the PR changes `CIL/`, `CIL.lean`, `StrictBinding/`, `StrictBinding.lean`, the
+  lakefile, the toolchain pin or the Lake manifest.
 - A proof suite (`core`, `loops`, `outlines`, `outlines-components`) is compared when
-  selection chose that suite. Its rows are every output directory the suite verified: its
+  selection chose that suite and the PR changes `CIL/`, `StrictBinding/`, `Extractor/`, `Examples/`
+  or a `.lean` file. Its rows are every output directory the suite verified: its
   `Extracted.lean`, its `Symbols.lean` when present, keyed re-export modules imported by the
   proof, and the proof that `verified.json` names, provided the proof is unchanged since.
   Package-local imports are resolved through Lake and measured with the proof; their source bytes

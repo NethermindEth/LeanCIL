@@ -273,11 +273,14 @@ const string selection = """
       {"suite":"outlines-components","suites":["outlines-components"],"timeout":30},
       {"suite":"docs+cli","suites":["docs","cli"],"timeout":30}]}
     """;
-Require(Sources(selection, ["Tests/Loops.cs"]) is ["core", "outlines-components"],
-    "selected proof suites are measured and other suites are not");
+Require(Sources(selection, ["Tests/Loops.cs"]) is [],
+    "a C# test-harness edit that touches no library, extractor or Lean proof skips redundant proof-cost re-elaboration");
+Require(Sources(selection, ["Examples/Proofs/Add.lean"]) is ["core", "outlines-components"] &&
+    Sources(selection, ["Extractor/LeanEmitter.cs"]) is ["core", "outlines-components"],
+    "an example proof or extractor change measures selected proof suites without re-measuring all test libraries");
 Require(Sources(selection, ["CIL/Safety/Stepping.lean"]) is [LibrariesSource, "core", "outlines-components"] &&
     Sources(selection, ["lakefile.toml"]) is [LibrariesSource, ..],
-    "a Lean or build change also measures the test libraries");
+    "a CIL library or build change measures both the test libraries and selected proof suites");
 Require(Sources("""{"include":[{"suite":"docs","suites":["docs"],"timeout":30}]}""", ["docs/CI.md"]) is [],
     "a documentation change measures nothing");
 

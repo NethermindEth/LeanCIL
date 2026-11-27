@@ -62,7 +62,8 @@ internal static class VerificationSelection
 
     // Give the next suite to the runner with the least work, including each job's setup.
     // Short selections share a job. Unknown suites start first and run alone.
-    internal static Group[] Groups(IEnumerable<string> suites, string? root = null, bool planLibraries = true)
+    internal static Group[] Groups(IEnumerable<string> suites, string? root = null, bool planLibraries = true,
+        bool planProofs = true)
     {
         var run = ReadDurations(root);
         var durations = run.Suites;
@@ -102,7 +103,7 @@ internal static class VerificationSelection
                 var libraries = group.Contains(carrier);
                 var budget = group.Sum(Seconds) + (libraries ? run.LibrarySeconds : 0);
                 return new Group(Name(group), group.ToArray(), Timeout(group, budget),
-                    group.Any(VerificationSuites.ProofSuites.Contains), libraries);
+                    planProofs && group.Any(VerificationSuites.ProofSuites.Contains), libraries);
             }).ToArray();
     }
 
