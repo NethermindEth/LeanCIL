@@ -616,7 +616,8 @@ internal static partial class ProofCostReport
                     directories = consumerDirectories.GetOrAdd(root, path => new Lazy<string[]>(() =>
                         Program.ConsumerSourceDirectories(path, [path]))).Value;
                 }
-                catch (Exception error) when (error is IOException or InvalidOperationException or ArgumentException)
+                catch (Exception error) when (error is IOException or InvalidDataException or
+                    InvalidOperationException or ArgumentException)
                 {
                     consumerFailure = error.Message;
                 }
