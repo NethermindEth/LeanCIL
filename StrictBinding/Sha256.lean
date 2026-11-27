@@ -67,8 +67,11 @@ def rounds : List Nat → List Nat → Nat → Nat → Nat → Nat → Nat → N
 def compress (state : List Nat) (block : Nat) : List Nat :=
   match state with
   | [a, b, c, d, e, f, g, h] =>
-    let words := blockWords block
-    match rounds roundConstants (words ++ expand 48 words) a b c d e f g h with
+    -- Every word derived from an all-zero block is zero.
+    let schedule := if block == 0 then List.replicate 64 0 else
+      let words := blockWords block
+      words ++ expand 48 words
+    match rounds roundConstants schedule a b c d e f g h with
     | [a', b', c', d', e', f', g', h'] =>
       [add a a', add b b', add c c', add d d', add e e', add f f', add g g', add h h']
     | _ => []
