@@ -20,7 +20,7 @@ internal static partial class ClassViews
 
     /// <summary>One field access: the method and pc whose emitted operation loads or stores the field.</summary>
     internal sealed record Access(FieldDefinition Field, TypeReference Owner, int Method, int Pc,
-        FieldOperation Operation);
+        FieldOperation Operation, string Operand);
 
     /// <summary>A named field of a class: where it lives, what it holds, and which methods load and store it.
     /// </summary>
@@ -36,14 +36,15 @@ internal static partial class ClassViews
     internal sealed record View(string FullName, string Path, string Type, Field[] Fields);
 
     /// <summary>The named class field accessed by a reachable load or store.</summary>
-    internal static Access? Of(Instruction instruction, int method, int pc, MetadataValidation.LayoutContext layouts)
+    internal static Access? Of(Instruction instruction, int method, int pc, string operand,
+        MetadataValidation.LayoutContext layouts)
     {
         if (instruction is not { OpCode.Code: Code.Ldfld or Code.Stfld, Operand: FieldReference field } ||
             !ObjectTypes.Candidate(field.DeclaringType)) return null;
         var resolved = field.Resolve() ?? throw new InvalidDataException("Unresolved field");
         var operation = ObjectTypes.FieldOperation(field, resolved, instruction.OpCode.Code == Code.Stfld,
             address: false, layouts);
-        return new(resolved, field.DeclaringType, method, pc, operation);
+        return new(resolved, field.DeclaringType, method, pc, operation, operand);
     }
 
     /// <summary>The views of the classes whose fields the accesses touch, each field named once per class.
@@ -82,7 +83,7 @@ internal static partial class ClassViews
     /// The `Extracted.Classes` namespace: per class, its type and one descriptor per accessed field with a theorem
     /// that the descriptor is the operand of the access it names. Empty when no method accesses a class field.
     /// </summary>
-    internal static string Emit(IEnumerable<Access> accesses, View[] views)
+    internal static string Emit(IEnumerable<Access> accesses, View[] views, bool instructionFacts)
     {
         if (views.Length == 0) return "";
         var first = accesses.GroupBy(access => (access.Owner.FullName, access.Operation.Offset))
@@ -107,10 +108,14 @@ internal static partial class ClassViews
                 lean.AppendLine($"/-- `{access.Field.FieldType.FullName} {view.FullName}::{access.Field.Name}`, " +
                     $"at model offset {field.Offset}. -/");
                 lean.AppendLine($"@[reducible] def {field.Lean} : {descriptor} := ⟨type, {field.Offset}⟩");
+                var method = $"method{access.Method}";
+                var store = access.Operation.Store ? "true" : "false";
+                var proof = instructionFacts ?
+                    $"{field.Lean}.accessedBy_of_shape {store} {method}_instruction{access.Pc} rfl " +
+                    $"({access.Operand}_shape {method}_environment)" : LeanEmitter.Decide;
                 lean.AppendLine($"theorem {Identifier(field.Name + "_accessed")} : " +
-                    $"(method{access.Method}.code[{access.Pc}]?).any " +
-                    $"({field.Lean}.accessedBy method{access.Method}) = true := " +
-                    LeanEmitter.Decide);
+                    $"({method}.code[{access.Pc}]?).any " +
+                    $"({field.Lean}.accessedBy {method}) = true := {proof}");
             }
             lean.AppendLine($"end {view.Path}");
         }

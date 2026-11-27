@@ -747,10 +747,10 @@ A contract for a method taking [class instances](SOUNDNESS-RUNTIME.md#class-inst
 fields instead of offsets. For every field of an admitted class that its methods load or store, an
 extraction emits a descriptor under `Extracted.Classes`, such as `Account.Balance :
 WordField 8`, `Node.Next : ReferenceField` or `Samples.Values : ArrayField .signed32`, carrying
-the class and the model offset the extractor validated. Each comes with a theorem, checked by
-`decide`, that the method's `Method.fieldShape` of the field an instruction it names accesses is
-the descriptor's slot (`Account.Balance_accessed`). A field name is a label; only the class, offset and width or
-element are relied on.
+the class and the model offset the extractor validated. Each descriptor has a theorem such as
+`Account.Balance_accessed` connecting a load or store at a specific instruction to its checked
+field slot. Methods with named instruction and operand-shape equations use those proofs to check
+the descriptor's owner, offset and width or element. A field name serves as a label.
 
 `CIL.Safety.ObjectFields` gives each descriptor its predicates and lemmas:
 
