@@ -59,26 +59,27 @@ partial class Program
         new Random(5).NextBytes(larger.AsSpan(examples.Length));
         const int smaller = 1272;
         const int largerClaims = 5088;
-        (string Name, byte[] Bytes, int? Claims)[] cases =
+        (string Name, byte[] Bytes, int? Claims, int MemoryGiB)[] cases =
         [
-            ("fixture", StrictBindingFacts.ReadImage(File.ReadAllText(Fixture)), null),
-            ($"Examples.dll, {smaller} claims", examples, smaller),
-            ($"Examples.dll and 770 KB more, {smaller} claims", larger, smaller),
-            ($"Examples.dll, {largerClaims} claims", examples, largerClaims)
+            ("fixture", StrictBindingFacts.ReadImage(File.ReadAllText(Fixture)), null, 3),
+            ($"Examples.dll, {smaller} claims", examples, smaller, 3),
+            ($"Examples.dll and 770 KB more, {smaller} claims", larger, smaller, 5),
+            ($"Examples.dll, {largerClaims} claims", examples, largerClaims, 5)
         ];
         Directory.CreateDirectory(root);
-        var heartbeats = new long[cases.Length];
-        for (var index = 0; index < cases.Length; index++)
+        long BodyHeartbeats(int index)
         {
             var path = Path.Combine(root, $"Bodies{index}.lean");
             File.WriteAllText(path, AllBodiesModule(cases[index].Bytes, cases[index].Claims) +
                 "\n#eval show IO Nat from IO.getNumHeartbeats\n");
-            var run = Execute(["lake", "env", "lean", "-DElab.async=false", path], cwd: package);
+            var run = Execute(["lake", "env", "lean", "-j1", "-DElab.async=false", path], cwd: package);
             if (run.Code != 0)
                 throw new InvalidOperationException($"The bodies of {cases[index].Name} were not found: {run.Output}");
-            heartbeats[index] = long.Parse(run.Output.Split('\n', StringSplitOptions.TrimEntries |
+            return long.Parse(run.Output.Split('\n', StringSplitOptions.TrimEntries |
                 StringSplitOptions.RemoveEmptyEntries).Last(), System.Globalization.CultureInfo.InvariantCulture);
         }
+        var heartbeats = Concurrently(Enumerable.Range(0, cases.Length).ToArray(),
+            index => ReservingMemory((long)cases[index].MemoryGiB << 30, () => BodyHeartbeats(index)));
         var costs = cases.Zip(heartbeats, (item, count) => $"{item.Name} {count} heartbeats");
         Console.WriteLine("Body checks: " + string.Join(", ", costs));
         double Above(int index) => heartbeats[index] - heartbeats[0];
@@ -303,21 +304,24 @@ partial class Program
     /// </summary>
     static void CheckMetadataRowsModuleScaling(string root, string package)
     {
-        int[] sizes = [318, 1272, 5088];
+        (int Methods, int Images, int MemoryGiB)[] cases =
+            [(318, 1, 3), (1272, 1, 5), (5088, 1, 9), (1272, 2, 5)];
         Directory.CreateDirectory(root);
-        var heartbeats = sizes.Select(methods => MetadataRowsModuleHeartbeats(root, package, methods, 1)).ToArray();
-        var split = MetadataRowsModuleHeartbeats(root, package, sizes[1], 2);
-        var measured = string.Join(", ", sizes.Zip(heartbeats, (methods, cost) => $"{cost} heartbeats at {methods}"));
-        var perMethod = (double)heartbeats[2] / sizes[2] / ((double)heartbeats[1] / sizes[1]);
+        var heartbeats = Concurrently(cases, item => ReservingMemory((long)item.MemoryGiB << 30,
+            () => MetadataRowsModuleHeartbeats(root, package, item.Methods, item.Images)));
+        var measured = string.Join(", ", cases[..^1].Zip(heartbeats,
+            (item, cost) => $"{cost} heartbeats at {item.Methods}"));
+        var split = heartbeats[^1];
+        var perMethod = (double)heartbeats[2] / cases[2].Methods / ((double)heartbeats[1] / cases[1].Methods);
         if (heartbeats[1] <= 0 || perMethod > MaximumPerClaimGrowth)
             throw new InvalidOperationException($"The metadata rows module costs {measured}; a method costs " +
-                $"{perMethod:F2} times as much at {sizes[2]} methods as at {sizes[1]}");
+                $"{perMethod:F2} times as much at {cases[2].Methods} methods as at {cases[1].Methods}");
         var perImage = (double)split / heartbeats[1];
         if (split <= 0 || perImage > MaximumPerClaimGrowth)
-            throw new InvalidOperationException($"The metadata rows module costs {split} heartbeats for {sizes[1]} " +
-                $"methods over two images and {heartbeats[1]} over one");
+            throw new InvalidOperationException($"The metadata rows module costs {split} heartbeats for " +
+                $"{cases[1].Methods} methods over two images and {heartbeats[1]} over one");
         Console.WriteLine($"PASS the metadata rows module is linear in the methods ({measured}; " +
-            $"{perMethod:F2} times per method; {split} heartbeats at {sizes[1]} over two images, " +
+            $"{perMethod:F2} times per method; {split} heartbeats at {cases[1].Methods} over two images, " +
             $"{perImage:F2} times)");
     }
 
@@ -349,16 +353,18 @@ partial class Program
         var perImage = methods / images;
         var files = Enumerable.Range(0, images).Select(image => SyntheticMethods(perImage, "Synthetic" + image))
             .ToArray();
+        static string MethodSource(string slice, int index)
+        {
+            var row = index + 1;
+            return $"def slice{row} : CIL.Extraction.MetadataSlice :=\n  {slice}\n" +
+                $"def method{row} : CIL.Extraction.MethodMetadata := {{ own := slice{row} }}\n";
+        }
         var definitions = string.Concat(files.Select((file, image) => $$"""
             namespace Image{{image}}
             {{BindingImage.Definitions(file)}}
             def assemblyBlock : CIL.Extraction.AssemblyMetadata :=
               {{StrictBindingFacts.AssemblyBlock(file)}}
-            {{string.Concat(Enumerable.Range(1, perImage).Select(row =>
-                $"def slice{row} : CIL.Extraction.MetadataSlice :=\n  " +
-                StrictBindingFacts.Slice(file, new HashSet<int> { MetadataTokens.GetToken(
-                    MetadataTokens.MethodDefinitionHandle(row)) }) +
-                $"\ndef method{row} : CIL.Extraction.MethodMetadata := {{ own := slice{row} }}\n"))}}end Image{{image}}
+            {{string.Concat(StrictBindingFacts.MethodSlices(file).Select(MethodSource))}}end Image{{image}}
 
             """));
         // One list per page keeps each list literal within the elaborator's recursion limit.
