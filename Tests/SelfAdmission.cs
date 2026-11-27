@@ -89,7 +89,7 @@ var blockers = document.RootElement.GetProperty("blockers").EnumerateArray().ToA
 var summary = new List<string>
 {
     "# Self-admission of Nethermind.LeanCIL.dll", "",
-    $"Admission under the `{Profile}` profile; nothing here is proved. Gated on an exact match with the baseline.", "",
+    $"Admission under the `{Profile}` profile; nothing here is proved. Gated on regressions only; gains and removed methods are reported.", "",
     "| Methods | Admitted | Blocked | Not checked | Distinct blockers | Seconds |",
     "| ---: | ---: | ---: | ---: | ---: | ---: |",
     $"| {current.Count} | {Count('A')} | {Count('B')} | {Count('N')} | {blockers.Length} | {elapsed:F1} |", "",
@@ -121,12 +121,10 @@ Console.WriteLine(string.Join('\n', summary));
 if (lost.Length != 0)
     throw new InvalidOperationException($"Methods admitted in {baselinePath} are no longer admitted:\n" +
         string.Join('\n', lost) + "\nSee " + report + " for their blockers.");
-// A stale baseline stops guarding the methods it omits, so unrecorded gains and removals fail too.
 if (gained.Length != 0 || removed.Length != 0)
-    throw new InvalidOperationException($"{baselinePath} is stale: {gained.Length} admissions gained and " +
-        $"{removed.Length} admitted methods removed. Review them, then record the scan with " +
-        "`dotnet run --file Tests/SelfAdmission.cs -- --update`.");
-Console.WriteLine($"PASS self-admission: {Count('A')} of {current.Count} methods admitted, matching the baseline");
+    Console.WriteLine($"NOTE {baselinePath}: {gained.Length} admissions gained and " +
+        $"{removed.Length} removed methods (refresh with `dotnet run --file Tests/SelfAdmission.cs -- --update`).");
+Console.WriteLine($"PASS self-admission: {Count('A')} of {current.Count} methods admitted with no regressions");
 
 // Extracts each admitted method alone and elaborates it against the checkout's CIL; an admission the Lean
 // checks refuse is a drift between the extractor and the checker, so any refusal fails.

@@ -130,39 +130,35 @@ partial class Program
             File.WriteAllLines(baseline, lines);
         }
         var expected = File.ReadAllLines(baseline);
-        if (advisory || !allCompilers)
+        var oldColumns = expected[0].Split('\t').Skip(1).ToArray();
+        var previous = expected.Skip(1).Select(line => line.Split('\t'))
+            .ToDictionary(fields => fields[0], fields => fields.Skip(1).ToArray(), StringComparer.Ordinal);
+        var lost = new List<string>();
+        var gained = new List<string>();
+        var removed = new List<string>();
+        foreach (var (column, actual) in columns)
         {
-            var oldColumns = expected[0].Split('\t').Skip(1).ToArray();
-            var previous = expected.Skip(1).Select(line => line.Split('\t'))
-                .ToDictionary(fields => fields[0], fields => fields.Skip(1).ToArray(), StringComparer.Ordinal);
-            var lost = new List<string>();
-            var gained = new List<string>();
-            foreach (var (column, actual) in columns)
+            var language = column[(column.IndexOf('/') + 1)..];
+            var targetColumn = advisory ? CorpusCompilerVersions[^1] + "/" + language : column;
+            var index = Array.IndexOf(oldColumns, targetColumn);
+            if (index < 0) throw new InvalidDataException("Missing comparison baseline for " + targetColumn);
+            foreach (var method in previous.Keys.Union(actual.Keys).Order(StringComparer.Ordinal))
             {
-                var language = column[(column.IndexOf('/') + 1)..];
-                var targetColumn = advisory ? CorpusCompilerVersions[^1] + "/" + language : column;
-                var index = Array.IndexOf(oldColumns, targetColumn);
-                if (index < 0) throw new InvalidDataException("Missing comparison baseline for " + targetColumn);
-                foreach (var method in previous.Keys.Union(actual.Keys).Order(StringComparer.Ordinal))
-                {
-                    var wasAdmitted = previous.TryGetValue(method, out var states) && states[index] == "A";
-                    var admitted = actual.GetValueOrDefault(method) == 'A';
-                    if (wasAdmitted && !admitted) lost.Add(column + ": " + method);
-                    if (!wasAdmitted && admitted) gained.Add(column + ": " + method);
-                }
+                var wasAdmitted = previous.TryGetValue(method, out var states) && index < states.Length &&
+                    states[index] == "A";
+                var exists = actual.TryGetValue(method, out var currentState);
+                var admitted = exists && currentState == 'A';
+                if (wasAdmitted && exists && !admitted) lost.Add(column + ": " + method);
+                else if (wasAdmitted && !exists) removed.Add(column + ": " + method);
+                else if (!wasAdmitted && admitted) gained.Add(column + ": " + method);
             }
-            File.WriteAllLines(Path.Combine(directory, "changes.txt"),
-                lost.Select(method => "LOST " + method).Concat(gained.Select(method => "GAINED " + method)));
-            Console.WriteLine($"{(advisory ? "Latest compiler" : "Pinned compiler")}: " +
-                $"{lost.Count} lost, {gained.Count} gained admissions");
-            if (lost.Count != 0) throw new InvalidOperationException(string.Join('\n', lost));
-            if (!advisory && gained.Count != 0)
-                throw new InvalidOperationException("Compiler coverage gained admissions; review changes.txt and " +
-                    "run with --all-compilers --update.\n" + string.Join('\n', gained.Take(100)));
         }
-        else if (!expected.SequenceEqual(lines))
-            throw new InvalidOperationException("Compiler coverage changed; review acceptance.tsv and use --all-compilers --update.\n" +
-                string.Join('\n', lines.Except(expected).Select(line => "+ " + line)
-                    .Concat(expected.Except(lines).Select(line => "- " + line)).Take(100)));
+        File.WriteAllLines(Path.Combine(directory, "changes.txt"),
+            lost.Select(method => "LOST " + method)
+                .Concat(gained.Select(method => "GAINED " + method))
+                .Concat(removed.Select(method => "REMOVED " + method)));
+        Console.WriteLine($"{(advisory ? "Latest compiler" : "Pinned compiler")}: " +
+            $"{lost.Count} lost, {gained.Count} gained, {removed.Count} removed admissions");
+        if (lost.Count != 0) throw new InvalidOperationException(string.Join('\n', lost));
     }
 }

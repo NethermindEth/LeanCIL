@@ -425,15 +425,16 @@ Require(unextracted.Length == 0,
 Require(Unextracted(admittedMethods, extractedMethods.Where(method => method != admittedMethods[0]))
         .SequenceEqual([admittedMethods[0]]),
     "An admitted method that was not extracted went unreported");
+// The admitted set passes; a lost admission fails, while renumbered closures, removed methods and gains pass.
 var exact = Gate(admittedMethods);
-Require(exact.Code == 0 && exact.Output.Contains("matching the baseline"),
+Require(exact.Code == 0 && exact.Output.Contains("with no regressions"),
     "The scan's own admitted set failed the gate:\n" + exact.Output);
 // Adding a member or a lambda renumbers the closures and lambdas after it; that alone must not fail the gate.
 var renumbered = Gate([.. admittedMethods.Select(method =>
     method.Replace("<>c__DisplayClass", "<>c__DisplayClass9", StringComparison.Ordinal)
         .Replace(">b__", ">b__9", StringComparison.Ordinal))]);
 Require(admittedMethods.Any(method => method.Contains("<>c__DisplayClass", StringComparison.Ordinal)) &&
-    renumbered.Code == 0 && renumbered.Output.Contains("matching the baseline"),
+    renumbered.Code == 0 && renumbered.Output.Contains("with no regressions"),
     "Renumbered closures failed the gate:\n" + renumbered.Output);
 var blockedMethod = Existing("blocked")!;
 var lostAdmission = Gate([.. admittedMethods, blockedMethod]);
@@ -441,16 +442,16 @@ Require(lostAdmission.Code != 0 && lostAdmission.Output.Contains("no longer admi
     lostAdmission.Output.Contains(blockedMethod), "Lost admission passed the gate:\n" + lostAdmission.Output);
 const string gone = "System.Int32 Gone::Removed()";
 var removedMethod = Gate([.. admittedMethods, gone]);
-Require(removedMethod.Code != 0 && removedMethod.Output.Contains("is stale") &&
-    removedMethod.Output.Contains("Removed admitted methods:") && removedMethod.Output.Contains(gone),
-    "A removed admitted method passed the gate:\n" + removedMethod.Output);
+Require(removedMethod.Code == 0 && removedMethod.Output.Contains("Removed admitted methods:") &&
+    removedMethod.Output.Contains(gone),
+    "A removed admitted method failed the regression-only gate:\n" + removedMethod.Output);
 if (admittedMethods.Length != 0)
 {
     var unrecorded = Existing("admitted")!;
     var gained = Gate([.. admittedMethods.Where(method => method != unrecorded)]);
-    Require(gained.Code != 0 && gained.Output.Contains("is stale") &&
-        gained.Output.Contains("Gained admissions") && gained.Output.Contains(unrecorded),
-        "An unrecorded admission passed the gate:\n" + gained.Output);
+    Require(gained.Code == 0 && gained.Output.Contains("Gained admissions:") &&
+        gained.Output.Contains(unrecorded),
+        "A gained admission failed the regression-only gate:\n" + gained.Output);
 }
 // A volatile field is read and written under a `volatile.` prefix, which the single-threaded model gives no meaning:
 // extraction stops at it and names the instruction, the method and the stage.

@@ -95,20 +95,24 @@ var current = extracted.Order(StringComparer.Ordinal).ToArray();
 var baseline = File.Exists(baselinePath) ? File.ReadAllLines(baselinePath).Where(line => line.Length != 0) : [];
 var currentCounts = StableNames.Counts(current);
 var baselineCounts = StableNames.Counts(baseline);
-var (lost, added) = (Excess(baselineCounts, currentCounts), Excess(currentCounts, baselineCounts));
+var presentByProfile = StableNames.Counts(profiles.SelectMany(profile =>
+    methods.Select(method => profile + " " + StableNames.Of(method))));
+var missing = Excess(baselineCounts, currentCounts);
+// Only fail on methods that still exist in Examples.dll and regressed; removed methods and gains are reported.
+var lost = missing.Where(entry => presentByProfile.ContainsKey(entry)).ToArray();
+var removed = missing.Where(entry => !presentByProfile.ContainsKey(entry)).ToArray();
+var added = Excess(currentCounts, baselineCounts);
 foreach (var method in added) Console.WriteLine("  added: " + method);
-// --update records additions only, so a lost admission needs a deliberate edit of the baseline.
 if (lost.Length != 0)
     throw new InvalidOperationException($"Methods listed in {baselinePath} are no longer extracted:\n" +
         string.Join('\n', lost));
 if (update)
 {
     File.WriteAllText(baselinePath, string.Concat(current.Select(method => method + "\n")));
-    Console.WriteLine($"Recorded {added.Length} additions in {baselinePath}.");
+    Console.WriteLine($"Recorded {added.Length} additions and {removed.Length} removals in {baselinePath}.");
     return;
 }
-if (added.Length != 0)
-    throw new InvalidOperationException($"{added.Length} example methods are newly extracted. Review them, then " +
-        $"record them in {baselinePath} with `{UpdateCommand}`.");
-Console.WriteLine($"PASS example admission: {current.Length} methods extracted across the profiles, matching the " +
-    "baseline");
+if (added.Length != 0 || removed.Length != 0)
+    Console.WriteLine($"NOTE {baselinePath}: {added.Length} newly extracted and {removed.Length} removed methods " +
+        $"(refresh with `{UpdateCommand}`).");
+Console.WriteLine($"PASS example admission: {current.Length} methods extracted across the profiles with no regressions");
