@@ -163,4 +163,91 @@ theorem RuntimeModelsAgree.of_closed {closed storage reachable layouts constants
     simpa [present, linkReads_eq, inside, Method.linkAt] using modeled
 
 #print axioms RuntimeModelsAgree.of_closed
+
+/-- Mapping with `Option` keeps the input list's length. -/
+private theorem length_of_mapM_option {α β : Type} {f : α → Option β} :
+    ∀ {xs : List α} {ys : List β}, xs.mapM f = some ys → ys.length = xs.length
+  | [], ys, h => by simp [Option.pure_def] at h; subst h; rfl
+  | x :: xs, ys, h => by
+    simp only [List.mapM_cons, Option.bind_eq_bind, Option.bind_eq_some_iff,
+      Option.pure_def, Option.some.injEq] at h
+    obtain ⟨y, _, rest, hrest, rfl⟩ := h
+    simp [length_of_mapM_option hrest]
+
+/-- Closed decoding validates the parameter homes, local kinds and argument instructions. -/
+theorem ParameterHomesValid.of_closed {profile : FeatureProfile}
+    {environment : LayoutEnvironment} {links : List (Nat × Link)} {reachable : List Bool}
+    {closed : RawMethod} {storage : RawArguments} {method : Method}
+    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method) :
+    ParameterHomesValid environment.layouts storage reachable method := by
+  unfold Method.ofClosed? at decoded
+  cases failure : firstLiveHole 0 reachable
+      (methodCode profile environment links reachable closed)
+    <;> simp only [failure] at decoded
+  case some => cases decoded
+  case none =>
+    cases hLocals : storage.locals.mapM (storageKind environment.layouts) <;>
+      cases hHomes : expectedHomes environment.layouts storage reachable <;>
+      simp only [hLocals, hHomes] at decoded
+    all_goals try cases decoded
+    split at decoded
+    · cases decoded
+    · split at decoded
+      · cases decoded
+      · rename_i _ _ _ hArgs
+        cases decoded
+        simp only [Bool.not_eq_true', Bool.not_eq_false] at hArgs
+        have hLengths := all3_lengths (by simpa [argumentInstructionsValid] using hArgs)
+        refine ⟨hLengths.1.symm, hLengths.2.symm, hLocals, ?_, hHomes, hArgs⟩
+        simpa [List.length_map] using length_of_mapM_option hLocals
+
+#print axioms ParameterHomesValid.of_closed
+
+/-- Closed decoding never replaces a live call-family opcode with `pop`. -/
+theorem UnsafeCallsValid.of_closed {closed storage reachable layouts constants linkAt certificate}
+    {method : Method}
+    (decoded : Method.ofClosed? method.profile method.environment method.links reachable closed
+      storage = .ok method)
+    (features : FeatureFlowValid layouts constants linkAt closed method.profile certificate
+      reachable method.code) :
+    UnsafeCallsValid closed reachable method.code := by
+  have maskSize : closed.code.length = reachable.length := by
+    rw [features.2.2.1, List.length_map, features.1]
+  have codeSize := features.2.1.symm
+  refine ⟨maskSize, codeSize, ?_⟩
+  apply all3_of_getElem? maskSize codeSize
+  intro pc raw live emitted found _ atCode
+  rw [(Method.ofClosed?_fields decoded).1, methodCode_eq,
+    Instruction.ofRawCode_getElem? closed.code pc _, Instruction.ofRawAt, found] at atCode
+  cases atCode
+  cases live
+  · rfl
+  · simpa using methodInstruction_callEmitsNoPop method.profile
+      method.environment.callLayouts closed.owner (firstEntryIndex closed.staticFields)
+      (Std.TreeSet.ofList (method.links.map Prod.fst) compare)
+      (foldRoles closed.code).toArray reachable.toArray pc
+      (rawBefore (closed.code[·]?) pc) raw
+
+#print axioms UnsafeCallsValid.of_closed
+
+/-- Closed decoding fixes the profile, return flag, local initialization and raw prefixes. -/
+theorem _root_.CIL.Method.ofClosed?_shape {profile : FeatureProfile}
+    {environment : LayoutEnvironment} {links : List (Nat × Link)} {reachable : List Bool}
+    {closed : RawMethod} {storage : RawArguments} {method : Method}
+    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method) :
+    method.profile = profile ∧
+    method.returnsValue = (closed.returnType != .void) ∧
+    method.locals = method.localKinds.map (LocalKind.initialValue closed.initLocals) ∧
+    rawPrefixesValid closed.returnType closed.code = true := by
+  unfold Method.ofClosed? at decoded
+  cases failure : firstLiveHole 0 reachable
+      (methodCode profile environment links reachable closed)
+    <;> simp only [failure] at decoded
+  repeat' split at decoded
+  all_goals first
+    | contradiction
+    | (cases decoded; simp_all)
+
+#print axioms Method.ofClosed?_shape
+
 end CIL.Extraction

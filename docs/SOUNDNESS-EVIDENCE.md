@@ -61,6 +61,9 @@ Dead sites retain their opcode-tagged holes.
 `MethodEvidenceValid.modelsAgree` derives runtime call agreement for the whole method.
 Closed decoding rules out reachable holes. The feature certificate fixes the mask and code
 lengths, and `RuntimeModelsAgree.of_decoded_site` relates each instruction to its catalog entry.
+`ParameterHomesValid.of_closed`, `UnsafeCallsValid.of_closed` and `MethodShapeValid.of_closed`
+similarly derive the parameter-home, call-no-pop, return-flag, local-initialization and prefix
+checks directly from closed decoding instead of re-deciding them per method.
 A span
 reset must have its matching local address for the decoder to produce an initialization.
 

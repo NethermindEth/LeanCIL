@@ -158,6 +158,21 @@ instance (closed : RawMethod) (method : Method) :
     Decidable (MethodShapeValid closed method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
+/-- Closed decoding discharges the return flag, local initialization and prefix checks of
+    `MethodShapeValid`, leaving only profile validity and static-field sites. -/
+theorem MethodShapeValid.of_closed {profile : FeatureProfile} {environment : LayoutEnvironment}
+    {links : List (Nat × Link)} {reachable : List Bool} {closed : RawMethod}
+    {storage : RawArguments} {method : Method}
+    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method)
+    (validProfile : profile.Valid)
+    (statics : methodShapeInstructions closed method = true) :
+    MethodShapeValid closed method := by
+  obtain ⟨sameProfile, sameReturn, sameLocals, prefixes⟩ := Method.ofClosed?_shape decoded
+  exact ⟨sameProfile ▸ validProfile, sameReturn, sameLocals, statics,
+    ((rawPrefixesValid_iff _ _).mp prefixes).1⟩
+
+#print axioms MethodShapeValid.of_closed
+
 /-- The method's declared signature is the one its closed metadata implies. -/
 def DeclaredValid (closed : RawMethod) (method : Method) : Prop :=
   method.declared = DeclaredSignature.ofRaw closed

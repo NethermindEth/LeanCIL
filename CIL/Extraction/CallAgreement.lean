@@ -399,4 +399,115 @@ theorem RuntimeModelsAgree.of_decoded_site {profile : FeatureProfile}
 
 #print axioms RuntimeModelsAgree.of_decoded_site
 
+/-- No static instruction decodes to `.pop`. -/
+private theorem staticInstruction_ne_pop {profile : FeatureProfile} {environment : CallLayouts}
+    {methodOwner : String} {site : Option StaticFieldSite} {raw : RawInstruction}
+    (decoded : staticInstruction profile environment methodOwner site raw = some .pop) :
+    False := by
+  unfold staticInstruction ordinaryStaticInstruction at decoded
+  simp only [Bind.bind, Option.bind, Pure.pure, guard] at decoded
+  repeat' first
+    | cases decoded
+    | (split at decoded <;> try dsimp only at decoded)
+    | unfold Instruction.staticField? at decoded
+
+/-- `linkedRequirement` never emits `.pop`. -/
+private theorem linkedRequirement_ne_pop (catalog : ModelCatalog) (environment : CallLayouts)
+    (profile : FeatureProfile) (raw : RawInstruction) :
+    catalog.linkedRequirement environment profile raw ≠ .instruction .pop := by
+  intro eq
+  unfold ModelCatalog.linkedRequirement at eq
+  repeat' first | cases eq | split at eq
+
+/-- `callRequirement` never emits `.pop`. -/
+private theorem callRequirement_ne_pop (catalog : ModelCatalog) (environment : CallLayouts)
+    (profile : FeatureProfile) (link : Option Link) (raw : RawInstruction) :
+    catalog.callRequirement environment profile link raw ≠ .instruction .pop := by
+  intro eq
+  unfold ModelCatalog.callRequirement at eq
+  dsimp only at eq
+  split at eq
+  · exact linkedRequirement_ne_pop catalog environment profile raw eq
+  · cases eq
+  · repeat' first | cases eq | split at eq
+
+/-- `methodInstruction` never replaces a call-family opcode with `.pop`. -/
+theorem methodInstruction_callEmitsNoPop (profile : FeatureProfile) (environment : CallLayouts)
+    (methodOwner : String) (statics : Std.TreeMap Nat StaticFieldSite)
+    (occupied : Std.TreeSet Nat) (roles : Array (Option FoldRole)) (reachable : Array Bool)
+    (pc : Nat) (previous : Option RawInstruction) (raw : RawInstruction) :
+    callEmitsNoPop raw (methodInstruction profile environment methodOwner statics occupied
+      roles reachable pc previous raw) = true := by
+  suffices h : callFamilyOpcodes.contains raw.opcode = true →
+      methodInstruction profile environment methodOwner statics occupied
+        roles reachable pc previous raw ≠ .pop by
+    unfold callEmitsNoPop
+    cases eq : methodInstruction profile environment methodOwner statics occupied
+        roles reachable pc previous raw with
+    | pop =>
+      cases isCall : callFamilyOpcodes.contains raw.opcode
+      · rfl
+      · exact (h isCall eq).elim
+    | _ => rfl
+  intro isCall isPop
+  have callOp : raw.opcode = 40 ∨ raw.opcode = 41 ∨ raw.opcode = 111 ∨ raw.opcode = 115 := by
+    simp only [callFamilyOpcodes, List.contains_cons, List.contains_nil, Bool.or_false,
+      Bool.or_eq_true, beq_iff_eq] at isCall
+    rcases isCall with h | h | h | h
+    · exact .inl h
+    · exact .inr (.inl h)
+    · exact .inr (.inr (.inl h))
+    · exact .inr (.inr (.inr h))
+  unfold methodInstruction Instruction.withSiteDecoder at isPop
+  dsimp only at isPop
+  have ofRaw_pop : ∀ prev, Instruction.ofRaw prev raw ≠ .pop := by
+    intro prev h
+    unfold Instruction.ofRaw at h
+    cases dec : Instruction.ofRaw? prev raw with
+    | none => simp [dec] at h
+    | some op => simp [dec] at h; subst h; exact Instruction.ofRaw?_ne_pop_of_call callOp dec
+  have ofClosed_pop : ∀ prev, Instruction.ofClosedValue prev raw ≠ .pop := by
+    intro prev h
+    unfold Instruction.ofClosedValue at h
+    repeat' first | exact ofRaw_pop prev h | cases h | split at h
+  split at isPop
+  · cases isPop
+  · split at isPop
+    · split at isPop
+      · split at isPop
+        · cases isPop
+        · cases s : staticInstruction profile environment methodOwner statics[pc]? raw with
+          | none => simp [s] at isPop
+          | some op =>
+            simp [s] at isPop; subst isPop
+            exact staticInstruction_ne_pop s
+      · split at isPop
+        · cases req : runtimeCatalog.linkedRequirement environment profile raw with
+          | linked => simp [req, CallRequirement.decode] at isPop; exact ofRaw_pop _ isPop
+          | instruction op =>
+            simp [req, CallRequirement.decode] at isPop; subst isPop
+            exact linkedRequirement_ne_pop _ _ _ _ req
+          | hole _ => simp [req, CallRequirement.decode] at isPop
+        · split at isPop
+          · cases isPop
+          · cases req : runtimeCatalog.callRequirement environment profile none raw with
+            | linked => simp [req, CallRequirement.decode] at isPop; exact ofRaw_pop _ isPop
+            | instruction op =>
+              simp [req, CallRequirement.decode] at isPop; subst isPop
+              exact callRequirement_ne_pop _ _ _ _ _ req
+            | hole _ => simp [req, CallRequirement.decode] at isPop
+    · split at isPop
+      · exact ofClosed_pop _ isPop
+      · split at isPop
+        · cases isPop
+        · exact ofClosed_pop _ isPop
+      · rename_i role _ _
+        cases r : Instruction.ofRole? role previous raw with
+        | none => simp [r] at isPop
+        | some op =>
+          simp [r] at isPop; subst isPop
+          exact Instruction.ofRole?_ne_pop_of_call callOp r
+
+#print axioms methodInstruction_callEmitsNoPop
+
 end CIL.Extraction

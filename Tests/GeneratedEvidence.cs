@@ -294,10 +294,13 @@ partial class Program
                     return match.Value;
                 if (match.Groups[1].Value != theorem) return "";
                 found++;
-                // Isolated layout, object and scalar checks decide the fixture's complete obligation.
+                // Isolated layout, object, parameter, shape and scalar checks decide the fixture's complete obligation.
                 if (match.Value.Contains(" : Extraction.MethodLayoutsValid ", StringComparison.Ordinal) ||
                     match.Value.Contains(" : Extraction.ObjectOperandsValid ", StringComparison.Ordinal) ||
-                      match.Value.Contains(" : Extraction.RuntimeModelsAgree ", StringComparison.Ordinal) ||
+                    match.Value.Contains(" : Extraction.RuntimeModelsAgree ", StringComparison.Ordinal) ||
+                    match.Value.Contains(" : Extraction.ParameterHomesValid ", StringComparison.Ordinal) ||
+                    match.Value.Contains(" : Extraction.UnsafeCallsValid ", StringComparison.Ordinal) ||
+                    match.Value.Contains(" : Extraction.MethodShapeValid ", StringComparison.Ordinal) ||
                     match.Value.Contains(" : Extraction.ScalarFlowValid ", StringComparison.Ordinal))
                     return TheoremHead.Replace(match.Value, "$1 := by decide +kernel");
                 return InstructionCheckProjection.Replace(match.Value, " := by decide +kernel");
