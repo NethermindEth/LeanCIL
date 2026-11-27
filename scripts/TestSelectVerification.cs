@@ -692,7 +692,7 @@ static partial class ExternalSources
     /// <summary>Accepted findings by file and rule, with why each cannot reach another repository.</summary>
     static readonly Dictionary<(string File, string Rule), string> Exempt = new()
     {
-        [("scripts/ConsumerVerification.cs", "fetch-repository")] =
+        [("scripts/Consumer/WorkspaceAndComponents.cs", "fetch-repository")] =
             "clones the dependency directories of the repository under verification into a scratch workspace",
         [("scripts/CertifiedLibraryDonor.cs", "other-url")] =
             "compares a pull request side with this repository by the API URL that run metadata gives",
@@ -733,9 +733,10 @@ static partial class ExternalSources
 
     /// <summary>Every workflow and every script or test source that a suite runs.</summary>
     internal static IEnumerable<string> CiFiles(string root) =>
-        new[] { ".github/workflows/*.yml", ".github/workflows/*.yaml", "scripts/*.cs", "Tests/*.cs" }
+        new[] { ".github/workflows/*.yml", ".github/workflows/*.yaml", "Tests/*.cs" }
             .SelectMany(pattern => Directory.GetFiles(Path.Combine(root, Path.GetDirectoryName(pattern)!),
-                Path.GetFileName(pattern)));
+                Path.GetFileName(pattern)))
+            .Concat(Directory.GetFiles(Path.Combine(root, "scripts"), "*.cs", SearchOption.AllDirectories));
 
     /// <summary>One finding per rule broken on a line, as file:line: rule. Cost is linear in total lines.</summary>
     internal static List<string> Scan(string root, IEnumerable<string> files)

@@ -852,11 +852,16 @@ internal static partial class ProofCostReport
     {
         workflow ??= File.ReadAllText(Path.Combine(ScriptDirectory(), "..", ".github", "workflows",
             "verification.yml"));
+        var verificationSources = Directory.EnumerateFiles(
+                Path.Combine(ScriptDirectory(), "Verification"), "*.cs")
+            .Order(StringComparer.Ordinal)
+            .Prepend(Path.Combine(ScriptDirectory(), "Verification.cs"))
+            .Select(Sha);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"{Schema}\n{Sha(Path.Combine(ScriptDirectory(), "ProofCost.lean"))}\n" +
             $"{Sha(Path.Combine(ScriptDirectory(), "ProofCostReport.cs"))}\n" +
             $"{Sha(Path.Combine(ScriptDirectory(), "ProofProfiler.cs"))}\n" +
-            $"{Sha(Path.Combine(ScriptDirectory(), "Verification.cs"))}\n" +
+            $"{string.Join('\n', verificationSources)}\n" +
             string.Join('\n', MeasuringSteps.Select(step => WorkflowStep(workflow, step))))));
     }
 
