@@ -634,9 +634,8 @@ def userStringUnits (entries : SearchTree (List Nat)) (offset : Nat) :
 /-! ## Rows by token -/
 
 /-- The column widths of an in-scope token of a supported table. -/
-private def TableHeader.rowWidths (header : TableHeader) (token : Nat) :
+private def TableHeader.rowWidths (header : TableHeader) (table token : Nat) :
     Except MetadataError (List Nat) := do
-  let table := metadataTableOf token
   if tokenRow token == 0 || header.rows table < tokenRow token then
     throw (.tokenOutOfScope token)
   let some widths := columnWidths header.widths table | throw (.unsupportedTable token)
@@ -646,15 +645,15 @@ private def TableHeader.rowWidths (header : TableHeader) (token : Nat) :
     its row, the table must be one the checker reads and the row must have the length the
     header's widths give. -/
 def MetadataIndex.row (index : MetadataIndex) (token : Nat) : Except MetadataError (List Nat) := do
-  let widths ← index.header.rowWidths token
+  let widths ← index.header.rowWidths (metadataTableOf token) token
   let some bytes := index.rows.find? token | throw (.missingRow token)
   if bytes.length == widths.sum then return bytes
   throw (.rowLength token widths.sum bytes.length)
 
 /-- Decode one carried row, requiring its columns to consume exactly its bytes. -/
-private def TableHeader.rowColumns (header : TableHeader) (token : Nat) (row : Option (List Nat)) :
-    Except MetadataError (List Nat) := do
-  let widths ← header.rowWidths token
+private def TableHeader.rowColumns (header : TableHeader) (table token : Nat)
+    (row : Option (List Nat)) : Except MetadataError (List Nat) := do
+  let widths ← header.rowWidths table token
   let some bytes := row | throw (.missingRow token)
   let some values := splitColumns widths bytes | throw (.rowLength token widths.sum bytes.length)
   return values
@@ -662,12 +661,14 @@ private def TableHeader.rowColumns (header : TableHeader) (token : Nat) (row : O
 /-- The columns of a row as numbers. -/
 def MetadataIndex.columns (index : MetadataIndex) (token : Nat) :
     Except MetadataError (List Nat) :=
-  index.header.rowColumns token (index.rows.find? token)
+  index.header.rowColumns (metadataTableOf token) token (index.rows.find? token)
 
 /-- A row of a given table; a token of another table is out of scope. -/
 private def MetadataIndex.columnsOf (index : MetadataIndex) (table token : Nat) :
     Except MetadataError (List Nat) :=
-  if metadataTableOf token == table then index.columns token else .error (.tokenOutOfScope token)
+  if metadataTableOf token == table then
+    index.header.rowColumns table token (index.rows.find? token)
+  else .error (.tokenOutOfScope token)
 
 /-- The `TypeRef` row of a token. -/
 def MetadataIndex.typeRef (index : MetadataIndex) (token : Nat) :
@@ -700,8 +701,8 @@ theorem MetadataIndex.typeDef_bytes {index : MetadataIndex} {token : Nat} {row :
     cases stored : index.rows.find? token with
     | some bytes => exact ⟨bytes, rfl⟩
     | none =>
-      cases widths : index.header.rowWidths token <;>
-        simp [MetadataIndex.columns, TableHeader.rowColumns, stored, widths, bind, Except.bind,
+      cases widths : index.header.rowWidths Table.typeDef token <;>
+        simp [TableHeader.rowColumns, stored, widths, bind, Except.bind,
           throw] at cols
 #print axioms MetadataIndex.typeDef_bytes
 
@@ -759,7 +760,7 @@ def MetadataIndex.nestedClass (index : MetadataIndex) (token : Nat) :
 private def TableHeader.genericParam (header : TableHeader) (token : Nat)
     (row : Option (List Nat)) : Except MetadataError GenericParamRow := do
   if metadataTableOf token != Table.genericParam then throw (.tokenOutOfScope token)
-  match ← header.rowColumns token row with
+  match ← header.rowColumns Table.genericParam token row with
   | [number, flags, owner, name] =>
     .ok { number, flags, owner := ← decodeCoded typeOrMethodDefTags 1 owner, name }
   | _ => .error (.unsupportedTable token)
