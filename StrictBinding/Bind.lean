@@ -121,15 +121,19 @@ def blockDisplay (assembly : CIL.Extraction.AssemblyMetadata) : String :=
 
 /-- The prepared image whose Assembly row names the assembly a carried block's row names. -/
 def locatedBlock (prepared : List PreparedImage) (assembly : CIL.Extraction.AssemblyMetadata) :
-    Except AuditError PreparedImage := do
-  let .ok identity := assembly.name | throw .unnamedAssembly
-  located prepared identity
+    Except AuditError PreparedImage :=
+  -- Different slice projections reduce to the same block before the kernel decodes its name.
+  match assembly with
+  | block@⟨_, _, _, _, _, _⟩ => do
+    let .ok identity := block.name | throw .unnamedAssembly
+    located prepared identity
 
 /-- The image `locatedBlock` selects is one of the prepared images. -/
 theorem mem_of_locatedBlock {prepared : List PreparedImage}
     {assembly : CIL.Extraction.AssemblyMetadata} {image : PreparedImage}
     (found : locatedBlock prepared assembly = .ok image) : image ∈ prepared := by
-  unfold locatedBlock at found
+  cases assembly
+  simp only [locatedBlock] at found
   split at found
   · exact mem_of_located found
   · cases found
