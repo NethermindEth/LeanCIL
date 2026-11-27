@@ -1,4 +1,5 @@
-import Tests.WrapperProofs
+import CIL.Safety.HandlerSteps
+import CIL.Safety.StepComposition
 
 /-! Execution facts that the generated Unsafe layout fixtures apply to extracted bodies. Each body
     takes the declared signature and layout environment an extraction records. Its return metadata
@@ -93,8 +94,9 @@ theorem add_error {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEn
   rw [run_next (body := addMethod method profile declared environment) rfl rfl
     (by simp [step, observerCount, unspecifiedOperands, loadArgument, CIL.Method.argumentAccess,
       addMethod, offsetStorage, numeric] <;> rfl)]
-  rw [Tests.WrapperProofs.run_fault
-    (body := addMethod method profile declared environment) rfl rfl
+  have free : HandlerFree [addMethod method profile declared environment] := by handler_free
+  rw [run_fault (body := addMethod method profile declared environment)
+    (unprotected := free.unprotected 0 2) rfl rfl
     (by
       rw [step_call_model (link := rfl) (found := found) (direct := rfl)]
       simp [modelStep_memory, CIL.MemoryOp.argumentCount, unspecifiedOperands,
