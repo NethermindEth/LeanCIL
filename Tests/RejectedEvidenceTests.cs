@@ -73,6 +73,32 @@ foreach (var (path, marker) in new[] { (valid, "decide"), (invalid, "absent diag
 Console.WriteLine("PASS valid evidence and mismatched diagnostics cannot borrow another case's rejection");
 
 CheckEvidenceBatchFailures(valid);
+CheckShardedEvidenceFailure(valid);
+
+static void CheckShardedEvidenceFailure(string original)
+{
+    var directory = Path.GetFullPath(At("artifacts/RejectedEvidenceTests/ShardedEvidence"));
+    Directory.CreateDirectory(directory);
+    var valid = Path.Combine(directory, "Valid.lean");
+    var admitted = Path.Combine(directory, "Admitted.lean");
+    var source = File.ReadAllText(original);
+    const string hypothesis = "\ntheorem unchecked : False := by sorry\n#print axioms unchecked\n";
+    // The larger valid input occupies the first batch on multi-core runners.
+    File.WriteAllText(valid, source + "\n-- " + new string(' ', hypothesis.Length));
+    File.WriteAllText(admitted, source + hypothesis);
+    var evidence = new GeneratedEvidence(directory);
+    evidence.Add(valid, "Unexpected pass before admitted evidence", "invalid");
+    evidence.Add(admitted, "Unexpected admitted evidence", "invalid");
+    var failedModule = Environment.ProcessorCount > 1 ? "PositiveBatch1.lean" : "PositiveBatch.lean";
+    try { evidence.Check(replay: false, maxShards: 2); }
+    catch (InvalidOperationException error) when (
+        error.Message == "Untrusted generated evidence: " + Path.Combine(directory, failedModule))
+    {
+        Console.WriteLine("PASS admitted evidence fails its own generated batch");
+        return;
+    }
+    throw new InvalidOperationException("An admitted proof passed a generated evidence batch");
+}
 
 static void CheckEvidenceBatchFailures(string original)
 {

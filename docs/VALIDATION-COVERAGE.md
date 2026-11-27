@@ -125,6 +125,10 @@ workflow.
 - Each of these five scripts accepts `--measure`, which first checks the same final source files
   separately. `artifacts/<fixture>/batch-timings.json` records source hashes, separate time and
   batch compilation/replay time.
+- The call-site agreement suite checks each extracted method, its emission witnesses and its
+  altered operands in a separate namespace. Up to four Lean processes share the cases by source
+  size, subject to the runner's processor and memory limits. All batches must pass before the
+  suite reports any successful case.
 - `GenericEvidence` also checks that an invalid proof fails batch compilation and that an
   unchecked declaration reaches, and fails, independent kernel replay.
 - `GenericEvidence` mutates the emitted `declared` signature (a parameter, the return type, the

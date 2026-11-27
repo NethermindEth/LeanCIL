@@ -413,11 +413,11 @@ partial class Program
         public void Add(string path, string passed, string theorem = "translation_valid") =>
             cases.Add((Path.GetFullPath(path), File.ReadAllText(path), passed, theorem));
 
-        string BatchSource()
+        string BatchSource(IEnumerable<int> indexes)
         {
             var imports = new SortedSet<string>(StringComparer.Ordinal);
             var bodies = new StringBuilder();
-            for (var index = 0; index < cases.Count; index++)
+            foreach (var index in indexes)
             {
                 var source = cases[index].Source;
                 if (!source.Contains("namespace Extracted\n", StringComparison.Ordinal) ||
@@ -450,27 +450,60 @@ partial class Program
             return timer.Elapsed.TotalSeconds;
         }
 
-        // Direct semantic fixtures already kernel-check during elaboration. Certificate audit
-        // fixtures additionally replay every serialized declaration with the authenticated auditor.
-        public void Check(bool replay = true)
+        // Each case keeps its namespace when a large batch is distributed among Lean processes.
+        string[] WriteBatches(int maxShards)
+        {
+            Directory.CreateDirectory(directory);
+            var count = Math.Min(maxShards, Math.Min(cases.Count, Environment.ProcessorCount));
+            var indexes = Enumerable.Range(0, cases.Count);
+            if (count == 1) return [WriteBatch("PositiveBatch", indexes)];
+            var groups = Enumerable.Range(0, count).Select(_ => new List<int>()).ToArray();
+            var loads = new long[count];
+            foreach (var index in indexes.OrderByDescending(i => cases[i].Source.Length))
+            {
+                var group = Array.IndexOf(loads, loads.Min());
+                groups[group].Add(index);
+                loads[group] += cases[index].Source.Length;
+            }
+            return groups.Select((members, group) =>
+                WriteBatch(group == 0 ? "PositiveBatch" : $"PositiveBatch{group}", members.Order())).ToArray();
+
+            string WriteBatch(string module, IEnumerable<int> members)
+            {
+                var path = Path.GetFullPath(Path.Combine(directory, module + ".lean"));
+                File.WriteAllText(path, BatchSource(members));
+                return path;
+            }
+        }
+
+        // Direct semantic fixtures kernel-check during elaboration. Certificate audit fixtures
+        // additionally replay every serialized declaration with the authenticated auditor.
+        public void Check(bool replay = true, int maxShards = 1)
         {
             if (cases.Count == 0) return;
-            Directory.CreateDirectory(directory);
-            var batch = Path.GetFullPath(Path.Combine(directory, "PositiveBatch.lean"));
-            File.WriteAllText(batch, BatchSource());
+            var batches = WriteBatches(maxShards);
             double? separateSeconds = measure ? MeasureSeparate() : null;
             var timer = Stopwatch.StartNew();
-            var compiled = Path.ChangeExtension(batch, ".olean");
-            File.Delete(compiled);
-            var checkedBatch = Run(["lake", "env", "lean", "--root=" + Path.GetDirectoryName(batch),
-                .. replay ? new[] { "-o", compiled } : [], batch], cwd: FixturePackage());
-            if (checkedBatch.Contains("sorryAx", StringComparison.Ordinal))
-                throw new InvalidOperationException("Untrusted generated evidence batch");
+            var package = FixturePackage();
+            void CheckBatch(string batch)
+            {
+                var compiled = Path.ChangeExtension(batch, ".olean");
+                File.Delete(compiled);
+                var log = Run(["lake", "env", "lean", "--root=" + Path.GetDirectoryName(batch),
+                    .. replay ? new[] { "-o", compiled } : [], batch], cwd: package);
+                if (log.Contains("sorryAx", StringComparison.Ordinal))
+                    throw new InvalidOperationException("Untrusted generated evidence: " + batch);
+            }
+            if (batches.Length == 1) CheckBatch(batches[0]);
+            else Concurrently(batches, CheckBatch);
             var buildSeconds = timer.Elapsed.TotalSeconds;
             if (replay)
-                fixtureVerification!.ReplayCheckedModules(["PositiveBatch"],
-                    Path.GetDirectoryName(batch) + Path.PathSeparator + FixtureLeanPath(),
+            {
+                string[] modules = [.. batches.Select(path => Path.GetFileNameWithoutExtension(path))];
+                fixtureVerification!.ReplayCheckedModules(modules,
+                    Path.GetDirectoryName(batches[0]) + Path.PathSeparator + FixtureLeanPath(),
                     "Kernel replay of generated evidence");
+            }
             timer.Stop();
             foreach (var item in cases)
             {
@@ -483,7 +516,8 @@ partial class Program
                 sources = cases.ToDictionary(item => item.Path, item => ContentKey(item.Source)) };
             File.WriteAllText(Path.Combine(directory, "batch-timings.json"),
                 JsonSerializer.Serialize(measurements, Json));
-            Console.WriteLine($"PASS {cases.Count} generated evidence fixtures in one checked batch");
+            var scope = batches.Length == 1 ? "one checked batch" : $"{batches.Length} checked batches";
+            Console.WriteLine($"PASS {cases.Count} generated evidence fixtures in {scope}");
             cases.Clear();
         }
     }
