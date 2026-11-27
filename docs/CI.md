@@ -27,11 +27,12 @@ the suite helper tests run in `select`.
 ## Suite selection
 
 Pushes to `main` and manual runs execute every automatic verification suite (the scaling
-microbenchmark suites `lookups`, `stepping`, `scaling` and `excluded` run in their own manual
-workflow `.github/workflows/benchmarks.yml` instead of on PRs or `main`). A pull request runs the
-automatic suites that own a changed file. A suite owns its entry script and, transitively, the
-`Tests/` and `Examples/` sources that script names, its file-based includes and the Lean modules
-those import.
+microbenchmark suites `lookups`, `stepping`, `scaling` and `excluded` run in
+`.github/workflows/benchmarks.yml`, and `exceptionlint` runs in
+`.github/workflows/exception-lint.yml`, both manually triggered instead of on PRs or `main`). A
+pull request runs the automatic suites that own a changed file. A suite owns its entry script and,
+transitively, the `Tests/` and `Examples/` sources that script names, its file-based includes and
+the Lean modules those import.
 
 | Changed path | Suites selected |
 | --- | --- |

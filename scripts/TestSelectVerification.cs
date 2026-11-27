@@ -158,6 +158,7 @@ Test("test entry points", () =>
     Equal(Select(["Tests/LookupScaling.cs"]), []);
     Equal(Select(["Tests/TranslationScaling.cs"]), []);
     Equal(Select(["Tests/ExcludedBranchScaling.cs"]), []);
+    Equal(Select(["Tests/ExceptionLint.cs"]), []);
     foreach (var module in new[] { "OperationFacts", "VectorLocalCalls", "SimdCarryCalls" })
         Equal(Select([$"Tests/{module}.lean"]), ["core"]);
     Equal(Select(["Tests/ProofOutlines.cs"]),

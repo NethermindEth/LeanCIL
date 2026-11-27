@@ -13,7 +13,8 @@ internal static class VerificationSuites
     /// <summary>
     /// Suites excluded from automatic PR and main verification runs and invoked through manual workflows or locally.
     /// </summary>
-    internal static readonly string[] ManualSuites = ["lookups", "stepping", "scaling", "excluded"];
+    internal static readonly string[] ManualSuites =
+        ["lookups", "stepping", "scaling", "excluded", "exceptionlint"];
 
     /// <summary>Inputs that select the test libraries for proof-cost measurement.</summary>
     internal static bool MeasureLibraries(IEnumerable<string> paths) => paths.Any(path =>
