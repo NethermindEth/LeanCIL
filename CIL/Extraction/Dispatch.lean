@@ -313,6 +313,8 @@ def resolveVirtualWith (find : TypeExpr → Option DispatchType) (fuel : Nat) (r
 def findDispatchType (types : List DispatchType) (identity : TypeExpr) : Option DispatchType :=
   unique (types.filter fun type => type.identity == identity)
 
+attribute [local instance] lexOrd
+
 /-- Every class a virtual call's table lists is bound to the body `resolveVirtualWith` selects:
     an extracted, non-generic instance method of the selecting class with the site's signature.
     Each class appears once, and no concrete catalog class whose chain reaches the slot's class
@@ -321,8 +323,13 @@ def virtualTableValid (types : List DispatchType) (find : TypeExpr → Option Di
     (methods : Nat → Option SpecializedMethod) (site : CallSite)
     (targets : List (TypeExpr × Nat)) (count : Nat) : Bool :=
   let fuel := types.length
-  !targets.isEmpty && decide (targets.map Prod.fst).Nodup &&
-  count == site.parameterCount + 1 &&
+  let key : TypeExpr → List (Nat × Nat) × List (List UInt8) := fun identity => match identity with
+    | .object scope name =>
+      let levelKey (level : TypeLevel) := (level.name.code, level.typeNamespace.code)
+      (name.levels.map levelKey, [keyBytes scope])
+    | type => ([], typeKeyInto type [])
+  !targets.isEmpty && count == site.parameterCount + 1 &&
+  (distinctMembership? key (targets.map Prod.fst)).any fun contains =>
   (targets.all fun (runtime, index) =>
     match resolveVirtualWith find fuel runtime site, methods index with
     | some (owner, method), some callee =>
@@ -334,8 +341,8 @@ def virtualTableValid (types : List DispatchType) (find : TypeExpr → Option Di
       callee.closed.parameters == site.parameterTypes
     | _, _ => false) &&
   types.all fun entry => entry.abstractType ||
-    (classChain find fuel entry.identity site.declaringType).isNone ||
-    targets.any (·.1 == entry.identity)
+    contains entry.identity ||
+    (classChain find fuel entry.identity site.declaringType).isNone
 
 /-- A class `castclass` and `isinst` may test against: a pinned, non-generic catalog class other
     than `System.Object`. An instance's runtime lineage lists exactly its own and its admitted

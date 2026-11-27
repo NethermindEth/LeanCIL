@@ -69,4 +69,18 @@ theorem baseline64 : baseline 64 = true := by decide +kernel
 theorem indexed64 : indexed 64 = true := by decide +kernel
 #print axioms indexed64
 
+/-- Distinct members that share a key survive indexing, and an absent member stays absent. -/
+theorem collisionMembership :
+    (distinctMembership? (fun _ : Nat => 0) [1, 2, 3]).any
+      (fun contains => contains 1 && contains 2 && contains 3 && !contains 4) = true := by
+  decide +kernel
+
+#print axioms collisionMembership
+
+/-- A nonadjacent duplicate in a shared bucket invalidates the entire catalog. -/
+theorem nonadjacentDuplicate :
+    (distinctMembership? (fun _ : Nat => 0) [1, 2, 3, 1]).isNone = true := by decide +kernel
+
+#print axioms nonadjacentDuplicate
+
 end DispatchScaling

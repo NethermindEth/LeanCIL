@@ -2,6 +2,7 @@ import CIL.RuntimeModel
 import CIL.CallSite
 import CIL.Extraction.TypeStorage
 import CIL.Extraction.FlowIndex
+import CIL.Extraction.DistinctIndex
 import CIL.Extraction.LinkIndex
 import CIL.Imports
 import CIL.Extraction.Assemblies
@@ -653,11 +654,15 @@ def managedAddressMatches (methods : Nat → Option SpecializedMethod)
     site.returnsValue == (signature.result != .void)
   | _ => false
 
+attribute [local instance] lexOrd
+
 /-- Indirect calls bind the exact raw managed signature and every possible selected target. -/
 def managedIndirectMatches (methods : Nat → Option SpecializedMethod)
     (raw : RawInstruction) (signature : ManagedSignature) (catalog : List ManagedTarget) : Bool :=
+  let key := fun (identity : ManagedIdentity) =>
+    (identity.token, keyBytes identity.owner, identity.arguments.map (typeKeyInto · []))
   raw.opcode == 41 && !catalog.isEmpty &&
-    (catalog.map (·.identity)).Nodup &&
+    (distinctMembership? key (catalog.map ManagedTarget.identity)).isSome &&
   match raw.operand with
   | .indirectCall result parameters false false 0 =>
     callableType result == signature.result && parameters.map callableType == signature.parameters &&
