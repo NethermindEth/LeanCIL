@@ -690,6 +690,7 @@ theorem feature_steps_evaluate_term (program : CIL.Program) (index : Nat) (profi
   cil_checked_steps [(show profile.evaluate .avx2 = true from wide)]
 
 -- A fact over every feature is instantiated at each constructor, so it still decides the field test.
+set_option maxHeartbeats 1800 in
 theorem feature_step_evaluate_forall (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
     (unlinked : body.linkAt 0 = none) (all : ∀ f, body.profile.evaluate f = true) :
     CIL.Safety.step body (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =

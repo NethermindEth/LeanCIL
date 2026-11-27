@@ -1644,23 +1644,29 @@ elab_rules : tactic
         let intrinsic ← `(tactic| (
           refine Eq.trans (CIL.Safety.step_call_intrinsic _ _ _ _ _ $link $model rfl) ?_
           cil_checked_intrinsic [$facts:term,*]))
+        let feature ← `(tactic| (
+          refine Eq.trans (CIL.Safety.step_call_feature _ _ _ _ _ $link $model rfl) ?_
+          cil_try_simp_only [cil_step, cil_guard, cil_checked, cil_side, $[$facts:term],*,
+            ite_true, ite_false, Bool.true_eq_false, Bool.false_eq_true]
+          all_goals rfl))
         -- Scalar results can reduce directly. Vector steps normalize lanes, and supplied
         -- evaluation facts must rewrite before reduction unfolds their symbolic operands.
         let preferIntrinsic := modelValue?.any fun value =>
           match argumentsOf? value ``CIL.RuntimeModel.intrinsic 2 with
           | some #[op, _] => !op.isAppOf ``CIL.Intrinsic.scalar || !facts.getElems.isEmpty
           | _ => false
-        let (firstStep, secondStep) :=
-          if preferIntrinsic then (intrinsic, evaluate) else (evaluate, intrinsic)
+        let featureCall := operation == ``CIL.Instruction.call &&
+          modelValue?.any (·.isAppOf ``CIL.RuntimeModel.feature)
+        let (firstStep, secondStep, thirdStep) :=
+          if featureCall then (feature, intrinsic, evaluate)
+          else if preferIntrinsic then (intrinsic, evaluate, feature)
+          else (evaluate, intrinsic, feature)
         `(tactic| cil_strict (first
           | $firstStep:tactic
           | $secondStep:tactic
           | (apply CIL.Safety.step_call_skipInit_address _ _ _ _ _ $link $model rfl
              assumption)
-          | (refine Eq.trans (CIL.Safety.step_call_feature _ _ _ _ _ $link $model rfl) ?_
-             cil_try_simp_only [cil_step, cil_guard, cil_checked, cil_side, $[$facts:term],*,
-               ite_true, ite_false, Bool.true_eq_false, Bool.false_eq_true]
-             all_goals rfl)
+          | $thirdStep:tactic
           | (refine Eq.trans (CIL.Safety.step_call_typedTransfer _ _ _ _ _ $link $model rfl _) ?_
              cil_simp_only [CIL.Safety.typedTransferCall, CIL.Safety.observedTransfer,
                CIL.Safety.transferValues, cil_guard, cil_checked, $[$facts:term],*]
