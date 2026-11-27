@@ -27,19 +27,7 @@ var flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 var callModel = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("CallModel", flags)!;
 var select = extractor.GetType("Nethermind.LeanCIL.FeatureProfile", true)!.GetMethod("Select", flags)!;
 var profile = select.Invoke(null, ["scalar"]);
-var cases = 0;
 var pending = new List<(GeneratedVerification Request, string Name, int Count)>();
-void Flush()
-{
-    if (pending.Count == 0) return;
-    verification.VerifyGeneratedBatch(assembly, "Examples", pending.Select(item => item.Request).ToArray());
-    foreach (var item in pending)
-    {
-        cases += item.Count;
-        Console.WriteLine($"PASS {item.Name}: {item.Count} runtime comparisons");
-    }
-    pending.Clear();
-}
 object Value(Type type, ulong bits)
 {
     if (type == typeof(sbyte)) return unchecked((sbyte)bits);
@@ -55,23 +43,21 @@ object Value(Type type, ulong bits)
     throw new InvalidOperationException("Unexpected fixture type: " + type);
 }
 
-string LeanValue(object value) => value switch
+ulong Bits(object value) => value switch
 {
-    bool x => $".scalar (.i32 {(x ? 1 : 0)})",
-    sbyte x => $".scalar (.i32 {unchecked((uint)x)})",
-    byte x => $".scalar (.i32 {x})",
-    nint x => $".scalar (.i64 {unchecked((ulong)x)})",
-    nuint x => $".scalar (.i64 {(ulong)x})",
-    short x => $".scalar (.i32 {unchecked((uint)x)})",
-    ushort x => $".scalar (.i32 {x})",
-    int x => $".scalar (.i32 {unchecked((uint)x)})",
-    uint x => $".scalar (.i32 {x})",
-    long x => $".scalar (.i64 {unchecked((ulong)x)})",
-    ulong x => $".scalar (.i64 {x})",
+    sbyte x => unchecked((uint)x),
+    byte x => x,
+    short x => unchecked((uint)x),
+    ushort x => x,
+    int x => unchecked((uint)x),
+    uint x => x,
+    nint x => unchecked((ulong)x),
+    nuint x => x,
+    long x => unchecked((ulong)x),
+    ulong x => x,
     _ => throw new InvalidOperationException("Unexpected value: " + value)
 };
 
-string Bits(object value) => LeanValue(value).Split(' ')[^1].TrimEnd(')');
 string Narrow(Type type, string value) => type == typeof(sbyte) ? $"(CIL.NarrowKind.signed8.extend {value})" :
     type == typeof(byte) ? $"(CIL.NarrowKind.unsigned8.extend {value})" :
     type == typeof(short) ? $"(CIL.NarrowKind.signed16.extend {value})" :
@@ -115,8 +101,9 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var aliasModel = callModel.Invoke(null, [alias, profile]);
     if (originalModel is not true || aliasModel is not true)
         throw new InvalidOperationException("Primitive helper must share its Math model: " + alias.FullName);
-    var values = new ulong[] { 0, 1, 2, 127, 128, 255, 32767, 32768, 65535, int.MaxValue, 1UL << 31, uint.MaxValue, long.MaxValue, 1UL << 63, ulong.MaxValue }
-        .Select(x => Value(type, x)).Distinct().ToArray();
+    ulong[] boundaries = [0, 1, 2, 127, 128, 255, 32767, 32768, 65535, int.MaxValue, 1UL << 31,
+        uint.MaxValue, long.MaxValue, 1UL << 63, ulong.MaxValue];
+    var values = boundaries.Select(x => Value(type, x)).Distinct().ToArray();
     var boundaryCases = new List<string>();
     foreach (var x in values)
     foreach (var y in parameters.Length > 1 ? values : values.Take(1))
@@ -146,11 +133,12 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var binders = $"({string.Join(" ", variables)} : CIL.W{stackWidth})";
     var evaluation = $"CIL.evalIntegerMath .{operation} {width} {signed} [{string.Join(", ", loaded)}]";
     var invocation = $"CIL.Safety.invoke Extracted.program 8 0 [{inputsLean}] CIL.Safety.Memory.empty";
-    var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], 0, []⟩ [{stack}] CIL.Safety.Memory.empty = _\n";
+    var atCall = $"CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] " +
+        $"⟨0, [], [], 0, []⟩ [{stack}] CIL.Safety.Memory.empty";
+    var usePrefix = $"  refine (wrapper_prefix {string.Join(" ", variables)}).trans ?_\n";
     // The helper keeps its call, which steps as the scalar intrinsic its model fact names.
-    var instruction = "(body := Extracted.method0)";
+    var fetched = $"Extracted.program_method0 Extracted.method0_instruction{argc}";
     var callStep = $"  math_wrapper_step Extracted.method0_model{argc} evaluated\n";
-    var argumentsLean = string.Join(" ", variables);
     var caseArguments = string.Join(" ", variables.Select(variable => "test." + variable));
     string ForCase(string expression)
     {
@@ -159,27 +147,22 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     }
     File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nimport Tests.WrapperProofs\nset_option maxRecDepth 4096\n" +
         "namespace ExampleProof\n" +
+        "/-- Loading the wrapper arguments reaches the checked arithmetic call. -/\n" +
+        $"private theorem wrapper_prefix {binders} :\n    {invocation} =\n    {atCall} := Eq.symm (Eq.refl _)\n" +
+        "#print axioms wrapper_prefix\n" +
         $"theorem wrapper_success_full {binders} (r : CIL.W{resultWidth})\n" +
         $"    (evaluated : {evaluation} = .ok (.i{resultWidth} r)) :\n" +
-        $"    {invocation} = .ok (CIL.Safety.Memory.empty, [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})]) := by\n" + prefix +
-        $"  refine (CIL.Safety.run_next {instruction} (by rfl) (by rfl)\n" +
+        $"    {invocation} = .ok (CIL.Safety.Memory.empty, [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})]) := by\n" + usePrefix +
+        $"  refine (CIL.Safety.run_next {fetched}\n" +
         $"    (show CIL.Safety.step _ _ _ _ _ _ _ = .ok (.next {argc + 1} [.scalar (.i{resultWidth} r)] ⟨0, [], [], 0, []⟩ CIL.Safety.Memory.empty) from ?_)).trans (by rfl)\n" +
         callStep +
         $"theorem wrapper_fault_full {binders} (fault : CIL.ArithmeticFault)\n" +
         $"    (evaluated : {evaluation} = .error fault) :\n" +
-        $"    {invocation} = .error ⟨0, {argc}, .arithmetic fault⟩ := by\n" + prefix +
-        $"  apply Tests.WrapperProofs.run_fault {instruction} (by rfl) (by rfl)\n" +
+        $"    {invocation} = .error ⟨0, {argc}, .arithmetic fault⟩ := by\n" + usePrefix +
+        "  have free : CIL.Safety.HandlerFree Extracted.program := by handler_free\n" +
+        $"  apply CIL.Safety.run_fault {fetched}\n" +
+        $"    (unprotected := by simpa only [Extracted.program_method0, Option.all] using free.unprotected 0 {argc})\n" +
         callStep +
-        $"theorem wrapper_success {binders} (r : CIL.W{resultWidth})\n" +
-        $"    (evaluated : {evaluation} = .ok (.i{resultWidth} r)) :\n" +
-        $"    ({invocation}).map Prod.snd = .ok [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})] :=\n" +
-        "  congrArg (fun result => result.map Prod.snd) " +
-        $"(wrapper_success_full {argumentsLean} r evaluated)\n" +
-        $"theorem wrapper_fault {binders} (fault : CIL.ArithmeticFault)\n" +
-        $"    (evaluated : {evaluation} = .error fault) :\n" +
-        $"    ({invocation}).map Prod.snd = .error ⟨0, {argc}, .arithmetic fault⟩ :=\n" +
-        "  congrArg (fun result => result.map Prod.snd) " +
-        $"(wrapper_fault_full {argumentsLean} fault evaluated)\n" +
         "/-- One runtime comparison, including its normal result or arithmetic fault. -/\n" +
         "structure BoundaryCase where\n" +
         string.Join("\n", variables.Select(variable => $"  {variable} : CIL.W{stackWidth}")) + "\n" +
@@ -202,11 +185,13 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         "  · rename_i actual expected evaluated outcome\n" +
         "    have same := beq_iff_eq.mp checked\n" +
         "    simpa only [outcome, Except.map, Except.mapError, same] using\n" +
-        $"      (wrapper_success {caseArguments} actual evaluated)\n" +
+        "      (congrArg (fun result => result.map Prod.snd) " +
+        $"(wrapper_success_full {caseArguments} actual evaluated))\n" +
         "  · rename_i actual expected evaluated outcome\n" +
         "    have same := beq_iff_eq.mp checked\n" +
         "    simpa only [outcome, Except.map, Except.mapError, same] using\n" +
-        $"      (wrapper_fault {caseArguments} actual evaluated)\n" +
+        "      (congrArg (fun result => result.map Prod.snd) " +
+        $"(wrapper_fault_full {caseArguments} actual evaluated))\n" +
         "  · simp at checked\n" +
         "#print axioms boundaryMatches_correct\n" +
         "/-- The kernel checks all recorded runtime comparisons. -/\n" +
@@ -223,7 +208,10 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var selector = $"IntegerMath::{method.Name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
     pending.Add((new GeneratedVerification(selector, proof, output), method.Name, boundaryCases.Count));
 }
-Flush();
+verification.VerifyGeneratedBatch(assembly, "Examples", pending.Select(item => item.Request).ToArray());
+foreach (var item in pending)
+    Console.WriteLine($"PASS {item.Name}: {item.Count} runtime comparisons");
+var cases = pending.Sum(item => item.Count);
 
 // A runtime helper model must never accept a forged identity or signature.
 foreach (var mutation in new[] { "scope", "version", "instance", "return", "argument", "generic", "unsupported" })
