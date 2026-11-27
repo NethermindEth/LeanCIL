@@ -18,11 +18,6 @@ private def images (image : ImageBytes) : List PinnedImage :=
 private def audit (image : ImageBytes) (items := Extracted.methodEvidence) :=
   ClassDispatch.check (images image) Extracted.assemblies items Extracted.imports
 
-/-- Both explicit slots match the implementation catalog read from the assembly. -/
-theorem original : DispatchCatalogsChecked (images DispatchImage.image) Extracted.assemblies
-    Extracted.methodEvidence Extracted.imports true := by decide +kernel
-#print axioms original
-
 /-- The unrelated IDisposable implementation names an external declaration by MemberRef. -/
 theorem unrelatedMemberRef :
     (do
@@ -63,12 +58,6 @@ private def changedPrimitiveScope : Option Bool := do
 theorem primitiveScopeMismatch : changedPrimitiveScope = some true := by decide +kernel
 #print axioms primitiveScopeMismatch
 
-/-- Omitting the explicit slots from the carried declarations changes the entry catalog. -/
-theorem missingOverrides :
-    mismatch (audit DispatchImage.image (Extracted.methodEvidence.map erase))
-      Extracted.method0Original.token = true := by decide +kernel
-#print axioms missingOverrides
-
 /-- Erasing the managed reference from a carried parameter contradicts its physical signature. -/
 private def eraseByref (item : MethodEvidence) : MethodEvidence := { item with
   dispatchTypes := item.dispatchTypes.map fun type => { type with
@@ -77,10 +66,35 @@ private def eraseByref (item : MethodEvidence) : MethodEvidence := { item with
         | .byref element => element
         | other => other } } }
 
+/-- The unaltered MethodImpl catalog binds and both carried changes fail at its MethodDef. -/
+theorem originalChecks :
+    DispatchCatalogsChecked (images DispatchImage.image) Extracted.assemblies
+      Extracted.methodEvidence Extracted.imports true ∧
+    mismatch (audit DispatchImage.image (Extracted.methodEvidence.map erase))
+      Extracted.method0Original.token = true ∧
+    mismatch (audit DispatchImage.image (Extracted.methodEvidence.map eraseByref))
+      Extracted.method0Original.token = true := by
+  decide +kernel
+#print axioms originalChecks
+
+/-- Both explicit slots match the implementation catalog read from the assembly. -/
+theorem original : DispatchCatalogsChecked (images DispatchImage.image) Extracted.assemblies
+    Extracted.methodEvidence Extracted.imports true :=
+  originalChecks.1
+#print axioms original
+
+/-- Omitting the explicit slots from the carried declarations changes the entry catalog. -/
+theorem missingOverrides :
+    mismatch (audit DispatchImage.image (Extracted.methodEvidence.map erase))
+      Extracted.method0Original.token = true :=
+  originalChecks.2.1
+#print axioms missingOverrides
+
 /-- The same Int32 parameter passed by value does not match the byref declaration. -/
 theorem byrefMismatch :
     mismatch (audit DispatchImage.image (Extracted.methodEvidence.map eraseByref))
-      Extracted.method0Original.token = true := by decide +kernel
+      Extracted.method0Original.token = true :=
+  originalChecks.2.2
 #print axioms byrefMismatch
 
 private def crossed (owner : Bool) : Option Bool := do
