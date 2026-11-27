@@ -23,25 +23,25 @@ private def rejected (items : List MethodEvidence) : Bool :=
   | _ => false
 
 /-- Dropping the class declaration leaves both tests without their catalog. -/
-theorem missingCatalog : rejected (Extracted.methodEvidence.map fun item =>
-    {item with dispatchTypes := []}) = true := by decide +kernel
-#print axioms missingCatalog
+private abbrev RejectsMissingCatalog : Prop :=
+  rejected (Extracted.methodEvidence.map fun item =>
+    {item with dispatchTypes := []}) = true
 
 /-- Change the method type parameter named by the physical return signature of Pick. -/
-theorem wrongGenericReturn : rejected (Extracted.methodEvidence.map fun item =>
+private abbrev RejectsWrongGenericReturn : Prop :=
+  rejected (Extracted.methodEvidence.map fun item =>
     { item with dispatchTypes := item.dispatchTypes.map fun type =>
       { type with methods := type.methods.map fun method =>
         if method.name == "Pick" then { method with returnType := .parameter 0 }
-        else method } }) = true := by decide +kernel
-#print axioms wrongGenericReturn
+        else method } }) = true
 
 /-- Removing the managed reference from Load's parameter contradicts the signature blob. -/
-theorem wrongGenericByref : rejected (Extracted.methodEvidence.map fun item =>
+private abbrev RejectsWrongGenericByref : Prop :=
+  rejected (Extracted.methodEvidence.map fun item =>
     { item with dispatchTypes := item.dispatchTypes.map fun type =>
       { type with methods := type.methods.map fun method =>
         if method.name == "Load" then { method with parameters := [.parameter 0] }
-        else method } }) = true := by decide +kernel
-#print axioms wrongGenericByref
+        else method } }) = true
 
 /-- Alter only the constraints of Pick's first type parameter in the proposed catalog. -/
 private def changeConstraint (change : GenericConstraint → GenericConstraint) :
@@ -53,17 +53,16 @@ private def changeConstraint (change : GenericConstraint → GenericConstraint) 
       else method } }
 
 /-- Dropping the reference-type and default-constructor flags contradicts the GenericParam row. -/
-theorem wrongParameterFlags :
-    rejected (changeConstraint fun claim => { claim with flags := 0 }) = true := by decide +kernel
-#print axioms wrongParameterFlags
+private abbrev RejectsWrongParameterFlags : Prop :=
+  rejected (changeConstraint fun claim => { claim with flags := 0 }) = true
 
 /-- Swapping the two arguments of IScale contradicts the TypeSpec of the constraint. -/
-theorem wrongConstraintArguments : rejected (changeConstraint fun claim =>
+private abbrev RejectsWrongConstraintArguments : Prop :=
+  rejected (changeConstraint fun claim =>
     { claim with interfaces := claim.interfaces.map fun constraint =>
       match constraint with
       | .apply (.apply head first) second => .apply (.apply head second) first
-      | other => other }) = true := by decide +kernel
-#print axioms wrongConstraintArguments
+      | other => other }) = true
 
 /-- Changing either operand while retaining its original body contradicts the physical token. -/
 private def crossed (opcode : Nat) (item : MethodEvidence) : MethodEvidence :=
@@ -73,13 +72,40 @@ private def crossed (opcode : Nat) (item : MethodEvidence) : MethodEvidence :=
     else instruction}}
 
 /-- A different type in the nonthrowing test contradicts the original bytes. -/
-theorem crossedIsinst : rejected (Extracted.methodEvidence.map (crossed 0x75)) = true := by
-  decide +kernel
-#print axioms crossedIsinst
+private abbrev RejectsCrossedIsinst : Prop :=
+  rejected (Extracted.methodEvidence.map (crossed 0x75)) = true
 
 /-- A different type in the throwing cast contradicts the original bytes. -/
-theorem crossedCastclass : rejected (Extracted.methodEvidence.map (crossed 0x74)) = true := by
+private abbrev RejectsCrossedCastclass : Prop :=
+  rejected (Extracted.methodEvidence.map (crossed 0x74)) = true
+
+/-- Every carried mutation contradicts the method's original physical catalog. -/
+theorem catalogRejections :
+    RejectsMissingCatalog ∧ RejectsWrongGenericReturn ∧
+    RejectsWrongGenericByref ∧ RejectsWrongParameterFlags ∧
+    RejectsWrongConstraintArguments ∧ RejectsCrossedIsinst ∧ RejectsCrossedCastclass := by
   decide +kernel
+#print axioms catalogRejections
+
+theorem missingCatalog : RejectsMissingCatalog := catalogRejections.1
+#print axioms missingCatalog
+
+theorem wrongGenericReturn : RejectsWrongGenericReturn := catalogRejections.2.1
+#print axioms wrongGenericReturn
+
+theorem wrongGenericByref : RejectsWrongGenericByref := catalogRejections.2.2.1
+#print axioms wrongGenericByref
+
+theorem wrongParameterFlags : RejectsWrongParameterFlags := catalogRejections.2.2.2.1
+#print axioms wrongParameterFlags
+
+theorem wrongConstraintArguments : RejectsWrongConstraintArguments := catalogRejections.2.2.2.2.1
+#print axioms wrongConstraintArguments
+
+theorem crossedIsinst : RejectsCrossedIsinst := catalogRejections.2.2.2.2.2.1
+#print axioms crossedIsinst
+
+theorem crossedCastclass : RejectsCrossedCastclass := catalogRejections.2.2.2.2.2.2
 #print axioms crossedCastclass
 
 /-- Change the target's physical name or abstract flag. The original body must still bind. -/
