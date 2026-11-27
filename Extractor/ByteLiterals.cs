@@ -10,9 +10,8 @@ internal static class ByteLiterals
     /// <see cref="NumeralCode.Append"/> writes it. The elaborator reads numerals where a list literal costs a numeral
     /// and a constructor per byte; the qualified names resolve wherever the text is pasted.
     /// </summary>
-    internal static string Of(IEnumerable<byte> bytes)
+    internal static string Of(byte[] data)
     {
-        var data = bytes.ToArray();
         if (data.Length == 0) return "[]";
         var text = new StringBuilder($"(CIL.Extraction.fixedBytes {data.Length} ");
         NumeralCode.Append(text, data);

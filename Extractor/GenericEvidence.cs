@@ -987,7 +987,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     internal void InsertPlatformDefinitions(StringBuilder lean)
     {
         var platform = Platform();
-        var definitions = platform.Lean(assembly => assembly.ToLean(), ByteLiterals.Of);
+        var definitions = platform.Lean(assembly => assembly.ToLean());
         lean.Insert(platformAt, $"""
             set_option maxRecDepth {platform.Depth} in
             def platformDefinitions : Extraction.PlatformTable := platform_table% {definitions}

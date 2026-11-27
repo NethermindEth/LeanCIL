@@ -303,7 +303,7 @@ var prefix = $$"""
         links := [{{linkList}}] }
 
     /-- Scoped definitions supplied by the runtime libraries referenced by this assembly. -/
-    def platform : PlatformTable := platform_table% {{platform.Lean(AssemblyTerm, ByteLiterals.Of)}}
+    def platform : PlatformTable := platform_table% {{platform.Lean(AssemblyTerm)}}
 
     {{declaration}}
 

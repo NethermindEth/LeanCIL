@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Reflection.Metadata;
@@ -41,25 +42,14 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         var row = image.Row(0x20000001);
         var textWidth = image.HeapIndexWidth(HeapIndex.String);
         var blobWidth = image.HeapIndexWidth(HeapIndex.Blob);
-        var ranked = new SortedDictionary<int, byte[]>[] { [], [] };
-        var numbers = new Dictionary<int, int>[] { new() { [0] = 0 }, new() { [0] = 0 } };
-        foreach (var (heap, source) in new[] { (0, strings), (1, blobs) })
-        {
-            var rank = 1;
-            foreach (var entry in source.Where(entry => entry.Key != 0)
-                         .OrderBy(entry => Convert.ToHexString(entry.Value), StringComparer.Ordinal))
-            {
-                RequireHeapRank((uint)rank, heap == 0 ? textWidth : blobWidth, heap == 0 ? "#Strings" : "#Blob");
-                numbers[heap][entry.Key] = rank;
-                ranked[heap][rank++] = entry.Value;
-            }
-            if (source.TryGetValue(0, out var empty)) ranked[heap][0] = empty;
-        }
+        var textNumbers = RankHeap(strings, textWidth, "#Strings");
+        var blobNumbers = RankHeap(blobs, blobWidth, "#Blob");
         var at = 4 + 8 + 4;
-        foreach (var (heap, width) in new[] { (1, blobWidth), (0, textWidth), (0, textWidth) })
+        foreach (var (numbers, width) in new[]
+                 { (blobNumbers, blobWidth), (textNumbers, textWidth), (textNumbers, textWidth) })
         {
             var offset = width == 2 ? BitConverter.ToUInt16(row, at) : (int)BitConverter.ToUInt32(row, at);
-            Array.Copy(BitConverter.GetBytes(numbers[heap][offset]), 0, row, at, width);
+            WriteHeapOffset(row.AsSpan(at, width), (uint)numbers[offset]);
             at += width;
         }
         // The token is the SHA-1 of the public key, which Lean does not compute: it is stated, and checked only
@@ -68,7 +58,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             throw new InvalidDataException($"Invalid assembly row in {module.Assembly.Name.Name}");
         var keyToken = identity.PublicKeyToken is { } token ? $"publicKeyToken := some 0x{token:x16}, " : "";
         var headers = $"tableHeader := {ByteLiterals.Of(image.TableHeader())}, header := {image.DecodedHeader()}";
-        var tables = $"assemblyRow := {ByteLiterals.Of(row)}, strings := {Entries(ranked[0])}, blobs := {Entries(ranked[1])}";
+        var tables = $"assemblyRow := {ByteLiterals.Of(row)}, strings := {Entries(strings)}, blobs := {Entries(blobs)}";
         return $$"""{ {{keyToken}}{{headers}}, {{tables}} }""";
     }
 
@@ -109,6 +99,34 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         if (rank >= OmittedHeapOffset(width))
             throw new InvalidDataException(
                 $"The carried {heap} rank {rank} reaches its reserved omitted-entry offset.");
+    }
+
+    static readonly IComparer<byte[]> ByteOrder = Comparer<byte[]>.Create((left, right) =>
+        left.AsSpan().SequenceCompareTo(right));
+
+    /// <summary>Numbers carried entries by byte content, returning the rank for each image offset.</summary>
+    static Dictionary<int, int> RankHeap(SortedDictionary<int, byte[]> heap, int width, string name)
+    {
+        var numbers = new Dictionary<int, int>(heap.Count + 1) { [0] = 0 };
+        var ranked = heap.Where(entry => entry.Key != 0).OrderBy(entry => entry.Value, ByteOrder).ToArray();
+        RequireHeapRank((uint)ranked.Length, width, name);
+        heap.TryGetValue(0, out var empty);
+        heap.Clear();
+        if (empty is not null) heap.Add(0, empty);
+        for (var index = 0; index < ranked.Length; index++)
+        {
+            var rank = index + 1;
+            var (offset, bytes) = ranked[index];
+            heap.Add(rank, bytes);
+            numbers.Add(offset, rank);
+        }
+        return numbers;
+    }
+
+    static void WriteHeapOffset(Span<byte> destination, uint offset)
+    {
+        if (destination.Length == 2) BinaryPrimitives.WriteUInt16LittleEndian(destination, checked((ushort)offset));
+        else BinaryPrimitives.WriteUInt32LittleEndian(destination, offset);
     }
 
     internal static string Entries<TKey>(SortedDictionary<TKey, byte[]> entries) where TKey : notnull =>
@@ -769,27 +787,20 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         /// </summary>
         internal void Canonicalize()
         {
-            // By content, not by image order: the image orders its heaps by a hash or a suffix sort, so one
-            // changed name can move the position of every other entry.
-            Dictionary<int, int> Numbering(SortedDictionary<int, byte[]> heap, int width, string name)
+            var textNumbers = RankHeap(strings, image.HeapIndexWidth(HeapIndex.String), "#Strings");
+            var blobNumbers = RankHeap(blobs, image.HeapIndexWidth(HeapIndex.Blob), "#Blob");
+            TableIndex? previousTable = null;
+            (int Width, Heap Heap)[] columns = [];
+            foreach (var (token, row) in rows)
             {
-                var next = 1;
-                var numbers = new Dictionary<int, int> { [0] = 0 };
-                foreach (var entry in heap.Where(entry => entry.Key != 0)
-                             .OrderBy(entry => Convert.ToHexString(entry.Value), StringComparer.Ordinal))
+                var table = (TableIndex)(token >> 24);
+                if (table != previousTable)
                 {
-                    RequireHeapRank((uint)next, width, name);
-                    numbers[entry.Key] = next++;
+                    columns = Columns(table);
+                    previousTable = table;
                 }
-                return numbers;
-            }
-            var textNumbers = Numbering(strings, image.HeapIndexWidth(HeapIndex.String), "#Strings");
-            var blobNumbers = Numbering(blobs, image.HeapIndexWidth(HeapIndex.Blob), "#Blob");
-            foreach (var token in rows.Keys.ToArray())
-            {
-                var row = rows[token];
                 var at = 0;
-                foreach (var (width, heap) in Columns((TableIndex)(token >> 24)))
+                foreach (var (width, heap) in columns)
                 {
                     if (heap != Heap.None)
                     {
@@ -798,16 +809,13 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                         // A position-only row's omitted entry must remain unreadable even when zero is carried.
                         var number = numbers.TryGetValue(offset, out var rank)
                             ? (uint)rank : OmittedHeapOffset(width);
-                        var bytes = BitConverter.GetBytes(number);
-                        Array.Copy(bytes, 0, row, at, width);
+                        WriteHeapOffset(row.AsSpan(at, width), number);
                     }
                     at += width;
                 }
                 if (at != row.Length)
                     throw new InvalidDataException($"The columns of row 0x{token:X8} do not add up to its length.");
             }
-            Renumber(strings, textNumbers);
-            Renumber(blobs, blobNumbers);
             RequireRanked(strings, "#Strings");
             RequireRanked(blobs, "#Blob");
         }
@@ -818,22 +826,14 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         static void RequireRanked(SortedDictionary<int, byte[]> heap, string name)
         {
             var rank = 1;
-            string? previous = null;
+            byte[]? previous = null;
             foreach (var (key, value) in heap.Where(entry => entry.Key != 0))
             {
-                var hex = Convert.ToHexString(value);
-                if (key != rank++ || previous is not null && string.CompareOrdinal(previous, hex) > 0)
+                if (key != rank++ || previous is not null && previous.AsSpan().SequenceCompareTo(value) > 0)
                     throw new InvalidDataException(
                         $"The carried {name} entries are not numbered by their rank in bytes.");
-                previous = hex;
+                previous = value;
             }
-        }
-
-        static void Renumber(SortedDictionary<int, byte[]> heap, Dictionary<int, int> numbers)
-        {
-            var entries = heap.ToArray();
-            heap.Clear();
-            foreach (var (key, value) in entries) heap[numbers[key]] = value;
         }
 
         internal int AssemblyIndex() => collection.Pinned.Index(collection.Pinned.Working(module));

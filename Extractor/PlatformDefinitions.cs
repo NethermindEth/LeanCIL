@@ -30,11 +30,10 @@ internal enum PlatformKind
 internal sealed record PlatformDefinition(ImmutableArray<string> Parts, PlatformKind Kind, int Underlying, int Arity)
 {
     /// <summary>The Lean <c>CIL.Extraction.PlatformDefinition</c> of this type in the assembly whose
-    /// <c>CIL.AssemblyName</c> term is <paramref name="assembly"/>, with byte lists written by
-    /// <paramref name="bytes"/>.</summary>
-    internal string Lean(string assembly, Func<IEnumerable<byte>, string> bytes)
+    /// <c>CIL.AssemblyName</c> term is <paramref name="assembly"/>.</summary>
+    internal string Lean(string assembly)
     {
-        var parts = string.Join(", ", Parts.Select(part => bytes(Encoding.UTF8.GetBytes(part))));
+        var parts = string.Join(", ", Parts.Select(part => ByteLiterals.Of(Encoding.UTF8.GetBytes(part))));
         return $$"""{ assembly := {{assembly}}, parts := [{{parts}}], kind := {{LeanKind}} }""";
     }
 
@@ -133,10 +132,10 @@ internal sealed class PlatformDefinitions<TAssembly>(
         definitions.TryAdd((scope, string.Join('\0', definition.Parts)), definition);
 
     /// <summary>The Lean list of the definitions, ordered by their text, with assemblies written by
-    /// <paramref name="writeAssembly"/> and byte lists by <paramref name="bytes"/>.</summary>
-    internal string Lean(Func<TAssembly, string> writeAssembly, Func<IEnumerable<byte>, string> bytes) =>
+    /// <paramref name="writeAssembly"/>.</summary>
+    internal string Lean(Func<TAssembly, string> writeAssembly) =>
         $"""[{string.Join(",\n  ", definitions
-            .Select(entry => entry.Value.Lean(writeAssembly(entry.Key.Assembly), bytes))
+            .Select(entry => entry.Value.Lean(writeAssembly(entry.Key.Assembly)))
             .Order(StringComparer.Ordinal))}]""";
 
     (TAssembly Assembly, PlatformDefinition Definition)? Definition(ModuleDefinition module, MetadataReader reader,
