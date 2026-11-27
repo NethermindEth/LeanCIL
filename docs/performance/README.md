@@ -41,7 +41,7 @@ Four suites fail when cost grows faster than the size of the input. Run one with
 ## Suite times
 
 `scripts/verification-durations.json` includes each suite's verification and verified-output
-measurement on the hosted runner. The file records the source run and any substituted time.
+measurement on the hosted runner. The file records the source runs and how their times are combined.
 Print the resulting jobs and their estimated minutes with:
 
 ```sh
