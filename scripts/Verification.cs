@@ -315,17 +315,20 @@ partial class Program : IDisposable
     {
         if (!File.Exists(ExtractorPath)) return "";
         var inputs = CommonInputs();
+        var files = new List<(string Name, string Path)>();
         foreach (var path in Directory.EnumerateFiles(Root))
-            inputs["root:" + Path.GetFileName(path)] = Sha(path);
+            files.Add(("root:" + Path.GetFileName(path), path));
         foreach (var path in Directory.EnumerateFiles(At("Extractor"), "*", SearchOption.AllDirectories))
         {
             var relative = Path.GetRelativePath(Root, path).Replace('\\', '/');
-            if (!relative.Split('/').Any(part => part is "bin" or "obj"))
-                inputs[relative] = Sha(path);
+            if (!inputs.ContainsKey(relative) && !relative.Split('/').Any(part => part is "bin" or "obj"))
+                files.Add((relative, path));
         }
         foreach (var path in Directory.EnumerateFiles(Path.GetDirectoryName(ExtractorPath)!, "*",
                      SearchOption.AllDirectories))
-            inputs["output:" + Path.GetRelativePath(Root, path)] = Sha(path);
+            files.Add(("output:" + Path.GetRelativePath(Root, path), path));
+        foreach (var (name, digest) in HashFiles(files))
+            inputs.Add(name, digest);
         return ContentKey(Root + JsonSerializer.Serialize(inputs));
     }
 

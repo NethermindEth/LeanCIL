@@ -21,6 +21,7 @@ Run(["dotnet", "build", "Extractor", "-c", "Release",
 buildElapsed.Stop();
 var prior = Environment.GetEnvironmentVariable(ExtractorBuildEnvironment);
 var source = At("Extractor/BuildReuseProbe-" + Guid.NewGuid().ToString("N") + ".cs");
+var targets = Path.ChangeExtension(source, ".targets");
 var output = Path.Combine(Path.GetDirectoryName(ExtractorPath)!, "BuildReuseProbe-" + Guid.NewGuid().ToString("N"));
 var fixture = Path.Combine(Path.GetTempPath(), "leancil-build-reuse-" + Guid.NewGuid().ToString("N") + ".cs");
 try
@@ -60,6 +61,9 @@ try
     if (PreparedExtractorMatches()) throw new Exception("Changed source accepted");
     File.Delete(source);
     if (!PreparedExtractorMatches()) throw new Exception("Restored source rejected");
+    File.WriteAllText(targets, "<Project />");
+    if (PreparedExtractorMatches()) throw new Exception("Additional extractor build input accepted");
+    File.Delete(targets);
     File.WriteAllText(output, "changed output");
     if (PreparedExtractorMatches()) throw new Exception("Changed output accepted");
     File.Delete(output);
@@ -71,6 +75,7 @@ try
 finally
 {
     File.Delete(source);
+    File.Delete(targets);
     File.Delete(output);
     File.Delete(fixture);
     Environment.SetEnvironmentVariable(ExtractorBuildEnvironment, prior);
