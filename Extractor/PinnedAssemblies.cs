@@ -43,6 +43,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     static PinnedAssemblies? active;
 
     readonly PinnedAssemblies? previous;
+    readonly Program.ExtractionBatch? batch;
     readonly Dictionary<AssemblyName, ModuleDefinition> modules = [];
     // One platform assembly per identity, so two references to one platform type resolve to one definition.
     readonly Dictionary<AssemblyName, AssemblyDefinition> platformAssemblies = [];
@@ -89,16 +90,16 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         return classes;
     }
 
-    /// <summary>Pins <paramref name="selected"/> and each source; <paramref name="readReference"/> reads a
-    /// referenced assembly's bytes and hash, so a batch of extractions reads each reference once.</summary>
+    /// <summary>Pins the selected bytes and loads references and platform images from the optional batch.</summary>
     internal PinnedAssemblies(byte[] selected, string selectedHash, IEnumerable<Source> sources,
-        Func<string, Program.ExtractionBatch.AssemblySnapshot>? readReference = null)
-        : this(new Program.ExtractionBatch.AssemblySnapshot(selected, selectedHash), sources, readReference) { }
+        Program.ExtractionBatch? batch = null)
+        : this(new Program.ExtractionBatch.AssemblySnapshot(selected, selectedHash), sources, batch) { }
 
     /// <summary>A batch shares each immutable image's signature check across extraction requests.</summary>
     internal PinnedAssemblies(Program.ExtractionBatch.AssemblySnapshot snapshot, IEnumerable<Source> sources,
-        Func<string, Program.ExtractionBatch.AssemblySnapshot>? readReference)
+        Program.ExtractionBatch? batch)
     {
+        this.batch = batch;
         Signatures = new(this);
         previous = active;
         try
@@ -113,7 +114,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
             AddOriginal(Selected, selected);
             foreach (Source source in sources)
             {
-                var image = readReference?.Invoke(source.Path);
+                var image = batch?.ReadAssembly(source.Path);
                 byte[] bytes = image?.Bytes ?? File.ReadAllBytes(source.Path);
                 string hash = image?.Hash ?? Convert.ToHexStringLower(SHA256.HashData(bytes));
                 if (source.ExpectedSha256 is { } expected && !string.Equals(expected, hash, StringComparison.Ordinal))
@@ -348,7 +349,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         }
         if (!platformPaths.TryGetValue(requested.Name, out string? path))
             throw new InvalidDataException("No exact trusted platform assembly: " + requested.ToDisplay());
-        byte[] bytes = File.ReadAllBytes(path);
+        byte[] bytes = batch?.ReadImage(path).Bytes ?? File.ReadAllBytes(path);
         ModuleDefinition module = Read(bytes);
         try
         {

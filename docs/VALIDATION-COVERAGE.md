@@ -111,10 +111,11 @@ workflow.
 ### Evidence batches
 
 - The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
-  extractions in six batches. Each method keeps fresh mutable metadata; immutable assembly bytes,
-  hashes and whole-assembly signature validation are shared within the batch. Long-form argument
-  fixtures use a separate batch after writing their modified assembly. Expected extraction
-  failures are isolated, since a batch stops at its first failure.
+  extractions in six batches. Each extraction gets fresh mutable metadata. A batch reads each
+  selected, referenced or trusted runtime assembly image once and checks its hash again before
+  completion. It also shares whole-assembly signature validation for selected and referenced images.
+  Long-form argument fixtures use a separate batch after writing their modified assembly.
+  Expected extraction failures run separately because a batch stops at its first failure.
 - `PrimitiveArrays`, `LayoutEvidence`, `ParameterEvidence`, `GenericEvidence` and
   `StaticScalarValues` each compile their generated positive evidence once as one file, with
   shared imports and a namespace per extraction and proof, and replay it independently with

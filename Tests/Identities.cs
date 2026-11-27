@@ -700,6 +700,8 @@ static void CheckEquality(string path, ReaderParameters parameters, IdentityCorp
 
 static void CheckAssemblyCache()
 {
+    CheckPlatformBatch();
+
     byte[] Create(int keyBytes, string name)
     {
         using var assembly = AssemblyDefinition.CreateAssembly(
@@ -759,6 +761,41 @@ static void CheckAssemblyCache()
             ReferenceEquals(first, AssemblyName.Of(otherModule.AssemblyReferences[0], otherImage)))
             throw new InvalidOperationException("Distinct metadata images shared a cached assembly row");
     }
+}
+
+static void CheckPlatformBatch()
+{
+    const string trustedPaths = "TRUSTED_PLATFORM_ASSEMBLIES";
+    var runtime = typeof(object).Assembly.Location;
+    var source = Path.Combine(Path.GetDirectoryName(runtime)!, "System.Runtime.dll");
+    var copy = At("artifacts/Identities/PlatformBatch/System.Runtime.dll");
+    Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+    File.Copy(source, copy, overwrite: true);
+    var previousPaths = AppContext.GetData(trustedPaths);
+    try
+    {
+        AppContext.SetData(trustedPaths, copy);
+        var batch = new IdentityExtractor::Nethermind.LeanCIL.Program.ExtractionBatch();
+        var selected = batch.ReadAssembly(At("Examples/Assembly/bin/Examples.dll"));
+        AssemblyDefinition Resolve(PinnedAssemblies pins) =>
+            pins.Resolve(pins.Selected.AssemblyReferences.Single(reference => reference.Name == "System.Runtime"));
+        using var first = new PinnedAssemblies(selected, [], batch);
+        var original = Resolve(first);
+        batch.RequireUnchanged();
+        File.WriteAllBytes(copy, [0]);
+        using var second = new PinnedAssemblies(selected, [], batch);
+        var replay = Resolve(second);
+        if (original == replay || original.MainModule.Mvid != replay.MainModule.Mvid)
+            throw new InvalidOperationException("Expected independent modules from the same platform image");
+        try { batch.RequireUnchanged(); }
+        catch (InvalidDataException error) when (error.Message.Contains("System.Runtime.dll", StringComparison.Ordinal))
+        {
+            Console.WriteLine("PASS platform image reuse isolates modules and rejects changed input at completion");
+            return;
+        }
+        throw new InvalidOperationException("The batch accepted a changed platform image");
+    }
+    finally { AppContext.SetData(trustedPaths, previousPaths); }
 }
 
 static void CheckHeapBounds()

@@ -165,7 +165,7 @@ internal static partial class Blockers
         // operand rewrites are undone before the next entry is validated.
         var references = referencePaths.Distinct(StringComparer.Ordinal).ToArray();
         using var pinned = new PinnedAssemblies(image,
-            references.Select(path => new PinnedAssemblies.Source(path)), batch.ReadAssembly);
+            references.Select(path => new PinnedAssemblies.Source(path)), batch);
         var module = pinned.Selected;
         Symbols.Read(module, assemblyPath, out _, batch.ReadPdb);
         foreach (var entry in entries.EnumerateArray())
