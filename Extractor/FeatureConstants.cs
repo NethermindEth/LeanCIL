@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -9,30 +10,25 @@ namespace Nethermind.LeanCIL;
 internal sealed class FeatureConstants
 {
     private readonly List<int?> _stack;
-    private readonly int?[] _locals;
+    private ImmutableSortedDictionary<int, int> _locals;
 
-    internal FeatureConstants(int locals)
-    {
-        _stack = [];
-        // Leave locals unknown even with InitLocals: only explicit assignments
-        // to unaddressed integer locals supply facts to this analysis.
-        _locals = new int?[locals];
-    }
+    // Only explicit assignments to unaddressed integer locals supply facts, even with InitLocals.
+    internal FeatureConstants() : this([], ImmutableSortedDictionary<int, int>.Empty) { }
 
     /// <summary>The state a handler starts in: no known local, and the caught object for a catch.</summary>
-    internal static FeatureConstants HandlerEntry(int locals, bool caught) =>
-        new(caught ? [null] : [], new int?[locals]);
+    internal static FeatureConstants HandlerEntry(bool caught) =>
+        new(caught ? [null] : [], ImmutableSortedDictionary<int, int>.Empty);
 
-    private FeatureConstants(List<int?> stack, int?[] locals)
+    private FeatureConstants(List<int?> stack, ImmutableSortedDictionary<int, int> locals)
     {
         _stack = stack;
         _locals = locals;
     }
 
     internal IReadOnlyList<int?> Stack => _stack;
-    internal IReadOnlyList<int?> Locals => _locals;
+    internal ImmutableSortedDictionary<int, int> KnownLocals => _locals;
 
-    internal FeatureConstants Copy() => new([.. _stack], (int?[])_locals.Clone());
+    internal FeatureConstants Copy() => new([.. _stack], _locals);
 
     internal bool Merge(FeatureConstants other)
     {
@@ -45,10 +41,11 @@ internal sealed class FeatureConstants
                 _stack[i] = null;
                 changed = true;
             }
-        for (int i = 0; i < _locals.Length; i++)
-            if (_locals[i] is not null && _locals[i] != other._locals[i])
+        if (_locals == other._locals) return changed;
+        foreach (var (index, value) in _locals)
+            if (!other._locals.TryGetValue(index, out var incoming) || value != incoming)
             {
-                _locals[i] = null;
+                _locals = _locals.Remove(index);
                 changed = true;
             }
         return changed;
@@ -113,15 +110,18 @@ internal sealed class FeatureConstants
                 _stack.Add(Convert.ToInt32(instruction.Operand)); return;
             case Code.Ldloc_0: case Code.Ldloc_1: case Code.Ldloc_2: case Code.Ldloc_3:
             case Code.Ldloc: case Code.Ldloc_S:
-                _stack.Add(_locals[Local(instruction)]); return;
+                int loaded = Local(instruction);
+                if ((uint)loaded >= (uint)method.Body.Variables.Count) throw new IndexOutOfRangeException();
+                _stack.Add(_locals.TryGetValue(loaded, out var known) ? known : null);
+                return;
             case Code.Stloc_0: case Code.Stloc_1: case Code.Stloc_2: case Code.Stloc_3:
             case Code.Stloc: case Code.Stloc_S:
                 int local = Local(instruction);
                 int? value = Pop();
                 string type = method.Body.Variables[local].VariableType.FullName;
-                _locals[local] = !addressed.Contains(local) &&
-                    (type is "System.Int32" or "System.UInt32" || type == "System.Boolean" && value is 0 or 1)
-                    ? value : null;
+                _locals = value is int word && !addressed.Contains(local) &&
+                    (type is "System.Int32" or "System.UInt32" || type == "System.Boolean" && word is 0 or 1)
+                    ? _locals.SetItem(local, word) : _locals.Remove(local);
                 return;
             case Code.Dup:
                 int? top = Pop();

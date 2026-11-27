@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -10,20 +11,27 @@ internal static class FeatureEvidence
 {
     static string Fact(int? value) => value is int word ? $"some (BitVec.ofInt 32 ({word}))" : "none";
 
-    // Lean accepts only known facts in increasing local order, so unknown locals cost nothing.
-    static IEnumerable<string> KnownLocals(IReadOnlyList<int?> locals) =>
-        locals.Select((value, index) => (value, index))
-            .Where(entry => entry.value is not null)
-            .Select(entry => $"({entry.index}, BitVec.ofInt 32 ({entry.value}))");
-
     internal static void Emit(StringBuilder lean, MethodDefinition method, int number,
         IReadOnlyDictionary<Instruction, FeatureConstants> incoming)
     {
+        // Instructions sharing a local map emit the same facts in increasing slot order.
+        var locals = new Dictionary<ImmutableSortedDictionary<int, int>, string>(ReferenceEqualityComparer.Instance);
+        string KnownLocals(ImmutableSortedDictionary<int, int> facts)
+        {
+            if (facts.IsEmpty) return "";
+            if (!locals.TryGetValue(facts, out var text))
+            {
+                text = string.Join(", ", facts.Select(entry => $"({entry.Key}, BitVec.ofInt 32 ({entry.Value}))"));
+                locals.Add(facts, text);
+            }
+            return text;
+        }
+
         var states = method.Body.Instructions.Select(instruction =>
         {
             if (!incoming.TryGetValue(instruction, out FeatureConstants? state)) return "none";
             return $"some {{ stack := [{string.Join(", ", state.Stack.Reverse().Select(Fact))}], " +
-                $"locals := [{string.Join(", ", KnownLocals(state.Locals))}] }}";
+                $"locals := [{KnownLocals(state.KnownLocals)}] }}";
         });
         lean.AppendLine($"def method{number}FeatureStates : Extraction.FeatureCertificate := [{string.Join(", ", states)}]");
     }
