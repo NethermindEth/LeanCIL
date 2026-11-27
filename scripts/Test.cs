@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:property EnforceCodeStyleInBuild=true
 #:property GenerateDocumentationFile=true
+#:property WarningsAsErrors=IDE0005
 #:include Verification.cs
 #:include DeepChecks.cs
 #:include FailureReports.cs
@@ -90,10 +91,9 @@ var signatures = CoreExampleSignatures;
 
 // Each suite can run in its own checkout, with only the projects it needs.
 string[] tools = ["Extractor", "Examples/Assembly"];
-var projects = new List<string>(tools) { "scripts/Test.cs" };
-if (suite == "tools") projects = [.. tools];
+var projects = new List<string>(tools);
 // CI builds the shared tools once per run and ships their outputs to every suite job.
-else if (Environment.GetEnvironmentVariable(PrebuiltToolsEnvironment) == "true")
+if (suite != "tools" && Environment.GetEnvironmentVariable(PrebuiltToolsEnvironment) == "true")
 {
     if (!File.Exists(ExtractorPath) || !File.Exists(assembly))
         throw new InvalidOperationException(
