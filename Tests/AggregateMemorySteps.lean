@@ -237,6 +237,12 @@ private def memory (width : Nat) : Memory := { Memory.empty with
 private def payload (width : Nat) : List (BitVec 8) :=
   (List.range width).map fun index => BitVec.ofNat 8 (index + index / 256)
 
+/-- A short write at a symbolic offset reduces directly to list lookup in framing proofs. -/
+theorem short_symbolic_read (value : BitVec 8) (offset : Nat) :
+    initializedCellAt (List.replicate 16 value).toArray offset =
+      (List.replicate 16 value)[offset]? := rfl
+#print axioms short_symbolic_read
+
 /-- A checked store and load of the same initialized aggregate through a nonzero offset. -/
 private def Stepped (width : Nat) : Prop :=
   let target : Reference := ⟨0, 1⟩

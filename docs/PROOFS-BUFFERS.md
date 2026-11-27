@@ -186,8 +186,9 @@ establish neither initialization nor read/write authority.
 After a successful `write`, use `write_cells_eq` to read the stored memory's cell function at
 any allocation and offset. Each byte in the destination is initialized. For `writeSnapshot`,
 `writeSnapshot_cells_eq` also preserves each source byte's initialization flag. Both writes
-preserve cells outside the destination. Kernel reduction shares indexed ranges across cell
-reads, and compiled execution reads the retained array directly.
+preserve cells outside the destination. Kernel reduction uses direct list lookup for initialized
+writes of at most sixteen bytes, including reads at symbolic offsets. Larger writes share indexed
+ranges across cell reads, and compiled execution reads the retained array directly.
 
 Single-reference and pointer span constructors, empty getters and span resets use the same views.
 `memoryInstruction_emptySpan` proves that every supported element width and capability produces

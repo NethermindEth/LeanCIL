@@ -261,7 +261,7 @@ def writeAlwaysPrepend (m : Memory) (r : Reference) (bytes : List (BitVec 8)) (a
 def write (m : Memory) (r : Reference) (bytes : List (BitVec 8)) (alignment : Nat) :
     Checked Memory := do
   access m r bytes.length alignment true
-  let storedCell := snapshotCellAt bytes.toArray
+  let storedCell := initializedCellAt bytes.toArray
   -- A method may read its own initialized output. This grants no write authority
   -- and exposes exactly the interval whose original write authority was checked.
   return { m with
@@ -298,7 +298,7 @@ def writeIndexed (memory : Memory) (reference : Reference) (bytes : List (BitVec
 theorem writeIndexed_eq (memory : Memory) (reference : Reference)
     (bytes : List (BitVec 8)) (alignment : Nat) :
     writeIndexed memory reference bytes alignment = write memory reference bytes alignment := by
-  simp only [writeIndexed, write, snapshotCellAt_eq, List.getElem?_toArray]
+  simp only [writeIndexed, write, initializedCellAt_eq, List.getElem?_toArray]
 #print axioms writeIndexed_eq
 
 /-- A snapshot is obtained before any destination change, preserving overlap. -/

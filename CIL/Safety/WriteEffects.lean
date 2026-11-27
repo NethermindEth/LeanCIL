@@ -73,7 +73,7 @@ theorem write_cells_eq {memory result : Memory} {reference : Reference}
   next =>
     cases written
     by_cases inside : id = reference.allocation ∧ reference.offset ≤ offset
-    · cases found : bytes[offset - reference.offset]? <;> simp [inside, snapshotCellAt_eq, found]
+    · cases found : bytes[offset - reference.offset]? <;> simp [inside, initializedCellAt_eq, found]
     · simp [inside]
 #print axioms write_cells_eq
 

@@ -114,4 +114,26 @@ theorem snapshotCellAt_eq {cell : Type} (bytes : List cell) (index : Nat) :
   | mk bytes => simp only [snapshotCellAt_eq, arrayCellAt, List.getElem?_toArray]
 #print axioms snapshotCellAt_eq_array
 
+/-- A short initialized write retains its list for reads at symbolic offsets. Longer writes
+    share the index across cell reads. Only the first leaf determines the lookup. -/
+def initializedCellAt {cell : Type} (indexed : Array cell) : Nat → Option cell :=
+  if (indexed.toList.drop (2 ^ leafBits)).isEmpty then fun index => indexed.toList[index]?
+  else snapshotCellAt indexed
+
+/-- Short and indexed initialized writes both return the byte at the requested offset. -/
+theorem initializedCellAt_eq {cell : Type} (bytes : List cell) (index : Nat) :
+    initializedCellAt bytes.toArray index = bytes[index]? := by
+  unfold initializedCellAt
+  split
+  · rfl
+  · exact snapshotCellAt_eq bytes index
+#print axioms initializedCellAt_eq
+
+/-- Compiled initialized writes capture one array for all cell reads. -/
+@[csimp] private theorem initializedCellAt_eq_array : @initializedCellAt = @arrayCellAt := by
+  funext cell indexed index
+  cases indexed with
+  | mk bytes => simp only [initializedCellAt_eq, arrayCellAt, List.getElem?_toArray]
+#print axioms initializedCellAt_eq_array
+
 end CIL.Safety
