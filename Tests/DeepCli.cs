@@ -423,7 +423,7 @@ string CheckForeignOverride(string assembly, string selector, bool changed)
     var image = fixture.Build(build, "DeepCli.Neighbour", $$"""
         namespace Neighbours;
         public sealed class NewShape : Geometry.Shape { public override int Sides() => {{(changed ? 8 : 7)}}; }
-        """, references: """<ProjectReference Include="../SixFaces/SixFaces.csproj" />""");
+        """, references: $"""<Reference Include="{System.Security.SecurityElement.Escape(assembly)}" />""");
     var context = new System.Runtime.Loader.AssemblyLoadContext(build, isCollectible: true);
     try
     {
