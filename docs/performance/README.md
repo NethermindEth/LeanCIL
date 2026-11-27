@@ -75,8 +75,9 @@ by explicit overrides. Extending a summary checks overrides in both directions. 
 marks each cyclic path as unable to reach the slot. For a finite catalog with distinct identity
 keys and bounded signature and name sizes, the ordered-map work is
 O(N log N), where N counts classes, method declarations, override entries and virtual targets.
-Indirect-call catalogs with strictly increasing tokens take one pass to certify distinctness.
-Other token orders use an ordered index with exact equality inside each identity bucket.
+Strictly ascending or descending indirect-call tokens take one pass to certify distinctness.
+Other token orders track 64 metadata rows per occupied bitmap word. When tokens recur, the
+checker compares full identities, including declaring owners and generic arguments.
 The default certificate checks the supplied catalog. The physical metadata covered by the deep
 binding audit is described in [soundness evidence](../SOUNDNESS-EVIDENCE.md).
 

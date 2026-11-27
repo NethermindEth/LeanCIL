@@ -438,6 +438,12 @@ platform type is a value type, a class or an enum, an enum's underlying type, th
 `ValueTuple`, and that `System.Object` declares no instance fields), public key tokens of referenced assemblies,
 imported implementation definitions, raw layout content, the layouts import slots select, dispatch catalog
 completeness, static data bytes and generic parameter constraints.
+The default virtual-call check trusts that the catalog includes every concrete descendant of
+the declaring class and faithfully reports each base, method declaration and explicit override.
+An omitted override can make the supplied hierarchy select an inherited body. Constrained
+dispatch also trusts the interface implementations and inherited slots in the catalog. For an
+indirect call, Lean checks the full identity and signature of every listed target. Calling a pointer
+whose target is absent from that table faults.
 The extractor reads raw layout content, dispatch catalogs, static data bytes and generic parameter
 constraints from the metadata of the pinned image, and the default check does not reconfirm them.
 [Deep verification](CLI.md#deep-verification) reconfirms them as the `layout-content`,
