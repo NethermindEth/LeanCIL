@@ -1,0 +1,72 @@
+name: Compiler language regression (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compiler-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix:
+    name: Multi-Roslyn and C# language regression
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Install pinned elan
+        timeout-minutes: 6
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/elan.tar.gz"
+          curl --fail --location --retry 1 --retry-all-errors --retry-delay 30 --max-time 150 \
+            https://github.com/leanprover/elan/releases/download/v4.2.4/elan-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$archive"
+          echo "42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63  $archive" | sha256sum --check --status
+          mkdir -p "$RUNNER_TEMP/elan-installer"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/elan-installer"
+          "$RUNNER_TEMP/elan-installer/elan-init" -y --default-toolchain none --no-modify-path
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Install Lean toolchain
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          lean --version
+          lake --version
+      - name: Build extractor
+        run: dotnet build Extractor -c Release
+      - name: Prepare certified Lean library
+        run: dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library
+      - name: Run full Roslyn and language-version regression matrix
+        env:
+          LEANCIL_CERTIFIED_LIBRARY: ${{ github.workspace }}/artifacts/certified-library
+        run: dotnet run --file Tests/CompilerCoverage.cs -- --all-compilers
+      - name: Summarize coverage
+        if: always()
+        shell: bash
+        run: |
+          if test -f artifacts/CompilerCoverage/summary.md; then
+            cat artifacts/CompilerCoverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: compiler-regression-${{ github.run_attempt }}
+          path: |
+            artifacts/CompilerCoverage/**/*.json
+            artifacts/CompilerCoverage/*.tsv
+            artifacts/CompilerCoverage/*.md
+            artifacts/CompilerCoverage/*.txt
+          if-no-files-found: ignore
+          retention-days: 14

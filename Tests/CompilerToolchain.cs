@@ -3,6 +3,7 @@ using System.Text.Json;
 partial class Program
 {
     static readonly string[] CorpusCompilerVersions = ["4.14.0", "5.0.0", "5.9.0"];
+    static string LatestPinnedCompilerVersion => CorpusCompilerVersions[^1];
     const string CorpusReferenceVersion = "11.0.0";
 
     sealed record CompilerToolchain(string Packages, string References);

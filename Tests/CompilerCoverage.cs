@@ -15,11 +15,13 @@
 using System.Text.Json;
 using Mono.Cecil;
 
-if (args.Any(argument => argument is not ("--update" or "--latest" or "--whole-only")))
-    throw new ArgumentException("Usage: CompilerCoverage.cs [--update] [--latest] [--whole-only]");
+if (args.Any(argument => argument is not ("--update" or "--latest" or "--whole-only" or "--all-compilers")))
+    throw new ArgumentException("Usage: CompilerCoverage.cs [--update] [--latest] [--whole-only] [--all-compilers]");
 var advisory = args.Contains("--latest");
+var allCompilers = args.Contains("--all-compilers");
 if (advisory && args.Contains("--update")) throw new ArgumentException("Latest runs cannot update pinned baselines.");
-var versions = CorpusCompilerVersions;
+var versions = allCompilers ? CorpusCompilerVersions : [LatestPinnedCompilerVersion];
+var selectedLanguages = allCompilers ? CorpusLanguages : [DefaultCorpusLanguage];
 if (advisory)
 {
     using var http = new HttpClient();
@@ -45,7 +47,7 @@ foreach (var version in versions)
     var compilerHash = Sha(compiler);
     var compilerVersion = Run(["dotnet", "exec", "--roll-forward", "Major", compiler, "/version"]).Trim();
     var languages = Run(["dotnet", "exec", "--roll-forward", "Major", compiler, "/langversion:?"]);
-    foreach (var language in CorpusLanguages)
+    foreach (var language in selectedLanguages)
     {
         if (language == "14" && !languages.Split('\n').Any(line => line.Trim().StartsWith("14.0")))
         {
@@ -99,7 +101,7 @@ foreach (var version in versions)
 }
 File.WriteAllText(Path.Combine(root, "coverage.json"), JsonSerializer.Serialize(report,
     new JsonSerializerOptions { WriteIndented = true }));
-CheckCoverageBaseline(root, columns, args.Contains("--update"), advisory);
+CheckCoverageBaseline(root, columns, args.Contains("--update"), advisory, allCompilers);
 if (failures.Count != 0) throw new InvalidOperationException(string.Join(Environment.NewLine, failures));
 if (!args.Contains("--whole-only")) evidence.Check();
 Console.WriteLine($"PASS compiler coverage: {columns.Count} compiler/language columns; " +

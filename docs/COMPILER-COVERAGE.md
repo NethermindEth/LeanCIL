@@ -6,11 +6,12 @@ This page describes the checks that pin which compiler output and which runtime 
 extractor admits, and how to review and record a change to either. Read it when one of these
 baselines fails.
 
-The `dispatch` suite checks a pinned source corpus against Roslyn 4.14.0, 5.0.0 and 5.9.0,
-using the same .NET 11.0.0 reference pack and optimized compilation. Each compiler runs at its
-default language version and at `latest`; compilers supporting C# 14 also run explicitly at `14`.
-The default column omits `/langversion`, so it tests the compiler default, not an SDK-selected
-language version. Compiler binaries
+The `dispatch` suite checks a pinned source corpus against the latest pinned Roslyn (`5.9.0`) at
+`/langversion:latest` using the .NET 11.0.0 reference pack and optimized compilation. Pass
+`--all-compilers` (also runnable manually via `.github/workflows/compiler-regression.yml`) to run
+the full multi-compiler matrix across Roslyn 4.14.0, 5.0.0 and 5.9.0 at `default`, `14` (where
+supported) and `latest`. The default column omits `/langversion`, so it tests the compiler default,
+not an SDK-selected language version. Compiler binaries
 and reference assemblies come from exact NuGet package versions in
 [CompilerToolchain.cs](../Tests/CompilerToolchain.cs).
 

@@ -4,6 +4,7 @@ using Mono.Cecil;
 partial class Program
 {
     static readonly string[] CorpusLanguages = ["default", "14", "latest"];
+    const string DefaultCorpusLanguage = "latest";
 
     static string CompileCorpus(string compiler, CompilerToolchain toolchain, string directory,
         string name, IEnumerable<string> sources, string language, IEnumerable<string>? extraReferences = null,
@@ -106,7 +107,8 @@ partial class Program
     }
 
     static void CheckCoverageBaseline(string directory,
-        SortedDictionary<string, SortedDictionary<string, char>> columns, bool update, bool advisory)
+        SortedDictionary<string, SortedDictionary<string, char>> columns, bool update, bool advisory,
+        bool allCompilers = false)
     {
         var methods = columns.Values.SelectMany(column => column.Keys).Distinct().Order(StringComparer.Ordinal);
         var lines = new[] { "method\t" + string.Join('\t', columns.Keys) }.Concat(methods.Select(method =>
@@ -121,9 +123,14 @@ partial class Program
                 $"{column.Value.Values.Count(state => state == 'B')} | " +
                 $"{column.Value.Values.Count(state => state == 'N')} |")));
         var baseline = At("Tests/CompilerCoverageBaseline.tsv");
-        if (update) File.WriteAllLines(baseline, lines);
+        if (update)
+        {
+            if (!allCompilers)
+                throw new ArgumentException("--update requires --all-compilers so the full baseline table stays complete.");
+            File.WriteAllLines(baseline, lines);
+        }
         var expected = File.ReadAllLines(baseline);
-        if (advisory)
+        if (advisory || !allCompilers)
         {
             var oldColumns = expected[0].Split('\t').Skip(1).ToArray();
             var previous = expected.Skip(1).Select(line => line.Split('\t'))
@@ -133,8 +140,9 @@ partial class Program
             foreach (var (column, actual) in columns)
             {
                 var language = column[(column.IndexOf('/') + 1)..];
-                var index = Array.IndexOf(oldColumns, CorpusCompilerVersions[^1] + "/" + language);
-                if (index < 0) throw new InvalidDataException("Missing comparison baseline for " + language);
+                var targetColumn = advisory ? CorpusCompilerVersions[^1] + "/" + language : column;
+                var index = Array.IndexOf(oldColumns, targetColumn);
+                if (index < 0) throw new InvalidDataException("Missing comparison baseline for " + targetColumn);
                 foreach (var method in previous.Keys.Union(actual.Keys).Order(StringComparer.Ordinal))
                 {
                     var wasAdmitted = previous.TryGetValue(method, out var states) && states[index] == "A";
@@ -145,11 +153,15 @@ partial class Program
             }
             File.WriteAllLines(Path.Combine(directory, "changes.txt"),
                 lost.Select(method => "LOST " + method).Concat(gained.Select(method => "GAINED " + method)));
-            Console.WriteLine($"Latest compiler: {lost.Count} lost, {gained.Count} gained admissions");
+            Console.WriteLine($"{(advisory ? "Latest compiler" : "Pinned compiler")}: " +
+                $"{lost.Count} lost, {gained.Count} gained admissions");
             if (lost.Count != 0) throw new InvalidOperationException(string.Join('\n', lost));
+            if (!advisory && gained.Count != 0)
+                throw new InvalidOperationException("Compiler coverage gained admissions; review changes.txt and " +
+                    "run with --all-compilers --update.\n" + string.Join('\n', gained.Take(100)));
         }
         else if (!expected.SequenceEqual(lines))
-            throw new InvalidOperationException("Compiler coverage changed; review acceptance.tsv and use --update.\n" +
+            throw new InvalidOperationException("Compiler coverage changed; review acceptance.tsv and use --all-compilers --update.\n" +
                 string.Join('\n', lines.Except(expected).Select(line => "+ " + line)
                     .Concat(expected.Except(lines).Select(line => "- " + line)).Take(100)));
     }
