@@ -62,7 +62,9 @@ internal static class ParameterEvidence
             Code.Ldarga or Code.Ldarga_S => $".address {Index(method, instruction)}",
             _ => ".other"
         });
-        lean.AppendLine($"def method{number}RawArguments : Extraction.RawArguments := {{ arguments := [{string.Join(", ", arguments)}], locals := [{string.Join(", ", locals)}], code := [{string.Join(", ", code)}] }}");
+        lean.AppendLine($"def method{number}RawArguments : Extraction.RawArguments := " +
+            $"{{ arguments := [{string.Join(", ", arguments)}], locals := [{string.Join(", ", locals)}], " +
+            $"code := cil_list%[{string.Join(", ", code)}] }}");
         lean.AppendLine($"def method{number}Reachable : List Bool := [{string.Join(", ", method.Body.Instructions.Select(instruction => reachable.Contains(instruction).ToString().ToLowerInvariant()))}]");
     }
 }

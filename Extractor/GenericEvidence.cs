@@ -531,7 +531,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             returnType := {{returnType}}, parameters := {{parameters}},
             locals := {{locals}}, initLocals := {{Bool(method.Body.InitLocals)}},
             maxStack := {{method.Body.MaxStackSize}}, genericParameters := {{List(constraints)}},
-            {{staticInput}}code := {{List(code)}}{{handlers}} }
+            {{staticInput}}code := cil_list%{{List(code)}}{{handlers}} }
             """.ReplaceLineEndings(" ");
     }
 

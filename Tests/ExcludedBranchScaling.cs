@@ -93,7 +93,7 @@ void Reject(string name, string validator, string obligation, Func<int, bool> si
     Console.WriteLine($"PASS {validator} rejects pruned site {pc} claimed reachable");
 }
 var argumentCode = extracted.Split('\n').Single(l => l.StartsWith("def method0RawArguments ", StringComparison.Ordinal));
-var operations = argumentCode[(argumentCode.LastIndexOf("code := [", StringComparison.Ordinal) + 9)..argumentCode.LastIndexOf(']')].Split(", ");
+var operations = argumentCode[(argumentCode.LastIndexOf('[') + 1)..argumentCode.LastIndexOf(']')].Split(", ");
 bool ArgumentLoad(int pc) => operations[pc].StartsWith(".load", StringComparison.Ordinal);
 Reject("ForgedFeatureSite", "FeatureFlowValid", featureObligation, _ => true);
 // Code decoded from the forged mask loads the argument there, so the feature flow refuses the site.

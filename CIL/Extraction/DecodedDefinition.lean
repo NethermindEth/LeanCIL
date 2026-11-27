@@ -43,6 +43,13 @@ namespace CIL.Extraction.DecodedDefinition
 
 open Lean Meta Elab Command
 
+/-- A list literal whose entries are elaborated at the element type specified by the context. -/
+elab "cil_list%[" entries:term,* "]" : term <= expectedType => do
+  let listType ← whnf expectedType
+  let_expr List elementType := listType | throwError "cil_list% expects a list type"
+  let values ← entries.getElems.mapM (Term.elabTermEnsuringType · elementType)
+  mkListLit elementType values.toList
+
 /-- The natural number a closed `Nat` term reduces to. -/
 partial def natValue (term : Expr) : MetaM Nat := do
   let value ← kernelWhnf term
