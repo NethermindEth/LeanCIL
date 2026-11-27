@@ -56,11 +56,12 @@ isolation.Check();
 foreach (var (path, marker) in new[] { (valid, "decide"), (invalid, "absent diagnostic marker") })
 {
     var batch = new RejectedEvidence(directory);
-    batch.Add(invalid, "PASS initial rejection", "decide");
+    for (var index = 0; index < 7; index++)
+        batch.Add(invalid, "PASS neighboring rejection", "decide");
     batch.Add(path, "Unexpected successful negative test", marker);
     try
     {
-        batch.Check();
+        batch.Check(parallel: true);
     }
     catch (InvalidOperationException exception) when (
         exception.Message.StartsWith("Expected rejection missing: " + Path.GetFullPath(path), StringComparison.Ordinal))

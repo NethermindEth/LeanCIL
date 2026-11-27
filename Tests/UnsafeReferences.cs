@@ -300,7 +300,7 @@ foreach (var (name, before, after) in new[]
     File.WriteAllText(path, byteOffsetSource.Replace(before, after, StringComparison.Ordinal));
     rejected.Add(path, $"PASS exact ByteOffset evidence rejection: {name}", "RuntimeModelsAgree");
 }
-rejected.Check();
+rejected.Check(parallel: true);
 
 foreach (var mutation in new[] { "reference-field", "class", "pointer", "arity", "parameter", "return", "instance", "scope", "version" })
 {

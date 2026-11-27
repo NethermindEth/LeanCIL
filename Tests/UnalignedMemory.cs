@@ -180,7 +180,7 @@ foreach (var name in new[] { "ReadWord", "ReadPointerWord", "ReadAlignedWord" }
     Reject(name, SeparateClosedBody(source, 0), "def method0Original", "target := .external externalIdentity0",
         "target := .external \"forged\"", "the decoded method does not match its body bytes or metadata");
 }
-rejected.Check();
+rejected.Check(parallel: true);
 
 void Reject(string name, string source, string declaration, string before, string after, string marker)
 {

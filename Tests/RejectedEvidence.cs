@@ -43,7 +43,7 @@ partial class Program
         public void Add(string path, string passed, Func<string, bool> diagnostic, params string[] markers) =>
             cases.Add((Path.GetFullPath(path), File.ReadAllText(path), passed, markers, diagnostic));
 
-        (string Source, List<(int Start, int End)> Ranges) BatchSource()
+        (string Header, List<string> Blocks, List<(int Start, int End)> Ranges) BatchSource()
         {
             var imports = new SortedSet<string>(StringComparer.Ordinal);
             imports.Add("Lean");
@@ -55,36 +55,69 @@ partial class Program
                 bodies.Add(RejectedImport.Replace(item.Source,
                     match => { imports.Add(match.Groups[1].Value); return ""; }));
             }
-            var source = new StringBuilder(string.Join('\n', imports.Select(module => "import " + module)) +
-                "\n" + Isolation);
+            var header = string.Join('\n', imports.Select(module => "import " + module)) + "\n" + Isolation;
             var ranges = new List<(int Start, int End)>();
             var line = imports.Count + 1 + Isolation.Count(character => character == '\n');
-            for (var index = 0; index < cases.Count; index++)
+            for (var index = 0; index < bodies.Count; index++)
             {
-                source.Append($"#isolated_rejection {{\nnamespace RejectedCase{index}\n");
-                line += 2;
-                var start = line;
-                source.Append(bodies[index]).Append('\n');
-                line += bodies[index].Count(character => character == '\n') + 1;
-                ranges.Add((start, line));
-                source.Append($"end RejectedCase{index}\n}}\n");
-                line += 2;
+                var start = line + 2;
+                var end = start + bodies[index].Count(character => character == '\n') + 1;
+                ranges.Add((start, end));
+                bodies[index] = $"#isolated_rejection {{\nnamespace RejectedCase{index}\n{bodies[index]}\n" +
+                    $"end RejectedCase{index}\n}}\n";
+                line = end + 2;
             }
-            return (source.ToString(), ranges);
+            return (header, bodies, ranges);
         }
 
-        public void Check(string? leanPath = null)
+        // Every shard sees the complete import header, and every diagnostic keeps its line in the standalone source.
+        static (string Source, string Output) CheckBlocks(string path, string header, List<string> blocks,
+            string? leanPath, bool parallel, bool rejection)
+        {
+            var source = header + string.Concat(blocks);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, source);
+            var package = FixturePackage();
+            string Check(string file)
+            {
+                // Lean drops later diagnostics when it reaches the command-line error limit.
+                var run = Execute(["lake", "env", "lean", .. rejection ? new[] { "-DmaxErrors=0" } : [], file],
+                    cwd: package, leanPath: leanPath);
+                if (rejection && run.Code == 0) return "";
+                if (!rejection && (run.Code != 0 || run.Output.Contains("sorryAx", StringComparison.Ordinal)))
+                    throw new InvalidOperationException(
+                        "The kernel did not refute a mutation the evaluator found false:\n" + run.Output);
+                return file == path ? run.Output : run.Output.Replace(file, path, StringComparison.Ordinal)
+                    .Replace(file.Replace('\\', '/'), path.Replace('\\', '/'), StringComparison.Ordinal);
+            }
+            // The small batches cost less to check than to start a second Lean process.
+            const int minimumCasesPerShard = 4;
+            if (!parallel || Environment.ProcessorCount < 2 || blocks.Count < 2 * minimumCasesPerShard)
+                return (source, Check(path));
+            var first = string.Concat(blocks.Take(blocks.Count / 2));
+            var padding = new string('\n', first.Count(character => character == '\n'));
+            string[] shards = [header + first, header + padding + string.Concat(blocks.Skip(blocks.Count / 2))];
+            var output = Concurrently(new[] { 0, 1 }, index =>
+            {
+                var file = Path.Combine(Path.GetDirectoryName(path)!, $"EvidenceShard{Guid.NewGuid():N}.lean");
+                try
+                {
+                    File.WriteAllText(file, shards[index]);
+                    return Check(file);
+                }
+                finally { File.Delete(file); }
+            });
+            return (source, string.Join('\n', output));
+        }
+
+        public void Check(string? leanPath = null, bool parallel = false)
         {
             if (cases.Count == 0) return;
-            var (source, ranges) = BatchSource();
-            Directory.CreateDirectory(directory);
+            var (header, blocks, ranges) = BatchSource();
             var path = Path.GetFullPath(Path.Combine(directory, "RejectedBatch.lean"));
-            File.WriteAllText(path, source);
-            // Lean caps errors at the command line's maxErrors, not the file's, and drops every later diagnostic.
-            var result = Execute(["lake", "env", "lean", "-DmaxErrors=0", path], cwd: FixturePackage(),
-                leanPath: leanPath);
+            var (source, transcript) = CheckBlocks(path, header, blocks, leanPath, parallel, rejection: true);
             // Lean names the file with either separator.
-            var located = LocatedDiagnostic.Matches(result.Output);
+            var located = LocatedDiagnostic.Matches(transcript);
             Match[] diagnostics = [.. located.Where(match => match.Groups["file"].Value == path.Replace('\\', '/'))];
             if (diagnostics.Length == 0)
                 diagnostics = [.. located.Where(match => match.Groups["file"].Value == path)];
@@ -103,8 +136,8 @@ partial class Program
                 if (index < 0 || location >= ranges[index].End) continue;
                 var end = diagnostic + 1 < diagnostics.Length
                     ? diagnostics[diagnostic + 1].Index
-                    : result.Output.Length;
-                var message = result.Output.AsSpan(match.Index, end - match.Index);
+                    : transcript.Length;
+                var message = transcript.AsSpan(match.Index, end - match.Index);
                 errors[index].Append(message);
                 if (location >= firstLines[index]) continue;
                 firstLines[index] = location;
@@ -116,7 +149,7 @@ partial class Program
             for (var index = 0; index < cases.Count; index++)
             {
                 var output = errors[index].ToString();
-                if (result.Code == 0 || output.Length == 0 ||
+                if (output.Length == 0 ||
                     cases[index].Markers.Any(marker => !output.Contains(marker, StringComparison.Ordinal)) ||
                     !cases[index].Diagnostic(output))
                     throw new InvalidOperationException(
@@ -124,7 +157,7 @@ partial class Program
                 if (File.ReadAllText(cases[index].Path) != cases[index].Source)
                     throw new InvalidOperationException("Mutation changed during checking: " + cases[index].Path);
             }
-            RefuteSemanticRejections(refutable, leanPath);
+            RefuteSemanticRejections(refutable, leanPath, parallel);
             foreach (var item in cases) Console.WriteLine(item.Passed);
             cases.Clear();
         }
@@ -133,7 +166,7 @@ partial class Program
         // is stated as its negation and proved by `decide +kernel`, so the mutation is shown false, not merely
         // unprovable. Rejections of another kind (a name that no longer resolves, a malformed term) have no negation
         // to prove and are counted, not hidden.
-        void RefuteSemanticRejections(string?[] theorems, string? leanPath)
+        void RefuteSemanticRejections(string?[] theorems, string? leanPath, bool parallel)
         {
             var refutations = new List<string>();
             var imports = new SortedSet<string>(StringComparer.Ordinal);
@@ -155,12 +188,8 @@ partial class Program
             {
                 var path = Path.GetFullPath(Path.Combine(directory, "KernelRefutations.lean"));
                 imports.Add("Lean");
-                File.WriteAllText(path, string.Join('\n', imports.Select(module => "import " + module)) + "\n" +
-                    Isolation + string.Concat(refutations));
-                var proved = Execute(["lake", "env", "lean", path], cwd: FixturePackage(), leanPath: leanPath);
-                if (proved.Code != 0 || proved.Output.Contains("sorryAx", StringComparison.Ordinal))
-                    throw new InvalidOperationException(
-                        "The kernel did not refute a mutation the evaluator found false:\n" + proved.Output);
+                var header = string.Join('\n', imports.Select(module => "import " + module)) + "\n" + Isolation;
+                CheckBlocks(path, header, refutations, leanPath, parallel, rejection: false);
             }
             Console.WriteLine($"PASS kernel refutations of {refutations.Count} decided rejections" +
                 (unrefuted.Count == 0 ? "" : $"; {unrefuted.Count} rejections of another kind have none: " +

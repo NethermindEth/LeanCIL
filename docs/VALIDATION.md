@@ -27,6 +27,9 @@ dotnet run --file scripts/Test.cs -- --suite outlines-objects
   replay is rejected, which therefore runs alone on a 16 GB runner. Larger reservations start first. A heartbeat count
   does not depend on the processes beside it, and the checks that time Lean run before the
   others start.
+- The `unsafe` suite checks large span-constructor, unaligned-memory and reference
+  mutation batches in two processes under the same limits. The complete generated
+  `RejectedBatch.lean` and `KernelRefutations.lean` files can be checked individually.
 - In CI one job builds the extractor and example assembly with `--build-tools`, and suite jobs set
   `LEANCIL_PREBUILT_TOOLS=true` to use them.
 - `lake build` builds only `CIL`. A change under `CIL/` requires building every library target in
