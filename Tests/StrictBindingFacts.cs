@@ -281,14 +281,37 @@ static partial class StrictBindingFacts
     /// name. Entries are numbered as in <see cref="AssemblyBlock"/> within this slice. Offset 0 has key 0.
     /// Entries named only by Field rows carry the omitted-entry marker.
     /// </summary>
-    internal static string Slice(byte[] file) => Slices(file, perMethod: false).Single();
+    internal static string Slice(byte[] file)
+    {
+        var slice = Slices(file, perMethod: false).Single();
+        var carried = Packed(slice.Rows.Select(row => $"(0x{row.Token:x8}, {Packed(row.Row, "         ")})"), "      ",
+            oneEach: true);
+        return $$"""
+            { assembly := assemblyBlock,
+                rows :=
+                  {{carried}},
+                strings :=
+                  {{slice.Strings}},
+                blobs :=
+                  {{slice.Blobs}} }
+            """;
+    }
+
+    /// <summary>The independently numbered contents of one physical MethodDef row.</summary>
+    internal readonly record struct MethodSlice(int Token, string Row, string Strings, string Blobs);
 
     /// <summary>One independently numbered slice per MethodDef, in physical row order.</summary>
-    internal static IEnumerable<string> MethodSlices(byte[] file) => Slices(file, perMethod: true);
+    internal static IEnumerable<MethodSlice> MethodSlices(byte[] file) =>
+        Slices(file, perMethod: true).Select(slice =>
+        {
+            var row = slice.Rows.Single();
+            return new MethodSlice(row.Token, Packed(row.Row, "         "), slice.Strings, slice.Blobs);
+        });
 
     readonly record struct SliceRow(int Token, byte[] Row, (bool Blob, int Offset)[] Cells, int At);
+    readonly record struct NumberedSlice(SliceRow[] Rows, string Strings, string Blobs);
 
-    static IEnumerable<string> Slices(byte[] file, bool perMethod)
+    static IEnumerable<NumberedSlice> Slices(byte[] file, bool perMethod)
     {
         using PEReader pe = new(ImmutableArray.Create(file));
         var reader = pe.GetMetadataReader();
@@ -315,10 +338,10 @@ static partial class StrictBindingFacts
             ? ReadRows(TableIndex.MethodDef).Chunk(1)
             : [SliceTables.SelectMany(ReadRows).ToArray()];
         foreach (var rows in groups)
-            yield return RenderSlice(rows, stringWidth, blobWidth, stringEntry, blobEntry);
+            yield return NumberSlice(rows, stringWidth, blobWidth, stringEntry, blobEntry);
     }
 
-    static string RenderSlice(SliceRow[] rows, int stringWidth, int blobWidth,
+    static NumberedSlice NumberSlice(SliceRow[] rows, int stringWidth, int blobWidth,
         Func<int, byte[]> stringEntry, Func<int, byte[]> blobEntry)
     {
         var named = rows.Where(row => row.Token >> 24 != (int)TableIndex.Field).SelectMany(row => row.Cells).ToArray();
@@ -336,17 +359,7 @@ static partial class StrictBindingFacts
                 column += width;
             }
         }
-        var carried = Packed(rows.Select(row => $"(0x{row.Token:x8}, {Packed(row.Row, "         ")})"), "      ",
-            oneEach: true);
-        return $$"""
-            { assembly := assemblyBlock,
-                rows :=
-                  {{carried}},
-                strings :=
-                  {{Entries(strings)}},
-                blobs :=
-                  {{Entries(blobs)}} }
-            """;
+        return new(rows, Entries(strings), Entries(blobs));
     }
 
     // Where the heap columns of a row start, for tables whose earlier columns have fixed widths; the heap

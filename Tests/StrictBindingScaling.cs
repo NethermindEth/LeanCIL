@@ -353,23 +353,10 @@ partial class Program
         var perImage = methods / images;
         var files = Enumerable.Range(0, images).Select(image => SyntheticMethods(perImage, "Synthetic" + image))
             .ToArray();
-        static string MethodSource(string slice, int index)
-        {
-            var row = index + 1;
-            return $"def slice{row} : CIL.Extraction.MetadataSlice :=\n  {slice}\n" +
-                $"def method{row} : CIL.Extraction.MethodMetadata := {{ own := slice{row} }}\n";
-        }
-        var definitions = string.Concat(files.Select((file, image) => $$"""
-            namespace Image{{image}}
-            {{BindingImage.Definitions(file)}}
-            def assemblyBlock : CIL.Extraction.AssemblyMetadata :=
-              {{StrictBindingFacts.AssemblyBlock(file)}}
-            {{string.Concat(StrictBindingFacts.MethodSlices(file).Select(MethodSource))}}end Image{{image}}
-
-            """));
+        List<string> claims = [];
+        var definitions = string.Concat(files.Select((file, image) => MethodImageSource(file, image, claims)));
         // One list per page keeps each list literal within the elaborator's recursion limit.
-        var parts = Enumerable.Range(0, images).SelectMany(image => Enumerable.Range(1, perImage)
-            .Select(row => $"Image{image}.method{row}")).Chunk(size).ToArray();
+        var parts = claims.Chunk(size).ToArray();
         var lists = string.Concat(parts.Select((part, page) =>
             $"def claims{page} : List CIL.Extraction.MethodMetadata :=\n  [{string.Join(", ", part)}]\n"));
         var joined = Enumerable.Range(0, parts.Length - 1).Reverse()
@@ -395,6 +382,37 @@ partial class Program
 
             """);
         return CheckHeartbeats(path, package, 1, $"metadata rows of {methods} methods over {images} images")[0];
+    }
+
+    /// <summary>Every method retains its physical token and names and shares equal row and signature bytes.</summary>
+    static string MethodImageSource(byte[] file, int image, List<string> claims)
+    {
+        Dictionary<(string Row, string Blobs), string> constructors = [];
+        foreach (var method in StrictBindingFacts.MethodSlices(file))
+        {
+            var bytes = (method.Row, method.Blobs);
+            if (!constructors.TryGetValue(bytes, out var constructor))
+            {
+                constructor = "methodWithRows" + constructors.Count;
+                constructors.Add(bytes, constructor);
+            }
+            claims.Add($"Image{image}.{constructor} 0x{method.Token:x8} {method.Strings}");
+        }
+        var methods = string.Concat(constructors.Select(pair => $$"""
+            def {{pair.Value}} (token : Nat) (strings : List CIL.Extraction.ByteEntry) :
+                CIL.Extraction.MethodMetadata :=
+              { own := { assembly := assemblyBlock, rows := [(token, {{pair.Key.Row}})],
+                         strings, blobs := {{pair.Key.Blobs}} } }
+
+            """));
+        return $$"""
+            namespace Image{{image}}
+            {{BindingImage.Definitions(file)}}
+            def assemblyBlock : CIL.Extraction.AssemblyMetadata :=
+              {{StrictBindingFacts.AssemblyBlock(file)}}
+            {{methods}}end Image{{image}}
+
+            """;
     }
 
     /// <summary>A library whose user-string heap holds one repeated UTF-16 string at offset 1.</summary>
