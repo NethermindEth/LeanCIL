@@ -61,8 +61,8 @@ Small selections use fewer runners. Jobs start longest first, with up to eight r
 
 - The duration table `scripts/verification-durations.json` includes each suite's full elapsed
   time from its log group and the time to measure its verified outputs from the proof-cost log.
-  The table uses the median of three hosted runs where all three measurements are available.
-  It records the source runs, any missing measurements, per-job setup and library time.
+  The table records the source run and its library measurement. The setup estimate is the
+  median time per job after subtracting suite and library work.
   A suite without a measured time runs alone.
 - `dotnet run --file scripts/EstimateVerificationSchedule.cs -- --jobs` prints the jobs of a full
   run with their estimated minutes, including the library measurement.
