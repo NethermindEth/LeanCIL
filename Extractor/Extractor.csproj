@@ -12,7 +12,7 @@
     <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Verification.cs declares the file-based script includes for test callers. -->
+    <!-- Verification/Verification.cs declares the file-based script includes for test callers. -->
     <Features>$(Features);FileBasedProgram</Features>
     <StartupObject>Nethermind.LeanCIL.Program</StartupObject>
   </PropertyGroup>
@@ -32,18 +32,18 @@
     <Compile Include="../scripts/Consumer/Fingerprints.cs" Link="Consumer/Fingerprints.cs" />
     <Compile Include="../scripts/Consumer/WorkspaceAndComponents.cs" Link="Consumer/WorkspaceAndComponents.cs" />
     <Compile Include="../scripts/Consumer/Orchestration.cs" Link="Consumer/Orchestration.cs" />
-    <Compile Include="../scripts/ProofWorkspace.cs" Link="ProofWorkspace.cs" />
-    <Compile Include="../scripts/ProofWatch.cs" Link="ProofWatch.cs" />
-    <Compile Include="../scripts/ContractExport.cs" Link="ContractExport.cs" />
-    <Compile Include="../scripts/FullImportVerification.cs" Link="FullImportVerification.cs" />
-    <Compile Include="../scripts/FullModuleResolution.cs" Link="FullModuleResolution.cs" />
-    <Compile Include="../scripts/LeanDiagnostics.cs" Link="LeanDiagnostics.cs" />
-    <Compile Include="../scripts/FailureReports.cs" Link="FailureReports.cs" />
-    <Compile Include="../scripts/VerifyReports.cs" Link="VerifyReports.cs" />
-    <Compile Include="../scripts/LibraryAudit.cs" Link="LibraryAudit.cs" />
-    <Compile Include="../scripts/DeepChecks.cs" Link="DeepChecks.cs" />
-    <Compile Include="../scripts/DeepCheckInputs.cs" Link="DeepCheckInputs.cs" />
-    <Compile Include="../scripts/BindingImage.cs" Link="BindingImage.cs" />
+    <Compile Include="../scripts/Consumer/ProofWorkspace.cs" Link="Consumer/ProofWorkspace.cs" />
+    <Compile Include="../scripts/Consumer/ProofWatch.cs" Link="Consumer/ProofWatch.cs" />
+    <Compile Include="../scripts/Consumer/ContractExport.cs" Link="Consumer/ContractExport.cs" />
+    <Compile Include="../scripts/Consumer/FullImportVerification.cs" Link="Consumer/FullImportVerification.cs" />
+    <Compile Include="../scripts/Consumer/FullModuleResolution.cs" Link="Consumer/FullModuleResolution.cs" />
+    <Compile Include="../scripts/Checking/LeanDiagnostics.cs" Link="Checking/LeanDiagnostics.cs" />
+    <Compile Include="../scripts/Checking/FailureReports.cs" Link="Checking/FailureReports.cs" />
+    <Compile Include="../scripts/Checking/VerifyReports.cs" Link="Checking/VerifyReports.cs" />
+    <Compile Include="../scripts/Checking/LibraryAudit.cs" Link="Checking/LibraryAudit.cs" />
+    <Compile Include="../scripts/Checking/DeepChecks.cs" Link="Checking/DeepChecks.cs" />
+    <Compile Include="../scripts/Checking/DeepCheckInputs.cs" Link="Checking/DeepCheckInputs.cs" />
+    <Compile Include="../scripts/Checking/BindingImage.cs" Link="Checking/BindingImage.cs" />
     <Content Include="../CIL/**/*.lean;../CIL.lean;../StrictBinding/**/*.lean;../StrictBinding.lean;../lakefile.toml;../lake-manifest.json;../lean-toolchain">
       <Link>verification/%(Identity)</Link>
       <TargetPath>verification/$([MSBuild]::MakeRelative('$(MSBuildProjectDirectory)/..', '%(FullPath)'))</TargetPath>

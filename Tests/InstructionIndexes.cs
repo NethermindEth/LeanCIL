@@ -1,13 +1,13 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:package Mono.Cecil
-#:include ../scripts/Verification.cs
+#:include ../scripts/Verification/Verification.cs
 #:include PinnedMetadata.cs
-#:include ../scripts/DeepChecks.cs
-#:include ../scripts/FailureReports.cs
-#:include ../scripts/LeanDiagnostics.cs
-#:include ../scripts/BindingImage.cs
-#:include ../scripts/DeepCheckInputs.cs
+#:include ../scripts/Checking/DeepChecks.cs
+#:include ../scripts/Checking/FailureReports.cs
+#:include ../scripts/Checking/LeanDiagnostics.cs
+#:include ../scripts/Checking/BindingImage.cs
+#:include ../scripts/Checking/DeepCheckInputs.cs
 
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -571,7 +571,7 @@ var readers = RenderedLeanReaders.Scan(sourceFiles, constructors);
 [
     ("scripts/Consumer/WorkspaceAndComponents.cs", 2,
         "the component splitter cuts module text at declaration boundaries"),
-    ("scripts/VerifyReports.cs", 1, "reads the source location table of Symbols.lean, not an instruction"),
+    ("scripts/Checking/VerifyReports.cs", 1, "reads the source location table of Symbols.lean, not an instruction"),
     ("scripts/BenchmarkExternalIdentities.cs", 1, "reads identity byte arrays from baseline extractions"),
 ];
 var actualReaders = readers.Where(finding => finding.Kind == "reads generated Lean")

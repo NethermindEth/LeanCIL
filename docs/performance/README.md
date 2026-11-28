@@ -49,7 +49,7 @@ lake build Tests.PinnedIndexScaling
 
 ## Suite times
 
-`scripts/verification-durations.json` includes each suite's verification and verified-output
+`scripts/CI/verification-durations.json` includes each suite's verification and verified-output
 measurement on the hosted runner. The file records the source runs and how their times are combined.
 Print the resulting jobs and their estimated minutes with:
 

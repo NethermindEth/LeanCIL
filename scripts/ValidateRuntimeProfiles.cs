@@ -1,12 +1,12 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include RuntimeProfileValidation.cs
-#:include Verification.cs
-#:include DeepChecks.cs
-#:include FailureReports.cs
-#:include LeanDiagnostics.cs
-#:include BindingImage.cs
-#:include DeepCheckInputs.cs
+#:include CI/RuntimeProfileValidation.cs
+#:include Verification/Verification.cs
+#:include Checking/DeepChecks.cs
+#:include Checking/FailureReports.cs
+#:include Checking/LeanDiagnostics.cs
+#:include Checking/BindingImage.cs
+#:include Checking/DeepCheckInputs.cs
 
 if (args.Length < 2) throw new ArgumentException("Usage: ValidateRuntimeProfiles.cs <extractor.dll> <evidence.json>...");
 var output = Path.GetFullPath("artifacts/RuntimeProfileEvidence.lean");

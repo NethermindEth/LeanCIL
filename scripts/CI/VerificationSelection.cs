@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 // Conservative suite ownership: unknown/shared inputs select every suite.
 internal static class VerificationSelection
 {
-    internal static string Root { get; } = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Source())!, ".."));
+    internal static string Root { get; } = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Source())!, "..", ".."));
     static string Source([CallerFilePath] string path = "") => path;
     static IEnumerable<string> Matches(string text, string pattern, RegexOptions options = RegexOptions.None) =>
         Regex.Matches(text, pattern, options).Select(match => match.Groups[1].Value);
@@ -16,7 +16,7 @@ internal static class VerificationSelection
 
     internal static RunDurations ReadDurations(string? root = null)
     {
-        using var data = JsonDocument.Parse(File.ReadAllText(Path.Combine(root ?? Root, "scripts/verification-durations.json")));
+        using var data = JsonDocument.Parse(File.ReadAllText(Path.Combine(root ?? Root, "scripts/CI/verification-durations.json")));
         var durations = new Dictionary<string, double>(StringComparer.Ordinal);
         foreach (var property in data.RootElement.GetProperty("seconds").EnumerateObject())
         {
@@ -240,7 +240,7 @@ internal static class VerificationSelection
     static HashSet<string> DirectReferences(string root, string path)
     {
         // Registries name every fixture; including their types does not execute those fixtures.
-        if (path is "scripts/ExportVerificationSuites.cs" or "scripts/VerificationSuites.cs") return [];
+        if (path is "scripts/CI/ExportVerificationSuites.cs" or "scripts/CI/VerificationSuites.cs") return [];
         var source = Path.Combine(root, path);
         if (!File.Exists(source)) return [];
         var text = File.ReadAllText(source);
@@ -431,7 +431,7 @@ internal static class VerificationSelection
             if (path == "LICENSE") continue;
             // Other workflows run in their own jobs; only this workflow's definition feeds the suites.
             if (path.StartsWith(".github/workflows/", StringComparison.Ordinal) && path != ".github/workflows/verification.yml") continue;
-            if (path is "scripts/ExportVerificationSuites.cs" or "scripts/VerificationSuites.cs") return all;
+            if (path is "scripts/CI/ExportVerificationSuites.cs" or "scripts/CI/VerificationSuites.cs") return all;
             if (TrySelectScopedSubsystem(root, path, inputs, manual, ambientCil, exportSuites, out var scoped))
             {
                 selected.UnionWith(scoped.Where(name => inputs.ContainsKey(name) && !manual.Contains(name)));

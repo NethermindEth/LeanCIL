@@ -43,7 +43,7 @@ the Lean modules those import.
 | Pure ISA-model SIMD leaf modules (`CIL/SIMD/{AES,AVX,AVX2,AVX512,AVX512DQ,AdvSimd,ArmBase,BMI1,BMI2,SSE,X86Base}.lean`) | `core`, `dispatch`, `divrem`, `docs`, `evidence`, `exportsprofiles`, `gates`, `intrinsics`, `templates`, `unsafe` |
 | `StrictBinding.lean`, `StrictBinding/` | `assemblies`, `audit`, `cli`, `core`, `docs`, `imports`, `workspace`, every `exports*` partition and any direct owners |
 | Isolated `Extractor/` subsystems (`ProofOutline*.cs`/`OutlineInstructions.cs`, `ExceptionLint.cs`, `Blockers.cs`, `Template*.cs`, `ProofGates.cs`/`ProofBindingCatalog.cs`, contract-export bundle/manifest/metadata helpers) | their subsystem suites plus `blockers` and `docs` |
-| Other `CIL/`, `CIL.lean`, `Extractor/`, `Examples/Assembly/`, `Examples/FSharp/`, `Tests/Support.lean`, `scripts/ExportVerificationSuites.cs`, a script compiled into the extractor | all |
+| Other `CIL/`, `CIL.lean`, `Extractor/`, `Examples/Assembly/`, `Examples/FSharp/`, `Tests/Support.lean`, `scripts/CI/ExportVerificationSuites.cs`, a script compiled into the extractor | all |
 | A file some suite owns | its owners |
 | Any other path, including `verification.yml` and build configuration | all |
 
@@ -70,7 +70,7 @@ eighth of the full automatic run's suite and library time, so a full run packs i
 wave across the eight runners without spawning single-suite tail jobs.
 Small selections use fewer runners. Jobs start longest first, with up to eight running at once.
 
-- The duration table `scripts/verification-durations.json` includes each suite's full elapsed
+- The duration table `scripts/CI/verification-durations.json` includes each suite's full elapsed
   time from its log group and the time to measure its verified outputs from the proof-cost log.
   The table records the source run and its library measurement. The setup estimate is the
   median time per job after subtracting suite and library work.
@@ -288,8 +288,8 @@ run takes those rows as its base when the push run of its merge base published t
 be a push of that commit on `main`, which is what reusing a certified library without replay
 requires of its producer, the file must have the digest that job logged, and its rows must come
 from the same measurer and from that commit. The measurer includes `scripts/ProofCost.lean`,
-`scripts/ProofProfiler.cs`, `scripts/ProofCostReport.cs`, the shared helpers in
-`scripts/Verification.cs`, the row schema and the two workflow steps that measure. No other run
+`scripts/ProofCost/ProofProfiler.cs`, `scripts/ProofCost/ProofCostReport.cs`, the shared helpers in
+`scripts/Verification/Verification.cs`, the row schema and the two workflow steps that measure. No other run
 supplies a base, and no pull request run measures a base.
 
 ### Comparison
@@ -323,7 +323,7 @@ reports the measurement noise between two runs.
 
 ### Accepting an increase
 
-Accept an increase that is worth its cost by adding it to `scripts/proof-cost-accepted.json` in
+Accept an increase that is worth its cost by adding it to `scripts/ProofCost/proof-cost-accepted.json` in
 the same PR. The summary prints the entry: the row, the measure, the base and head values and a
 reason to fill in. An entry applies only to that base value and up to that head value, each with
 1,000 heartbeats of allowance for the difference between reruns, so it does not cover later growth;
@@ -371,7 +371,7 @@ Selection runs `dotnet run --file scripts/CheckDocReferences.cs`, which needs no
   `Tests/` path, `Tests.*` module or excerpt of one; it cites an example, states the API in a
   checked snippet, or links the maintainers document that describes the evidence.
 - The [suite table](VALIDATION.md#suites) lists each suite `scripts/Test.cs` accepts exactly
-  once, as registered in `scripts/VerificationSuites.cs` and `scripts/ExportVerificationSuites.cs`.
+  once, as registered in `scripts/CI/VerificationSuites.cs` and `scripts/CI/ExportVerificationSuites.cs`.
 - No `simp`, `simp only`, `simpa`, `simp_all` or `dsimp` list of an example under
   `Examples/Proofs`, or of a Lean block that is not an excerpt, names one of the interpreter's own
   functions: `step`, `run`, `invoke`, `pureArity`, `scalars`, `instructionStep`,

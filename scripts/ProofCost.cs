@@ -1,15 +1,15 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include ProofCostReport.cs
-#:include Verification.cs
-#:include DeepChecks.cs
-#:include FailureReports.cs
-#:include LeanDiagnostics.cs
-#:include BindingImage.cs
-#:include DeepCheckInputs.cs
-#:include CertifiedLibraryDonor.cs
-#:include ExportVerificationSuites.cs
-#:include VerificationGroupRunner.cs
-#:include VerificationSuites.cs
+#:include ProofCost/ProofCostReport.cs
+#:include Verification/Verification.cs
+#:include Checking/DeepChecks.cs
+#:include Checking/FailureReports.cs
+#:include Checking/LeanDiagnostics.cs
+#:include Checking/BindingImage.cs
+#:include Checking/DeepCheckInputs.cs
+#:include CI/CertifiedLibraryDonor.cs
+#:include CI/ExportVerificationSuites.cs
+#:include CI/VerificationGroupRunner.cs
+#:include CI/VerificationSuites.cs
 
 return ProofCostReport.Run(args);

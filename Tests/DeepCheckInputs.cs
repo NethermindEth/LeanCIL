@@ -1,7 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include ../scripts/DeepCheckInputs.cs
-#:include ../scripts/BindingImage.cs
+#:include ../scripts/Checking/DeepCheckInputs.cs
+#:include ../scripts/Checking/BindingImage.cs
 
 using System.Diagnostics;
 using System.Reflection;

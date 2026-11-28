@@ -3,12 +3,12 @@
 #:property AssemblyName=LeanCIL.IdentityTests
 #:project ../Extractor/Extractor.csproj
 #:package Mono.Cecil
-#:include ../scripts/Verification.cs
-#:include ../scripts/DeepChecks.cs
-#:include ../scripts/FailureReports.cs
-#:include ../scripts/LeanDiagnostics.cs
-#:include ../scripts/BindingImage.cs
-#:include ../scripts/DeepCheckInputs.cs
+#:include ../scripts/Verification/Verification.cs
+#:include ../scripts/Checking/DeepChecks.cs
+#:include ../scripts/Checking/FailureReports.cs
+#:include ../scripts/Checking/LeanDiagnostics.cs
+#:include ../scripts/Checking/BindingImage.cs
+#:include ../scripts/Checking/DeepCheckInputs.cs
 #:include LeanStringEmissions.cs
 
 extern alias IdentityExtractor;

@@ -1,6 +1,6 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include CertifiedLibraryDonor.cs
+#:include CI/CertifiedLibraryDonor.cs
 
 using System.Text.Json;
 

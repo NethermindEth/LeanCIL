@@ -1,6 +1,6 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include VerificationGroupRunner.cs
+#:include CI/VerificationGroupRunner.cs
 
 using System.Reflection;
 

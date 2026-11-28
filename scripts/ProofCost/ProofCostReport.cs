@@ -15,7 +15,7 @@ internal static partial class ProofCostReport
     internal const int Schema = 1;
     internal const string ModuleKind = "module";
     internal const string ModuleRow = "(module)";
-    internal const string AcceptedFile = "scripts/proof-cost-accepted.json";
+    internal const string AcceptedFile = "scripts/ProofCost/proof-cost-accepted.json";
 
     // A regression must exceed both the relative threshold and the measure's absolute floor.
     internal const double DefaultThresholdPercent = 5;
@@ -434,7 +434,9 @@ internal static partial class ProofCostReport
         return (process.ExitCode, output.ToString());
     }
 
-    static string ScriptDirectory([CallerFilePath] string path = "") => Path.GetDirectoryName(path)!;
+    static string ProofCostDirectory([CallerFilePath] string path = "") => Path.GetDirectoryName(path)!;
+
+    static string ScriptsDirectory() => Path.GetFullPath(Path.Combine(ProofCostDirectory(), ".."));
 
     static string Sha(string path) => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
 
@@ -513,7 +515,7 @@ internal static partial class ProofCostReport
     sealed class Measurer(string tree, string library, string work, int jobs)
     {
         readonly Lazy<Program.ProofProfiler> profiler = new(() => Program.BuildProofProfiler(
-            Path.Combine(work, "profiler"), Path.Combine(ScriptDirectory(), "ProofCost.lean"), tree));
+            Path.Combine(work, "profiler"), Path.Combine(ScriptsDirectory(), "ProofCost.lean"), tree));
         readonly string shared = Path.Combine(work, "modules");
         readonly SemaphoreSlim slots = new(jobs);
         readonly ModuleTasks modules = new();
@@ -850,17 +852,16 @@ internal static partial class ProofCostReport
     // called by the same workflow steps.
     internal static string MeasurerKey(string? workflow = null)
     {
-        workflow ??= File.ReadAllText(Path.Combine(ScriptDirectory(), "..", ".github", "workflows",
+        workflow ??= File.ReadAllText(Path.Combine(ScriptsDirectory(), "..", ".github", "workflows",
             "verification.yml"));
         var verificationSources = Directory.EnumerateFiles(
-                Path.Combine(ScriptDirectory(), "Verification"), "*.cs")
+                Path.Combine(ScriptsDirectory(), "Verification"), "*.cs")
             .Order(StringComparer.Ordinal)
-            .Prepend(Path.Combine(ScriptDirectory(), "Verification.cs"))
             .Select(Sha);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
-            $"{Schema}\n{Sha(Path.Combine(ScriptDirectory(), "ProofCost.lean"))}\n" +
-            $"{Sha(Path.Combine(ScriptDirectory(), "ProofCostReport.cs"))}\n" +
-            $"{Sha(Path.Combine(ScriptDirectory(), "ProofProfiler.cs"))}\n" +
+            $"{Schema}\n{Sha(Path.Combine(ScriptsDirectory(), "ProofCost.lean"))}\n" +
+            $"{Sha(Path.Combine(ProofCostDirectory(), "ProofCostReport.cs"))}\n" +
+            $"{Sha(Path.Combine(ProofCostDirectory(), "ProofProfiler.cs"))}\n" +
             $"{string.Join('\n', verificationSources)}\n" +
             string.Join('\n', MeasuringSteps.Select(step => WorkflowStep(workflow, step))))));
     }

@@ -1,9 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include VerificationSelection.cs
-#:include Documentation.cs
-#:include ExportVerificationSuites.cs
-#:include VerificationSuites.cs
+#:include CI/VerificationSelection.cs
+#:include CI/Documentation.cs
+#:include CI/ExportVerificationSuites.cs
+#:include CI/VerificationSuites.cs
 
 using System.Globalization;
 using System.Text.Json;

@@ -1,8 +1,8 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include Documentation.cs
-#:include ExportVerificationSuites.cs
-#:include VerificationSuites.cs
+#:include CI/Documentation.cs
+#:include CI/ExportVerificationSuites.cs
+#:include CI/VerificationSuites.cs
 
 using System.Runtime.CompilerServices;
 

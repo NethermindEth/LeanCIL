@@ -1,5 +1,5 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include VerificationTimings.cs
+#:include CI/VerificationTimings.cs
 
 VerificationTimings.Run(args);
