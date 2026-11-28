@@ -25,7 +25,7 @@ using var verification = new Program();
 var output = At("artifacts/FeatureEvidence");
 Directory.CreateDirectory(output);
 var rejected = new RejectedEvidence(output);
-// Exercise the production validator and both old-name and custom-profile migration paths.
+// Exercise the production validator, unknown profile names and custom profile rules.
 verification.EnsureExtractorBuilt();
 var profileType = Assembly.Load(File.ReadAllBytes(ExtractorPath))
     .GetType("Nethermind.LeanCIL.FeatureProfile", throwOnError: true)!;
@@ -64,9 +64,9 @@ foreach (var name in new[] { "scalar", "x64-sse42", "x64-v3", "x64-v4", "arm64-a
 foreach (var name in new[] { "x64-avx2", "x64-avx2-bmi1", "x64-avx512", "x64-avx512-bmi1",
     "x64-bmi2", "x64-vector256", "x64-sse41", "arm64-armbase" })
 {
-    try { _ = SelectProfile(name); throw new InvalidOperationException("Retired profile accepted: " + name); }
+    try { _ = SelectProfile(name); throw new InvalidOperationException("Unknown profile accepted: " + name); }
     catch (TargetInvocationException exception) when (exception.InnerException is ArgumentException invalidProfile &&
-        invalidProfile.Message.Contains("Retired execution profile", StringComparison.Ordinal)) { }
+        invalidProfile.Message == $"Unknown execution profile: {name}") { }
 }
 foreach (var (name, flag, value, accepted) in new[]
 {
@@ -97,7 +97,7 @@ foreach (var (name, flag, value, accepted) in new[]
     }
     catch (TargetInvocationException exception) when (!accepted && exception.InnerException is InvalidDataException) { }
 }
-Console.WriteLine("PASS runtime profile groups, retired profiles and reduced vector width");
+Console.WriteLine("PASS runtime profile groups, unknown profiles and reduced vector width");
 // No .NET 11 x64 process reports SSE2 without SSSE3, SSE4.1 and SSE4.2, so that set is rejected with the gap.
 var belowBaseline = JsonSerializer.SerializeToNode(SelectProfile("x64-sse42"), jsonOptions)!;
 foreach (var flag in new[] { "ssse3", "sse41", "sse42" }) belowBaseline[flag] = false;
