@@ -51,10 +51,37 @@ private def hasRawScalarUnsafe : List RawInstruction → List Bool → Bool
       | _ => false)) || hasRawScalarUnsafe rest mask
   | _, _ => false
 
+/-- Whether any declared local of `closed` is a 128-bit `UInt64` vector eligible for opaque
+    storage. -/
+def hasEligibleOpaqueLocal (closed : RawMethod) : Bool :=
+  closed.locals.any (fun type => opaqueLocalType (some type))
+
 /-- The closed body and its live mask determine the opaque vector slots in its frame. -/
 def rawOpaqueLocals (closed : RawMethod) (reachable : List Bool) : List Nat :=
-  if closed.locals.any (fun type => opaqueLocalType (some type)) &&
+  if hasEligibleOpaqueLocal closed &&
       hasRawScalarUnsafe closed.code reachable then opaqueLocalIndices closed else []
+
+/-- When no local is eligible for opaque storage, `opaqueLocalIndices` is empty. -/
+theorem opaqueLocalIndices_of_no_eligible {closed : RawMethod}
+    (noEligible : hasEligibleOpaqueLocal closed = false) :
+    opaqueLocalIndices closed = [] := by
+  simp only [opaqueLocalIndices, List.map_eq_nil_iff, List.filter_eq_nil_iff]
+  intro entry member
+  have inLocals : entry.1 ∈ closed.locals :=
+    List.mem_of_getElem? (List.mem_zipIdx_iff_getElem?.mp member)
+  have rejected : opaqueLocalType (some entry.1) = false :=
+    Bool.eq_false_iff.mpr (List.any_eq_false.mp noEligible entry.1 inLocals)
+  simp [rejected]
+
+#print axioms opaqueLocalIndices_of_no_eligible
+
+/-- When no local is eligible for opaque storage, `rawOpaqueLocals` is empty. -/
+theorem rawOpaqueLocals_of_no_eligible {closed : RawMethod} {reachable : List Bool}
+    (noEligible : hasEligibleOpaqueLocal closed = false) :
+    rawOpaqueLocals closed reachable = [] := by
+  simp only [rawOpaqueLocals, noEligible, Bool.false_and, Bool.false_eq_true, ↓reduceIte]
+
+#print axioms rawOpaqueLocals_of_no_eligible
 
 /-- Every claimed opaque local has the emitted whole-vector slot kind. -/
 private def opaqueKindsValid (method : Method) : Bool :=

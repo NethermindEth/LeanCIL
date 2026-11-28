@@ -17,53 +17,40 @@ Run one partition with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 
 | Name | Cases |
 | --- | --- |
-| `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions, caller reuse after a body-only rebuild and rejection of a cached exact postcondition after its imported contract is weakened |
+| `exports` | Production, wrapper-True rejection, post-callback proof-source and compiled-wrapper audit mutations, six-argument SDK discovery, generic/virtual/static-value restrictions, caller reuse after a body-only rebuild and rejection of a cached exact postcondition after its imported contract is weakened |
 | `exportsprotected` | SDK-built protected static export, separately compiled derived caller and rehashed visibility mismatch rejection |
-| `exportsaudit` | Proof-source and compiled-wrapper callback mutations |
 | `exportsresolution` | Same loaded files, changed loaded module and same-length caller artifact rewrite |
-| `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal; caller and library proof-build stages required separately for each invocation |
-| `exportsfullordinary` | Ordinary caller full verification, requiring its direct proof check and the imported proof build |
-| `exportsfullpair` | Two imported slots from one bundle, requiring both imported proof builds and the caller check |
-| `exportsfullchecks` | Bundle, DLL, closure, statement digest and caller-premise rejection |
-| `exportsfulltheorems` | Wrong producer theorem statement and definition |
-| `exportsfullcomposition` | Transferred macro cannot replace the composition theorem with True |
-| `exportsmutationordinary` | Executed ordinary caller artifact mutation |
-| `exportsmutationconsumer` | Executed consumer caller artifact mutation |
-| `exportsmutationsource` | Executed consumer caller source mutation |
-| `exportsmutationshadow` | Executed original-root module shadow |
+| `exportsfull` | Explicit and repeated consumer full verification, ordinary caller full verification, two imported slots from one bundle, bundle/DLL/closure/digest/premise/theorem rejection and composition statement integrity on one shared producer bootstrap |
+| `exportsmutations` | Executed ordinary and consumer caller artifact, source and original-root shadow mutations on one shared producer bootstrap |
 | `exportsstatics` | Standalone modular static exports with their own SDK setup and assertions |
 | `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt, with a private library cache that the first forced run meets empty and builds into, and the last meets holding the library and opens, tracing the open; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof; a chain of Top, App and library independently composes the table reader with its static-world premise |
 | `exportstransitive` | A chain of App, A and B, and a four-node diamond where A and C share B; full mode rechecks each selected export despite warm receipts, rejects changed deployment pins and cycles before building, rejects forged dependency composition, and detects B changing staged A before A builds |
 | `exportstransitiveoutcomes` | A chain of App, C, A and B independently preserves normal returns and the named exceptional outcome through three forwarders |
-| `exportsdiscovery` | Real producer SDK/publication bootstrap, then the six-argument discovery fixture |
 | `exportstyped` | Standalone closed-generic, imported-layout and imported-local fixture with its own SDK setup and assertions |
 | `exportsderived` | Standalone derived public contracts: `Holds.weaken` exports, sidecar-only callers, refuted weakenings |
 | `exportsinitialized` | A static-readonly struct library exports a named initialization premise; its caller retains the scoped premise, malformed descriptors reject, and full verification is unavailable |
 | `exportsprofiles` | One family theorem across three profiles, independent full composition, outcome families and scoped initialization premises; disagreeing flags, unequal programs, malformed selections, forged audit declarations and compiled-reference mutation reject |
 
-[ExportVerificationSuites.cs](../scripts/ExportVerificationSuites.cs) registers the 23 partitions
+[ExportVerificationSuites.cs](../scripts/ExportVerificationSuites.cs) registers the 13 partitions
 and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
 
 ### Case ledger
 
-- The base ledger covers 51 cases across 23 core, 3 protected, 2 callback, 3 resolution and 20 full cases.
-  Each partition rejects an omitted, repeated or unexpected completion.
+- The base ledger covers 51 cases across 23 core, 3 protected, 2 callback, 3 resolution and 20 full cases,
+  plus `discovery.fixture` on the shared `exports` bootstrap. Each partition rejects an omitted,
+  repeated or unexpected completion.
 - The artifact-mode rejection runs after consumer requests that succeed, so it checks removal of
   a successful report that a request wrote.
-- The default eight-argument `Tests/FullImportVerification.cs` invocation runs resolution and all
-  full cohorts once; `--cohort NAME` selects one full cohort. Unknown, missing or duplicate
-  selections fail before fixture setup. The full plan holds only its ten base cohorts; the
-  standalone and discovery partitions cannot enter it.
+- The default eight-argument `Tests/FullImportVerification.cs` invocation runs resolution and both
+  full cohorts (`full` and `mutations`) once; `--cohort NAME` selects one full cohort. Unknown,
+  missing or duplicate selections fail before fixture setup.
 - `exportsstatics`, `exportsfullstatics`, `exportstransitive`, `exportstransitiveoutcomes`,
   `exportstyped`, `exportsderived`, `exportsinitialized` and `exportsprofiles` run directly, with
   no core export bootstrap or nested post-call. Their fixture assertions are separate from the 51
   base case IDs, and a standalone fixture cannot use an empty base completion ledger to claim
   coverage.
-- `exportsdiscovery` records one separate `discovery.fixture` completion after the child
-  succeeds; the child's behaviors are outside the 51 base cases. The partition builds the
-  producer library and creates its proof packages and publication. The child builds, extracts
-  and verifies its own caller and needs no baseline caller artifact or verified report. The
-  partition runs no core caller verification, restrictions, callbacks or full cases.
+- `exports` records the `discovery.fixture` completion after the child succeeds; the child builds,
+  extracts and verifies its own caller against the shared producer export.
 - `exportstyped` owns its fixture and five input proof/interface modules; shared model and proof
   dependencies keep their own owners.
 - `exportsderived` owns its fixture and the five `Derived*` interface, producer and caller modules

@@ -24,10 +24,10 @@ for (var index = 0; index < args.Length; index++)
     // A focused run of the named cases of the group; the suites run each whole group.
     else if (args[index] == "--case" && index + 1 < args.Length) cases = args[++index].Split(',');
     else throw new ArgumentException(
-        "Usage: ProofOutlines.cs --group control|objects|buffers [--case name[,name...]] [--list]");
+        "Usage: ProofOutlines.cs --group core|control|objects|buffers [--case name[,name...]] [--list]");
 }
-if (group is not (null or "control" or "objects" or "buffers") || group is null && !list)
-    throw new ArgumentException("Choose --group control|objects|buffers, or --list for every group");
+if (group is not (null or "core" or "control" or "objects" or "buffers") || group is null && !list)
+    throw new ArgumentException("Choose --group core|control|objects|buffers, or --list for every group");
 // A generated starting proof must elaborate with only its holes open, and verification must refuse it
 // until every hole is filled; otherwise an author could mistake the outline for a proof.
 // Each selected method has an independent extraction; the straight-line
@@ -181,7 +181,18 @@ var typeArguments = new Dictionary<string, string[]>(StringComparer.Ordinal)
     ["TypedReadUInt32"] = ["--type-argument", "System.UInt32"],
     ["TypedReadUInt64"] = ["--type-argument", "System.UInt64"]
 };
-var outlined = catalog.Where(entry => (group is null || entry.Group == group) &&
+// Representative subset covering every outline pattern family (control, loops, spans, helpers, objects,
+// reference arrays, value arrays, throws and closures) without running dozens of overlapping variants in CI.
+var coreCases = new HashSet<string>(StringComparer.Ordinal)
+{
+    "Countdown", "WordByte", "FillWords", "CountUntil", "CountCalls", "SpanAllZero", "SpanSum",
+    "Choose", "SizeOfBranch", "SizeOfEqual", "Narrow", "CheckedAdd", "PacketValue",
+    "HelperThrows", "HelperObjectThrows",
+    "Deposit", "DepositBoth", "DepositFrom", "IsIdle", "CopyTag", "ArrayElement", "ArrayCovariance", "FreshPair",
+    "SpanFill", "TypedReadUInt32", "ArraySum", "SampleCount", "TileRelane", "PairLength"
+};
+var outlined = catalog.Where(entry =>
+    (group is null || (group == "core" ? coreCases.Contains(entry.Name) : entry.Group == group)) &&
     (cases is null || cases.Contains(entry.Name, StringComparer.Ordinal))).ToArray();
 if (catalog.Select(entry => entry.Name).Distinct(StringComparer.Ordinal).Count() != catalog.Length)
     throw new InvalidOperationException("Outline catalog names must be unique");

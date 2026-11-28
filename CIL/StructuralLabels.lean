@@ -1,5 +1,4 @@
 import CIL.MethodIdentity
-import CIL.Embedding.Basic
 import CIL.TermAccess
 
 /-!

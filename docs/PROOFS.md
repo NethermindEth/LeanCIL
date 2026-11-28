@@ -104,11 +104,10 @@ These commands name parts of an extraction:
 
 ## Public proof surface
 
-`import CIL` is the supported import for a consumer proof and exports the interfaces below. It
-also imports embedding and renaming metatheory; there is no narrower proof facade and no
-import-closure size guarantee. Import these separately when a proof uses them:
-`CIL.Safety.LoopScaffold` (`bind_entry`, `bind_cutpoint`), `CIL.Observe` and
-`CIL.Safety.AllocationRefinement`.
+`import CIL` is the supported import for a consumer proof and exports the interfaces below. Import
+these opt-in libraries separately when a proof uses them: `CIL.Embedding.Tactic` and
+`CIL.Safety.Embedding.*` (body embeddings and transports), `CIL.Safety.LoopScaffold` (`bind_entry`,
+`bind_cutpoint`), `CIL.Observe` and `CIL.Safety.AllocationRefinement`.
 
 | Purpose | Consumer interfaces |
 | --- | --- |

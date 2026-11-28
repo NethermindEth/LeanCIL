@@ -259,6 +259,20 @@ def Instruction.ofRole? (role : FoldRole) (previous : Option RawInstruction)
       else none
   | .blocked => none
 
+/-- No fold role turns a call-family opcode into `.pop`. -/
+theorem Instruction.ofRole?_ne_pop_of_call {role : FoldRole} {previous : Option RawInstruction}
+    {raw : RawInstruction}
+    (isCall : raw.opcode = 40 ∨ raw.opcode = 41 ∨ raw.opcode = 111 ∨ raw.opcode = 115) :
+    Instruction.ofRole? role previous raw ≠ some .pop := by
+  intro decoded
+  cases role <;> simp only [Instruction.ofRole?] at decoded
+  all_goals repeat' first
+    | exact Instruction.ofRaw?_ne_pop_of_call isCall decoded
+    | split at decoded
+    | cases decoded
+
+#print axioms Instruction.ofRole?_ne_pop_of_call
+
 /-- Calls and static field operands need the method's bindings or profile to decode. -/
 def boundSite (raw : RawInstruction) : Bool :=
   methodTokenCall raw.opcode || raw.opcode == 126 || raw.opcode == 127 ||

@@ -4,6 +4,7 @@ using Mono.Cecil;
 partial class Program
 {
     static readonly string[] CorpusLanguages = ["default", "14", "latest"];
+    const string DefaultCorpusLanguage = "latest";
 
     static string CompileCorpus(string compiler, CompilerToolchain toolchain, string directory,
         string name, IEnumerable<string> sources, string language, IEnumerable<string>? extraReferences = null,
@@ -106,7 +107,8 @@ partial class Program
     }
 
     static void CheckCoverageBaseline(string directory,
-        SortedDictionary<string, SortedDictionary<string, char>> columns, bool update, bool advisory)
+        SortedDictionary<string, SortedDictionary<string, char>> columns, bool update, bool advisory,
+        bool allCompilers = false)
     {
         var methods = columns.Values.SelectMany(column => column.Keys).Distinct().Order(StringComparer.Ordinal);
         var lines = new[] { "method\t" + string.Join('\t', columns.Keys) }.Concat(methods.Select(method =>
@@ -121,36 +123,42 @@ partial class Program
                 $"{column.Value.Values.Count(state => state == 'B')} | " +
                 $"{column.Value.Values.Count(state => state == 'N')} |")));
         var baseline = At("Tests/CompilerCoverageBaseline.tsv");
-        if (update) File.WriteAllLines(baseline, lines);
-        var expected = File.ReadAllLines(baseline);
-        if (advisory)
+        if (update)
         {
-            var oldColumns = expected[0].Split('\t').Skip(1).ToArray();
-            var previous = expected.Skip(1).Select(line => line.Split('\t'))
-                .ToDictionary(fields => fields[0], fields => fields.Skip(1).ToArray(), StringComparer.Ordinal);
-            var lost = new List<string>();
-            var gained = new List<string>();
-            foreach (var (column, actual) in columns)
-            {
-                var language = column[(column.IndexOf('/') + 1)..];
-                var index = Array.IndexOf(oldColumns, CorpusCompilerVersions[^1] + "/" + language);
-                if (index < 0) throw new InvalidDataException("Missing comparison baseline for " + language);
-                foreach (var method in previous.Keys.Union(actual.Keys).Order(StringComparer.Ordinal))
-                {
-                    var wasAdmitted = previous.TryGetValue(method, out var states) && states[index] == "A";
-                    var admitted = actual.GetValueOrDefault(method) == 'A';
-                    if (wasAdmitted && !admitted) lost.Add(column + ": " + method);
-                    if (!wasAdmitted && admitted) gained.Add(column + ": " + method);
-                }
-            }
-            File.WriteAllLines(Path.Combine(directory, "changes.txt"),
-                lost.Select(method => "LOST " + method).Concat(gained.Select(method => "GAINED " + method)));
-            Console.WriteLine($"Latest compiler: {lost.Count} lost, {gained.Count} gained admissions");
-            if (lost.Count != 0) throw new InvalidOperationException(string.Join('\n', lost));
+            if (!allCompilers)
+                throw new ArgumentException("--update requires --all-compilers so the full baseline table stays complete.");
+            File.WriteAllLines(baseline, lines);
         }
-        else if (!expected.SequenceEqual(lines))
-            throw new InvalidOperationException("Compiler coverage changed; review acceptance.tsv and use --update.\n" +
-                string.Join('\n', lines.Except(expected).Select(line => "+ " + line)
-                    .Concat(expected.Except(lines).Select(line => "- " + line)).Take(100)));
+        var expected = File.ReadAllLines(baseline);
+        var oldColumns = expected[0].Split('\t').Skip(1).ToArray();
+        var previous = expected.Skip(1).Select(line => line.Split('\t'))
+            .ToDictionary(fields => fields[0], fields => fields.Skip(1).ToArray(), StringComparer.Ordinal);
+        var lost = new List<string>();
+        var gained = new List<string>();
+        var removed = new List<string>();
+        foreach (var (column, actual) in columns)
+        {
+            var language = column[(column.IndexOf('/') + 1)..];
+            var targetColumn = advisory ? CorpusCompilerVersions[^1] + "/" + language : column;
+            var index = Array.IndexOf(oldColumns, targetColumn);
+            if (index < 0) throw new InvalidDataException("Missing comparison baseline for " + targetColumn);
+            foreach (var method in previous.Keys.Union(actual.Keys).Order(StringComparer.Ordinal))
+            {
+                var wasAdmitted = previous.TryGetValue(method, out var states) && index < states.Length &&
+                    states[index] == "A";
+                var exists = actual.TryGetValue(method, out var currentState);
+                var admitted = exists && currentState == 'A';
+                if (wasAdmitted && exists && !admitted) lost.Add(column + ": " + method);
+                else if (wasAdmitted && !exists) removed.Add(column + ": " + method);
+                else if (!wasAdmitted && admitted) gained.Add(column + ": " + method);
+            }
+        }
+        File.WriteAllLines(Path.Combine(directory, "changes.txt"),
+            lost.Select(method => "LOST " + method)
+                .Concat(gained.Select(method => "GAINED " + method))
+                .Concat(removed.Select(method => "REMOVED " + method)));
+        Console.WriteLine($"{(advisory ? "Latest compiler" : "Pinned compiler")}: " +
+            $"{lost.Count} lost, {gained.Count} gained, {removed.Count} removed admissions");
+        if (lost.Count != 0) throw new InvalidOperationException(string.Join('\n', lost));
     }
 }

@@ -1541,6 +1541,17 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
   | .pop, _ :: rest => return (m, rest)
   | _, _ => .error (.unsupported "Not a memory instruction")
 
+/-- Every instruction that `instruction` executes continues at the next pc. -/
+theorem instruction_continues {op : CIL.Instruction} {stack : List Value} {memory : Memory}
+    {result : Memory × List Value} (ran : instruction op stack memory = .ok result) :
+    op.continues = true := by
+  unfold instruction at ran
+  split at ran
+  · cases ran
+  · split at ran <;> first | rfl | cases ran
+
+#print axioms instruction_continues
+
 /-- Loads or stores a typed primitive, struct or vector using its checked storage shape.
     A span load accepts only a span value, which stays in place (`step` has already read a home
     as its slot's view); a null reference faults as a null dereference and any other operand is

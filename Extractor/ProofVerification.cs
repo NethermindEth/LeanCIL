@@ -56,14 +56,16 @@ partial class Program
     /// <summary>LeanCIL's own example and test modules, which the tool does not ship.</summary>
     static HashSet<string> RepositoryModules() => [.. Regex.Matches(File.ReadAllText(At("lakefile.toml")),
             @"^\[\[lean_lib\]\]\r?\nname = ""([^""]+)""", RegexOptions.Multiline)
-        .Select(match => match.Groups[1].Value).Where(name => name != "CIL"), "Examples.Support"];
+        .Select(match => match.Groups[1].Value).Where(name => name is not ("CIL" or "StrictBinding")),
+        "Examples.Support"];
 
     // Importing one fails later as a missing Lake source; name the module and its replacement instead.
     static void RejectRepositoryImports(string proof)
     {
         var repository = RepositoryModules();
         var imported = SourceImport.Matches(File.ReadAllText(proof)).Select(import => import.Groups[1].Value)
-            .FirstOrDefault(repository.Contains);
+            .FirstOrDefault(module => repository.Contains(module) ||
+                repository.Any(root => module.StartsWith(root + ".", StringComparison.Ordinal)));
         if (imported is not null)
             throw new InvalidDataException($"{CliPaths.Display(proof)} imports {imported}, a LeanCIL repository " +
                 "module that the tool does not ship. Import CIL modules instead; CIL.Safety.Memory.empty replaces " +

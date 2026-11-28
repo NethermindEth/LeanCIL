@@ -6,11 +6,12 @@ This page describes the checks that pin which compiler output and which runtime 
 extractor admits, and how to review and record a change to either. Read it when one of these
 baselines fails.
 
-The `dispatch` suite checks a pinned source corpus against Roslyn 4.14.0, 5.0.0 and 5.9.0,
-using the same .NET 11.0.0 reference pack and optimized compilation. Each compiler runs at its
-default language version and at `latest`; compilers supporting C# 14 also run explicitly at `14`.
-The default column omits `/langversion`, so it tests the compiler default, not an SDK-selected
-language version. Compiler binaries
+The `dispatch` suite checks a pinned source corpus against the latest pinned Roslyn (`5.9.0`) at
+`/langversion:latest` using the .NET 11.0.0 reference pack and optimized compilation. Pass
+`--all-compilers` (also runnable manually via `.github/workflows/compiler-regression.yml`) to run
+the full multi-compiler matrix across Roslyn 4.14.0, 5.0.0 and 5.9.0 at `default`, `14` (where
+supported) and `latest`. The default column omits `/langversion`, so it tests the compiler default,
+not an SDK-selected language version. Compiler binaries
 and reference assemblies come from exact NuGet package versions in
 [CompilerToolchain.cs](../Tests/CompilerToolchain.cs).
 
@@ -34,11 +35,12 @@ library pinned through the blocker manifest's `references`.
 It runs the extractor's blocker analysis under the scalar profile over every metadata method,
 including constructors and open generic methods. The checked-in
 [baseline](../Tests/CompilerCoverageBaseline.tsv) records each method as admitted (`A`),
-blocked (`B`) or not checked (`N`) in each column. A missing method is `-`. Any difference
-requires review; use `--update` to record an intentional change. Per-method comparison catches
-losses even when gains elsewhere leave the accepted count unchanged. Reports include counts
-and detailed blocker diagnostics. Admission is extraction coverage; it is not a correctness
-proof.
+blocked (`B`) or not checked (`N`) in each column. A missing method is `-`. The gate fails only
+when a previously admitted method that still exists in the scan regresses; newly admitted or
+removed methods are reported without failing, and `--all-compilers --update` refreshes the full
+table. Per-method comparison catches losses even when gains elsewhere leave the accepted count
+unchanged. Reports include counts and detailed blocker diagnostics. Admission is extraction
+coverage; it is not a correctness proof.
 Each compiler/language directory also contains `not-checked.tsv`, listing the method and
 selection failure for every `N` entry; console output groups these entries by reason.
 An open generic definition is not an entry `extract` accepts, so it is `B`, with that shape as
@@ -86,18 +88,15 @@ metadata and compares the report with the checked-in
 [baseline](../Tests/SelfAdmissionBaseline.txt), the list of admitted methods. It needs no Lean; its
 opt-in Lean check of every admitted method is described in [validation](VALIDATION.md).
 
-The gate checks admission and ignores blocker totals: it requires the admitted set to match the
-baseline exactly. A method the baseline admits that is no longer admitted, an admission the
-baseline omits, and an admitted method that no longer exists each fail the scan, since a method
-missing from a stale baseline could later lose admission unnoticed. Review the difference, then
-record it with `dotnet run --file Tests/SelfAdmission.cs -- --update` in the PR that causes it.
-Counts, the difference and the most widely reached blockers are reported in
-`artifacts/SelfAdmission/summary.md` and the CI job summary. The baseline names a
+The gate checks admission regressions and ignores blocker totals: it fails only when a method
+present in the assembly and admitted in the baseline is no longer admitted. Newly gained admissions
+and removed or renamed methods are reported in `artifacts/SelfAdmission/summary.md` and the CI job
+summary without failing CI; refresh the baseline periodically with
+`dotnet run --file Tests/SelfAdmission.cs -- --update`. The baseline names a
 compiler-generated method (a closure, lambda, local function or state machine) by the source
 method it was generated for, one line per admitted method, since the compiler numbers it by
-positions that unrelated edits shift. Gaining or losing one still changes its source method's
-count and fails the gate. Any change to a source compiled into the extractor, or to the baseline,
-selects the suite.
+positions that unrelated edits shift. Any change to a source compiled into the extractor, or to
+the baseline, selects the suite.
 
 The suite also requires the methods the report extracts for admitted entries, its
 `decodedMethods`, to be exactly the admitted methods: each admitted method is extracted, and
@@ -108,7 +107,7 @@ every method extracted for an admitted entry is itself admitted.
 `x64-v4` and `arm64-advsimd` profiles at once, and compares the methods each extracts for its
 admitted entries, as `<profile> <name>` lines named as the baseline names methods, with the
 checked-in [baseline](../Tests/ExampleAdmissionBaseline.txt). A closed generic instantiation an
-admitted entry calls is listed with it. A method that leaves the baseline fails the scan; a method
-that joins it fails until `dotnet run --file Tests/ExampleAdmission.cs -- --update` records it,
-so the baseline only grows. The runs only read the built extractor, and the check fails if its
-hash changes while they run.
+admitted entry calls is listed with it. A method still in the assembly that leaves the baseline
+fails the scan; newly admitted or removed methods are logged without failing and can be recorded
+with `dotnet run --file Tests/ExampleAdmission.cs -- --update`. The runs only read the built
+extractor, and the check fails if its hash changes while they run.

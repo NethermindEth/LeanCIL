@@ -26,16 +26,24 @@ the suite helper tests run in `select`.
 
 ## Suite selection
 
-Pushes to `main` and manual runs execute every suite. A pull request runs the suites that own a
-changed file. A suite owns its entry script and, transitively, the `Tests/` and `Examples/` sources
-that script names, its file-based includes and the Lean modules those import.
+Pushes to `main` and manual runs execute every automatic verification suite (the scaling
+microbenchmark suites `lookups`, `stepping`, `scaling` and `excluded` run in
+`.github/workflows/benchmarks.yml`, and `exceptionlint` runs in
+`.github/workflows/exception-lint.yml`, both manually triggered instead of on PRs or `main`). A
+pull request runs the automatic suites that own a changed file. A suite owns its entry script and,
+transitively, the `Tests/` and `Examples/` sources that script names, its file-based includes and
+the Lean modules those import.
 
 | Changed path | Suites selected |
 | --- | --- |
 | `README.md`, Markdown under `docs/` or `skills/` | `docs` only |
 | Other Markdown, `LICENSE` | none |
 | A workflow file other than `verification.yml` | none; that workflow runs its own jobs |
-| `CIL/`, `Extractor/`, `Examples/Assembly/`, `Examples/FSharp/`, `Tests/Support.lean`, `scripts/ExportVerificationSuites.cs`, a script compiled into the extractor | all |
+| Opt-in `CIL/` modules not reachable from `CIL.lean`, extracted imports, the auditor or observation hooks (such as `CIL/Embedding/`, `CIL/Safety/Embedding/`, `CIL/Safety/AllocationRefinement.lean` and its renaming helpers, and `CIL/Safety/LoopScaffold.lean`) | suites that transitively import them, plus `docs` (falls back to all if unowned) |
+| Pure ISA-model SIMD leaf modules (`CIL/SIMD/{AES,AVX,AVX2,AVX512,AVX512DQ,AdvSimd,ArmBase,BMI1,BMI2,SSE,X86Base}.lean`) | `core`, `dispatch`, `divrem`, `docs`, `evidence`, `exportsprofiles`, `gates`, `intrinsics`, `templates`, `unsafe` |
+| `StrictBinding.lean`, `StrictBinding/` | `assemblies`, `audit`, `cli`, `core`, `docs`, `imports`, `workspace`, every `exports*` partition and any direct owners |
+| Isolated `Extractor/` subsystems (`ProofOutline*.cs`/`OutlineInstructions.cs`, `ExceptionLint.cs`, `Blockers.cs`, `Template*.cs`, `ProofGates.cs`/`ProofBindingCatalog.cs`, contract-export bundle/manifest/metadata helpers) | their subsystem suites plus `blockers` and `docs` |
+| Other `CIL/`, `CIL.lean`, `Extractor/`, `Examples/Assembly/`, `Examples/FSharp/`, `Tests/Support.lean`, `scripts/ExportVerificationSuites.cs`, a script compiled into the extractor | all |
 | A file some suite owns | its owners |
 | Any other path, including `verification.yml` and build configuration | all |
 
@@ -85,11 +93,10 @@ Within a generated proof batch, requests with the same extraction manifest, proo
 assembled Lean source share one elaboration and kernel replay. The verifier audits each requested
 theorem, writes its verification report and checks each output against its assembly.
 
-The generated outline checks run in `outlines-control`, `outlines-objects` and `outlines-buffers`.
-Each selects its cases from the shared `Tests/ProofOutlines.cs` runner with `--group`, prepares its
-own extractions and checks its completed proofs and rejection cases; `--case name[,name...]`
-narrows a local run to the named cases of that group. `loops`, `structoutlines`,
-`receiveroutlines`, `wordreader` and `savedwordreader` each run their own fixture.
+The generated outline checks run in `outlines` (representative control, object and buffer cases
+selected from `Tests/ProofOutlines.cs` with `--group core`; `--group control|objects|buffers` and
+`--case name[,name...]` remain available locally) and `outlines-components` (struct, receiver-loop,
+word-reader and saved-local component outlines).
 
 ## Certified library
 
@@ -242,12 +249,12 @@ keyword and a hash of its source, so rows keep their identity when code around t
 
 A source is measured on each tree by the run that verifies it:
 
-- `libraries` is every test library of `lakefile.toml`, meaning each `[[lean_lib]]` table that
-  only names a library, with the checkout modules it imports. It is compared when the PR changes
-  a Lean file, the lakefile, the toolchain pin or the Lake manifest.
-- A proof suite (`core`, `loops`, `outlines-control`, `outlines-objects`, `outlines-buffers`,
-  `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader`) is compared when
-  selection chose that suite. Its rows are every output directory the suite verified: its
+- `libraries` is every test library of `lakefile.toml`, with the checkout modules it imports. It
+  is compared when the PR changes `CIL/`, `CIL.lean`, `StrictBinding/`, `StrictBinding.lean`, the
+  lakefile, the toolchain pin or the Lake manifest.
+- A proof suite (`core`, `loops`, `outlines`, `outlines-components`) is compared when
+  selection chose that suite and the PR changes `CIL/`, `StrictBinding/`, `Extractor/`, `Examples/`
+  or a `.lean` file. Its rows are every output directory the suite verified: its
   `Extracted.lean`, its `Symbols.lean` when present, keyed re-export modules imported by the
   proof, and the proof that `verified.json` names, provided the proof is unchanged since.
   Package-local imports are resolved through Lake and measured with the proof; their source bytes
@@ -465,7 +472,7 @@ the suite.
 Run the `docs` suite locally with `dotnet run --file scripts/Test.cs -- --suite docs`;
 `scripts/TestCheckDocReferences.cs` tests the static rules and the output comparison.
 
-Separately, the `Countdown` case of the `outlines-control` suite fails unless the first
+Separately, the `Countdown` case of the `outlines` suite fails unless the first
 `lean extracted` block of `docs/CLI.md` that starts by importing an extraction is, byte for byte,
 the generated `Countdown` proof outline.
 

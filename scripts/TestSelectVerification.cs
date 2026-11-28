@@ -12,7 +12,9 @@ using System.Text.RegularExpressions;
 var checks = 0;
 var root = VerificationSelection.Root;
 var suiteInputs = VerificationSelection.SuiteInputs();
-var allSuites = suiteInputs.Keys.Order(StringComparer.Ordinal).ToArray();
+var registeredSuites = suiteInputs.Keys.Order(StringComparer.Ordinal).ToArray();
+var allSuites = registeredSuites.Except(VerificationSuites.ManualSuites, StringComparer.Ordinal)
+    .Order(StringComparer.Ordinal).ToArray();
 string[] Select(IEnumerable<string> paths, string eventName = "pull_request") =>
     VerificationSelection.Select(suiteInputs, paths, eventName);
 void Require(bool condition, string message)
@@ -152,16 +154,19 @@ Test("test entry points", () =>
     Equal(Select(["Tests/LoopVariants/CountCallsDiscarded.lean.in"]), ["loops"]);
     foreach (var path in new[] { "Tests/ProofCostFrontend.cs", "Tests/ProofCostDiscovery.lean" })
         Equal(Select([path]), ["core"]);
-    Equal(Select(["Tests/SteppingScaling.cs"]), ["stepping"]);
+    Equal(Select(["Tests/SteppingScaling.cs"]), []);
+    Equal(Select(["Tests/LookupScaling.cs"]), []);
+    Equal(Select(["Tests/TranslationScaling.cs"]), []);
+    Equal(Select(["Tests/ExcludedBranchScaling.cs"]), []);
+    Equal(Select(["Tests/ExceptionLint.cs"]), []);
     foreach (var module in new[] { "OperationFacts", "VectorLocalCalls", "SimdCarryCalls" })
         Equal(Select([$"Tests/{module}.lean"]), ["core"]);
-    Equal(Select(["Tests/ProofOutlines.cs"]),
-        ["outlines-buffers", "outlines-control", "outlines-objects"]);
-    Equal(Select(["Tests/StructOutlines.cs"]), ["structoutlines"]);
-    Equal(Select(["Tests/ReceiverLoopOutlines.cs"]), ["receiveroutlines"]);
-    Equal(Select(["Tests/WordReaderOutlines.cs"]), ["wordreader"]);
-    Equal(Select(["Tests/SavedWordReaderOutlines.cs"]), ["savedwordreader"]);
-    Equal(Select(["Tests/WordReaderOutlineSupport.cs"]), ["savedwordreader", "wordreader"]);
+    Equal(Select(["Tests/ProofOutlines.cs"]), ["outlines"]);
+    Equal(Select(["Tests/StructOutlines.cs"]), ["outlines-components"]);
+    Equal(Select(["Tests/ReceiverLoopOutlines.cs"]), ["outlines-components"]);
+    Equal(Select(["Tests/WordReaderOutlines.cs"]), ["outlines-components"]);
+    Equal(Select(["Tests/SavedWordReaderOutlines.cs"]), ["outlines-components"]);
+    Equal(Select(["Tests/WordReaderOutlineSupport.cs"]), ["outlines-components"]);
     Equal(Select(["Tests/ProgramClosures/Proof.lean"]), ["closures"]);
     Equal(Select(["Tests/SkipInitialization.cs"]), ["unsafe"]);
     Equal(Select(["Tests/NullReferences.cs"]), ["unsafe"]);
@@ -171,8 +176,7 @@ Test("test entry points", () =>
     Equal(Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
     Equal(Select(["Tests/MetadataDifferential.cs"]), ["evidence"]);
     Equal(Select(["Tests/GeneratedEvidence.cs"]),
-        ["assemblies", "core", "dispatch", "enums", "evidence", "excluded", "generics", "imports", "intrinsics",
-            "lookups", "scaling", "unsafe"]);
+        ["assemblies", "core", "dispatch", "enums", "evidence", "generics", "imports", "intrinsics", "unsafe"]);
     Equal(Select(["Tests/GenericOwners.cs"]), ["generics"]);
     Equal(Select(["Tests/MultiAssemblyGenerics.cs"]), ["assemblies"]);
     Equal(Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies", "audit", "cli"]);
@@ -216,10 +220,57 @@ Test("dynamic proof paths", () =>
 });
 Test("shared unknown and workflow inputs", () =>
 {
-    foreach (var path in new[] { "CIL/Safety/Memory.lean", "Extractor/UnsafeModels.cs", "global.json",
-        "Examples/Assembly/SkipInitialization.cs", "Tests/NewTest.cs", ".github/workflows/verification.yml",
-        "scripts/SelectVerification.cs" })
+    foreach (var path in new[] { "CIL/Safety/Memory.lean", "CIL/Semantics.lean", "CIL.lean",
+        "CIL/OleanAudit.lean", "CIL/SIMD/Availability.lean", "Extractor/UnsafeModels.cs",
+        "Extractor/LeanEmitter.cs", "Extractor/ContractInterface.cs", "Extractor/NewCore.cs",
+        "global.json", "Examples/Assembly/SkipInitialization.cs", "Tests/NewTest.cs",
+        ".github/workflows/verification.yml", "scripts/SelectVerification.cs" })
         Equal(Select([path]), allSuites);
+});
+Test("dependency-aware selection narrows isolated CIL, StrictBinding and Extractor subsystems", () =>
+{
+    var embedding = Select(["CIL/Embedding/Tactic.lean"]);
+    Require(embedding.Contains("core") && embedding.Contains("docs") && embedding.Length < allSuites.Length / 2,
+        "Opt-in embedding module should select only its importers and docs: " + string.Join(", ", embedding));
+    var embeddingStep = Select(["CIL/Safety/Embedding/Step.lean"]);
+    Require(embeddingStep.Contains("core") && embeddingStep.Contains("docs") &&
+        embeddingStep.Length < allSuites.Length / 2,
+        "Opt-in embedding safety module should select only its importers and docs: " +
+        string.Join(", ", embeddingStep));
+    var allocation = Select(["CIL/Safety/AllocationRefinement.lean"]);
+    Require(allocation.Contains("core") && allocation.Contains("docs") && allocation.Length < allSuites.Length / 2,
+        "Opt-in allocation refinement should select only its importers and docs: " + string.Join(", ", allocation));
+    var loops = Select(["CIL/Safety/LoopScaffold.lean"]);
+    foreach (var expected in new[] { "core", "docs", "loops", "outlines", "outlines-components", "gates", "pool" })
+        Require(loops.Contains(expected), "LoopScaffold selection missed " + expected);
+    Require(loops.Length < allSuites.Length, "LoopScaffold selection should stay narrower than all suites");
+    var aes = Select(["CIL/SIMD/AES.lean"]);
+    Equal(aes, ["core", "dispatch", "divrem", "docs", "evidence", "exportsprofiles",
+        "gates", "intrinsics", "templates", "unsafe"]);
+    var strict = Select(["StrictBinding/Bind.lean"]);
+    foreach (var expected in new[] { "assemblies", "audit", "cli", "core", "docs", "imports", "workspace",
+        "exports", "exportsfull", "exportsprofiles" })
+        Require(strict.Contains(expected), "StrictBinding selection missed " + expected);
+    Require(!strict.Contains("division") && !strict.Contains("outlines") && !strict.Contains("intrinsics"),
+        "StrictBinding selection included unrelated suites");
+    Equal(Select(["Extractor/ExceptionLint.cs"]), ["blockers", "cli", "docs"]);
+    Equal(Select(["Extractor/Blockers.cs"]), ["blockers", "cli", "docs"]);
+    Equal(Select(["Extractor/ProofOutlineLoops.cs"]),
+        ["blockers", "cli", "core", "docs", "loops", "outlines", "outlines-components"]);
+    Equal(Select(["Extractor/TemplateEmitter.cs"]),
+        ["blockers", "cli", "core", "docs", "gates", "pool", "templates"]);
+    Equal(Select(["Extractor/ProofGates.cs"]), ["blockers", "cli", "core", "docs", "gates"]);
+    var contractExport = Select(["Extractor/ContractExportManifest.cs"]);
+    foreach (var expected in new[] { "blockers", "cli", "core", "docs", "evidence", "imports",
+        "exports", "exportsfull", "exportstyped" })
+        Require(contractExport.Contains(expected), "ContractExportManifest selection missed " + expected);
+    Require(!contractExport.Contains("division") && !contractExport.Contains("intrinsics"),
+        "ContractExportManifest selection included unrelated suites");
+    // Deleted or unknown opt-in CIL files fall back conservatively to all suites.
+    Equal(Select(["CIL/Safety/Embedding/Deleted.lean"]), allSuites);
+    // Main and manual runs still execute every automatic suite even for narrowed subsystems.
+    Equal(Select(["Extractor/ExceptionLint.cs"], "push"), allSuites);
+    Equal(Select(["StrictBinding/Bind.lean"], "workflow_dispatch"), allSuites);
 });
 Test("other workflows do not rerun suites", () =>
 {
@@ -235,7 +286,7 @@ Test("multiple changes and deleted paths", () =>
 });
 Test("every registered suite has its entry point", () =>
 {
-    Equal(VerificationSuites.Names().Order(StringComparer.Ordinal), allSuites);
+    Equal(VerificationSuites.Names().Order(StringComparer.Ordinal), registeredSuites);
     Require(VerificationSuites.Names().Distinct(StringComparer.Ordinal).Count() == VerificationSuites.Names().Length,
         "A suite name is registered twice");
     foreach (IndependentSuite suite in VerificationSuites.Independent)
@@ -251,37 +302,30 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves 23 leaves, 51 base cases and one discovery completion", () =>
+Test("independent export cohort map preserves 13 leaves, 51 base cases and one discovery completion", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
         ["exports"] = ("core", ["core.unrelated", "core.definition", "core.wrapper-true", "core.publication",
-            "core.caller", "core.internal", "core.instance", "core.generic", "core.virtual", "core.static-values",
+            "core.caller", "audit.proof-source", "audit.wrapper-artifact", "discovery.fixture",
+            "core.internal", "core.instance", "core.generic", "core.virtual", "core.static-values",
             "core.initialized", "core.imports", "core.profile", "core.reference",
             "core.bundle-location", "core.framework-change", "core.interface-text", "core.duplicate",
-            "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post", "core.revised-contract"]),
-        ["exportsaudit"] = ("audit", ["audit.proof-source", "audit.wrapper-artifact"]),
+            "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post",
+            "core.revised-contract"]),
         ["exportsprotected"] = ("protected", ["protected.publication", "protected.caller", "protected.visibility"]),
         ["exportsresolution"] = ("resolution", ["resolution.same-files", "resolution.changed-file",
             "resolution.rewritten-artifact"]),
-        ["exportsfullconsumer"] =
-            ("consumer", ["full.consumer-explicit", "full.consumer-repeat", "full.artifact-mode"]),
-        ["exportsfullordinary"] = ("ordinary", ["full.ordinary"]),
-        ["exportsfullpair"] = ("pair", ["full.pair"]),
-        ["exportsfullchecks"] = ("checks", ["full.missing-bundle", "full.inventory-bytes", "full.producer-bytes",
+        ["exportsfull"] = ("full", ["full.consumer-explicit", "full.consumer-repeat", "full.artifact-mode",
+            "full.ordinary", "full.pair", "full.missing-bundle", "full.inventory-bytes", "full.producer-bytes",
             "full.unrecorded-olean", "full.deployed-dll", "full.stale-closure", "full.statement-digest",
-            "full.extra-premise"]),
-        ["exportsfulltheorems"] = ("theorems", ["full.producer-true", "full.producer-definition"]),
-        ["exportsfullcomposition"] = ("composition", ["full.composition-true"]),
-        ["exportsmutationordinary"] = ("ordinary-artifact", ["full.ordinary-artifact"]),
-        ["exportsmutationconsumer"] = ("consumer-artifact", ["full.consumer-artifact"]),
-        ["exportsmutationsource"] = ("consumer-source", ["full.consumer-source"]),
-        ["exportsmutationshadow"] = ("consumer-shadow", ["full.consumer-shadow"]),
+            "full.extra-premise", "full.producer-true", "full.producer-definition", "full.composition-true"]),
+        ["exportsmutations"] = ("mutations", ["full.ordinary-artifact", "full.consumer-artifact",
+            "full.consumer-source", "full.consumer-shadow"]),
         ["exportsstatics"] = ("statics", []),
         ["exportsfullstatics"] = ("fullstatics", []),
         ["exportstransitive"] = ("transitive", []),
         ["exportstransitiveoutcomes"] = ("transitiveoutcomes", []),
-        ["exportsdiscovery"] = ("discovery", ["discovery.fixture"]),
         ["exportstyped"] = ("typed", []),
         ["exportsderived"] = ("derived", []),
         ["exportsinitialized"] = ("initialized", []),
@@ -301,7 +345,7 @@ Test("independent export cohort map preserves 23 leaves, 51 base cases and one d
                     "derived" or "initialized" or "profiles";
 
             Require(entry.Standalone == standalone, "Wrong standalone fixture kind: " + entry.Name);
-            Require(entry.ChildScript == (entry.Cohort == "discovery" ? "Tests/ContractDiscovery.cs" : null),
+            Require(entry.ChildScript == (entry.Cohort == "core" ? "Tests/ContractDiscovery.cs" : null),
                 "Wrong bootstrapped child fixture: " + entry.Name);
             string script = entry.Cohort switch
             {
@@ -328,7 +372,7 @@ Test("independent export cohort map preserves 23 leaves, 51 base cases and one d
     }
     ExportSuite[] all = ExportVerificationSuites.Plan();
     ExactPlan(all);
-    string[] baseCases = all.Where(entry => entry.Cohort != "discovery").SelectMany(entry => entry.Cases).ToArray();
+    string[] baseCases = all.SelectMany(entry => entry.Cases).Where(id => id != "discovery.fixture").ToArray();
     Require(baseCases.Length == 51 && baseCases.Distinct(StringComparer.Ordinal).Count() == 51,
         "Lost or duplicate base behavior");
     Require(all.SelectMany(entry => entry.Cases).Count() == 52 &&
@@ -344,9 +388,7 @@ Test("independent export cohort map preserves 23 leaves, 51 base cases and one d
     Equal(ExportVerificationSuites.FullPlan().Select(entry => entry.Name),
         all.Where(OnlyFullCases).Select(entry => entry.Name));
     Equal(ExportVerificationSuites.FullPlan().Select(entry => entry.Cohort).Order(StringComparer.Ordinal),
-        new[] { "composition", "consumer", "ordinary", "pair", "checks", "theorems",
-            "ordinary-artifact", "consumer-artifact", "consumer-source", "consumer-shadow" }
-            .Order(StringComparer.Ordinal));
+        new[] { "full", "mutations" }.Order(StringComparer.Ordinal));
     foreach (ExportSuite entry in all)
     {
         if (!entry.Standalone && entry.Cohort != "resolution")
@@ -366,8 +408,8 @@ Test("export coverage detects each omitted completion and invalid selection", ()
         ["--cohort", "transitiveoutcomes"], ["--cohort", "typed"], ["--cohort", "derived"] })
         MustReject(() => ExportVerificationSuites.Select(invalid));
     string[] nonFullCohorts =
-        ["core", "audit", "protected", "resolution", "statics", "fullstatics", "transitive", "transitiveoutcomes",
-            "discovery", "typed", "derived", "unknown"];
+        ["core", "protected", "resolution", "statics", "fullstatics", "transitive", "transitiveoutcomes",
+            "typed", "derived", "unknown"];
 
     foreach (string cohort in nonFullCohorts)
     {
@@ -420,7 +462,7 @@ Test("export leaf selection, strict files and shared inputs", () =>
     Equal(Select(["Tests/ModularStaticExports.cs"]).Order(StringComparer.Ordinal),
         ["exportsfullstatics", "exportsstatics"]);
     Equal(Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
-    Equal(Select(["Tests/ContractDiscovery.cs"]), ["exportsdiscovery"]);
+    Equal(Select(["Tests/ContractDiscovery.cs"]), ["exports"]);
     Equal(Select(["Tests/GenericLayoutImports.cs"]), ["exportstyped"]);
     string[] typedFixtures =
         ["TypedImportInterface", "TypedIdentityProof", "TypedCopyProof", "TypedIdentityCaller", "TypedCopyCaller",
@@ -460,7 +502,6 @@ Test("export leaf selection, strict files and shared inputs", () =>
     Require(!Has("\"Tests/TransitiveImports.cs\""), "Old nested transitive suite remains");
     Require(!Has("\"Tests/GenericLayoutImports.cs\""), "Old nested typed suite remains");
     Require(!Has("\"Tests/ContractDiscovery.cs\"") &&
-        Has("if (cohort == \"discovery\")") &&
         Has("ExportVerificationSuites.DiscoveryArguments(") &&
         Has("sidecar, callerProof, callerPackage, package, proof, contractSource)"),
         "Discovery lost its selected six-argument child dispatch");
@@ -475,11 +516,11 @@ Test("a missing registered export fixture fails selection", () =>
         // Each fixture in registration order must be reported missing before the next one is checked.
         (string Fixture, string Kind)[] fixtures =
         [
+            ("Tests/ContractDiscovery.cs", "discovery child"),
             ("Tests/FullModuleResolution.cs", "resolution"),
             ("Tests/ModularStaticExports.cs", "standalone static"),
             ("Tests/TransitiveImports.cs", "standalone transitive"),
             ("Tests/TransitiveOutcomes.cs", "standalone transitive outcomes"),
-            ("Tests/ContractDiscovery.cs", "discovery child"),
             ("Tests/GenericLayoutImports.cs", "standalone typed"),
             ("Tests/DerivedContractExports.cs", "standalone derived"),
             ("Tests/InitializedExports.cs", "standalone initialized")
@@ -698,7 +739,7 @@ static partial class ExternalSources
     /// <summary>Accepted findings by file and rule, with why each cannot reach another repository.</summary>
     static readonly Dictionary<(string File, string Rule), string> Exempt = new()
     {
-        [("scripts/ConsumerVerification.cs", "fetch-repository")] =
+        [("scripts/Consumer/WorkspaceAndComponents.cs", "fetch-repository")] =
             "clones the dependency directories of the repository under verification into a scratch workspace",
         [("scripts/CertifiedLibraryDonor.cs", "other-url")] =
             "compares a pull request side with this repository by the API URL that run metadata gives",
@@ -739,9 +780,10 @@ static partial class ExternalSources
 
     /// <summary>Every workflow and every script or test source that a suite runs.</summary>
     internal static IEnumerable<string> CiFiles(string root) =>
-        new[] { ".github/workflows/*.yml", ".github/workflows/*.yaml", "scripts/*.cs", "Tests/*.cs" }
+        new[] { ".github/workflows/*.yml", ".github/workflows/*.yaml", "Tests/*.cs" }
             .SelectMany(pattern => Directory.GetFiles(Path.Combine(root, Path.GetDirectoryName(pattern)!),
-                Path.GetFileName(pattern)));
+                Path.GetFileName(pattern)))
+            .Concat(Directory.GetFiles(Path.Combine(root, "scripts"), "*.cs", SearchOption.AllDirectories));
 
     /// <summary>One finding per rule broken on a line, as file:line: rule. Cost is linear in total lines.</summary>
     internal static List<string> Scan(string root, IEnumerable<string> files)

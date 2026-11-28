@@ -557,8 +557,11 @@ Console.WriteLine(
     $"PASS argument narrowing agrees with declaredNarrow on 14 primitive heads and {enums.Length} enums");
 
 // Outline categories, calls and targets come from source CIL and its bindings.
-var sourceFiles = Directory.GetFiles(At("Extractor"), "*.cs").Concat(Directory.GetFiles(At("scripts"), "*.cs")
-    .Where(path => !Path.GetFileName(path).StartsWith("Test", StringComparison.Ordinal)))
+var sourceFiles = Directory.GetFiles(At("Extractor"), "*.cs")
+    .Concat(Directory.GetFiles(At("scripts"), "*.cs", SearchOption.AllDirectories)
+        .Where(path => !Path.GetFileName(path).StartsWith("Test", StringComparison.Ordinal) &&
+            !path.Replace('\\', '/').Contains("/bin/", StringComparison.Ordinal) &&
+            !path.Replace('\\', '/').Contains("/obj/", StringComparison.Ordinal)))
     .ToDictionary(path => Path.GetRelativePath(Root, path).Replace('\\', '/'), File.ReadAllText);
 var constructors = RenderedLeanReaders.Constructors(File.ReadLines(At("CIL/Instructions.lean")));
 foreach (var rendered in new[] { "ret", "ldloc", "switch", "br", "brtrue", "call", "callvirt" })
@@ -566,7 +569,8 @@ foreach (var rendered in new[] { "ret", "ldloc", "switch", "br", "brtrue", "call
 var readers = RenderedLeanReaders.Scan(sourceFiles, constructors);
 (string File, int Reads, string Reason)[] allowedReaders =
 [
-    ("scripts/ConsumerVerification.cs", 2, "the component splitter cuts module text at declaration boundaries"),
+    ("scripts/Consumer/WorkspaceAndComponents.cs", 2,
+        "the component splitter cuts module text at declaration boundaries"),
     ("scripts/VerifyReports.cs", 1, "reads the source location table of Symbols.lean, not an instruction"),
     ("scripts/BenchmarkExternalIdentities.cs", 1, "reads identity byte arrays from baseline extractions"),
 ];

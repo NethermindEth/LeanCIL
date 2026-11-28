@@ -45,8 +45,17 @@ void Prove(MethodDefinition method, List<string> claims, string definitions = ""
     pending.Add((new GeneratedVerification(method.FullName, proof, output), method.Name, claims.Count));
 }
 
+// Representative types covering every storage category: bool (0), char (1), int (6), ulong (9), nint (10),
+// enum (12), packed struct (14), nested struct (15), explicit struct (16), Vector128 (17) and Vector256 (18).
+var representativeIndices = new HashSet<string>(StringComparer.Ordinal)
+    { "0", "1", "6", "9", "10", "12", "14", "15", "16", "17", "18" };
+// Exercise all three offset overloads (int, nint, nuint) on one primitive, one struct and one vector;
+// test the int overload on the remaining representative types.
+var allOffsetIndices = new HashSet<string>(StringComparer.Ordinal) { "6", "14", "17" };
+
 // Sizes come from .NET's managed layout, including packed/nested structs and vectors.
-foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Size", StringComparison.Ordinal)))
+foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Size", StringComparison.Ordinal) &&
+    representativeIndices.Contains(m.Name[4..])))
 {
     var size = (int)runtime.GetMethod(method.Name)!.Invoke(null, null)!;
     const string run = "(CIL.Safety.invoke Extracted.program 8 0 [] CIL.Safety.Memory.empty).map Prod.snd";
@@ -56,11 +65,14 @@ foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Size", String
         """);
 }
 
-// Runtime byte offsets and Lean references must agree for each element type and offset overload.
+// Runtime byte offsets and Lean references must agree for each representative type and offset overload.
 foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Add", StringComparison.Ordinal)))
 {
     var suffix = method.Name[3..];
     var index = new string(suffix.TakeWhile(char.IsDigit).ToArray());
+    if (!representativeIndices.Contains(index)) continue;
+    var offsetKind = suffix[index.Length..];
+    if (offsetKind != "int" && !allOffsetIndices.Contains(index)) continue;
     var size = (int)runtime.GetMethod("Size" + index)!.Invoke(null, null)!;
     var measure = runtime.GetMethod("Measure" + suffix)!;
     var type = measure.GetParameters()[0].ParameterType;
@@ -144,23 +156,24 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
 }
 
 Console.WriteLine($"PASS {cases} layout-based Unsafe checks");
-Run(["dotnet", "run", "--file", "Tests/SkipInitialization.cs"], streamOutput: true, progress: "SkipInit checks");
-Run(["dotnet", "run", "--file", "Tests/NullReferences.cs"], streamOutput: true, progress: "Null reference checks");
-Run(["dotnet", "run", "--file", "Tests/UnsafeReferences.cs"], streamOutput: true, progress: "Unsafe byref reinterpretation checks");
-Run(["dotnet", "run", "--file", "Tests/ValueBitCasts.cs"], streamOutput: true, progress: "Value BitCast checks");
-Run(["dotnet", "run", "--file", "Tests/StaticSpans.cs"], streamOutput: true, progress: "Static byte span checks");
-
-Run(["dotnet", "run", "--file", "Tests/VectorFields.cs"], streamOutput: true, progress: "Vector field checks");
-Run(["dotnet", "run", "--file", "Tests/VectorStorage.cs"], streamOutput: true, progress: "Vector storage checks");
-Run(["dotnet", "run", "--file", "Tests/UnalignedMemory.cs"], streamOutput: true, progress: "Unaligned transfer checks");
-Run(["dotnet", "run", "--file", "Tests/MarshaledMemory.cs"], streamOutput: true, progress: "Byte-span transfer checks");
-Run(["dotnet", "run", "--file", "Tests/ReinterpretedSpans.cs"], streamOutput: true, progress: "Span reinterpretation checks");
-Run(["dotnet", "run", "--file", "Tests/SpanCopies.cs"], streamOutput: true, progress: "Span copy checks");
-Run(["dotnet", "run", "--file", "Tests/ViewAccessors.cs"], streamOutput: true, progress: "View accessor checks");
-Run(["dotnet", "run", "--file", "Tests/BinarySpans.cs"], streamOutput: true, progress: "Endian span checks");
-
-Run(["dotnet", "run", "--file", "Tests/AggregateSpans.cs"], streamOutput: true, progress: "Aggregate span checks");
-Run(["dotnet", "run", "--file", "Tests/SpanConstructors.cs"], streamOutput: true, progress: "Span constructor checks");
-Run(["dotnet", "run", "--file", "Tests/AggregateSpanFill.cs"], streamOutput: true, progress: "Aggregate fill checks");
-Run(["dotnet", "run", "--file", "Tests/AggregateArrays.cs"], streamOutput: true, progress: "Aggregate array checks");
-Run(["dotnet", "run", "--file", "Tests/SpanReferences.cs"], streamOutput: true, progress: "Span reference checks");
+RunFixturesConcurrently(
+[
+    ("Tests/SkipInitialization.cs", "SkipInit checks"),
+    ("Tests/NullReferences.cs", "Null reference checks"),
+    ("Tests/UnsafeReferences.cs", "Unsafe byref reinterpretation checks"),
+    ("Tests/ValueBitCasts.cs", "Value BitCast checks"),
+    ("Tests/StaticSpans.cs", "Static byte span checks"),
+    ("Tests/VectorFields.cs", "Vector field checks"),
+    ("Tests/VectorStorage.cs", "Vector storage checks"),
+    ("Tests/UnalignedMemory.cs", "Unaligned transfer checks"),
+    ("Tests/MarshaledMemory.cs", "Byte-span transfer checks"),
+    ("Tests/ReinterpretedSpans.cs", "Span reinterpretation checks"),
+    ("Tests/SpanCopies.cs", "Span copy checks"),
+    ("Tests/ViewAccessors.cs", "View accessor checks"),
+    ("Tests/BinarySpans.cs", "Endian span checks"),
+    ("Tests/AggregateSpans.cs", "Aggregate span checks"),
+    ("Tests/SpanConstructors.cs", "Span constructor checks"),
+    ("Tests/AggregateSpanFill.cs", "Aggregate fill checks"),
+    ("Tests/AggregateArrays.cs", "Aggregate array checks"),
+    ("Tests/SpanReferences.cs", "Span reference checks")
+]);

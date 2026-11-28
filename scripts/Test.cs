@@ -115,10 +115,14 @@ foreach (ExportSuite entry in ExportVerificationSuites.Plan())
         projects.AddRange(entry.Inputs.Where(path => path.EndsWith(".cs", StringComparison.Ordinal) &&
             File.ReadLines(At(path)).FirstOrDefault() == "#!/usr/bin/env dotnet"));
 
-foreach (string project in projects.Distinct(StringComparer.Ordinal))
+var toBuild = projects.Distinct(StringComparer.Ordinal)
+    .Where(project => !project.EndsWith(".cs", StringComparison.Ordinal) || PreparedFixtureCommand(project, []) is null)
+    .ToArray();
+// Build project references (such as Extractor and Examples/Assembly) first, then precompile file-based scripts in parallel.
+var msbuildProjects = toBuild.Where(project => !project.EndsWith(".cs", StringComparison.Ordinal)).ToArray();
+var fileProjects = toBuild.Where(project => project.EndsWith(".cs", StringComparison.Ordinal)).ToArray();
+void BuildProject(string project)
 {
-    if (project.EndsWith(".cs", StringComparison.Ordinal) && PreparedFixtureCommand(project, []) is not null)
-        continue;
     var command = new List<string>
     {
         "dotnet", "build", project, "-c", "Release",
@@ -132,10 +136,13 @@ foreach (string project in projects.Distinct(StringComparer.Ordinal))
 
     if (log.Contains("IDE0005"))
         throw new InvalidOperationException("Unused imports: " + log);
-
-    if (project.EndsWith(".cs", StringComparison.Ordinal) && project != "Examples/Hardware/Hardware.cs")
-        preparedFixtures.Add(project);
 }
+foreach (string project in msbuildProjects) BuildProject(project);
+if (fileProjects.Length > 0)
+    ReservingMemory(1L << 30, () => Concurrently(fileProjects, BuildProject));
+foreach (string project in fileProjects)
+    if (project != "Examples/Hardware/Hardware.cs")
+        preparedFixtures.Add(project);
 
 if (suite == "tools") return;
 Environment.SetEnvironmentVariable(ExtractorBuildEnvironment, ExtractorBuildIdentity());

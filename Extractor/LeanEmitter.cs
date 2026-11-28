@@ -235,6 +235,7 @@ internal static class LeanEmitter
         StringBuilder? inputs = templateInputs ? new() : null;
         var profileDefinition = $"def profile : FeatureProfile := {profile.Lean}";
         lean.AppendLine($"@[cil_code] {profileDefinition}");
+        lean.AppendLine($"theorem profile_validated : profile.Valid := {Decide}");
         inputs?.AppendLine(profileDefinition);
         StaticIdentity.Validate(staticIdentities ?? StaticIdentities(methods, profile));
         var layoutContext = new MetadataValidation.LayoutContext(methods[0].Module, profile.Architecture);
@@ -289,6 +290,7 @@ internal static class LeanEmitter
         // inputs take this block, completed below with the platform definitions, before its methods.
         var metadataEnd = lean.Length;
         var metadataInputsAt = package is null ? null : inputs?.Length;
+        var hasVector128Local = new bool[methods.Length];
         for (int n = 0; n < methods.Length; n++)
         {
             MethodDefinition m = methods[n];
@@ -309,6 +311,7 @@ internal static class LeanEmitter
 
             LocalKind[] kinds =
                 [.. m.Body.Variables.Select(variable => KindOf(variable.VariableType, variable.Index))];
+            hasVector128Local[n] = kinds.Any(kind => kind is LocalKind.Vector { Bits: 128 });
             StaticSite[] sites = [.. m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && IsStaticSite(s.i))
                 .Select(s => SiteOf(s.i, s.pc, genericEvidence.FieldReferenceOf(m, s.pc), m, methodIndices,
@@ -406,7 +409,8 @@ internal static class LeanEmitter
             var layoutCheck = $"{layoutTables} method{n} method{n}LayoutUses";
             lean.AppendLine($"theorem method{n}_layouts_validated : {layoutCheck} := ⟨layouts_validated, {Decide}⟩");
             lean.AppendLine($"theorem method{n}_parameters_validated : Extraction.ParameterHomesValid " +
-                $"computedLayouts method{n}RawArguments method{n}Reachable method{n} := {Decide}");
+                $"computedLayouts method{n}RawArguments method{n}Reachable method{n} := " +
+                $"Extraction.ParameterHomesValid.of_closed method{n}_decoder_eq");
             FeatureEvidence.Emit(lean, m, n, featureCertificate);
             ScalarEvidence.Emit(lean, m, n, scalarCertificate, objectProof);
             // The command states `method{n}_instruction{pc}` for each pc and `method{n}_link{pc}` for each call site,
@@ -475,6 +479,9 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_models_validated : " +
                 $"Extraction.RuntimeModelsAgree method{n}Closed method{n}Reachable method{n} := " +
                 $"Extraction.RuntimeModelsAgree.of_closed method{n}_decoder_eq method{n}_features_validated");
+            lean.AppendLine($"theorem method{n}_unsafe_validated : " +
+                $"Extraction.UnsafeCallsValid method{n}Closed method{n}Reachable method{n}.code := " +
+                $"Extraction.UnsafeCallsValid.of_closed method{n}_decoder_eq method{n}_features_validated");
             lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid " +
                 $"specializedMethods imports (Extraction.callModelled method{n}) " +
                 $"(Extraction.lowerConstrainedRaw method{n}DispatchTypes " +
@@ -505,9 +512,15 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := {Decide}");
             lean.AppendLine($"theorem method{n}_constrained_validated : Extraction.ConstrainedCallsValid method{n}DispatchTypes specializedMethods method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_shape_validated : " +
-                $"Extraction.MethodShapeValid method{n}Closed method{n} := {Decide}");
+                $"Extraction.MethodShapeValid method{n}Closed method{n} := " +
+                $"Extraction.MethodShapeValid.of_closed method{n}_decoder_eq profile_validated ({Decide})");
 
-            lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
+            var opaqueProof = hasVector128Local[n]
+                ? Decide
+                : methods[n].Body.Variables.Count == 0
+                    ? $"Extraction.OpaqueLocalsValid.of_closed_none method{n}_decoder_eq rfl"
+                    : $"Extraction.OpaqueLocalsValid.of_closed_none method{n}_decoder_eq ({Decide})";
+            lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {opaqueProof}");
             lean.AppendLine($"theorem method{n}_environment_validated : " +
                 $"Extraction.MethodEnvironmentValid rawLayouts computedLayouts method{n} := rfl");
             lean.AppendLine($"theorem method{n}_declared_validated : " +

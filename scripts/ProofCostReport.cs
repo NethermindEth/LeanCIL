@@ -338,12 +338,45 @@ internal static partial class ProofCostReport
     private static partial Regex LibraryName { get; }
 
     // Test libraries are the tables that only name a library: no source directory, roots or facets.
-    internal static string[] TestLibraries(string lakefile) => LibraryTable.Matches(lakefile)
-        .Select(table => table.Groups["body"].Value.Split('\n').Select(line => line.Trim())
-            .Where(line => line.Length > 0 && !line.StartsWith('#')).ToArray())
-        .Where(body => body.Length == 1 && LibraryName.IsMatch(body[0]))
-        .Select(body => LibraryName.Match(body[0]).Groups["name"].Value)
-        .Where(name => name != "CIL").ToArray();
+    // When `Tests` is declared as a single consolidated library without a root `Tests.lean`, expand it to
+    // the checked-in standalone `Tests/*.lean` library modules (excluding standalone scaling/contract scripts
+    // and intentionally invalid discovery fixtures).
+    internal static string[] TestLibraries(string lakefile, string? tree = null)
+    {
+        var declared = LibraryTable.Matches(lakefile)
+            .Select(table => table.Groups["body"].Value.Split('\n').Select(line => line.Trim())
+                .Where(line => line.Length > 0 && !line.StartsWith('#')).ToArray())
+            .Where(body => body.Length == 1 && LibraryName.IsMatch(body[0]))
+            .Select(body => LibraryName.Match(body[0]).Groups["name"].Value)
+            .Where(name => name != "CIL").ToArray();
+        if (tree is null || !declared.Contains("Tests", StringComparer.Ordinal) ||
+            File.Exists(Path.Combine(tree, "Tests.lean")))
+            return declared;
+        var expanded = new List<string>();
+        foreach (var name in declared)
+        {
+            if (name != "Tests") { expanded.Add(name); continue; }
+            var directory = Path.Combine(tree, "Tests");
+            if (!Directory.Exists(directory)) continue;
+            var nonLibraryScaling = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "ArgumentSlotScaling", "AuditKeyScaling", "CallIndexScaling", "CertificateBranchScaling",
+                "CertificateFlowScaling", "DispatchScaling", "ExtractionGenerics", "FeatureLocalScaling",
+                "FlowIndexScaling", "HomeEnumerationScaling", "LayoutAccumulationScaling", "LayoutProjectionScaling",
+                "ProofCostDiscovery", "RegionScaling", "SnapshotWriteScaling", "StreamingValidationScaling"
+            };
+            foreach (var file in Directory.EnumerateFiles(directory, "*.lean").Order(StringComparer.Ordinal))
+            {
+                var stem = Path.GetFileNameWithoutExtension(file);
+                if (nonLibraryScaling.Contains(stem)) continue;
+                if (Imports(File.ReadAllText(file)).Any(import => import == "Extracted" ||
+                    import.StartsWith("Extracted.", StringComparison.Ordinal)))
+                    continue;
+                expanded.Add("Tests." + stem);
+            }
+        }
+        return [.. expanded];
+    }
 
     [GeneratedRegex("""^(?:(?:public|meta|private)[ \t]+)*import[ \t]+(?:all[ \t]+)?(?<modules>[^-/]+)""")]
     private static partial Regex ImportLine { get; }
@@ -742,7 +775,7 @@ internal static partial class ProofCostReport
         var measurer = new Measurer(tree, LibraryPath(tree, library), work, jobs);
         var tasks = new List<Task>();
         var roots = modules.ToList();
-        if (libraries) roots.AddRange(TestLibraries(File.ReadAllText(Path.Combine(tree, "lakefile.toml"))));
+        if (libraries) roots.AddRange(TestLibraries(File.ReadAllText(Path.Combine(tree, "lakefile.toml")), tree));
         foreach (var module in roots.Distinct(StringComparer.Ordinal))
         {
             var source = Path.Combine(tree, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
@@ -767,16 +800,19 @@ internal static partial class ProofCostReport
 
     internal const string LibrariesSource = "libraries";
 
-    // What a change needs measured: the test libraries when Lean inputs changed, and each selected proof suite.
+    // What a change needs measured: the test libraries when core library/build inputs changed, and each selected
+    // proof suite when core library, extractor, example or Lean proof sources changed.
     internal static string[] Sources(string selectionMatrix, IEnumerable<string> changedPaths)
     {
+        var paths = changedPaths as string[] ?? [.. changedPaths];
         using var matrix = JsonDocument.Parse(selectionMatrix);
         var selected = matrix.RootElement.GetProperty("include").EnumerateArray()
             .SelectMany(group => group.GetProperty("suites").EnumerateArray()).Select(suite => suite.GetString())
             .ToHashSet(StringComparer.Ordinal);
-        var lean = VerificationSuites.MeasureLibraries(changedPaths);
-        return [.. lean ? [LibrariesSource] : Array.Empty<string>(),
-            .. VerificationSuites.ProofSuites.Where(selected.Contains)];
+        var libraries = VerificationSuites.MeasureLibraries(paths);
+        var proofs = VerificationSuites.MeasureProofOutputs(paths);
+        return [.. libraries ? [LibrariesSource] : Array.Empty<string>(),
+            .. proofs ? VerificationSuites.ProofSuites.Where(selected.Contains) : Array.Empty<string>()];
     }
 
     internal static Measurement Read(IEnumerable<string> paths)
@@ -816,11 +852,16 @@ internal static partial class ProofCostReport
     {
         workflow ??= File.ReadAllText(Path.Combine(ScriptDirectory(), "..", ".github", "workflows",
             "verification.yml"));
+        var verificationSources = Directory.EnumerateFiles(
+                Path.Combine(ScriptDirectory(), "Verification"), "*.cs")
+            .Order(StringComparer.Ordinal)
+            .Prepend(Path.Combine(ScriptDirectory(), "Verification.cs"))
+            .Select(Sha);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"{Schema}\n{Sha(Path.Combine(ScriptDirectory(), "ProofCost.lean"))}\n" +
             $"{Sha(Path.Combine(ScriptDirectory(), "ProofCostReport.cs"))}\n" +
             $"{Sha(Path.Combine(ScriptDirectory(), "ProofProfiler.cs"))}\n" +
-            $"{Sha(Path.Combine(ScriptDirectory(), "Verification.cs"))}\n" +
+            $"{string.Join('\n', verificationSources)}\n" +
             string.Join('\n', MeasuringSteps.Select(step => WorkflowStep(workflow, step))))));
     }
 

@@ -607,6 +607,37 @@ theorem Instruction.ofRaw?_ne_unadmitted (previous : Option RawInstruction) (raw
 
 #print axioms Instruction.ofRaw?_ne_unadmitted
 
+/-- No call-family opcode (`call`, `calli`, `callvirt`, `newobj`) decodes to `.pop`. -/
+theorem Instruction.ofRaw?_ne_pop_of_call {previous : Option RawInstruction} {raw : RawInstruction}
+    (isCall : raw.opcode = 40 ∨ raw.opcode = 41 ∨ raw.opcode = 111 ∨ raw.opcode = 115) :
+    Instruction.ofRaw? previous raw ≠ some .pop := by
+  intro decoded
+  obtain ⟨offset, opcode, operand⟩ := raw
+  dsimp only at isCall
+  have found := (Option.filter_eq_some_iff.mp decoded).1
+  split at found
+  · cases found
+  · split at found
+    · rcases isCall with rfl | rfl | rfl | rfl <;>
+        rcases Instruction.ofType?_opcode found with
+          h | h | h | h | h | h | h | h | h | h | h | h | h <;> cases h
+    · split at found
+      · cases found
+      · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
+        rcases isCall with rfl | rfl | rfl | rfl <;>
+          rcases Instruction.instanceField?_opcode accessed with h | h | h <;> cases h
+    · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
+      rcases isCall with rfl | rfl | rfl | rfl <;>
+        rcases Instruction.staticField?_opcode accessed with h | h | h <;> cases h
+    · unfold Instruction.ofCallSite? at found
+      repeat' first | cases found | split at found
+    · split at found <;> cases found
+    · split at found
+      · cases found
+      · rcases isCall with rfl | rfl | rfl | rfl <;> cases operand <;> cases found
+
+#print axioms Instruction.ofRaw?_ne_pop_of_call
+
 /-- `readonly.` decodes only without an operand, and to `nop`. -/
 theorem Instruction.ofRaw?_readOnly {previous : Option RawInstruction} {raw : RawInstruction}
     {decoded : Instruction} (readOnly : raw.opcode = 65054)

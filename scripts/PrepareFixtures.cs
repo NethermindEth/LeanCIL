@@ -14,9 +14,10 @@ if (args.Length != 1) throw new ArgumentException("Usage: PrepareFixtures.cs <ou
 var output = Path.GetFullPath(args[0]);
 Directory.CreateDirectory(output);
 var fixtures = new Dictionary<string, PreparedFixture>(StringComparer.Ordinal);
-foreach (var script in new[] { "scripts/Test.cs", "Tests/ContractExport.cs", "Tests/FullImportVerification.cs",
+var scripts = new[] { "scripts/Test.cs", "Tests/ContractExport.cs", "Tests/FullImportVerification.cs",
     "Tests/ModularStaticExports.cs", "Tests/ProofOutlines.cs", "scripts/LibraryArchive.cs",
-    "scripts/RunVerificationGroup.cs", "scripts/ProofCost.cs" })
+    "scripts/RunVerificationGroup.cs", "scripts/ProofCost.cs" };
+var built = ReservingMemory(1L << 30, () => Concurrently(scripts, script =>
 {
     var inputs = FixtureInputs(script);
     var name = Path.GetFileNameWithoutExtension(script);
@@ -34,9 +35,11 @@ foreach (var script in new[] { "scripts/Test.cs", "Tests/ContractExport.cs", "Te
         .Select(path => (Path.GetRelativePath(output, path).Replace('\\', '/'), path)));
     var assembly = name + "/" + name + ".dll";
     if (!files.ContainsKey(assembly)) throw new InvalidOperationException("Missing fixture assembly: " + assembly);
+    return (Script: script, Fixture: inputs is not null ? new PreparedFixture(assembly, inputs, files) : null);
+}));
+foreach (var (script, fixture) in built)
     // Unsupported project graphs still build, but consumers run them from source.
-    if (inputs is not null) fixtures.Add(script, new(assembly, inputs, files));
-}
+    if (fixture is not null) fixtures.Add(script, fixture);
 var manifest = Path.Combine(output, "manifest.json");
 File.WriteAllText(manifest, JsonSerializer.Serialize(new PreparedFixtures(
     Run(["dotnet", "--version"]).Trim(), RuntimeInformation.RuntimeIdentifier, fixtures), Json));
