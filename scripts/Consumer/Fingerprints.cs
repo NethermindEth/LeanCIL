@@ -410,12 +410,12 @@ partial class Program
             ConsumerSupportManifest? manifest;
             try { manifest = JsonSerializer.Deserialize<ConsumerSupportManifest>(bytes); }
             catch (JsonException) { manifest = null; }
-            if (manifest is null) throw new InvalidDataException("Invalid consumer support manifest.");
-            // Older schemas lack fields; an incompatible manifest falls back to replay.
-            if (manifest.Schema != 3) continue;
-            if (manifest.Sources is null || manifest.Modules is null || manifest.Imports is null || manifest.Files is null ||
-                manifest.Tools is null || manifest.Files.Values.Any(files => files is null) ||
-                manifest.Modules.Any(pair => pair.Value is null || !manifest.Imports.TryGetValue(pair.Key, out var imports) || imports is null))
+            if (manifest is null || manifest.Schema != 3 ||
+                manifest.Sources is null || manifest.Modules is null || manifest.Imports is null ||
+                manifest.Files is null || manifest.Tools is null ||
+                manifest.Files.Values.Any(files => files is null) ||
+                manifest.Modules.Any(pair => pair.Value is null ||
+                    !manifest.Imports.TryGetValue(pair.Key, out var imports) || imports is null))
                 throw new InvalidDataException("Invalid consumer support manifest.");
             if (manifest.Policy != VerificationPolicy || manifest.Library != libraryKey || !Same(manifest.Sources, sources) ||
                 manifest.Toolchain != (toolchain ??= ConsumerToolchainIdentity())) continue;
@@ -438,7 +438,7 @@ partial class Program
             if (!Directory.Exists(directory)) continue;
             foreach (var (module, files) in manifest.Files)
             {
-                // Restore whole modules only; an earlier manifest or a missing file keeps the module fresh.
+                // Restore whole modules only; a missing file keeps the module fresh.
                 if (files.Count == 0 || files.Keys.Any(file => File.Exists(Within(session, file)) || !File.Exists(Within(directory, file))))
                     continue;
                 foreach (var (file, hash) in files)

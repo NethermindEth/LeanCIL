@@ -129,9 +129,10 @@ if (Path.IsPathRooted(JsonSerializer.Deserialize<JsonElement>(settings).GetPrope
     throw new InvalidOperationException("Expected a relative proof path in verification settings.");
 Console.WriteLine("PASS CLI proof selection, persistent settings and theorem statement");
 
-// Without settings or --proof, verify looks for Proof.lean beside the extraction and never reads the proof
-// from an earlier certificate.
+// Without settings or --proof, verify uses the defaults (Proof.lean and ExampleProof.correctness) and
+// never reads proof or theorem selection from an earlier verified.json.
 File.Delete(settingsPath);
+var defaultProofPath = Path.Combine(output, "Proof.lean");
 try
 {
     var unselected = Exited(Execute([.. cli, "verify", output]), 1);
@@ -139,9 +140,29 @@ try
         !unselected.Output.Contains("Proof.lean", StringComparison.Ordinal) ||
         File.Exists(Path.Combine(output, "verified.json")))
         throw new InvalidOperationException("verify took its proof from an earlier certificate: " + unselected.Output);
+
+    File.Copy(proof, defaultProofPath, overwrite: true);
+    File.WriteAllText(Path.Combine(output, "verified.json"),
+        """{"schema":5,"theorem":"LegacyProof.other","inputs":{"proof:Legacy.lean":"00"}}""");
+    var defaultRun = Exited(Execute([.. cli, "verify", output]), 0);
+    var defaultSettings = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(settingsPath));
+    var defaultReport = JsonSerializer.Deserialize<JsonElement>(
+        File.ReadAllText(Path.Combine(output, "verified.json")));
+    if (!defaultRun.Stdout.StartsWith("Verified: ExampleProof.correctness", StringComparison.Ordinal) ||
+        !defaultRun.Stdout.Contains("Proof.lean:16:0: info: 'ExampleProof.correctness' depends on axioms",
+            StringComparison.Ordinal) ||
+        defaultSettings.GetProperty("proof").GetString() != "Proof.lean" ||
+        defaultSettings.GetProperty("theorem").GetString() != "ExampleProof.correctness" ||
+        defaultReport.GetProperty("theorem").GetString() != "ExampleProof.correctness")
+        throw new InvalidOperationException("verify did not use default Proof.lean and ExampleProof.correctness: " +
+            defaultRun.Output);
 }
-finally { File.WriteAllText(settingsPath, settings); }
-Console.WriteLine("PASS CLI verify reads no proof selection from an earlier certificate");
+finally
+{
+    File.Delete(defaultProofPath);
+    File.WriteAllText(settingsPath, settings);
+}
+Console.WriteLine("PASS CLI verify uses default Proof.lean and ExampleProof.correctness despite verified.json");
 
 // The prepared library serves a verification whose cache holds nothing: no notice on stderr, and no
 // library built into the cache.
