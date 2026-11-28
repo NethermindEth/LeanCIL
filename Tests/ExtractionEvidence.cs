@@ -22,9 +22,11 @@ fixtures.PrepareLeanFixtures(
     "Tests.ReadOnlyArrayReferences", "Tests.ExtractionGenerics", "Tests.ReferenceTests", "Tests.PointerOperations",
     "Tests.Objects");
 if (args is ["--prepare-only"]) return;
+// PreparedLeanFixturesTests creates and deletes temporary Lean files under Tests/, so run it
+// before concurrent fixtures snapshot the checkout inputs.
+RunFixturesConcurrently([("Tests/PreparedLeanFixturesTests.cs", "PreparedLeanFixturesTests")]);
 (string Script, string Progress)[] fixturesToRun =
 [
-    ("Tests/PreparedLeanFixturesTests.cs", "PreparedLeanFixturesTests"),
     ("Tests/RejectedEvidenceTests.cs", "RejectedEvidenceTests"),
     ("Tests/PrimitiveArrays.cs", "Supplied primitive arrays"),
     ("Tests/ArrayElementReferences.cs", "Array element references"),

@@ -176,10 +176,13 @@ private theorem length_of_mapM_option {α β : Type} {f : α → Option β} :
 
 /-- Closed decoding validates the parameter homes, local kinds and argument instructions. -/
 theorem ParameterHomesValid.of_closed {profile : FeatureProfile}
-    {environment : LayoutEnvironment} {links : List (Nat × Link)} {reachable : List Bool}
+    {environment : LayoutEnvironment} {layouts : Array ComputedLayout}
+    {links : List (Nat × Link)} {reachable : List Bool}
     {closed : RawMethod} {storage : RawArguments} {method : Method}
-    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method) :
-    ParameterHomesValid environment.layouts storage reachable method := by
+    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method)
+    (sameLayouts : environment.layouts = layouts := by rfl) :
+    ParameterHomesValid layouts storage reachable method := by
+  subst sameLayouts
   unfold Method.ofClosed? at decoded
   cases failure : firstLiveHole 0 reachable
       (methodCode profile environment links reachable closed)

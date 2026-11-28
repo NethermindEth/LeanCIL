@@ -63,7 +63,8 @@ partial class Program
     {
         var repository = RepositoryModules();
         var imported = SourceImport.Matches(File.ReadAllText(proof)).Select(import => import.Groups[1].Value)
-            .FirstOrDefault(repository.Contains);
+            .FirstOrDefault(module => repository.Contains(module) ||
+                repository.Any(root => module.StartsWith(root + ".", StringComparison.Ordinal)));
         if (imported is not null)
             throw new InvalidDataException($"{CliPaths.Display(proof)} imports {imported}, a LeanCIL repository " +
                 "module that the tool does not ship. Import CIL modules instead; CIL.Safety.Memory.empty replaces " +
