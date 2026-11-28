@@ -12,7 +12,7 @@ internal enum Feature
     X86Base64, Vector128Accelerated, Avx512Vbmi, Aes, ArmAes
 }
 
-// Runtime-visible capabilities for .NET 10 CoreCLR, including runtime disabling.
+// Runtime-visible capabilities for .NET 11 CoreCLR, including runtime disabling.
 // Group constraints and measured x64/arm64 evidence are recorded in docs/RUNTIME-PROFILES.md.
 internal sealed record FeatureProfile(string Name, string Architecture, int NativeWidth,
     bool LittleEndian, bool AdvSimd = false, bool Sse2 = false, bool Ssse3 = false,
@@ -56,7 +56,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             (Sse41 && !Ssse3) || (Sse42 && !Sse41) ||
             (Avx512DQ && !Avx512F) || (Avx512DQVL && (!Avx512DQ || !Avx512FVL)) ||
             (AdvSimd && !ArmBase64) ||
-            // VBMI (.NET 10's AVX512v2 group) requires AVX-512, but x64-v4 machines differ on it.
+            // VBMI (.NET 11's AVX512v2 group) requires AVX-512, but x64-v4 machines differ on it.
             (Avx512Vbmi && !Avx512F) ||
             // AES is its own group on each architecture and requires only that architecture's base.
             (ArmAes && !ArmBase64))
@@ -70,7 +70,8 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             Avx512F != Avx512FVL || Avx512F != Avx512DQ || Avx512F != Avx512DQVL ||
             AdvSimd != ArmBase64 || Vector128Accelerated != (Sse2 || AdvSimd) ||
             (Vector256Accelerated && !Avx2))
-            throw new InvalidDataException($"Invalid execution profile: {Name}: capabilities split a .NET 10 CoreCLR runtime group; see docs/RUNTIME-PROFILES.md");
+            throw new InvalidDataException($"Invalid execution profile: {Name}: " +
+                "capabilities split a .NET 11 CoreCLR runtime group; see docs/RUNTIME-PROFILES.md");
     }
 
     internal static FeatureProfile Select(string name)
@@ -98,7 +99,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             "scalar" => Scalar,
             "arm64-advsimd" => new(name, "arm64", 64, true, AdvSimd: true, ArmBase64: true, Vector128Accelerated: true),
             "x64-sse42" => new(name, "x64", 64, true, Sse2: true, Ssse3: true, Sse41: true, Sse42: true, X86Base64: true, Vector128Accelerated: true),
-            // .NET 10 enables x86-64-v3 (AVX2 with BMI1/BMI2) and v4 (AVX-512 F/DQ/VL) only as whole groups.
+            // .NET 11 enables x86-64-v3 (AVX2 with BMI1/BMI2) and v4 (AVX-512 F/DQ/VL) only as whole groups.
             // x86-64-v4 excludes VBMI, so x64-v4 covers only deployments where Avx512Vbmi is unsupported.
             // No x86-64 level includes AES, so every built-in covers only deployments without it.
             "x64-v3" or "x64-v4" => new(name, "x64", 64, true,
@@ -199,7 +200,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             "System.Runtime.Intrinsics.Vector128" when reference.Name == "get_IsHardwareAccelerated" => Feature.Vector128Accelerated,
             "System.Runtime.Intrinsics.Vector256" when reference.Name == "get_IsHardwareAccelerated" => Feature.Vector256Accelerated,
             _ when reference.Name != "get_IsSupported" => throw new InvalidDataException($"Unclassified feature getter: {reference.FullName}"),
-            // .NET 10 sets AdvSimd_Arm64 exactly when AdvSimd is set on ARM64; see docs/RUNTIME-PROFILES.md.
+            // .NET 11 sets AdvSimd_Arm64 exactly when AdvSimd is set on ARM64; see docs/RUNTIME-PROFILES.md.
             "System.Runtime.Intrinsics.Arm.AdvSimd" or "System.Runtime.Intrinsics.Arm.AdvSimd/Arm64" => Feature.AdvSimd,
             "System.Runtime.Intrinsics.Arm.ArmBase/Arm64" => Feature.ArmBase64,
             "System.Runtime.Intrinsics.X86.Sse2" => Feature.Sse2,
@@ -215,10 +216,10 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             "System.Runtime.Intrinsics.X86.X86Base/X64" => Feature.X86Base64,
             "System.Runtime.Intrinsics.X86.Avx512DQ" => Feature.Avx512DQ,
             "System.Runtime.Intrinsics.X86.Avx512DQ/VL" => Feature.Avx512DQVL,
-            // .NET 10 sets Avx512Vbmi_VL exactly when Avx512Vbmi is set; see docs/RUNTIME-PROFILES.md.
+            // .NET 11 sets Avx512Vbmi_VL exactly when Avx512Vbmi is set; see docs/RUNTIME-PROFILES.md.
             "System.Runtime.Intrinsics.X86.Avx512Vbmi" or
                 "System.Runtime.Intrinsics.X86.Avx512Vbmi/VL" => Feature.Avx512Vbmi,
-            // .NET 10 sets each 64-bit Aes variant exactly when its base Aes is set; see docs/RUNTIME-PROFILES.md.
+            // .NET 11 sets each 64-bit Aes variant exactly when its base Aes is set; see docs/RUNTIME-PROFILES.md.
             "System.Runtime.Intrinsics.X86.Aes" or "System.Runtime.Intrinsics.X86.Aes/X64" => Feature.Aes,
             "System.Runtime.Intrinsics.Arm.Aes" or "System.Runtime.Intrinsics.Arm.Aes/Arm64" => Feature.ArmAes,
             _ => throw new InvalidDataException($"Unclassified feature getter: {reference.FullName}")

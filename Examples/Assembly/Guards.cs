@@ -3,7 +3,7 @@ using System;
 namespace Examples;
 
 /// <summary>
-/// Framework argument guards: each throws its named exception exactly when its .NET 10 condition holds, and the
+/// Framework argument guards: each throws its named exception exactly when its .NET 11 condition holds, and the
 /// parameter name the compiler passes is an opaque string.
 /// </summary>
 public static class Guards

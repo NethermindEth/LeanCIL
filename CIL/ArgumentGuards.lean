@@ -6,7 +6,7 @@ import CIL.Types
 The integer tests of `System.ArgumentOutOfRangeException`'s `ThrowIfZero`, `ThrowIfNegative`,
 `ThrowIfNegativeOrZero`, `ThrowIfEqual`, `ThrowIfNotEqual`, `ThrowIfGreaterThan`,
 `ThrowIfGreaterThanOrEqual`, `ThrowIfLessThan` and `ThrowIfLessThanOrEqual`. On a primitive
-integer each .NET 10 body (`T.IsZero`, `T.IsNegative`, `EqualityComparer<T>.Default.Equals` or
+integer each .NET 11 body (`T.IsZero`, `T.IsNegative`, `EqualityComparer<T>.Default.Equals` or
 `CompareTo`) is the mathematical comparison of the values its type denotes, which is what
 `ZeroGuard.throws` and `ComparisonGuard.throws` state. The checked interpreter raises the
 exception for them.

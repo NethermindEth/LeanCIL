@@ -9,7 +9,7 @@ Lane multiplication, permutation, blending and byte shuffles on 256-bit vectors.
 namespace CIL.Vector
 
 /-- VPMULUDQ multiplies the even UInt32 lanes and widens each product to UInt64.
-https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/Avx2.cs -/
+https://github.com/dotnet/runtime/blob/v11.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/Avx2.cs -/
 def multiplyEven32 (left right : V256) : V256 :=
   let product (index : Nat) :=
     (lane32 left index).zeroExtend 64 * (lane32 right index).zeroExtend 64

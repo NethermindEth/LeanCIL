@@ -138,7 +138,7 @@ These operations use scalar integer operands, not vectors.
 | `Bmi1.BitFieldExtract` | `uint, byte start, byte length` -> `uint` | `Bmi1` | Extract a bit field; start >= 32 yields zero, length is clipped to the remaining bits |
 | `Bmi2.X64.MultiplyNoFlags` | `ulong, ulong` -> `ulong` | `Bmi2` | Return the high 64 bits of the unsigned 128-bit product |
 
-The pointer-output `MultiplyNoFlags` overload is not mapped. The .NET 10 CoreCLR profile validator requires BMI1, BMI2 and AVX2 to agree.
+The pointer-output `MultiplyNoFlags` overload is not mapped. The .NET 11 CoreCLR profile validator requires BMI1, BMI2 and AVX2 to agree.
 
 ## X86Base
 
@@ -170,7 +170,7 @@ No other AdvSimd operations or `ReverseElement8` overloads, signed `MultiplyHigh
 
 ## Feature getters, profiles and execution restrictions
 
-Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `Sse42`, `Avx`, `Avx2`, `Avx512F`, `Avx512F.VL`, `Avx512DQ`, `Avx512DQ.VL`, `Avx512Vbmi`, `Avx512Vbmi.VL`, `Bmi1`, `Bmi2.X64`, x86 `Aes`, `Aes.X64`, `AdvSimd`, `AdvSimd.Arm64`, `ArmBase.Arm64`, ARM64 `Aes` and `Aes.Arm64`. `AdvSimd.Arm64` answers with the `AdvSimd` capability, `Avx512Vbmi.VL` with the `Avx512Vbmi` capability and each 64-bit `Aes` class with its architecture's AES capability (`aes` or `armAes`), as .NET 10 reports each pair together ([runtime profiles](RUNTIME-PROFILES.md)). No built-in profile enables `Avx512Vbmi` or either AES capability; declare them in a [custom profile](RUNTIME-PROFILES.md#profile-selection). `Vector128.IsHardwareAccelerated` and `Vector256.IsHardwareAccelerated` are also recognised. The getter result comes from the chosen profile, not the host CPU. Other getters are rejected.
+Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `Sse42`, `Avx`, `Avx2`, `Avx512F`, `Avx512F.VL`, `Avx512DQ`, `Avx512DQ.VL`, `Avx512Vbmi`, `Avx512Vbmi.VL`, `Bmi1`, `Bmi2.X64`, x86 `Aes`, `Aes.X64`, `AdvSimd`, `AdvSimd.Arm64`, `ArmBase.Arm64`, ARM64 `Aes` and `Aes.Arm64`. `AdvSimd.Arm64` answers with the `AdvSimd` capability, `Avx512Vbmi.VL` with the `Avx512Vbmi` capability and each 64-bit `Aes` class with its architecture's AES capability (`aes` or `armAes`), as .NET 11 reports each pair together ([runtime profiles](RUNTIME-PROFILES.md)). No built-in profile enables `Avx512Vbmi` or either AES capability; declare them in a [custom profile](RUNTIME-PROFILES.md#profile-selection). `Vector128.IsHardwareAccelerated` and `Vector256.IsHardwareAccelerated` are also recognised. The getter result comes from the chosen profile, not the host CPU. Other getters are rejected.
 
 | Built-in profile | Enabled capabilities |
 | --- | --- |
@@ -180,8 +180,8 @@ Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `S
 | `x64-v4` | The above plus `Avx512F`, `Avx512FVL`, `Avx512DQ`, `Avx512DQVL` |
 | `arm64-advsimd` | `ArmBase64`, `AdvSimd`, `Vector128Accelerated` |
 
-Profiles target .NET 10 CoreCLR, and both the extractor and the Lean certificate reject capability
-sets that split its runtime groups or, on x64, fall below the .NET 11 baseline (`x86-64-v2`). [Runtime profiles](RUNTIME-PROFILES.md) gives the group
+Profiles target .NET 11 CoreCLR, and both the extractor and the Lean certificate reject capability
+sets that split its runtime groups or, on x64, fall below its `x86-64-v2` baseline. [Runtime profiles](RUNTIME-PROFILES.md) gives the group
 constraints, the custom-profile rules and the measured x64 and arm64 runtimes. Changing a profile
 requires fresh extraction and proof verification; certificates from another profile do not acquire
 its capabilities.
