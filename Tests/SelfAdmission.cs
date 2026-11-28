@@ -15,11 +15,13 @@ using Mono.Cecil;
 
 // Admission of LeanCIL's own assembly under the scalar profile against its baseline of admitted methods.
 // Fails on any difference, so a lost admission, an unrecorded gain or a removed method all need review.
-const string Usage = "Usage: SelfAdmission.cs [--update] [--baseline baseline.txt] [--reuse-report] [--lean-check]";
+const string Usage = "Usage: SelfAdmission.cs [--update] [--baseline baseline.txt] [--assembly assembly.dll] " +
+    "[--reuse-report] [--lean-check]";
 const string Profile = "scalar";
 const int ListedBlockers = 10;
 const int ListedMethods = 20;
 var baselinePath = At("Tests/SelfAdmissionBaseline.txt");
+var assemblyPath = ExtractorPath;
 bool update = false, reuse = false, leanCheck = false;
 for (var index = 0; index < args.Length; index++)
     switch (args[index])
@@ -30,6 +32,7 @@ for (var index = 0; index < args.Length; index++)
         // Run by hand: elaborates the extraction of every admitted method, hours of CPU time in all.
         case "--lean-check": leanCheck = true; break;
         case "--baseline" when index + 1 < args.Length: baselinePath = Path.GetFullPath(args[++index]); break;
+        case "--assembly" when index + 1 < args.Length: assemblyPath = Path.GetFullPath(args[++index]); break;
         default: throw new ArgumentException(Usage);
     }
 var directory = At("artifacts/SelfAdmission");
@@ -37,9 +40,19 @@ Directory.CreateDirectory(directory);
 
 // Every metadata method, constructors and compiler-generated members included, under one profile.
 string[] signatures;
-using (var module = ModuleDefinition.ReadModule(ExtractorPath))
+using (var module = ModuleDefinition.ReadModule(assemblyPath))
+{
+    var configuration = module.Assembly.CustomAttributes
+        .FirstOrDefault(attribute => attribute.AttributeType.FullName ==
+            "System.Reflection.AssemblyConfigurationAttribute")
+        ?.ConstructorArguments.FirstOrDefault().Value as string;
+    if (configuration != "Release")
+        throw new InvalidDataException(
+            $"SelfAdmission requires a Release build of {assemblyPath}, found configuration " +
+            $"'{configuration ?? "(none)"}'. Rebuild with `dotnet build Extractor/Extractor.csproj -c Release`.");
     signatures = module.GetTypes().SelectMany(type => type.Methods).Select(method => method.FullName)
         .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+}
 var manifest = Path.Combine(directory, "manifest.json");
 if (!reuse)
     File.WriteAllText(manifest, JsonSerializer.Serialize(new
@@ -48,7 +61,7 @@ if (!reuse)
     }));
 var report = Path.Combine(directory, "blockers.json");
 var timer = Stopwatch.StartNew();
-if (!reuse) Run(["dotnet", ExtractorPath, "blockers", ExtractorPath, "--manifest", manifest, "--output", report]);
+if (!reuse) Run(["dotnet", ExtractorPath, "blockers", assemblyPath, "--manifest", manifest, "--output", report]);
 var elapsed = timer.Elapsed.TotalSeconds;
 
 using var document = JsonDocument.Parse(File.ReadAllText(report));
@@ -143,7 +156,7 @@ void CheckAdmittedInLean(string[] methods)
     Parallel.ForEach(methods.Index(), options, entry =>
     {
         var output = Path.Combine(root, entry.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        var result = Execute(["dotnet", ExtractorPath, "extract", ExtractorPath, entry.Item, output, Profile]);
+        var result = Execute(["dotnet", ExtractorPath, "extract", assemblyPath, entry.Item, output, Profile]);
         if (result.Code == 0)
             result = Execute([verification.LeanExecutable, "--root=" + output, Path.Combine(output, "Extracted.lean")],
                 leanPath: leanPath);

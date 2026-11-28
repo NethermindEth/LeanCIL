@@ -13,7 +13,8 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(FileBasedProgram)' != 'true'">
-    <OutputPath>bin/</OutputPath>
+    <OutputPath Condition="'$(Configuration)' == 'Release'">bin/</OutputPath>
+    <OutputPath Condition="'$(Configuration)' != 'Release'">bin/$(Configuration)/</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>

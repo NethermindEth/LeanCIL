@@ -453,6 +453,19 @@ if (admittedMethods.Length != 0)
         gained.Output.Contains(unrecorded),
         "A gained admission failed the regression-only gate:\n" + gained.Output);
 }
+// Debug builds write to bin/Debug without overwriting bin/, and SelfAdmission refuses any non-Release assembly.
+var releaseFixture = Path.Combine(source, "bin", "Fixture.dll");
+var releaseFixtureHash = Sha(releaseFixture);
+Run(["dotnet", "build", Path.Combine(source, "Fixture.csproj"), "-c", "Debug"]);
+var debugFixture = Path.Combine(source, "bin", "Debug", "Fixture.dll");
+Require(File.Exists(debugFixture) && Sha(releaseFixture) == releaseFixtureHash,
+    "A Debug build overwrote or missed its separate bin/Debug output directory.");
+var debugSelfAdmission = Execute(["dotnet", "run", "--file", selfAdmission, "--",
+    "--assembly", debugFixture, "--reuse-report"]);
+Require(debugSelfAdmission.Code != 0 &&
+    debugSelfAdmission.Output.Contains("requires a Release build", StringComparison.Ordinal) &&
+    debugSelfAdmission.Output.Contains("'Debug'", StringComparison.Ordinal),
+    "SelfAdmission accepted a Debug assembly or omitted its configuration:\n" + debugSelfAdmission.Output);
 // A volatile field is read and written under a `volatile.` prefix, which the single-threaded model gives no meaning:
 // extraction stops at it and names the instruction, the method and the stage.
 var volatileSource = Path.Combine(directory, "VolatileAssembly");
