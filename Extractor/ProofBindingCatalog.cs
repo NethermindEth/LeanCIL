@@ -38,7 +38,7 @@ partial class Program
             StringComparer.Ordinal));
     }
 
-    const string BindingsUsage = "Usage: leancil bindings catalog.json [--check]";
+    internal const string BindingsUsage = "Usage: leancil bindings catalog.json [--check]";
 
     // A handwritten entry gives these besides the variables it matches, so no variable may take their names.
     static readonly string[] HandwrittenKeys = ["proof", "theorem"];

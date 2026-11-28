@@ -11,7 +11,7 @@ namespace Nethermind.LeanCIL;
 
 internal static partial class ExceptionLint
 {
-    const string Usage = "Usage: leancil lint-exceptions output-directory --documentation assembly.xml";
+    internal const string Usage = "Usage: leancil lint-exceptions output-directory --documentation assembly.xml";
     const string Notice = "Diagnostic only. Sites are potential model paths, not proved exceptions. XML comments are untrusted documentation, not evidence.";
     sealed record Site(string Method, int IlOffset, ExceptionType Exception, string Origin);
     sealed record Declaration(string Exception, string Text);

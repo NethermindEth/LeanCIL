@@ -9,9 +9,10 @@ namespace Nethermind.LeanCIL;
 // Runs extraction and its validators over explicit method/profile pairs; it never checks a proof.
 internal static partial class Blockers
 {
-    const string Usage = "Usage: leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] " +
-        "[--assembly 'assembly name or full identity'] [--reference Lib.dll]... [--import Lib.leancil.contracts]... " +
-        "[--import-implementation Lib=path]... [--import-sha256 Lib=hex]... [--import-interface-sha256 Lib=hex]...";
+    internal const string Usage = "Usage: leancil blockers assembly.dll --manifest manifest.json " +
+        "[--output blockers.json] [--assembly 'assembly name or full identity'] [--reference Lib.dll]... " +
+        "[--import Lib.leancil.contracts]... [--import-implementation Lib=path]... [--import-sha256 Lib=hex]... " +
+        "[--import-interface-sha256 Lib=hex]...";
     // Manifest keys that carry the import options, in the order `extract` names them.
     static readonly (string Key, string Option)[] ImportKeys =
     [

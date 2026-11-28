@@ -15,7 +15,7 @@ partial class Program
         string StatementDigest, string Statement, string AuditSource, string AuthorModule);
 
     const string ExportTheorem = "LeanCILExportAudit.certified";
-    const string ContractExportUsage =
+    internal const string ContractExportUsage =
         "Usage: leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]";
     const string SidecarExtension = ".leancil.contracts";
     const string ReferenceAssemblyAttribute = "System.Runtime.CompilerServices.ReferenceAssemblyAttribute";
