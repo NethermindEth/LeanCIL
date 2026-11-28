@@ -486,8 +486,8 @@ validates the runner's runtime groups against the [profile constraints](RUNTIME-
 uploads the observation. The x64 suites check x86 AESENC.
 
 The self-admission Lean check workflow (`.github/workflows/self-admission.yml`) runs weekly and on
-manual dispatch (`workflow_dispatch`) across six parallel shards. Each shard prepares the certified
-`CIL` library, builds the extractor in `Release` and runs
+manual dispatch across six parallel shards. Each shard prepares the certified `CIL` library, builds
+the extractor in `Release` and runs
 `dotnet run --file Tests/SelfAdmission.cs -- --lean-check --shard <n>/6`, failing when Lean refuses
 any method the extractor admits and reporting refused methods and diagnostics in the job summary
 and uploaded `artifacts/SelfAdmission/` files.

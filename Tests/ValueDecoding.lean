@@ -49,11 +49,12 @@ private def spanLayout (name : String) : RawLayout :=
     declaration := (ClassName.ofText name).levels
     generic := some ⟨owner, 1, [int32], [.parameter 0], [(0, [])]⟩ }
 
-/-- The span reset fixture has a valid four-byte layout row and decodes to `initobj`. -/
+/-- A raw layout row naming a runtime span is refused by `LayoutsValid`, while `initobj` over a
+    runtime span still decodes directly. -/
 theorem span_reset_inputs :
     ["System.Span`1", "System.ReadOnlySpan`1"].all (fun name =>
       let span := TypeExpr.apply (.constructor runtimeScope name) int32
-      decide (LayoutsValid [spanLayout name] #[⟨⟨4, [⟨0, 4, false⟩]⟩, 4⟩]) &&
+      !decide (LayoutsValid [spanLayout name] #[⟨⟨4, [⟨0, 4, false⟩]⟩, 4⟩]) &&
         Instruction.ofRaw? none ⟨0, 0xfe15, .type span⟩ == some (.initobj span)) = true := by
   decide +kernel
 #print axioms span_reset_inputs

@@ -309,30 +309,71 @@ private def bytesStartsWith : List UInt8 → List UInt8 → Bool
   | _ :: _, [] => false
 
 /-- UTF-8 byte prefixes of external generic value types whose storage comes from their own runtime
-    models rather than from a supplied struct layout. -/
-private def modeledExternalLayoutPrefixes : List (List UInt8) :=
-  [runtimeScope ++ "::System.Span`1<",
-   runtimeScope ++ "::System.ReadOnlySpan`1<",
-   layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector128`1<",
-   layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector256`1<",
-   layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector512`1<"].map
-     fun prefix_ => prefix_.toByteArray.data.toList
+    models rather than from a supplied struct layout, materialized so kernel reduction never
+    re-encodes the fixed strings. -/
+private def modeledExternalLayoutPrefixes : List (List UInt8) := by
+  run_tac do
+    let expression <- Lean.Elab.Term.elabTerm
+      (<- `([runtimeScope ++ "::System.Span`1<",
+            runtimeScope ++ "::System.ReadOnlySpan`1<",
+            layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector128`1<",
+            layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector256`1<",
+            layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector512`1<"].map
+              fun prefix_ => prefix_.toByteArray.data.toList)) none
+    Lean.Elab.Term.synthesizeSyntheticMVarsNoPostponing
+    let expression <- Lean.instantiateMVars expression
+    let values <- unsafe Lean.Meta.evalExpr (List (List UInt8))
+      (<- Lean.Meta.inferType expression) expression
+    Lean.Elab.Tactic.closeMainGoal `modeledExternalLayoutPrefixes (Lean.toExpr values)
+
+/-- The materialized prefixes spell exactly the modeled span and vector layout heads. -/
+private theorem modeledExternalLayoutPrefixes_eq :
+    modeledExternalLayoutPrefixes =
+      [runtimeScope ++ "::System.Span`1<",
+       runtimeScope ++ "::System.ReadOnlySpan`1<",
+       layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector128`1<",
+       layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector256`1<",
+       layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector512`1<"].map
+        fun prefix_ => prefix_.toByteArray.data.toList := by
+  decide +kernel
+#print axioms modeledExternalLayoutPrefixes_eq
 
 /-- Shortest prefix in `modeledExternalLayoutPrefixes` (`runtimeScope ++ "::System.Span`1<"`). -/
 private def minModeledExternalLayoutBytes : Nat := 98
+
+/-- Leading ASCII byte `'S'` shared by every modeled external layout prefix. -/
+private def modeledExternalLeadByte : UInt8 := 83
+
+/-- Declarations of external generic value types whose storage comes from their own runtime models
+    rather than from a supplied struct layout. Comparing `MetadataName` tags first avoids reducing
+    `raw.identity` in the kernel for ordinary structs. -/
+private def modeledExternalDeclarations : List (List TypeLevel) :=
+  [[⟨name!"System", name!"Span`1"⟩],
+   [⟨name!"System", name!"ReadOnlySpan`1"⟩],
+   [⟨name!"System.Runtime.Intrinsics", name!"Vector128`1"⟩],
+   [⟨name!"System.Runtime.Intrinsics", name!"Vector256`1"⟩],
+   [⟨name!"System.Runtime.Intrinsics", name!"Vector512`1"⟩]]
 
 /-- Whether `identity` names a runtime span or vector type whose storage comes from its own
     model and therefore cannot take a supplied raw layout row. -/
 def isModeledExternalLayoutIdentity (identity : String) : Bool :=
   let bytes := identity.toByteArray
-  if bytes.size < minModeledExternalLayoutBytes then false
+  if bytes.size < minModeledExternalLayoutBytes || bytes.data[0]? != some modeledExternalLeadByte
+  then false
   else modeledExternalLayoutPrefixes.any fun prefix_ => bytesStartsWith prefix_ bytes.data.toList
+
+/-- Whether `raw` names a modeled runtime span or vector layout. Ordinary structs with a
+    non-matching declaration skip string reduction in the kernel. -/
+def isModeledExternalLayout (raw : RawLayout) : Bool :=
+  if raw.declaration.isEmpty || modeledExternalDeclarations.contains raw.declaration then
+    isModeledExternalLayoutIdentity raw.identity
+  else false
 
 /-- Recompute CoreCLR reference-free 64-bit layout from ordered metadata fields; `previous`
     finds the computed layout of each nested struct. -/
 def computeLayout (previous : Nat → Option ComputedLayout) (raw : RawLayout)
     (architecture : Architecture := .scalar) : Option ComputedLayout := do
-  if isModeledExternalLayoutIdentity raw.identity then none
+  if isModeledExternalLayout raw then none
   else if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
   else if raw.declaredSize < -1 || raw.declaredSize > 65536 then none
   else if raw.explicit && raw.declaredSize ≤ 0 then none
@@ -380,7 +421,7 @@ private theorem placeField_append (previous : Nat → Option ComputedLayout) (ra
 /-- Linear field construction is exactly the former append-based layout computation. -/
 theorem computeLayout_eq_append (previous : Nat → Option ComputedLayout) (raw : RawLayout)
     (architecture : Architecture) : computeLayout previous raw architecture = do
-  if isModeledExternalLayoutIdentity raw.identity then none
+  if isModeledExternalLayout raw then none
   else if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
   else if raw.declaredSize < -1 || raw.declaredSize > 65536 then none
   else if raw.explicit && raw.declaredSize ≤ 0 then none

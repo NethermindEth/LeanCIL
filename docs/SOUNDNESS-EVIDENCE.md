@@ -304,7 +304,11 @@ What `MetadataResolution` and `MetadataBinding` check:
   value-like named type or another value-like instance whose arguments meet the same rule. Lean rejects an argument it resolves as a class at
   any depth, including when an array or a byref contains the aggregate. For an unpinned platform
   type, Lean trusts the signature's kind marker. A `VALUETYPE` marker can therefore admit a class
-  from that assembly as a value argument when the aggregate identity matches.
+  from that assembly as a value argument when the aggregate identity matches. External generic value
+  types with their own runtime storage models (`System.Span`, `System.ReadOnlySpan`,
+  `System.Runtime.Intrinsics.Vector128`, `System.Runtime.Intrinsics.Vector256` and
+  `System.Runtime.Intrinsics.Vector512`) cannot take a raw layout row or an `aggregate` claim;
+  external value tuples such as `System.ValueTuple` remain accepted.
   The extractor represents `System.String` as an object when a type reference names the
   supported `System.Runtime` or a definition belongs to the pinned .NET 11
   `System.Private.CoreLib`. It checks the defining assembly's name, version, culture and key
