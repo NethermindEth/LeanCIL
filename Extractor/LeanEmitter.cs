@@ -290,6 +290,7 @@ internal static class LeanEmitter
         // inputs take this block, completed below with the platform definitions, before its methods.
         var metadataEnd = lean.Length;
         var metadataInputsAt = package is null ? null : inputs?.Length;
+        var hasVector128Local = new bool[methods.Length];
         for (int n = 0; n < methods.Length; n++)
         {
             MethodDefinition m = methods[n];
@@ -310,6 +311,7 @@ internal static class LeanEmitter
 
             LocalKind[] kinds =
                 [.. m.Body.Variables.Select(variable => KindOf(variable.VariableType, variable.Index))];
+            hasVector128Local[n] = kinds.Any(kind => kind is LocalKind.Vector { Bits: 128 });
             StaticSite[] sites = [.. m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && IsStaticSite(s.i))
                 .Select(s => SiteOf(s.i, s.pc, genericEvidence.FieldReferenceOf(m, s.pc), m, methodIndices,
@@ -513,7 +515,12 @@ internal static class LeanEmitter
                 $"Extraction.MethodShapeValid method{n}Closed method{n} := " +
                 $"Extraction.MethodShapeValid.of_closed method{n}_decoder_eq profile_validated ({Decide})");
 
-            lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
+            var opaqueProof = hasVector128Local[n]
+                ? Decide
+                : methods[n].Body.Variables.Count == 0
+                    ? $"Extraction.OpaqueLocalsValid.of_closed_none method{n}_decoder_eq rfl"
+                    : $"Extraction.OpaqueLocalsValid.of_closed_none method{n}_decoder_eq ({Decide})";
+            lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {opaqueProof}");
             lean.AppendLine($"theorem method{n}_environment_validated : " +
                 $"Extraction.MethodEnvironmentValid rawLayouts computedLayouts method{n} := rfl");
             lean.AppendLine($"theorem method{n}_declared_validated : " +

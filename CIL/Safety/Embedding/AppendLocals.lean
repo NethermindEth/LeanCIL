@@ -437,7 +437,10 @@ theorem step_appendLocals_localloc : StepAppendLocals .localloc := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  simp only [step, localAllocation, allocateStack_appendLocals, bind_map_left]
+  unfold step
+  apply observed_appendLocals
+  unfold localAllocation
+  simp only [allocateStack_appendLocals, bind_map_left]
   frame_natural
 
 #print axioms step_appendLocals_localloc
@@ -569,10 +572,10 @@ theorem step_appendLocals_starg (index : Nat) : StepAppendLocals (.starg index) 
   subst stepped
   cases stack with
   | nil =>
-    revert kept
-    simp only [step]
-    repeat' split
-    all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
+    clear kept
+    unfold step
+    apply observed_appendLocals
+    exact fallback_appendLocals body.profile (.starg index) pc [] frame extra memory
   | cons value rest =>
     have unfolded : ∀ current : Frame,
         step body (.starg index) pc args current (value :: rest) memory = (do
@@ -627,15 +630,18 @@ theorem step_appendLocals_ldarga (index : Nat) : StepAppendLocals (.ldarga index
 theorem step_appendLocals_ldloc (index : Nat) : StepAppendLocals (.ldloc index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
-  cases found : frame.locals[index]? with
-  | some slot =>
-    cases stack <;>
-      simp only [step, found, Frame.appendLocals_getElem? found] <;>
+  unfold step at kept ⊢
+  by_cases obs : unspecifiedOperands (observerCount (.ldloc index)) stack = true
+  · simp only [obs, ↓reduceIte]; rfl
+  · simp only [obs, Bool.false_eq_true, ↓reduceIte]
+    cases found : frame.locals[index]? with
+    | some slot =>
+      simp only [Frame.appendLocals_getElem? found]
       frame_natural
-  | none =>
-    revert kept
-    cases stack <;> simp only [step, found] <;> repeat' split
-    all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
+    | none =>
+      simp only [obs, Bool.false_eq_true, ↓reduceIte, found, StepKept] at kept
+      rcases kept with ⟨_, thrown⟩
+      cases thrown
 
 #print axioms step_appendLocals_ldloc
 
@@ -644,15 +650,18 @@ theorem step_appendLocals_ldloca (index : Nat) :
     StepAppendLocals (.ldloca index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
-  cases found : frame.locals[index]? with
-  | some slot =>
-    cases stack <;>
-      simp only [step, found, Frame.appendLocals_getElem? found] <;>
+  unfold step at kept ⊢
+  by_cases obs : unspecifiedOperands (observerCount (.ldloca index)) stack = true
+  · simp only [obs, ↓reduceIte]; rfl
+  · simp only [obs, Bool.false_eq_true, ↓reduceIte]
+    cases found : frame.locals[index]? with
+    | some slot =>
+      simp only [Frame.appendLocals_getElem? found]
       frame_natural
-  | none =>
-    revert kept
-    cases stack <;> simp only [step, found] <;> repeat' split
-    all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
+    | none =>
+      simp only [obs, Bool.false_eq_true, ↓reduceIte, found, StepKept] at kept
+      rcases kept with ⟨_, thrown⟩
+      cases thrown
 
 #print axioms step_appendLocals_ldloca
 
@@ -660,16 +669,25 @@ theorem step_appendLocals_ldloca (index : Nat) :
 theorem step_appendLocals_stloc (index : Nat) : StepAppendLocals (.stloc index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
-  cases found : frame.locals[index]? with
-  | some slot =>
-    cases stack <;>
-      simp only [step, found, Frame.appendLocals_getElem? found,
-        Frame.appendLocals_set found] <;>
-      frame_natural
-  | none =>
-    revert kept
-    cases stack <;> simp only [step, found] <;> repeat' split
-    all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
+  cases stack with
+  | nil =>
+    clear kept
+    unfold step
+    apply observed_appendLocals
+    exact fallback_appendLocals body.profile (.stloc index) pc [] frame extra memory
+  | cons value rest =>
+    unfold step at kept ⊢
+    by_cases obs : unspecifiedOperands (observerCount (.stloc index)) (value :: rest) = true
+    · simp only [obs, ↓reduceIte]; rfl
+    · simp only [obs, Bool.false_eq_true, ↓reduceIte]
+      cases found : frame.locals[index]? with
+      | some slot =>
+        simp only [Frame.appendLocals_getElem? found, Frame.appendLocals_set found]
+        frame_natural
+      | none =>
+        simp only [obs, Bool.false_eq_true, ↓reduceIte, found, StepKept] at kept
+        rcases kept with ⟨_, thrown⟩
+        cases thrown
 
 #print axioms step_appendLocals_stloc
 
@@ -1192,7 +1210,8 @@ theorem step_appendLocals_ldfld (field : CIL.Extraction.FieldRef) :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  simp only [step]
+  unfold step
+  apply observed_appendLocals
   frame_natural
 
 #print axioms step_appendLocals_ldfld
@@ -1203,7 +1222,8 @@ theorem step_appendLocals_stfld (field : CIL.Extraction.FieldRef) :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  simp only [step]
+  unfold step
+  apply observed_appendLocals
   frame_natural
 
 #print axioms step_appendLocals_stfld
@@ -1214,7 +1234,8 @@ theorem step_appendLocals_ldflda (field : CIL.Extraction.FieldRef) :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  simp only [step]
+  unfold step
+  apply observed_appendLocals
   frame_natural
 
 #print axioms step_appendLocals_ldflda
@@ -1474,12 +1495,10 @@ theorem step_appendLocals_ret :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  simp only [step, observerCount]
-  simp only [returnFrom]
-  by_cases unknown : unspecifiedOperands 1 stack = true
-  · simp only [unknown, ite_true]
-    rfl
-  simp only [unknown, Bool.false_eq_true, ite_false]
+  unfold step
+  apply observed_appendLocals
+  dsimp only
+  unfold returnFrom
   repeat' first
     | rfl
     | (simp only [map_bind, map_pure, FrameAction.appendLocals]; done)

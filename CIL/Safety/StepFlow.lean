@@ -59,7 +59,90 @@ theorem calliStep_callee {signature : CIL.ManagedSignature} {tail : Bool} {link 
     | split at executed
 #print axioms calliStep_callee
 
-set_option maxHeartbeats 800000 in
+/-- A successful step passed the unspecified-bits guard. -/
+private theorem observer_ok {observed : Bool} {result : ExecutionResult FrameAction}
+    {action : FrameAction}
+    (h : (if observed then .error (.unsupported "Instruction observes unspecified vector bits")
+      else result) = .ok action) :
+    result = .ok action := by
+  cases observed with
+  | false => exact h
+  | true => cases h
+
+/-- The shared dispatcher tail only ever resumes in the current frame, never entering a callee. -/
+private theorem fallback_callee_none {profile : FeatureProfile} {op : CIL.Instruction} {pc : Nat}
+    {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
+    (h : (match pureArity op with
+      | some argc =>
+        if stack.length < argc then Except.error ExecutionFault.invalidState
+        else do
+          let values ← scalars (List.take argc stack)
+          match CIL.step op false none pc values (fun _ => none) profile with
+          | some (CIL.Action.next target result _) => do
+            let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
+            Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
+          | _ => Except.error ExecutionFault.invalidState
+      | none => do
+        let __x ← instruction op stack m
+        Pure.pure (FrameAction.next (pc + 1) __x.snd frame __x.fst)) = .ok action) :
+    action.callee = none := by
+  cases hp : pureArity op with
+  | none =>
+    rw [hp] at h
+    dsimp only at h
+    obtain ⟨_, _, h⟩ := except_bind_ok h
+    cases h
+    rfl
+  | some argc =>
+    rw [hp] at h
+    dsimp only at h
+    split at h
+    · cases h
+    · obtain ⟨_, _, h⟩ := except_bind_ok h
+      split at h
+      · obtain ⟨_, _, h⟩ := except_bind_ok h
+        cases h
+        rfl
+      · cases h
+
+/-- The shared dispatcher tail resumes at a target of `CIL.step` or at the fallthrough pc. -/
+private theorem fallback_next_target {profile : FeatureProfile} {op : CIL.Instruction} {pc : Nat}
+    {frame frame' : Frame} {stack stack' : List Value} {m m' : Memory} {target : Nat}
+    (h : (match pureArity op with
+      | some argc =>
+        if stack.length < argc then Except.error ExecutionFault.invalidState
+        else do
+          let values ← scalars (List.take argc stack)
+          match CIL.step op false none pc values (fun _ => none) profile with
+          | some (CIL.Action.next target result _) => do
+            let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
+            Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
+          | _ => Except.error ExecutionFault.invalidState
+      | none => do
+        let __x ← instruction op stack m
+        Pure.pure (FrameAction.next (pc + 1) __x.snd frame __x.fst)) =
+      .ok (.next target stack' frame' m')) :
+    (op.continues = true ∧ target = pc + 1) ∨ target ∈ op.targets := by
+  cases hp : pureArity op with
+  | none =>
+    rw [hp] at h
+    dsimp only at h
+    obtain ⟨_, found, h⟩ := except_bind_ok h
+    cases h
+    exact .inl ⟨instruction_continues found, rfl⟩
+  | some argc =>
+    rw [hp] at h
+    dsimp only at h
+    split at h
+    · cases h
+    · obtain ⟨_, _, h⟩ := except_bind_ok h
+      split at h
+      · rename_i stepTarget _ _ stepped
+        obtain ⟨_, _, h⟩ := except_bind_ok h
+        cases h
+        exact CIL.step_next_target stepped
+      · cases h
+
 /-- A successful call or construction is a step of an instruction that reads its link, and enters
     a method its link at the step's pc lists. -/
 theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args : List Value}
@@ -69,9 +152,11 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
     op.readsLink = true ∧ callee ∈ body.calleesAt pc := by
   unfold step observedCall referenceCompareCall referenceSubtractCall newobjStep
     constructAggregate constructObject at h
+  replace h := observer_ok h
   dsimp only at h
   split at h
   all_goals repeat' first
+    | exact absurd (fallback_callee_none h) (by rw [enters]; decide)
     | exact calliStep_callee h enters
     | unfold returnFrom at h
     | unfold localAllocation at h
@@ -84,7 +169,8 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
       refine ⟨rfl, ?_⟩
       rw [CIL.Method.calleesAt, ‹body.linkAt pc = _›]
       first
-      | (simp only [Option.map_some, Option.getD_some, CIL.Link.callees, List.mem_singleton]; done)
+      | (simp only [Option.map_some, Option.getD_some, CIL.Link.callees, List.mem_singleton];
+         done)
       | (simp only [Option.map_some, Option.getD_some, CIL.Link.callees]
          exact virtualTarget_mem ‹_›)
     | contradiction
@@ -102,7 +188,10 @@ theorem step_managed_tail_action {body : CIL.Method} {signature : CIL.ManagedSig
     (executed : step body (.calli signature true) pc args frame stack memory =
       .ok action) :
     ∃ callee arguments result, action = .tailCall callee arguments result := by
-  simp only [step, calliStep, Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  unfold step at executed
+  replace executed := observer_ok executed
+  unfold calliStep at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve | cases executed; exact ⟨_, _, _, rfl⟩
     | cases executed
@@ -110,7 +199,6 @@ theorem step_managed_tail_action {body : CIL.Method} {signature : CIL.ManagedSig
   all_goals simp_all
 #print axioms step_managed_tail_action
 
-set_option maxHeartbeats 800000 in
 /-- A step that stays in the frame resumes at the fallthrough of a continuing instruction or
     at one of its targets. -/
 theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args : List Value}
@@ -122,33 +210,31 @@ theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {
     (op.continues = true ∧ target = pc + 1) ∨ target ∈ op.targets := by
   unfold step observedCall referenceCompareCall referenceSubtractCall newobjStep
     constructAggregate constructObject at h
+  replace h := observer_ok h
   dsimp only at h
   split at h
-  · cases h
-  · split at h
-    all_goals repeat' first
-      | (rw [leaveStep_of_handlers_nil (free rfl)] at h; cases h
-         exact .inr (List.mem_singleton.mpr rfl))
-      | (rw [endFinallyStep_of_handlers_nil (free rfl)] at h; cases h)
-      | (unfold calliStep at h; simp only [Pure.pure, Except.pure] at h)
-      | (unfold returnFrom at h)
-      | (unfold localAllocation at h)
-      | (unfold initializeSpanHome at h)
-      | solve |
-        (obtain ⟨_, _, _, nextEq, _⟩ := modelStep_frame h
-         cases nextEq
-         exact .inl ⟨by simp_all [CIL.Instruction.continues], rfl⟩)
-      | solve |
-        cases h
-        first
-        | exact .inl ⟨rfl, rfl⟩
-        | (split <;> first | exact .inl ⟨rfl, rfl⟩ | exact .inr (List.mem_singleton.mpr rfl))
-        | exact CIL.step_next_target ‹_›
-      | solve | cases h
-      | contradiction
-      | (obtain ⟨_, found, h⟩ := except_bind_ok h
-         try (have := instruction_continues found; cases h; exact .inl ⟨this, rfl⟩))
-      | split at h
+  all_goals repeat' first
+    | exact fallback_next_target h
+    | (rw [leaveStep_of_handlers_nil (free rfl)] at h; cases h
+       exact .inr (List.mem_singleton.mpr rfl))
+    | (rw [endFinallyStep_of_handlers_nil (free rfl)] at h; cases h)
+    | (unfold calliStep at h; simp only [Pure.pure, Except.pure] at h)
+    | (unfold returnFrom at h)
+    | (unfold localAllocation at h)
+    | (unfold initializeSpanHome at h)
+    | solve |
+      (obtain ⟨_, _, _, nextEq, _⟩ := modelStep_frame h
+       cases nextEq
+       exact .inl ⟨by simp_all [CIL.Instruction.continues], rfl⟩)
+    | solve |
+      cases h
+      first
+      | exact .inl ⟨rfl, rfl⟩
+      | (split <;> first | exact .inl ⟨rfl, rfl⟩ | exact .inr (List.mem_singleton.mpr rfl))
+    | solve | cases h
+    | contradiction
+    | (obtain ⟨_, _, h⟩ := except_bind_ok h)
+    | split at h
 
 #print axioms step_next_target
 

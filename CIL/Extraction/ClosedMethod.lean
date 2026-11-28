@@ -176,10 +176,13 @@ private theorem length_of_mapM_option {α β : Type} {f : α → Option β} :
 
 /-- Closed decoding validates the parameter homes, local kinds and argument instructions. -/
 theorem ParameterHomesValid.of_closed {profile : FeatureProfile}
-    {environment : LayoutEnvironment} {links : List (Nat × Link)} {reachable : List Bool}
+    {environment : LayoutEnvironment} {layouts : Array ComputedLayout}
+    {links : List (Nat × Link)} {reachable : List Bool}
     {closed : RawMethod} {storage : RawArguments} {method : Method}
-    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method) :
-    ParameterHomesValid environment.layouts storage reachable method := by
+    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method)
+    (sameLayouts : environment.layouts = layouts := by rfl) :
+    ParameterHomesValid layouts storage reachable method := by
+  subst sameLayouts
   unfold Method.ofClosed? at decoded
   cases failure : firstLiveHole 0 reachable
       (methodCode profile environment links reachable closed)
@@ -202,6 +205,43 @@ theorem ParameterHomesValid.of_closed {profile : FeatureProfile}
         simpa [List.length_map] using length_of_mapM_option hLocals
 
 #print axioms ParameterHomesValid.of_closed
+
+/-- Closed decoding sets `opaqueVectorLocals` to `rawOpaqueLocals`. -/
+private theorem _root_.CIL.Method.ofClosed?_opaqueLocals {profile : FeatureProfile}
+    {environment : LayoutEnvironment} {links : List (Nat × Link)} {reachable : List Bool}
+    {closed : RawMethod} {storage : RawArguments} {method : Method}
+    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method) :
+    method.opaqueVectorLocals = rawOpaqueLocals closed reachable := by
+  unfold Method.ofClosed? at decoded
+  cases failure : firstLiveHole 0 reachable
+      (methodCode profile environment links reachable closed)
+    <;> simp only [failure] at decoded
+  repeat' split at decoded
+  all_goals first | contradiction | (cases decoded; rfl)
+
+#print axioms CIL.Method.ofClosed?_opaqueLocals
+
+/-- Closed decoding discharges `OpaqueLocalsValid` without scanning `method.code` whenever the
+    method declares no `Vector128<UInt64>` local. -/
+theorem OpaqueLocalsValid.of_closed_none {profile : FeatureProfile}
+    {environment : LayoutEnvironment} {links : List (Nat × Link)} {reachable : List Bool}
+    {closed : RawMethod} {storage : RawArguments} {method : Method}
+    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method)
+    (noEligible : hasEligibleOpaqueLocal closed = false) :
+    OpaqueLocalsValid closed method := by
+  have slotsEmpty : method.opaqueVectorLocals = [] :=
+    (Method.ofClosed?_opaqueLocals decoded).trans (rawOpaqueLocals_of_no_eligible noEligible)
+  have indicesEmpty : opaqueLocalIndices closed = [] := opaqueLocalIndices_of_no_eligible noEligible
+  rw [OpaqueLocalsValid_iff_scan]
+  refine ⟨?_, ?_, ?_⟩
+  · simp [slotsEmpty, indicesEmpty]
+  · simp [slotsEmpty]
+  · rw [slotsEmpty]
+    apply List.all_eq_true.mpr
+    intro operation _
+    cases operation <;> rfl
+
+#print axioms OpaqueLocalsValid.of_closed_none
 
 /-- Closed decoding never replaces a live call-family opcode with `pop`. -/
 theorem UnsafeCallsValid.of_closed {closed storage reachable layouts constants linkAt certificate}
