@@ -152,6 +152,10 @@ internal static class VerificationSelection
             "Tests/BufferContents.lean", "Tests/Linking.lean", "Tests/StepFlow.lean", "Tests/RegionRun.lean",
             "Tests/StoreFacts.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
             "Tests/VerificationReuse.cs", "Tests/SupportExtractionCache.cs", "Tests/SummaryCalls.cs",
+            "Tests/AllocationImports.cs", "Tests/JointReplay.cs", "Tests/BuildReuse.cs",
+            "Tests/EnvironmentLimit.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs",
+            "Tests/TemplateIndexes.cs", "Tests/OutlineStops.cs", "Tests/ImportIndexes.cs",
+            "Tests/StaticValueIndexes.cs", "Tests/DecodedOpcodes.cs",
             "Tests/RuntimeExceptions.lean", "Tests/ProfileContract.lean",
             "Tests/InstructionEquations.lean", "Tests/CodeAt.lean", "Tests/SimdLanes.lean",
             "Tests/SegmentContract.lean",
@@ -191,6 +195,9 @@ internal static class VerificationSelection
             "Tests/ProgramClosures/Assembly/ProgramClosures.csproj", "Tests/ProgramClosures/Assembly/Closure.cs"]);
         inputs["unsafe"].UnionWith(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
         inputs["intrinsics"].UnionWith(["Tests/ExactIntrinsics.lean", "Tests/ExactIntrinsics/WordContracts.lean"]);
+        // Generated outlines emit `import CIL.Safety.LoopScaffold` at runtime.
+        inputs["outlines"].Add("CIL/Safety/LoopScaffold.lean");
+        inputs["outlines-components"].Add("CIL/Safety/LoopScaffold.lean");
         inputs["stepping"].Add("scripts/ProofCost.lean");
         // Self-admission scans the extractor itself, so every source compiled into it can change the result.
         inputs["blockers"].UnionWith(["Tests/SelfAdmissionBaseline.txt", "Tests/ExampleAdmissionBaseline.txt"]);
@@ -238,6 +245,14 @@ internal static class VerificationSelection
         }
         references.UnionWith(Matches(text, @"^import\s+([\w.]+)", RegexOptions.Multiline)
             .Select(name => name.Replace('.', '/') + ".lean"));
+        if (path.EndsWith(".cs", StringComparison.Ordinal) &&
+            (path.StartsWith("Tests/", StringComparison.Ordinal) ||
+                path.StartsWith("Examples/", StringComparison.Ordinal)))
+        {
+            references.UnionWith(Matches(text, @"^\s*import\s+((?:CIL|StrictBinding)(?:\.[\w]+)*)",
+                    RegexOptions.Multiline)
+                .Select(name => name.Replace('.', '/') + ".lean"));
+        }
         references.UnionWith(Matches(text, @"""(Tests\.[\w.]+)""")
             .Select(name => name.Replace('.', '/') + ".lean"));
         foreach (var include in Matches(text, @"^#:include\s+(\S+)", RegexOptions.Multiline))
@@ -257,12 +272,138 @@ internal static class VerificationSelection
             .SelectMany(block => Documentation.CommandLines(block))
             .SelectMany(entry => Matches(entry.Command, @"(Examples/[\w./-]+\.(?:lean|cs))"));
 
-    internal static string[] Select(IReadOnlyDictionary<string, HashSet<string>> inputs,
-        IEnumerable<string> paths, string eventName = "pull_request")
+    // Modules reachable from the default `CIL` import, extracted files, the auditor or observation hooks.
+    // Any other existing `.lean` module under `CIL/` is opt-in and only reaches suites that import it.
+    static readonly string[] AmbientCilRoots =
+    [
+        "CIL.lean",
+        "CIL/OleanAudit.lean", "CIL/Replay.lean",
+        "CIL/Observe.lean", "CIL/Safety/FailureRecords.lean",
+        "CIL/Crypto/Sha1.lean", "CIL/Crypto/Words.lean",
+        "CIL/Runtime/ProgramEntry.lean", "CIL/Extraction/DecodedDefinition.lean",
+        "CIL/SymbolicExecution.lean", "CIL/InstructionEquations.lean",
+        "CIL/Safety/Execution.lean", "CIL/Safety/ResolutionFacts.lean", "CIL/Safety/ObjectFields.lean"
+    ];
+
+    static readonly HashSet<string> SimdIsaLeafModules = new(StringComparer.Ordinal)
     {
+        "CIL/SIMD/AES.lean", "CIL/SIMD/AVX.lean", "CIL/SIMD/AVX2.lean", "CIL/SIMD/AVX512.lean",
+        "CIL/SIMD/AVX512DQ.lean", "CIL/SIMD/AdvSimd.lean", "CIL/SIMD/ArmBase.lean",
+        "CIL/SIMD/BMI1.lean", "CIL/SIMD/BMI2.lean", "CIL/SIMD/SSE.lean", "CIL/SIMD/X86Base.lean"
+    };
+
+    static readonly string[] SimdIsaSuites =
+    [
+        "core", "dispatch", "divrem", "docs", "evidence", "exportsprofiles",
+        "gates", "intrinsics", "templates", "unsafe"
+    ];
+
+    static readonly string[] StrictBindingBaseSuites =
+        ["assemblies", "audit", "cli", "core", "docs", "imports", "workspace"];
+
+    // Isolated Extractor subsystems whose runtime behavior is scoped to specific suites. Every entry
+    // includes `blockers` (self-admission scans every file compiled into Extractor) and `docs`.
+    static readonly Dictionary<string, string[]> IsolatedExtractorSuites = new(StringComparer.Ordinal)
+    {
+        ["Extractor/ProofOutline.cs"] = ["blockers", "cli", "core", "docs", "loops", "outlines", "outlines-components"],
+        ["Extractor/ProofOutlineArrays.cs"] = ["blockers", "cli", "core", "docs", "loops", "outlines", "outlines-components"],
+        ["Extractor/ProofOutlineGenerate.cs"] = ["blockers", "cli", "core", "docs", "loops", "outlines", "outlines-components"],
+        ["Extractor/ProofOutlineLoops.cs"] = ["blockers", "cli", "core", "docs", "loops", "outlines", "outlines-components"],
+        ["Extractor/ProofOutlineObjects.cs"] = ["blockers", "cli", "core", "docs", "loops", "outlines", "outlines-components"],
+        ["Extractor/ProofOutlineScalar.cs"] = ["blockers", "cli", "core", "docs", "loops", "outlines", "outlines-components"],
+        ["Extractor/ProofOutlineSpanStores.cs"] = ["blockers", "cli", "core", "docs", "loops", "outlines", "outlines-components"],
+        ["Extractor/ProofOutlineStructLoops.cs"] = ["blockers", "cli", "core", "docs", "loops", "outlines", "outlines-components"],
+        ["Extractor/ProofOutlineStructs.cs"] = ["blockers", "cli", "core", "docs", "loops", "outlines", "outlines-components"],
+        ["Extractor/OutlineInstructions.cs"] = ["blockers", "cli", "core", "docs", "loops", "outlines", "outlines-components"],
+        ["Extractor/ExceptionLint.cs"] = ["blockers", "cli", "docs"],
+        ["Extractor/Blockers.cs"] = ["blockers", "cli", "docs"],
+        ["Extractor/TemplateEmitter.cs"] = ["blockers", "cli", "core", "docs", "gates", "pool", "templates"],
+        ["Extractor/TemplateVectorFrames.cs"] = ["blockers", "cli", "core", "docs", "gates", "pool", "templates"],
+        ["Extractor/ProofGates.cs"] = ["blockers", "cli", "core", "docs", "gates"],
+        ["Extractor/ProofBindingCatalog.cs"] = ["blockers", "cli", "core", "docs", "gates"]
+    };
+
+    static readonly HashSet<string> IsolatedContractExportFiles = new(StringComparer.Ordinal)
+    {
+        "Extractor/ContractDependencyGraph.cs", "Extractor/ContractExportManifest.cs",
+        "Extractor/ContractMethodMetadata.cs", "Extractor/ContractSourceBundle.cs",
+        "Extractor/ExportInitialization.cs", "Extractor/ImportedLayoutMetadata.cs",
+        "Extractor/ProfileContractExport.cs"
+    };
+
+    static HashSet<string> AmbientCilModules(string root)
+    {
+        var reachable = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Stack<string>();
+        foreach (var entry in AmbientCilRoots)
+            if (File.Exists(Path.Combine(root, entry)) && reachable.Add(entry)) pending.Push(entry);
+        while (pending.TryPop(out var path))
+        {
+            var text = File.ReadAllText(Path.Combine(root, path));
+            foreach (var module in Matches(text, @"^import\s+([\w.]+)", RegexOptions.Multiline))
+            {
+                var target = module.Replace('.', '/') + ".lean";
+                if ((target == "CIL.lean" || target.StartsWith("CIL/", StringComparison.Ordinal)) &&
+                    File.Exists(Path.Combine(root, target)) && reachable.Add(target))
+                    pending.Push(target);
+            }
+        }
+        return reachable;
+    }
+
+    static bool TrySelectScopedSubsystem(string root, string path,
+        IReadOnlyDictionary<string, HashSet<string>> inputs, HashSet<string> manual,
+        Lazy<HashSet<string>> ambientCil, Lazy<string[]> exportSuites, out string[] scoped)
+    {
+        if (SimdIsaLeafModules.Contains(path))
+        {
+            scoped = SimdIsaSuites;
+            return true;
+        }
+        if (path.StartsWith("CIL/", StringComparison.Ordinal) && path.EndsWith(".lean", StringComparison.Ordinal) &&
+            File.Exists(Path.Combine(root, path)) && !ambientCil.Value.Contains(path))
+        {
+            var owners = inputs.Where(pair => !manual.Contains(pair.Key) && pair.Value.Contains(path))
+                .Select(pair => pair.Key).ToArray();
+            if (owners.Length == 0)
+            {
+                scoped = [];
+                return false;
+            }
+            scoped = [.. owners, "docs"];
+            return true;
+        }
+        if (path == "StrictBinding.lean" || path.StartsWith("StrictBinding/", StringComparison.Ordinal))
+        {
+            var owners = inputs.Where(pair => !manual.Contains(pair.Key) && pair.Value.Contains(path))
+                .Select(pair => pair.Key);
+            scoped = [.. StrictBindingBaseSuites, .. exportSuites.Value, .. owners];
+            return true;
+        }
+        if (IsolatedExtractorSuites.TryGetValue(path, out var extractorSuites))
+        {
+            scoped = extractorSuites;
+            return true;
+        }
+        if (IsolatedContractExportFiles.Contains(path))
+        {
+            scoped = ["blockers", "cli", "core", "docs", "evidence", "imports", .. exportSuites.Value];
+            return true;
+        }
+        scoped = [];
+        return false;
+    }
+
+    internal static string[] Select(IReadOnlyDictionary<string, HashSet<string>> inputs,
+        IEnumerable<string> paths, string eventName = "pull_request", string? root = null)
+    {
+        root ??= Root;
         var manual = new HashSet<string>(VerificationSuites.ManualSuites, StringComparer.Ordinal);
         var all = inputs.Keys.Where(name => !manual.Contains(name)).Order(StringComparer.Ordinal).ToArray();
         if (eventName != "pull_request") return all;
+        var ambientCil = new Lazy<HashSet<string>>(() => AmbientCilModules(root));
+        var exportSuites = new Lazy<string[]>(() =>
+            ExportVerificationSuites.Plan().Select(entry => entry.Name).ToArray());
         var selected = new HashSet<string>(StringComparer.Ordinal);
         foreach (var path in paths)
         {
@@ -278,9 +419,15 @@ internal static class VerificationSelection
             // Other workflows run in their own jobs; only this workflow's definition feeds the suites.
             if (path.StartsWith(".github/workflows/", StringComparison.Ordinal) && path != ".github/workflows/verification.yml") continue;
             if (path is "scripts/ExportVerificationSuites.cs" or "scripts/VerificationSuites.cs") return all;
+            if (TrySelectScopedSubsystem(root, path, inputs, manual, ambientCil, exportSuites, out var scoped))
+            {
+                selected.UnionWith(scoped.Where(name => inputs.ContainsKey(name) && !manual.Contains(name)));
+                continue;
+            }
             // A script compiled into the CLI reaches every suite through the built command, include edge or not.
             if (new[] { "CIL/", "Extractor/", "Examples/Assembly/", "Examples/FSharp/" }
-                    .Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) || path == "Tests/Support.lean" ||
+                    .Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) ||
+                path is "CIL.lean" or "Tests/Support.lean" ||
                 path.StartsWith("scripts/", StringComparison.Ordinal) && inputs["blockers"].Contains(path))
                 return all;
             var owners = inputs.Where(pair => pair.Value.Contains(path)).Select(pair => pair.Key).ToArray();

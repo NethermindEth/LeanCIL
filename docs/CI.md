@@ -39,7 +39,11 @@ the Lean modules those import.
 | `README.md`, Markdown under `docs/` or `skills/` | `docs` only |
 | Other Markdown, `LICENSE` | none |
 | A workflow file other than `verification.yml` | none; that workflow runs its own jobs |
-| `CIL/`, `Extractor/`, `Examples/Assembly/`, `Examples/FSharp/`, `Tests/Support.lean`, `scripts/ExportVerificationSuites.cs`, a script compiled into the extractor | all |
+| Opt-in `CIL/` modules not reachable from `CIL.lean`, extracted imports, the auditor or observation hooks (such as `CIL/Embedding/`, `CIL/Safety/Embedding/`, `CIL/Safety/AllocationRefinement.lean` and its renaming helpers, and `CIL/Safety/LoopScaffold.lean`) | suites that transitively import them, plus `docs` (falls back to all if unowned) |
+| Pure ISA-model SIMD leaf modules (`CIL/SIMD/{AES,AVX,AVX2,AVX512,AVX512DQ,AdvSimd,ArmBase,BMI1,BMI2,SSE,X86Base}.lean`) | `core`, `dispatch`, `divrem`, `docs`, `evidence`, `exportsprofiles`, `gates`, `intrinsics`, `templates`, `unsafe` |
+| `StrictBinding.lean`, `StrictBinding/` | `assemblies`, `audit`, `cli`, `core`, `docs`, `imports`, `workspace`, every `exports*` partition and any direct owners |
+| Isolated `Extractor/` subsystems (`ProofOutline*.cs`/`OutlineInstructions.cs`, `ExceptionLint.cs`, `Blockers.cs`, `Template*.cs`, `ProofGates.cs`/`ProofBindingCatalog.cs`, contract-export bundle/manifest/metadata helpers) | their subsystem suites plus `blockers` and `docs` |
+| Other `CIL/`, `CIL.lean`, `Extractor/`, `Examples/Assembly/`, `Examples/FSharp/`, `Tests/Support.lean`, `scripts/ExportVerificationSuites.cs`, a script compiled into the extractor | all |
 | A file some suite owns | its owners |
 | Any other path, including `verification.yml` and build configuration | all |
 

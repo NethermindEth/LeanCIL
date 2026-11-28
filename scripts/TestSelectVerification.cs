@@ -220,10 +220,57 @@ Test("dynamic proof paths", () =>
 });
 Test("shared unknown and workflow inputs", () =>
 {
-    foreach (var path in new[] { "CIL/Safety/Memory.lean", "Extractor/UnsafeModels.cs", "global.json",
-        "Examples/Assembly/SkipInitialization.cs", "Tests/NewTest.cs", ".github/workflows/verification.yml",
-        "scripts/SelectVerification.cs" })
+    foreach (var path in new[] { "CIL/Safety/Memory.lean", "CIL/Semantics.lean", "CIL.lean",
+        "CIL/OleanAudit.lean", "CIL/SIMD/Availability.lean", "Extractor/UnsafeModels.cs",
+        "Extractor/LeanEmitter.cs", "Extractor/ContractInterface.cs", "Extractor/NewCore.cs",
+        "global.json", "Examples/Assembly/SkipInitialization.cs", "Tests/NewTest.cs",
+        ".github/workflows/verification.yml", "scripts/SelectVerification.cs" })
         Equal(Select([path]), allSuites);
+});
+Test("dependency-aware selection narrows isolated CIL, StrictBinding and Extractor subsystems", () =>
+{
+    var embedding = Select(["CIL/Embedding/Tactic.lean"]);
+    Require(embedding.Contains("core") && embedding.Contains("docs") && embedding.Length < allSuites.Length / 2,
+        "Opt-in embedding module should select only its importers and docs: " + string.Join(", ", embedding));
+    var embeddingStep = Select(["CIL/Safety/Embedding/Step.lean"]);
+    Require(embeddingStep.Contains("core") && embeddingStep.Contains("docs") &&
+        embeddingStep.Length < allSuites.Length / 2,
+        "Opt-in embedding safety module should select only its importers and docs: " +
+        string.Join(", ", embeddingStep));
+    var allocation = Select(["CIL/Safety/AllocationRefinement.lean"]);
+    Require(allocation.Contains("core") && allocation.Contains("docs") && allocation.Length < allSuites.Length / 2,
+        "Opt-in allocation refinement should select only its importers and docs: " + string.Join(", ", allocation));
+    var loops = Select(["CIL/Safety/LoopScaffold.lean"]);
+    foreach (var expected in new[] { "core", "docs", "loops", "outlines", "outlines-components", "gates", "pool" })
+        Require(loops.Contains(expected), "LoopScaffold selection missed " + expected);
+    Require(loops.Length < allSuites.Length, "LoopScaffold selection should stay narrower than all suites");
+    var aes = Select(["CIL/SIMD/AES.lean"]);
+    Equal(aes, ["core", "dispatch", "divrem", "docs", "evidence", "exportsprofiles",
+        "gates", "intrinsics", "templates", "unsafe"]);
+    var strict = Select(["StrictBinding/Bind.lean"]);
+    foreach (var expected in new[] { "assemblies", "audit", "cli", "core", "docs", "imports", "workspace",
+        "exports", "exportsfull", "exportsprofiles" })
+        Require(strict.Contains(expected), "StrictBinding selection missed " + expected);
+    Require(!strict.Contains("division") && !strict.Contains("outlines") && !strict.Contains("intrinsics"),
+        "StrictBinding selection included unrelated suites");
+    Equal(Select(["Extractor/ExceptionLint.cs"]), ["blockers", "cli", "docs"]);
+    Equal(Select(["Extractor/Blockers.cs"]), ["blockers", "cli", "docs"]);
+    Equal(Select(["Extractor/ProofOutlineLoops.cs"]),
+        ["blockers", "cli", "core", "docs", "loops", "outlines", "outlines-components"]);
+    Equal(Select(["Extractor/TemplateEmitter.cs"]),
+        ["blockers", "cli", "core", "docs", "gates", "pool", "templates"]);
+    Equal(Select(["Extractor/ProofGates.cs"]), ["blockers", "cli", "core", "docs", "gates"]);
+    var contractExport = Select(["Extractor/ContractExportManifest.cs"]);
+    foreach (var expected in new[] { "blockers", "cli", "core", "docs", "evidence", "imports",
+        "exports", "exportsfull", "exportstyped" })
+        Require(contractExport.Contains(expected), "ContractExportManifest selection missed " + expected);
+    Require(!contractExport.Contains("division") && !contractExport.Contains("intrinsics"),
+        "ContractExportManifest selection included unrelated suites");
+    // Deleted or unknown opt-in CIL files fall back conservatively to all suites.
+    Equal(Select(["CIL/Safety/Embedding/Deleted.lean"]), allSuites);
+    // Main and manual runs still execute every automatic suite even for narrowed subsystems.
+    Equal(Select(["Extractor/ExceptionLint.cs"], "push"), allSuites);
+    Equal(Select(["StrictBinding/Bind.lean"], "workflow_dispatch"), allSuites);
 });
 Test("other workflows do not rerun suites", () =>
 {
