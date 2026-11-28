@@ -429,6 +429,18 @@ foreach (var (mutation, marker) in new[]
         throw new InvalidOperationException("Incorrect throw rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
+// A bound constructor package rewrites only its own call sites, so another System.Runtime TypeRef
+// (such as FaultSlot.Error or an exception catch handler) must be refused at extraction rather than
+// emitting a constructor package that Lean rejects.
+const string guardedSelector = "Examples.Throws::Guarded(System.UInt32,System.UInt32[],Examples.FaultSlot)";
+var guardedRejectedOutput = Path.Combine(root, "Guarded-Rejected");
+var guardedRejected = Execute(Extract("extract", assembly, "Examples", guardedSelector, guardedRejectedOutput));
+if (guardedRejected.Code != 1 || File.Exists(Path.Combine(guardedRejectedOutput, "Extracted.lean")) ||
+    !guardedRejected.Output.Contains("Rejected external call", StringComparison.Ordinal))
+    throw new InvalidOperationException(
+        "Guarded method with non-constructor System.Runtime references was not rejected at extraction:\n" +
+        guardedRejected.Output);
+Console.WriteLine("PASS Guarded: non-constructor System.Runtime references refuse constructor binding at extraction");
 queue.Flush();
 Console.WriteLine("PASS folded throws, located faults, runtime comparisons, forged types and exact-pattern rejection");
 
