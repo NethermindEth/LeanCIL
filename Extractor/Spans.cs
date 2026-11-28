@@ -26,7 +26,7 @@ internal static class Spans
         if (Arrays.Storage(type) is { Kind: not NativeOperands.Kind.ArrayComposite } primitive)
             return primitive.Width;
         if (MetadataValidation.IntegerVectorWidth(type) is { } vector) return vector;
-        if (!MetadataValidation.IsAggregate(type, type.Module)) return null;
+        if (!MetadataValidation.IsAggregate(type, type.Module) || MetadataValidation.IsByRefLike(type)) return null;
         var widths = EnumTypes.Cached(type, _ => new ElementLayouts()).Widths;
         if (widths.TryGetValue(architecture, out var width)) return width;
         width = MetadataValidation.Layout(type, type.Module, architecture);

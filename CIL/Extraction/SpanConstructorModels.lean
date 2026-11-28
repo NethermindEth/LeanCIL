@@ -40,6 +40,7 @@ private def Source.operand (source : Source) : ModelOperand :=
 private def Source.constructor (source : Source) (writable staticData : Bool)
     (reader : CallLayouts) (method : MethodRef) : Option SpanConstructor := do
   let .apply _ element := method.owner | none
+  let _ ← reader.storage method.owner
   let _ ← spanElementName element
   let width ← match element with
     | .aggregate .. => (reader.valueShape element).size?

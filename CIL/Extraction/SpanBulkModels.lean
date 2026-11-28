@@ -73,6 +73,7 @@ private def BulkMember.operation (member : BulkMember) (owner : TypeExpr) (reade
     let storage ← arrayElementType element
     if storage matches .aggregate .. | .vector .. then none
     return .arrayFill storage counted
+  let _ ← reader.storage method.owner
   let width ← match element with
     | .aggregate .. => (reader.valueShape element).size?
     | _ => spanElementWidth element

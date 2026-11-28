@@ -139,19 +139,18 @@ private def decoded (raw : RawInstruction) (layouts : LayoutEnvironment := {}) :
     initLocals := false, maxStack := 3, genericParameters := [], code := [raw] }
   (decodeRaw .scalar layouts [] [true] body []).map Method.code
 
-/-- Only array conversions reject an otherwise valid byref-like aggregate layout. -/
-theorem byRefLikeArrays :
+/-- Span storage and every span member model refuse a byref-like aggregate element. -/
+theorem byRefLikeSpans :
+    typeStorage (environment 1 true).rawLayouts (span true aggregate) = none ∧
+    typeStorage (environment 1 true).rawLayouts (span false aggregate) = none ∧
     (rows aggregate 4).all (fun row =>
       let raw := row.raw row.declared
       let call := Instruction.call row.method {}
-      let expected := match row.operation with
-        | .arraySpan .. => liveHoleAt 0 40
-        | _ => .ok [call]
       decide (decoded raw (environment 1) = .ok [call]) &&
-        decide (decoded raw (environment 1 true) = expected)) = true := by
+        decide (decoded raw (environment 1 true) = liveHoleAt 0 40)) = true := by
   decide +kernel
 
-#print axioms byRefLikeArrays
+#print axioms byRefLikeSpans
 
 /-- A closed operand in the wrong slot or with the wrong calling convention has no model. -/
 theorem closedRefusals :
