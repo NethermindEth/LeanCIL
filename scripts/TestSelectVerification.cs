@@ -67,16 +67,24 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     // Every job repeats setup and restores, so a full run must not go back to one job per suite.
     double Seconds(VerificationSelection.Group group) => group.Suites.Sum(suite => durations[suite]) +
         (group.Libraries ? measured.LibrarySeconds : 0);
-    var target = VerificationSelection.GroupSeconds(durations);
-    var longest = durations.MaxBy(suite => suite.Value);
-    Require(groups.Length <= allSuites.Length / 3, "Suites were not packed: " + groups.Length + " jobs");
-    Require(target == Math.Min(longest.Value * 1.10, durations.Values.Sum() / VerificationSelection.Runners),
-        "Packed jobs must fit within the longest suite's 10% allowance and one runner's share");
+    var activeDurations = durations.Where(pair => !VerificationSuites.ManualSuites.Contains(pair.Key))
+        .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+    var target = VerificationSelection.GroupSeconds(durations, measured.LibrarySeconds);
+    var longest = activeDurations.MaxBy(suite => suite.Value);
+    Require(groups.Length <= VerificationSelection.Runners,
+        "Full automatic run spilled past one wave of runners: " + groups.Length + " jobs");
+    Require(target == Math.Max(longest.Value * 1.10,
+        (activeDurations.Values.Sum() + measured.LibrarySeconds) / VerificationSelection.Runners * 1.05),
+        "Packed jobs must target the active automatic suites plus library measurement");
+    // Manual suites in the duration table must not inflate the automatic target.
+    var inflatedManual = new Dictionary<string, double>(durations) { ["lookups"] = 99999 };
+    Require(VerificationSelection.GroupSeconds(inflatedManual, measured.LibrarySeconds) == target,
+        "Manual suite durations must not affect the automatic job target");
     // A refreshed table moves the target; the longest suites may then swap places without unbalancing a run.
-    var refreshed = new Dictionary<string, double>(durations) { ["evidence"] = longest.Value - 100 };
-    Require(VerificationSelection.GroupSeconds(refreshed) <= longest.Value * 1.10 &&
-        VerificationSelection.GroupSeconds(new Dictionary<string, double> { ["only"] = 90 }) == 90.0 / 8,
-        "The target follows the measured total, not one suite");
+    var refreshed = new Dictionary<string, double>(activeDurations) { ["evidence"] = longest.Value + 500 };
+    Require(VerificationSelection.GroupSeconds(refreshed) >= (longest.Value + 500) * 1.10 &&
+        VerificationSelection.GroupSeconds(new Dictionary<string, double> { ["only"] = 90 }) == 90.0 * 1.10,
+        "The target follows the measured active suites, not one fixed suite");
     Require(groups.Select(Seconds).SequenceEqual(groups.Select(Seconds).OrderDescending()),
         "Groups must start in descending order of estimated work");
     foreach (var group in groups.Where(group => group.Suites.Length > 1))

@@ -49,12 +49,22 @@ internal static class VerificationSelection
     internal const int Runners = 8;
 
     // More members than this make a job's summary long and its name useless for finding a failure.
-    internal const int GroupMembers = 8;
+    internal const int GroupMembers = 12;
 
-    // Allow a short suite to share the longest job while capping each group at one runner's share.
+    // Cap each group at one runner's share of the active automatic suites (with a small packing
+    // margin), or 110% of the longest single suite when one suite dominates the run.
     const double LongestSuiteAllowance = 1.10;
-    internal static double GroupSeconds(IReadOnlyDictionary<string, double> durations) =>
-        Math.Min(durations.Values.Max() * LongestSuiteAllowance, durations.Values.Sum() / Runners);
+    const double PackingAllowance = 1.05;
+    internal static double GroupSeconds(IReadOnlyDictionary<string, double> durations,
+        double librarySeconds = 0)
+    {
+        var manual = new HashSet<string>(VerificationSuites.ManualSuites, StringComparer.Ordinal);
+        var active = durations.Where(pair => !manual.Contains(pair.Key))
+            .Select(pair => pair.Value).ToArray();
+        var values = active.Length > 0 ? active : durations.Values.ToArray();
+        return Math.Max(values.Max() * LongestSuiteAllowance,
+            (values.Sum() + librarySeconds) / Runners * PackingAllowance);
+    }
 
     // A job's suites when few enough to read, else its longest suite and how many more it runs.
     static string Name(List<string> group) => group.Count <= 3 ? string.Join("+", group)
@@ -67,9 +77,9 @@ internal static class VerificationSelection
     {
         var run = ReadDurations(root);
         var durations = run.Suites;
-        var target = GroupSeconds(durations);
         var selected = suites.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         if (selected.Length == 0) return [];
+        var target = GroupSeconds(durations, planLibraries ? run.LibrarySeconds : 0);
         double Seconds(string suite) => durations.GetValueOrDefault(suite, double.PositiveInfinity);
         var carrier = selected.MinBy(Seconds)!;
         double Work(string suite) =>
@@ -84,8 +94,11 @@ internal static class VerificationSelection
         {
             bool Fits(List<string> group) => group.Count < GroupMembers &&
                 group.Sum(Work) + Work(suite) <= target;
-            var worker = Enumerable.Range(0, workers).MinBy(i =>
-                loads[i] + (assigned[i].Any(Fits) ? 0 : run.SetupSeconds));
+            var available = Enumerable.Range(0, workers)
+                .Where(i => assigned[i].Count == 0 || assigned[i].Any(Fits)).ToArray();
+            var worker = available.Length > 0
+                ? available.MinBy(i => loads[i] + (assigned[i].Count == 0 ? run.SetupSeconds : 0))
+                : Enumerable.Range(0, workers).MinBy(i => loads[i] + run.SetupSeconds);
             var group = assigned[worker].LastOrDefault(Fits);
             if (group is null)
             {

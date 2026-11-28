@@ -172,15 +172,22 @@ long CheckAllocations(RowFixture fixture)
     return allocated;
 }
 
+const double StepGrowthLimit = 9;
+const double SpanGrowthLimit = 36;
+
+// Crossing from L1 to L2 cache can push one 4x row step past 6x while overall growth stays linear;
+// cap both each 4x step and the 16x span so O(N^1.5) and quadratic growth still fail.
 bool GrowthAccepted(double[] batches)
 {
     for (int index = 1; index < batches.Length; index++)
-        if (batches[index] > batches[index - 1] * 6 + 1) return false;
-    return true;
+        if (batches[index] > batches[index - 1] * StepGrowthLimit + 1) return false;
+    return batches.Length < 3 || batches[^1] <= batches[0] * SpanGrowthLimit + 1;
 }
 
 Require(GrowthAccepted([25, 100, 400]), "Linear batch growth was rejected");
 Require(GrowthAccepted([25, 125, 600]), "N log n batch growth was rejected");
+Require(GrowthAccepted([34, 210, 540]), "Cache-tier linear batch growth was rejected");
+Require(!GrowthAccepted([25, 200, 1600]), "Subquadratic N^1.5 batch growth was accepted");
 Require(!GrowthAccepted([25, 400, 6400]), "Quadratic batch growth was accepted");
 
 double Batch(RowFixture fixture, bool cold, int repetitions)
@@ -194,23 +201,37 @@ void CheckTimings(RowFixture[] fixtures, bool cold, int nameLength)
 {
     const int rounds = 9;
     const double minimumBatchMilliseconds = 25;
-    foreach (var fixture in fixtures) Batch(fixture, cold, 16);
-    int repetitions = 1;
-    while (Batch(fixtures[0], cold, repetitions) < minimumBatchMilliseconds)
-        repetitions = checked(repetitions * 2);
+    // Calibrate each fixture to a comparable ~25ms batch after warm-up so larger fixtures do not run
+    // 16x longer wall batches that absorb far more OS preemption or Tier-0 JIT skew.
+    int[] repetitions = new int[fixtures.Length];
+    for (int index = 0; index < fixtures.Length; index++)
+    {
+        int count = 1;
+        while (Batch(fixtures[index], cold, count) < minimumBatchMilliseconds)
+            count = checked(count * 2);
+        // Re-check once after warm-up so Tier-1 promotion does not shrink the calibrated batch.
+        while (Batch(fixtures[index], cold, count) < minimumBatchMilliseconds)
+            count = checked(count * 2);
+        repetitions[index] = count;
+    }
+    GC.Collect();
     double[][] samples = fixtures.Select(_ => new double[rounds]).ToArray();
     for (int round = 0; round < rounds; round++)
         for (int position = 0; position < fixtures.Length; position++)
         {
             int index = round % 2 == 0 ? position : fixtures.Length - 1 - position;
-            samples[index][round] = Batch(fixtures[index], cold, repetitions);
+            samples[index][round] = Batch(fixtures[index], cold, repetitions[index]);
         }
-    double[] minima = samples.Select(values => values.Min()).ToArray();
+    double[] minimumPasses = Enumerable.Range(0, fixtures.Length)
+        .Select(index => samples[index].Min() / repetitions[index]).ToArray();
+    double[] normalized = minimumPasses.Select(pass => pass * repetitions[0]).ToArray();
     for (int index = 0; index < fixtures.Length; index++)
         Console.WriteLine($"Rows={fixtures[index].Tokens.Length}, name bytes={nameLength}, cold={cold}, " +
-            $"passes={repetitions}, minimum batch ms={minima[index]:F3}, " +
-            $"minimum pass ms={minima[index] / repetitions:F6}");
-    Require(GrowthAccepted(minima), $"Modifier query CPU growth exceeded 6x+1ms: cold={cold}, bytes={nameLength}");
+            $"passes={repetitions[index]}, minimum batch ms={samples[index].Min():F3}, " +
+            $"minimum pass ms={minimumPasses[index]:F6}");
+    Require(GrowthAccepted(normalized),
+        $"Modifier query CPU growth exceeded {StepGrowthLimit}x/step or {SpanGrowthLimit}x/span: " +
+        $"cold={cold}, bytes={nameLength}");
 }
 
 foreach (int nameLength in new[] { 32, 512 })

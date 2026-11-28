@@ -11,7 +11,9 @@ using System.Text.Json;
 // Compare queue schedules without running or skipping verification suites.
 // With --jobs, print the jobs a full run is packed into and what they are estimated to take.
 var measured = VerificationSelection.ReadDurations();
-var durations = measured.Suites;
+var manual = new HashSet<string>(VerificationSuites.ManualSuites, StringComparer.Ordinal);
+var durations = measured.Suites.Where(pair => !manual.Contains(pair.Key))
+    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
 var alphabetical = durations.Keys.Order(StringComparer.Ordinal).ToArray();
 var longest = alphabetical.OrderByDescending(name => durations[name]).ToArray();
 
