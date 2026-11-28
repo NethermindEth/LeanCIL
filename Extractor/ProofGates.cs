@@ -130,13 +130,13 @@ partial class Program
         internal int? PlanCount;
     }
 
-    const string GatesUsage = "Usage: leancil gates manifest.json [--method name] [--profile name] " +
+    internal const string GatesUsage = "Usage: leancil gates manifest.json [--method name] [--profile name] " +
         "[--only id-prefix]... [--changed path]... [--check] [--fresh] [--rebuild-library] [--trace] " +
         "[--parallel count] [--results results.json] [--format text|json]\n" +
         "       leancil gates manifest.json --plan count [--costs results.json]... [selection options] " +
         "[--format text|json]\n" +
         "       leancil gates manifest.json --plan-group plan.json group [verification options]\n" +
-        "       leancil gates manifest.json --require-results directory --plan plan.json";
+        "       leancil gates manifest.json --require-results directory --plan plan.json [--format text|json]";
 
     // Build settings the tool owns, so a manifest cannot point two builds at one output.
     static readonly HashSet<string> ReservedBuildProperties = new(StringComparer.OrdinalIgnoreCase)

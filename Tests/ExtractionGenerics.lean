@@ -38,6 +38,26 @@ def selfConstrained : RawMethod := { raw with
 def selfLayout : RawLayout := {
   identity := "Test::A", explicit := false, packing := 0, declaredSize := 0, fields := [],
   interfaces := ["Test::I`1<Test::A>"] }
+/-- Flag 0x08, `System.ValueType` and `unmanaged` each refuse class arguments and require an
+    admitted value type; byref-like structs require the `allows ref struct` flag 0x20. -/
+theorem value_type_constraints_reject_classes :
+    let classArg : TypeExpr := .object testScope "C"
+    let byRefLayout : RawLayout := { selfLayout with byRefLike := true }
+    let valueConstrained : RawMethod := { raw with
+      genericParameters := [{ flags := 0, types := [valueTypeConstraint] }] }
+    let unmanagedConstrained : RawMethod := { raw with
+      genericParameters := [{ flags := 0, types := [unmanagedTypeConstraint] }] }
+    let refStructAllowed : RawMethod := { raw with
+      genericParameters := [{ flags := 0x28, types := [valueTypeConstraint] }] }
+    instantiateMethod [] raw [classArg] = none ∧
+    instantiateMethod [] valueConstrained [classArg] = none ∧
+    instantiateMethod [] unmanagedConstrained [classArg] = none ∧
+    (instantiateMethod [] valueConstrained [word]).isSome ∧
+    (instantiateMethod [] unmanagedConstrained [word]).isSome ∧
+    instantiateMethod [byRefLayout] raw [.aggregate "Test::A" 0] = none ∧
+    (instantiateMethod [byRefLayout] refStructAllowed [.aggregate "Test::A" 0]).isSome := by
+  decide +kernel
+#print axioms value_type_constraints_reject_classes
 example : (instantiateMethod [selfLayout] selfConstrained [.aggregate "Test::A" 0]).isSome := by
   decide +kernel
 example : instantiateMethod [{ selfLayout with interfaces := ["Test::I`1<Test::B>"] }]

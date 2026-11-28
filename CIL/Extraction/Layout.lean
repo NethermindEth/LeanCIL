@@ -297,11 +297,84 @@ private theorem layoutFields_eq_fold
 
 #print axioms layoutFields_eq_fold
 
+/-- The System.Runtime.Intrinsics assembly identity for vector layout checks. -/
+private def layoutIntrinsicsScope : String :=
+  "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+
+/-- Byte-level prefix test so mismatches fail on the first differing byte without unfolding
+    string iterators during kernel reduction. -/
+private def bytesStartsWith : List UInt8 → List UInt8 → Bool
+  | [], _ => true
+  | p :: ps, t :: ts => p == t && bytesStartsWith ps ts
+  | _ :: _, [] => false
+
+/-- UTF-8 byte prefixes of external generic value types whose storage comes from their own runtime
+    models rather than from a supplied struct layout, materialized so kernel reduction never
+    re-encodes the fixed strings. -/
+private def modeledExternalLayoutPrefixes : List (List UInt8) := by
+  run_tac do
+    let expression <- Lean.Elab.Term.elabTerm
+      (<- `([runtimeScope ++ "::System.Span`1<",
+            runtimeScope ++ "::System.ReadOnlySpan`1<",
+            layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector128`1<",
+            layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector256`1<",
+            layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector512`1<"].map
+              fun prefix_ => prefix_.toByteArray.data.toList)) none
+    Lean.Elab.Term.synthesizeSyntheticMVarsNoPostponing
+    let expression <- Lean.instantiateMVars expression
+    let values <- unsafe Lean.Meta.evalExpr (List (List UInt8))
+      (<- Lean.Meta.inferType expression) expression
+    Lean.Elab.Tactic.closeMainGoal `modeledExternalLayoutPrefixes (Lean.toExpr values)
+
+/-- The materialized prefixes spell exactly the modeled span and vector layout heads. -/
+private theorem modeledExternalLayoutPrefixes_eq :
+    modeledExternalLayoutPrefixes =
+      [runtimeScope ++ "::System.Span`1<",
+       runtimeScope ++ "::System.ReadOnlySpan`1<",
+       layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector128`1<",
+       layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector256`1<",
+       layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector512`1<"].map
+        fun prefix_ => prefix_.toByteArray.data.toList := by
+  decide +kernel
+#print axioms modeledExternalLayoutPrefixes_eq
+
+/-- Shortest prefix in `modeledExternalLayoutPrefixes` (`runtimeScope ++ "::System.Span`1<"`). -/
+private def minModeledExternalLayoutBytes : Nat := 98
+
+/-- Leading ASCII byte `'S'` shared by every modeled external layout prefix. -/
+private def modeledExternalLeadByte : UInt8 := 83
+
+/-- Declarations of external generic value types whose storage comes from their own runtime models
+    rather than from a supplied struct layout. Comparing `MetadataName` tags first avoids reducing
+    `raw.identity` in the kernel for ordinary structs. -/
+private def modeledExternalDeclarations : List (List TypeLevel) :=
+  [[⟨name!"System", name!"Span`1"⟩],
+   [⟨name!"System", name!"ReadOnlySpan`1"⟩],
+   [⟨name!"System.Runtime.Intrinsics", name!"Vector128`1"⟩],
+   [⟨name!"System.Runtime.Intrinsics", name!"Vector256`1"⟩],
+   [⟨name!"System.Runtime.Intrinsics", name!"Vector512`1"⟩]]
+
+/-- Whether `identity` names a runtime span or vector type whose storage comes from its own
+    model and therefore cannot take a supplied raw layout row. -/
+def isModeledExternalLayoutIdentity (identity : String) : Bool :=
+  let bytes := identity.toByteArray
+  if bytes.size < minModeledExternalLayoutBytes || bytes.data[0]? != some modeledExternalLeadByte
+  then false
+  else modeledExternalLayoutPrefixes.any fun prefix_ => bytesStartsWith prefix_ bytes.data.toList
+
+/-- Whether `raw` names a modeled runtime span or vector layout. Ordinary structs with a
+    non-matching declaration skip string reduction in the kernel. -/
+def isModeledExternalLayout (raw : RawLayout) : Bool :=
+  if raw.declaration.isEmpty || modeledExternalDeclarations.contains raw.declaration then
+    isModeledExternalLayoutIdentity raw.identity
+  else false
+
 /-- Recompute CoreCLR reference-free 64-bit layout from ordered metadata fields; `previous`
     finds the computed layout of each nested struct. -/
 def computeLayout (previous : Nat → Option ComputedLayout) (raw : RawLayout)
     (architecture : Architecture := .scalar) : Option ComputedLayout := do
-  if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
+  if isModeledExternalLayout raw then none
+  else if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
   else if raw.declaredSize < -1 || raw.declaredSize > 65536 then none
   else if raw.explicit && raw.declaredSize ≤ 0 then none
   else if raw.auto && !autoSequential previous raw then none
@@ -348,7 +421,8 @@ private theorem placeField_append (previous : Nat → Option ComputedLayout) (ra
 /-- Linear field construction is exactly the former append-based layout computation. -/
 theorem computeLayout_eq_append (previous : Nat → Option ComputedLayout) (raw : RawLayout)
     (architecture : Architecture) : computeLayout previous raw architecture = do
-  if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
+  if isModeledExternalLayout raw then none
+  else if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
   else if raw.declaredSize < -1 || raw.declaredSize > 65536 then none
   else if raw.explicit && raw.declaredSize ≤ 0 then none
   else if raw.auto && !autoSequential previous raw then none
@@ -513,8 +587,7 @@ private def genericFieldType (table : LayoutTable) (type : TypeExpr) : Option Fi
     if (table.entry index).any (·.identity == identity) then some (.aggregate index) else none
   | .primitive type => type.fieldType?
   | .apply (.constructor scope name) (.primitive element) => do
-    if scope != "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, " ++
-        "PublicKeyToken=cc7b13ffcd2ddd51" then none
+    if scope != layoutIntrinsicsScope then none
     let lane ← element.fieldType?.bind VectorLane.ofField?
     if name == "System.Runtime.Intrinsics.Vector128`1" then some (.vector128 lane)
     else if name == "System.Runtime.Intrinsics.Vector256`1" then some (.vector256 lane) else none
@@ -586,15 +659,39 @@ theorem unmanagedTypeConstraint_eq :
       runtimeScope ++ "::System.ValueType" := by decide +kernel
 #print axioms unmanagedTypeConstraint_eq
 
+/-- Whether `argument` is an admitted value-type argument (every admitted raw layout is
+    reference-free). Classes, arrays, references and runtime spans fail value-type and unmanaged
+    constraints; a byref-like aggregate requires the `allows ref struct` flag `0x20`. -/
+def valueTypeArgument (table : LayoutTable) (allowByRefLike : Bool) (argument : TypeExpr) : Bool :=
+  match argument with
+  | .primitive type => type.fieldType?.isSome
+  | .enum .. => true
+  | .aggregate identity index => match table.entry index with
+    | some layout => layout.identity == identity && (allowByRefLike || !layout.byRefLike)
+    | none => false
+  | .apply (.constructor scope name) (.primitive element) =>
+    scope == layoutIntrinsicsScope &&
+      element ∈ [.uint64, .int64, .uint32, .int32, .byte, .double, .single] &&
+      (name == "System.Runtime.Intrinsics.Vector128`1" ||
+       name == "System.Runtime.Intrinsics.Vector256`1" ||
+       name == "System.Runtime.Intrinsics.Vector512`1")
+  | _ => false
+
 /-- Value-type flags and exact direct interface identities constrain a closed type argument. -/
 def genericConstraintValidWith (table : LayoutTable) (argument : TypeExpr)
     (flags : Nat) (types : List String) : Bool :=
-  flags &&& 56 == flags && types.all fun type =>
-    type == valueTypeConstraint || type == unmanagedTypeConstraint || match argument with
-    | .aggregate identity index => match table.entry index with
-      | some layout => layout.identity == identity && layout.interfaces.contains type
-      | none => false
-    | _ => false
+  let allowByRefLike := flags &&& 0x20 != 0
+  let needsValueType := flags &&& 0x08 != 0
+  flags &&& 56 == flags &&
+    (!needsValueType || valueTypeArgument table allowByRefLike argument) &&
+    types.all fun type =>
+      if type == valueTypeConstraint || type == unmanagedTypeConstraint then
+        valueTypeArgument table allowByRefLike argument
+      else match argument with
+        | .aggregate identity index => match table.entry index with
+          | some layout => layout.identity == identity && layout.interfaces.contains type
+          | none => false
+        | _ => false
 
 /-- `genericConstraintValidWith` reading a raw layout list. -/
 def genericConstraintValid (layouts : List RawLayout) (argument : TypeExpr)

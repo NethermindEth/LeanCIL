@@ -21,8 +21,10 @@ partial class Program
     /// <summary>Below the editor sources: per key, the selection and the verification outputs of its proofs.</summary>
     const string EditorSelectionsDirectory = "selections";
     const string EditorSelectionFile = "selection.json";
-    const string WorkspaceUsage = "Usage: leancil workspace assembly.dll method --profile profile --proof proof.lean " +
-        "[--theorem name] [--proof-root package-directory] [--assembly identity] [--assume-initialized type]...\n" +
+    internal const string WorkspaceUsage =
+        "Usage: leancil workspace assembly.dll method --profile profile --proof proof.lean " +
+        "[--theorem name] [--proof-root package-directory] [--assembly identity] " +
+        "[--assume-initialized Namespace.Type]...\n" +
         "       leancil workspace --remove key-or-method [--profile profile] [--proof-root package-directory]";
 
     internal static void CreateProofWorkspace(string[] args)

@@ -105,6 +105,7 @@ def spanReferenceResult (site : CallSite) : Bool := (do
 private def SpanMember.operation (member : SpanMember) (writable : Bool)
     (reader : CallLayouts) (method : MethodRef) : Option MemoryOp := do
   let .apply _ element := method.owner | none
+  let _ ← reader.storage method.owner
   let width ← match element with
     | .aggregate .. => (reader.valueShape element).size?
     | _ => spanElementWidth element

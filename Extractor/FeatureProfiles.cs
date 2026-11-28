@@ -106,12 +106,6 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
                 Sse2: true, Ssse3: true, Sse41: true, Sse42: true, Avx: true, Avx2: true, Bmi1: true, Bmi2: true,
                 Avx512F: name == "x64-v4", Avx512FVL: name == "x64-v4", Avx512DQ: name == "x64-v4", Avx512DQVL: name == "x64-v4",
                 X86Base64: true, Vector128Accelerated: true, Vector256Accelerated: true),
-            "x64-avx2" or "x64-avx2-bmi1" or "x64-bmi2" or "x64-vector256" =>
-                throw new ArgumentException($"Retired execution profile: {name}; migrate to x64-v3 and reverify (docs/RUNTIME-PROFILES.md)"),
-            "x64-avx512" or "x64-avx512-bmi1" =>
-                throw new ArgumentException($"Retired execution profile: {name}; migrate to x64-v4 and reverify (docs/RUNTIME-PROFILES.md)"),
-            "x64-sse41" => throw new ArgumentException($"Retired execution profile: {name}; migrate to x64-sse42 and reverify (docs/RUNTIME-PROFILES.md)"),
-            "arm64-armbase" => throw new ArgumentException($"Retired execution profile: {name}; migrate to arm64-advsimd and reverify (docs/RUNTIME-PROFILES.md)"),
             _ => throw new ArgumentException($"Unknown execution profile: {name}")
         };
         profile.Validate();

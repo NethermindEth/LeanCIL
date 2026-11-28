@@ -163,7 +163,7 @@ internal static partial class ProofOutline
         Code.Or => "|||", Code.Xor => "^^^", _ => null
     };
 
-    const string Usage = "Usage: leancil new-proof extraction-directory proof.lean";
+    internal const string Usage = "Usage: leancil new-proof extraction-directory proof.lean";
 
     internal static void Run(string[] args, Action<string, Action<Extraction>> read)
     {

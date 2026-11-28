@@ -9,7 +9,7 @@ using Nethermind.LeanCIL;
 // changed and runs ordinary `leancil verify` for the proofs those or their own sources affect.
 partial class Program
 {
-    const string WatchUsage = "Usage: leancil watch [package-directory] [--project project.csproj]... " +
+    internal const string WatchUsage = "Usage: leancil watch [package-directory] [--project project.csproj]... " +
         "[--configuration name] [--once] [--goals] [--format text|json]";
 
     /// <summary>The cycle's report shape; a change that removes or renames a field increments it.</summary>

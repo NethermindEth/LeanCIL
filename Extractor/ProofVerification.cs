@@ -24,12 +24,13 @@ partial class Program
         "output, proof, theorem, optional expect (verified or rejected), and refutes exactly when a request expects " +
         "rejected.";
 
-    const string BatchUsage = "Usage: leancil verify-batch requests.json [--fresh] [--rebuild-library] " +
+    internal const string BatchUsage = "Usage: leancil verify-batch requests.json [--fresh] [--rebuild-library] " +
         "[--parallel count] [--results results.json] [--format text|json] [--trace] [--check]";
 
-    const string VerifyUsage = "Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] " +
+    internal const string VerifyUsage =
+        "Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] " +
         "[--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] " +
-        "[--full-artifact Lib=directory] [--deep-checks digests.sha256] [--format text|json] [--trace] [--goals]";
+        "[--full-artifact Lib=directory]... [--deep-checks digests.sha256] [--format text|json] [--trace] [--goals]";
 
     /// <summary>
     /// The tool version, the LeanCIL revision and Lean toolchain its framework comes from, and the

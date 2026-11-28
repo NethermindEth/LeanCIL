@@ -66,4 +66,22 @@ theorem leaf_word_forgeries :
         .unsupported "Field outside the checked layouts" := by decide +kernel
 #print axioms leaf_word_forgeries
 
+/-- Raw layout rows naming runtime span or vector instances are refused. -/
+theorem rejects_modeled_external_layouts :
+    let row (identity : String) : RawLayout := {
+      identity, explicit := false, packing := 0, declaredSize := 0,
+      fields := [{ type := .signed32 }] }
+    let vectorScope := "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, " ++
+      "PublicKeyToken=cc7b13ffcd2ddd51"
+    (computeLayouts [row (runtimeScope ++ "::System.Span`1<System.Int32>")]).isNone ∧
+    (computeLayouts [row (runtimeScope ++ "::System.ReadOnlySpan`1<System.Int32>")]).isNone ∧
+    (computeLayouts [row (vectorScope ++
+      "::System.Runtime.Intrinsics.Vector128`1<System.UInt64>")]).isNone ∧
+    (computeLayouts [row (vectorScope ++
+      "::System.Runtime.Intrinsics.Vector256`1<System.UInt64>")]).isNone ∧
+    (computeLayouts [row (vectorScope ++
+      "::System.Runtime.Intrinsics.Vector512`1<System.UInt64>")]).isNone ∧
+    (computeLayouts [row "Fixture::UserBox`1<System.Int32>"]).isSome := by decide +kernel
+#print axioms rejects_modeled_external_layouts
+
 end Tests.ExtractionLayout

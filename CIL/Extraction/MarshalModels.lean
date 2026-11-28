@@ -69,13 +69,22 @@ private def Member.operation (member : Member) (reader : CallLayouts)
   guard ((arrayElementType source).isSome)
   let kind ← transferKind? reader source
   match member with
-  | .getReference => return .spanReference
-  | .getArrayDataReference => return .observeView .arrayData
-  | .asBytes => return .spanReinterpret kind.width 1 writable
+  | .getReference =>
+    let _ ← reader.storage (spanOf writable source)
+    return .spanReference
+  | .getArrayDataReference =>
+    let _ ← reader.storage (.array source)
+    return .observeView .arrayData
+  | .asBytes =>
+    let _ ← reader.storage (spanOf writable source)
+    return .spanReinterpret kind.width 1 writable
   | .cast =>
     guard ((arrayElementType target).isSome)
+    let _ ← reader.storage (spanOf writable source)
+    let _ ← reader.storage (spanOf writable target)
     return .spanReinterpret kind.width (← transferKind? reader target).width writable
   | .createSpan | .createReadOnlySpan =>
+    let _ ← reader.storage (spanOf (member == .createSpan) source)
     return .spanFromReference kind.width (member == .createSpan)
   | .read | .tryRead => return .marshalRead kind (member == .tryRead)
   | .write | .tryWrite =>

@@ -225,6 +225,19 @@ partial class Program
             sources["consumer:" + source] = Sha(source);
             if (binding.TrustedConsumerSupport(directory, sources).Length != 0)
                 throw new InvalidOperationException("Changed source inputs retained portable support trust.");
+            var oldSchemaPath = Path.Combine(directory, "support-schema-2.json");
+            File.WriteAllText(oldSchemaPath, JsonSerializer.Serialize(manifest with { Schema = 2 }));
+            Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT", oldSchemaPath);
+            Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256", Sha(oldSchemaPath));
+            try
+            {
+                binding.TrustedConsumerSupport(directory, sources);
+                throw new Exception("An older consumer support manifest schema was accepted.");
+            }
+            catch (InvalidDataException error) when (
+                error.Message.Contains("Invalid consumer support manifest", StringComparison.Ordinal)) { }
+            Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT", manifestPath);
+            Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256", Sha(manifestPath));
             File.AppendAllText(manifestPath, "\n");
             try
             {

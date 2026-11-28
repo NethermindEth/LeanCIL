@@ -237,42 +237,55 @@ internal static class ManagedConstructorPackage
     };
 
     /// <summary>
-    /// Whether each System.Runtime type a reference of <paramref name="method"/> names is System.Object, a bound
-    /// constructor's owner or one of its parameter classes: a bound caller resolves every such reference through the
-    /// carried facade, and the dependency slices define only those.
+    /// Whether every System.Runtime class/value-type reference in <paramref name="method"/> outside the bound
+    /// constructor sites is System.Object on the declaring type chain: a bound caller attaches the carried
+    /// System.Runtime facade slice and rewrites only the bound constructor operands, so any other System.Runtime
+    /// TypeRef (such as a catch type or field type) would resolve to CoreLib and mismatch its unrewritten operand.
     /// </summary>
     static bool RuntimeTypesCovered(MethodDefinition method, IReadOnlySet<Instruction> sites)
     {
-        var constructors = sites.Select(site => (MethodReference)site.Operand).ToArray();
-        HashSet<TypeDefinition?> covered = [method.Module.TypeSystem.Object.Resolve()];
-        foreach (var constructor in constructors)
-        {
-            covered.Add(constructor.DeclaringType.Resolve());
-            foreach (var parameter in constructor.Parameters) covered.Add(parameter.ParameterType.Resolve());
-        }
-        return MetadataReferences(method).All(type => covered.Contains(type.Resolve()));
+        var systemObject = method.Module.TypeSystem.Object.Resolve();
+        if (BaseMetadataReferences(method).Any(type => type.Resolve() != systemObject)) return false;
+        return !NonBoundMetadataReferences(method, sites).Any();
     }
 
-    /// <summary>
-    /// The System.Runtime type references a method's metadata rows may name, as named class references.
-    /// </summary>
-    static IEnumerable<TypeReference> MetadataReferences(MethodDefinition method)
+    static IEnumerable<TypeReference> RuntimeNamed(IEnumerable<TypeReference> types) =>
+        types.SelectMany(Named).Where(type => type is not TypeDefinition &&
+            type.MetadataType is MetadataType.Class or MetadataType.ValueType &&
+            LayoutEvidence.Scope(type) == TypeTests.RuntimeScope);
+
+    static IEnumerable<TypeReference> BaseMetadataReferences(MethodDefinition method)
     {
-        List<TypeReference> types = [method.ReturnType,
-            .. method.Parameters.Select(parameter => parameter.ParameterType),
-            .. method.Body.Variables.Select(variable => variable.VariableType)];
+        List<TypeReference> types = [];
         for (var owner = method.DeclaringType; owner is not null; owner = owner.DeclaringType)
             if (owner.BaseType is { } baseType) types.Add(baseType);
         for (var owner = method.DeclaringType.BaseType?.Resolve(); owner?.Module == method.Module;
              owner = owner.BaseType?.Resolve())
             if (owner.BaseType is { } baseType) types.Add(baseType);
+        return RuntimeNamed(types);
+    }
+
+    /// <summary>
+    /// The System.Runtime class/value-type references named outside the bound constructor operands.
+    /// </summary>
+    static IEnumerable<TypeReference> NonBoundMetadataReferences(MethodDefinition method,
+        IReadOnlySet<Instruction> sites)
+    {
+        List<TypeReference> types = [method.ReturnType,
+            .. method.Parameters.Select(parameter => parameter.ParameterType),
+            .. method.Body.Variables.Select(variable => variable.VariableType)];
+        foreach (var handler in method.Body.ExceptionHandlers)
+            if (handler.CatchType is { } catchType) types.Add(catchType);
         foreach (var instruction in method.Body.Instructions)
+        {
+            if (sites.Contains(instruction)) continue;
             switch (instruction.Operand)
             {
                 case MethodReference reference:
                     types.Add(reference.DeclaringType);
                     types.Add(reference.ReturnType);
                     types.AddRange(reference.Parameters.Select(parameter => parameter.ParameterType));
+                    if (reference is GenericInstanceMethod generic) types.AddRange(generic.GenericArguments);
                     break;
                 case FieldReference reference:
                     types.Add(reference.DeclaringType);
@@ -281,10 +294,13 @@ internal static class ManagedConstructorPackage
                 case TypeReference reference:
                     types.Add(reference);
                     break;
+                case CallSite callSite:
+                    types.Add(callSite.ReturnType);
+                    types.AddRange(callSite.Parameters.Select(parameter => parameter.ParameterType));
+                    break;
             }
-        return types.SelectMany(Named).Where(type => type is not TypeDefinition &&
-            type.MetadataType is MetadataType.Class or MetadataType.ValueType &&
-            LayoutEvidence.Scope(type) == TypeTests.RuntimeScope);
+        }
+        return RuntimeNamed(types);
     }
 
     static IEnumerable<TypeReference> Named(TypeReference type) => type switch

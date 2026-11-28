@@ -129,9 +129,10 @@ if (Path.IsPathRooted(JsonSerializer.Deserialize<JsonElement>(settings).GetPrope
     throw new InvalidOperationException("Expected a relative proof path in verification settings.");
 Console.WriteLine("PASS CLI proof selection, persistent settings and theorem statement");
 
-// Without settings or --proof, verify looks for Proof.lean beside the extraction and never reads the proof
-// from an earlier certificate.
+// Without settings or --proof, verify uses the defaults (Proof.lean and ExampleProof.correctness) and
+// never reads proof or theorem selection from an earlier verified.json.
 File.Delete(settingsPath);
+var defaultProofPath = Path.Combine(output, "Proof.lean");
 try
 {
     var unselected = Exited(Execute([.. cli, "verify", output]), 1);
@@ -139,9 +140,29 @@ try
         !unselected.Output.Contains("Proof.lean", StringComparison.Ordinal) ||
         File.Exists(Path.Combine(output, "verified.json")))
         throw new InvalidOperationException("verify took its proof from an earlier certificate: " + unselected.Output);
+
+    File.Copy(proof, defaultProofPath, overwrite: true);
+    File.WriteAllText(Path.Combine(output, "verified.json"),
+        """{"schema":5,"theorem":"LegacyProof.other","inputs":{"proof:Legacy.lean":"00"}}""");
+    var defaultRun = Exited(Execute([.. cli, "verify", output]), 0);
+    var defaultSettings = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(settingsPath));
+    var defaultReport = JsonSerializer.Deserialize<JsonElement>(
+        File.ReadAllText(Path.Combine(output, "verified.json")));
+    if (!defaultRun.Stdout.StartsWith("Verified: ExampleProof.correctness", StringComparison.Ordinal) ||
+        !defaultRun.Stdout.Contains("Proof.lean:16:0: info: 'ExampleProof.correctness' depends on axioms",
+            StringComparison.Ordinal) ||
+        defaultSettings.GetProperty("proof").GetString() != "Proof.lean" ||
+        defaultSettings.GetProperty("theorem").GetString() != "ExampleProof.correctness" ||
+        defaultReport.GetProperty("theorem").GetString() != "ExampleProof.correctness")
+        throw new InvalidOperationException("verify did not use default Proof.lean and ExampleProof.correctness: " +
+            defaultRun.Output);
 }
-finally { File.WriteAllText(settingsPath, settings); }
-Console.WriteLine("PASS CLI verify reads no proof selection from an earlier certificate");
+finally
+{
+    File.Delete(defaultProofPath);
+    File.WriteAllText(settingsPath, settings);
+}
+Console.WriteLine("PASS CLI verify uses default Proof.lean and ExampleProof.correctness despite verified.json");
 
 // The prepared library serves a verification whose cache holds nothing: no notice on stderr, and no
 // library built into the cache.
@@ -707,6 +728,117 @@ if (version.Code != 0 || !version.Stdout.Contains($"LeanCIL revision: {head}") |
     !version.Stdout.Contains("Lean toolchain: " + File.ReadAllText(At("lean-toolchain")).Trim()))
     throw new InvalidOperationException("Version report does not name the built revision: " + version.Output);
 Console.WriteLine("PASS CLI version names the framework revision and toolchain");
+
+// Every command's usage string is shared by --help and its argument errors, and lists every option its parser accepts.
+{
+    var help = Exited(Execute([.. cli, "--help"]), 0);
+    var helpByCommand = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+    string? currentCommand = null;
+    foreach (var raw in help.Stdout.ReplaceLineEndings("\n").Split('\n'))
+    {
+        var trimmed = raw.Trim();
+        if (trimmed.Length == 0) continue;
+        var text = trimmed.StartsWith("Usage: ", StringComparison.Ordinal) ? trimmed["Usage: ".Length..] : trimmed;
+        if (text.StartsWith("leancil ", StringComparison.Ordinal))
+        {
+            currentCommand = text.Split(' ')[1];
+            if (!helpByCommand.TryGetValue(currentCommand, out var lines))
+                helpByCommand[currentCommand] = lines = [];
+            lines.Add(text);
+        }
+        else if (currentCommand is not null)
+        {
+            helpByCommand[currentCommand][^1] += " " + text;
+        }
+    }
+    string HelpText(string command) => string.Join("\n", helpByCommand[command]);
+    foreach (var command in new[] { "blockers", "templates", "lint-exceptions", "export-contracts", "workspace",
+        "new-proof", "verify", "verify-batch", "gates", "bindings", "audit-library", "resolve-imports" })
+    {
+        var error = Exited(Execute([.. cli, command]), 1);
+        foreach (var line in helpByCommand[command])
+            if (!error.Stderr.Contains(line.Split(" List every")[0], StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    $"Bad-argument usage for `{command}` drifted from `--help`:\n  help: {line}\n" +
+                    $"  stderr: {error.Stderr}");
+    }
+    string SourceSlice(string path, string startMarker, string? endMarker = null)
+    {
+        var text = File.ReadAllText(At(path)).ReplaceLineEndings("\n");
+        var start = text.IndexOf(startMarker, StringComparison.Ordinal);
+        if (start < 0) throw new InvalidOperationException($"Missing parser marker `{startMarker}` in {path}");
+        if (endMarker is not null)
+        {
+            var end = text.IndexOf(endMarker, start, StringComparison.Ordinal);
+            if (end < 0) throw new InvalidOperationException($"Missing parser end `{endMarker}` in {path}");
+            return text[start..end];
+        }
+        var brace = text.IndexOf('{', start);
+        var depth = 0;
+        for (var i = brace; i < text.Length; i++)
+        {
+            if (text[i] == '{') depth++;
+            else if (text[i] == '}' && --depth == 0) return text[brace..(i + 1)];
+        }
+        throw new InvalidOperationException($"Unclosed parser block `{startMarker}` in {path}");
+    }
+    static string[] MissingUsageOptions(string helpText, string parserSource, params string[] excluded)
+    {
+        var documented = Regex.Matches(helpText, @"--[a-z][a-z0-9-]*").Select(m => m.Value)
+            .ToHashSet(StringComparer.Ordinal);
+        return [.. Regex.Matches(parserSource, @"""(--[a-z][a-z0-9-]*)""").Select(m => m.Groups[1].Value)
+            .Distinct(StringComparer.Ordinal).Except(excluded, StringComparer.Ordinal)
+            .Where(option => !documented.Contains(option)).Order(StringComparer.Ordinal)];
+    }
+    var importNames = SourceSlice("Extractor/ImportOptions.cs", "internal static bool Names(", "internal void Add(");
+    var extractCheckLoop = SourceSlice("Extractor/Program.cs",
+        "for (var index = 1; index < args.Length; index++)", "var recordedCheck =");
+    var batchOptions = SourceSlice("Extractor/ProofVerification.cs", "static BatchOptions ParseBatchOptions(");
+    var parsers = new (string Command, string Source, string[] Excluded)[]
+    {
+        ("templates", SourceSlice("Extractor/TemplateEmitter.cs", "static Options Parse("), []),
+        ("lint-exceptions", SourceSlice("Extractor/ExceptionLint.cs", "internal static int Run(",
+            "string output ="), []),
+        ("extract", extractCheckLoop + "\n" + importNames, ["--assembly-path", "--format"]),
+        ("check", extractCheckLoop + "\n" + importNames, ["--reference"]),
+        ("export-contracts", SourceSlice("scripts/Consumer/ContractExport.cs",
+            "internal static void ExportContracts(", "ContractExportManifest manifest ="), []),
+        ("workspace", SourceSlice("scripts/Consumer/ProofWorkspace.cs",
+            "internal static void CreateProofWorkspace(") +
+            SourceSlice("scripts/Consumer/ProofWorkspace.cs", "static WorkspaceSettings ParseWorkspaceSettings(",
+                "var root =") +
+            SourceSlice("scripts/Consumer/ProofWorkspace.cs", "static void RemoveEditorSelection(",
+                "var root ="), []),
+        ("watch", SourceSlice("scripts/Consumer/ProofWatch.cs", "static WatchSettings ParseWatchSettings("), []),
+        ("blockers", SourceSlice("Extractor/Blockers.cs", "internal static int Run(",
+            "if (assemblyPath is null || manifestPath is null)") + "\n" + importNames, []),
+        ("new-proof", SourceSlice("Extractor/ProofOutline.cs", "internal static void Run(", "var directory ="), []),
+        ("verify", SourceSlice("Extractor/ProofVerification.cs", "internal static void VerifyArtifacts(",
+            "Exception Rejected("), []),
+        ("verify-batch", batchOptions, []),
+        ("gates", SourceSlice("Extractor/ProofGates.cs", "static GateOptions ParseGateOptions(") + "\n" +
+            batchOptions, []),
+        ("bindings", SourceSlice("Extractor/ProofBindingCatalog.cs", "internal static int RunBindings(",
+            "var catalog ="), []),
+        ("audit-library", SourceSlice("scripts/Checking/LibraryAudit.cs", "internal static int AuditLibrary(",
+            "using Program verification ="), []),
+        ("resolve-imports", SourceSlice("Extractor/ImportResolver.cs", "static readonly string[] Options =",
+            "if (libraries.Count == 0)"), [])
+    };
+    foreach (var (command, source, excluded) in parsers)
+    {
+        var missing = MissingUsageOptions(HelpText(command), source, excluded);
+        if (missing.Length != 0)
+            throw new InvalidOperationException(
+                $"`leancil --help` for `{command}` omits accepted options: {string.Join(", ", missing)}");
+    }
+    if (!HelpText("check").Contains("leancil check assembly.dll ", StringComparison.Ordinal))
+        throw new InvalidOperationException("`leancil --help` omits the positional re-extraction form of `check`.");
+    if (!MissingUsageOptions(HelpText("gates"), "case \"--undocumented\": break;")
+            .SequenceEqual(["--undocumented"]))
+        throw new InvalidOperationException("Option coverage check did not catch an undocumented parser option.");
+    Console.WriteLine("PASS CLI --help matches every command usage string and every parser option");
+}
 
 // Optional development-pack verification (run with --pack); skipped on default PR runs.
 if (args.Contains("--pack", StringComparer.Ordinal))

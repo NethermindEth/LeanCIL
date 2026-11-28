@@ -7,43 +7,53 @@ namespace Nethermind.LeanCIL;
 
 internal static partial class Program
 {
-    const string Usage =
-        "Usage: leancil list assembly.dll\n" +
-        "       leancil templates output-directory extraction-directory... [--check] [--namespace name] " +
-        "[--omit-equations] [--module file.lean]\n" +
-        "       leancil lint-exceptions output-directory --documentation assembly.xml\n" +
-        "       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory " +
+    const string ListUsage = "Usage: leancil list assembly.dll";
+
+    const string ExtractUsage =
+        "Usage: leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory " +
         "[profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... " +
-        "[--assume-initialized Namespace.Type]... [--reference Lib.dll]... [--import Lib.leancil.contracts] " +
-        "[--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n" +
-        "       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n" +
-        "       leancil workspace assembly.dll method --profile profile --proof proof.lean [--theorem name] " +
-        "[--proof-root package-directory] [--assembly identity] [--assume-initialized Namespace.Type]...\n" +
-        "       leancil workspace --remove key-or-method [--profile profile] [--proof-root package-directory]\n" +
-        "       leancil watch [package-directory] [--project project.csproj]... [--configuration name] [--once] " +
-        "[--goals] [--format text|json]\n" +
-        "       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] " +
-        "[--assembly 'assembly name or full identity'] [--reference Lib.dll]...\n" +
-        "       leancil check output-directory [--assembly-path assembly.dll] " +
-        "[--assembly 'assembly name or full identity'] [--format json]\n" +
-        "       leancil new-proof extraction-directory proof.lean\n" +
-        "       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] " +
-        "[--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]... " +
-        "[--deep-checks digests.sha256] " +
-        "[--format text|json] [--trace] [--goals]\n" +
-        "       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] " +
-        "[--results results.json] [--format text|json] [--trace] [--check]\n" +
-        "       leancil gates manifest.json [--method name] [--profile name] [--only id-prefix]... " +
-        "[--changed path]... [--check] [--fresh] [--rebuild-library] [--trace] [--parallel count] " +
-        "[--results results.json] [--format text|json]\n" +
-        "       leancil gates manifest.json --plan count [--costs results.json]... [selection options] " +
-        "[--format text|json]\n" +
-        "       leancil gates manifest.json --plan-group plan.json group [verification options]\n" +
-        "       leancil gates manifest.json --require-results directory --plan plan.json\n" +
-        "       leancil bindings catalog.json [--check]\n" +
-        "       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] " +
-        "[--results results.json]\n" +
-        "       leancil --version";
+        "[--assume-initialized Namespace.Type]... [--reference Lib.dll]... [--import Lib.leancil.contracts]... " +
+        "[--import-implementation Lib=path]... [--import-sha256 Lib=hex]... [--import-interface-sha256 Lib=hex]...";
+
+    const string CheckUsage =
+        "Usage: leancil check output-directory [--assembly-path assembly.dll] " +
+        "[--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... " +
+        "[--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts]... " +
+        "[--import-implementation Lib=path]... [--import-sha256 Lib=hex]... [--import-interface-sha256 Lib=hex]... " +
+        "[--format json]\n" +
+        "       leancil check assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory " +
+        "[profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... " +
+        "[--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts]... " +
+        "[--import-implementation Lib=path]... [--import-sha256 Lib=hex]... [--import-interface-sha256 Lib=hex]... " +
+        "[--format json]";
+
+    static string FormatUsageEntry(string usage)
+    {
+        var body = usage.StartsWith("Usage: ", StringComparison.Ordinal) ? usage["Usage: ".Length..] : usage;
+        return string.Join("\n", body.Split('\n').Select((line, index) =>
+            index == 0 || line.StartsWith("       ", StringComparison.Ordinal) ? line : "       " + line));
+    }
+
+    static readonly string Usage = "Usage: " + string.Join("\n       ", new[]
+    {
+        ListUsage,
+        TemplateEmitter.Usage,
+        ExceptionLint.Usage,
+        ExtractUsage,
+        global::Program.ContractExportUsage,
+        global::Program.WorkspaceUsage,
+        global::Program.WatchUsage,
+        Blockers.Usage,
+        CheckUsage,
+        ProofOutline.Usage,
+        global::Program.VerifyUsage,
+        global::Program.BatchUsage,
+        global::Program.GatesUsage,
+        global::Program.BindingsUsage,
+        global::Program.LibraryAuditUsage,
+        ImportResolver.Usage,
+        "leancil --version"
+    }.Select(FormatUsageEntry));
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
@@ -86,7 +96,7 @@ internal static partial class Program
         report ??= Console.Out;
         if (args.Length == 0 || args is ["--help"] or ["-h"])
         {
-            Console.WriteLine(Usage + "\n       " + ImportResolver.Usage["Usage: ".Length..]);
+            Console.WriteLine(Usage);
             return 0;
         }
         if (args is ["--version"])
@@ -135,7 +145,7 @@ internal static partial class Program
             if (args[0] == "list")
             {
                 if (args.Length != 2)
-                    throw new ArgumentException("Usage: leancil list assembly.dll");
+                    throw new ArgumentException(ListUsage);
                 stage = "assembly loading";
                 using var listing = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(args[1])));
                 var signatures = listing.GetTypes().SelectMany(type => type.Methods)
@@ -254,7 +264,7 @@ internal static partial class Program
             }
             var recordedCheck = args[0] == "check" && positional.Count == 1;
             if ((!recordedCheck && positional.Count is < 3 or > 4) || (assemblyOverride is not null && !recordedCheck))
-                throw new ArgumentException(Usage);
+                throw new ArgumentException(args[0] == "check" ? CheckUsage : ExtractUsage);
 
             var output = Path.GetFullPath(recordedCheck ? positional[0] : positional[2]);
             var identityPath = Path.Combine(output, "identity.json");

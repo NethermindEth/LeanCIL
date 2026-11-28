@@ -1457,6 +1457,16 @@ def NamedType.fixedStorage (named : NamedType) : Bool :=
   (named.name.drop longestPrimitiveName).isEmpty && named.scope == runtimeScopeBytes &&
     (named.name == systemStringName || named.name == systemObjectName || valueAtomName named.name)
 
+/-- A runtime span or vector generic head has its own storage model and cannot use a supplied
+    aggregate layout. -/
+def NamedType.modeledGenericValue (named : NamedType) : Bool :=
+  (named.scope == runtimeScopeBytes &&
+    (named.name == bytesOf "System.Span`1" || named.name == bytesOf "System.ReadOnlySpan`1")) ||
+  (named.scope == bytesOf intrinsicsScope &&
+    (named.name == bytesOf "System.Runtime.Intrinsics.Vector128`1" ||
+     named.name == bytesOf "System.Runtime.Intrinsics.Vector256`1" ||
+     named.name == bytesOf "System.Runtime.Intrinsics.Vector512`1"))
+
 /-- Whether an atom spells one of the 14 primitives in the runtime scope. Resolution refuses
     every such atom: `.primitive` is the only form of a runtime primitive, and the spelling
     cannot tell `System`.`Int32` from an empty-namespace type named `System.Int32`. -/
@@ -1522,7 +1532,7 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
     | .szarray element, .array inner => typeAdmits frame fuel element inner
     | .genericInst head arguments, .aggregate identity index =>
       frame.layoutMatches index identity head (some arguments) && valueLike head.kind &&
-        aggregateValueArgs fuel arguments &&
+        !head.modeledGenericValue && aggregateValueArgs fuel arguments &&
         (if head.pinned || (head.parts == [systemNamespace, valueTuplePairName] &&
             head.scope == bytesOf runtimeScope) ||
             arguments.toList.any (fun | .primitive _ => false | _ => true) then

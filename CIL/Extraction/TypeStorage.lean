@@ -199,7 +199,7 @@ def typeStorageAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Option St
     if let some storage := spanStorage type then
       if let .aggregate identity index := elementType then
         let metadata ← layoutAt index
-        if metadata.identity != identity then none else
+        if metadata.identity != identity || metadata.byRefLike then none else
           return .aggregateSpan index (name == "System.Span`1")
       else return storage
     let .primitive element := elementType | none

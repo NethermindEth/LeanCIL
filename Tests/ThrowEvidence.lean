@@ -122,6 +122,7 @@ private def changeSite (operand : RawOperand) (change : CallSite → CallSite) :
 
 /-- Changes to a nongeneric exception constructor that retain the printed external target. -/
 private def alteredConstructors : List RawOperand := [
+  changeSite divide fun site => { site with declared.convention := 0x21 },
   changeSite divide fun site => { site with declared.convention := 0x25 },
   changeSite divide fun site => { site with declared.convention := 0x60 },
   changeSite divide fun site => { site with declared.returnType := intType },

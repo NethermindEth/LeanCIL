@@ -42,7 +42,7 @@ internal static partial class TemplateEmitter
     sealed record Template(string Identity, FrameMetadata Frame, Feature[] Features, string[] Callees, Row[] Rows,
         int[] Opcodes);
 
-    const string Usage = "Usage: leancil templates output-directory extraction-directory... [--check] " +
+    internal const string Usage = "Usage: leancil templates output-directory extraction-directory... [--check] " +
         "[--namespace name] [--omit-equations] [--module file.lean]";
 
     /// <summary>
