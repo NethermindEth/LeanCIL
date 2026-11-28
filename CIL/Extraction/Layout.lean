@@ -297,11 +297,43 @@ private theorem layoutFields_eq_fold
 
 #print axioms layoutFields_eq_fold
 
+/-- The System.Runtime.Intrinsics assembly identity for vector layout checks. -/
+private def layoutIntrinsicsScope : String :=
+  "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+
+/-- Byte-level prefix test so mismatches fail on the first differing byte without unfolding
+    string iterators during kernel reduction. -/
+private def bytesStartsWith : List UInt8 → List UInt8 → Bool
+  | [], _ => true
+  | p :: ps, t :: ts => p == t && bytesStartsWith ps ts
+  | _ :: _, [] => false
+
+/-- UTF-8 byte prefixes of external generic value types whose storage comes from their own runtime
+    models rather than from a supplied struct layout. -/
+private def modeledExternalLayoutPrefixes : List (List UInt8) :=
+  [runtimeScope ++ "::System.Span`1<",
+   runtimeScope ++ "::System.ReadOnlySpan`1<",
+   layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector128`1<",
+   layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector256`1<",
+   layoutIntrinsicsScope ++ "::System.Runtime.Intrinsics.Vector512`1<"].map
+     fun prefix_ => prefix_.toByteArray.data.toList
+
+/-- Shortest prefix in `modeledExternalLayoutPrefixes` (`runtimeScope ++ "::System.Span`1<"`). -/
+private def minModeledExternalLayoutBytes : Nat := 98
+
+/-- Whether `identity` names a runtime span or vector type whose storage comes from its own
+    model and therefore cannot take a supplied raw layout row. -/
+def isModeledExternalLayoutIdentity (identity : String) : Bool :=
+  let bytes := identity.toByteArray
+  if bytes.size < minModeledExternalLayoutBytes then false
+  else modeledExternalLayoutPrefixes.any fun prefix_ => bytesStartsWith prefix_ bytes.data.toList
+
 /-- Recompute CoreCLR reference-free 64-bit layout from ordered metadata fields; `previous`
     finds the computed layout of each nested struct. -/
 def computeLayout (previous : Nat → Option ComputedLayout) (raw : RawLayout)
     (architecture : Architecture := .scalar) : Option ComputedLayout := do
-  if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
+  if isModeledExternalLayoutIdentity raw.identity then none
+  else if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
   else if raw.declaredSize < -1 || raw.declaredSize > 65536 then none
   else if raw.explicit && raw.declaredSize ≤ 0 then none
   else if raw.auto && !autoSequential previous raw then none
@@ -348,7 +380,8 @@ private theorem placeField_append (previous : Nat → Option ComputedLayout) (ra
 /-- Linear field construction is exactly the former append-based layout computation. -/
 theorem computeLayout_eq_append (previous : Nat → Option ComputedLayout) (raw : RawLayout)
     (architecture : Architecture) : computeLayout previous raw architecture = do
-  if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
+  if isModeledExternalLayoutIdentity raw.identity then none
+  else if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
   else if raw.declaredSize < -1 || raw.declaredSize > 65536 then none
   else if raw.explicit && raw.declaredSize ≤ 0 then none
   else if raw.auto && !autoSequential previous raw then none
@@ -513,8 +546,7 @@ private def genericFieldType (table : LayoutTable) (type : TypeExpr) : Option Fi
     if (table.entry index).any (·.identity == identity) then some (.aggregate index) else none
   | .primitive type => type.fieldType?
   | .apply (.constructor scope name) (.primitive element) => do
-    if scope != "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, " ++
-        "PublicKeyToken=cc7b13ffcd2ddd51" then none
+    if scope != layoutIntrinsicsScope then none
     let lane ← element.fieldType?.bind VectorLane.ofField?
     if name == "System.Runtime.Intrinsics.Vector128`1" then some (.vector128 lane)
     else if name == "System.Runtime.Intrinsics.Vector256`1" then some (.vector256 lane) else none

@@ -2008,4 +2008,22 @@ theorem spell_refuses_another_stored_owner :
   decide +kernel
 #print axioms spell_refuses_another_stored_owner
 
+/-- Metadata admission refuses `.aggregate` claims for runtime span and vector heads while still
+    admitting an ordinary external generic value type. -/
+theorem rejects_aggregate_claim_for_span_and_vector_heads :
+    let intArg := ResolvedList.cons (.primitive 8) .nil
+    let vectorScope := "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, " ++
+      "PublicKeyToken=cc7b13ffcd2ddd51"
+    let claim (scope name argText : String) :=
+      let head := namedIn scope name (.external (some true))
+      let identity := scope ++ "::" ++ name ++ "<" ++ argText ++ ">"
+      pairFrame.admits (.genericInst head intArg) (.aggregate identity 0)
+    claim runtimeScope "System.Span`1" "System.Int32" = false ∧
+    claim runtimeScope "System.ReadOnlySpan`1" "System.Int32" = false ∧
+    claim vectorScope "System.Runtime.Intrinsics.Vector128`1" "System.Int32" = false ∧
+    claim vectorScope "System.Runtime.Intrinsics.Vector256`1" "System.Int32" = false ∧
+    claim vectorScope "System.Runtime.Intrinsics.Vector512`1" "System.Int32" = false ∧
+    claim "Fixture" "Fixture.Box`1" "System.Int32" = true := by decide +kernel
+#print axioms rejects_aggregate_claim_for_span_and_vector_heads
+
 end Tests.MetadataBinding
