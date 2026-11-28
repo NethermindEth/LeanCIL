@@ -5,7 +5,7 @@ on:
   schedule:
     - cron: '23 6 * * 1'
   pull_request:
-    paths: ['CIL/Features.lean', 'Extractor/FeatureProfiles.cs', 'scripts/*RuntimeProfile*.cs', 'docs/evidence/runtime-profiles/**', '.github/workflows/runtime-profiles.yml']
+    paths: ['CIL/Features.lean', 'Extractor/FeatureProfiles.cs', 'scripts/*RuntimeProfile*.cs', 'scripts/CI/RuntimeProfileValidation.cs', 'docs/evidence/runtime-profiles/**', '.github/workflows/runtime-profiles.yml']
 
 permissions:
   contents: read

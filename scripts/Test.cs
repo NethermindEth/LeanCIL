@@ -3,17 +3,17 @@
 #:property EnforceCodeStyleInBuild=true
 #:property GenerateDocumentationFile=true
 #:property WarningsAsErrors=IDE0005
-#:include Verification.cs
-#:include DeepChecks.cs
-#:include FailureReports.cs
-#:include LeanDiagnostics.cs
-#:include BindingImage.cs
-#:include DeepCheckInputs.cs
-#:include BatchVerification.cs
-#:include CoreExamples.cs
-#:include CertificateCases.cs
-#:include ExportVerificationSuites.cs
-#:include VerificationSuites.cs
+#:include Verification/Verification.cs
+#:include Checking/DeepChecks.cs
+#:include Checking/FailureReports.cs
+#:include Checking/LeanDiagnostics.cs
+#:include Checking/BindingImage.cs
+#:include Checking/DeepCheckInputs.cs
+#:include Checking/BatchVerification.cs
+#:include Checking/CoreExamples.cs
+#:include Checking/CertificateCases.cs
+#:include CI/ExportVerificationSuites.cs
+#:include CI/VerificationSuites.cs
 
 using System.Text.Json;
 

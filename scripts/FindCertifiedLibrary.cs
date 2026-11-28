@@ -1,6 +1,6 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include CertifiedLibraryDonor.cs
+#:include CI/CertifiedLibraryDonor.cs
 
 using System.Diagnostics;
 using System.Text.Json;

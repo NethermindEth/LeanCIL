@@ -1,6 +1,6 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include Documentation.cs
+#:include CI/Documentation.cs
 
 // Each stale or unshipped citation must fail the reference check with its reason, and the same
 // document with the citation fixed, or addressed to maintainers where that is allowed, must pass.

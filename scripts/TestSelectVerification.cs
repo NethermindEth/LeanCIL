@@ -1,9 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include VerificationSelection.cs
-#:include Documentation.cs
-#:include ExportVerificationSuites.cs
-#:include VerificationSuites.cs
+#:include CI/VerificationSelection.cs
+#:include CI/Documentation.cs
+#:include CI/ExportVerificationSuites.cs
+#:include CI/VerificationSuites.cs
 
 using System.Diagnostics;
 using System.Text;
@@ -207,7 +207,8 @@ Test("test entry points", () =>
     // Suites run the built command, so a script compiled into it selects every suite; `leancil workspace`,
     // `watch`, contract export and verify reports are reached by no include edge.
     foreach (var script in new[]
-        { "scripts/ContractExport.cs", "scripts/ProofWorkspace.cs", "scripts/ProofWatch.cs", "scripts/VerifyReports.cs" })
+        { "scripts/Consumer/ContractExport.cs", "scripts/Consumer/ProofWorkspace.cs",
+            "scripts/Consumer/ProofWatch.cs", "scripts/Checking/VerifyReports.cs" })
         Equal(Select([script]), allSuites);
 });
 Test("proof and transitive imports", () =>
@@ -465,8 +466,8 @@ Test("export leaf selection, strict files and shared inputs", () =>
         Require(Selects("Tests/ContractExport.cs", name), "Bootstrap change lost " + name);
     foreach (ExportSuite entry in ExportVerificationSuites.FullPlan())
         Require(Selects("Tests/FullImportVerification.cs", entry.Name), "Full change lost " + entry.Name);
-    Equal(Select(["scripts/ExportVerificationSuites.cs"]), allSuites);
-    Equal(Select(["scripts/VerificationSuites.cs"]), allSuites);
+    Equal(Select(["scripts/CI/ExportVerificationSuites.cs"]), allSuites);
+    Equal(Select(["scripts/CI/VerificationSuites.cs"]), allSuites);
     Equal(Select(["Tests/ModularStaticExports.cs"]).Order(StringComparer.Ordinal),
         ["exportsfullstatics", "exportsstatics"]);
     Equal(Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
@@ -749,7 +750,7 @@ static partial class ExternalSources
     {
         [("scripts/Consumer/WorkspaceAndComponents.cs", "fetch-repository")] =
             "clones the dependency directories of the repository under verification into a scratch workspace",
-        [("scripts/CertifiedLibraryDonor.cs", "other-url")] =
+        [("scripts/CI/CertifiedLibraryDonor.cs", "other-url")] =
             "compares a pull request side with this repository by the API URL that run metadata gives",
         [("scripts/TestFindCertifiedLibrary.cs", "other-url")] =
             "uses other and forked repositories as fixtures that donor selection must reject",

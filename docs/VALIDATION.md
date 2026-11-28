@@ -69,8 +69,8 @@ takes about 2.7 hours of CPU time.
 ## Suites
 
 This table lists every name `--suite` accepts, in the order a full run executes them. The names
-come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
-[ExportVerificationSuites.cs](../scripts/ExportVerificationSuites.cs);
+come from [VerificationSuites.cs](../scripts/CI/VerificationSuites.cs) and
+[ExportVerificationSuites.cs](../scripts/CI/ExportVerificationSuites.cs);
 `scripts/CheckDocReferences.cs` fails when this table and those registries disagree.
 
 | Suite | Checks |
@@ -159,7 +159,7 @@ git worktree add --detach ../base "$(git merge-base origin/main HEAD)"
 dotnet run --file scripts/ProofCost.cs -- measure --tree ../base --libraries --output artifacts/cost/base.json
 dotnet run --file scripts/ProofCost.cs -- measure --tree . --libraries --output artifacts/cost/head.json
 dotnet run --file scripts/ProofCost.cs -- compare --base artifacts/cost/base.json \
-  --head artifacts/cost/head.json --accepted scripts/proof-cost-accepted.json
+  --head artifacts/cost/head.json --accepted scripts/ProofCost/proof-cost-accepted.json
 ```
 
 `measure` runs from the head checkout for both trees, so the base needs no copy of the tool. Each

@@ -31,7 +31,7 @@ Run one partition with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsinitialized` | A static-readonly struct library exports a named initialization premise; its caller retains the scoped premise, malformed descriptors reject, and full verification is unavailable |
 | `exportsprofiles` | One family theorem across three profiles, independent full composition, outcome families and scoped initialization premises; disagreeing flags, unequal programs, malformed selections, forged audit declarations and compiled-reference mutation reject |
 
-[ExportVerificationSuites.cs](../scripts/ExportVerificationSuites.cs) registers the 13 partitions
+[ExportVerificationSuites.cs](../scripts/CI/ExportVerificationSuites.cs) registers the 13 partitions
 and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
 
 ### Case ledger

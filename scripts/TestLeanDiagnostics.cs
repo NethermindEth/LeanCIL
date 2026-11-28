@@ -1,12 +1,12 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include Verification.cs
-#:include DeepChecks.cs
-#:include BindingImage.cs
-#:include DeepCheckInputs.cs
-#:include LeanDiagnostics.cs
-#:include FailureReports.cs
-#:include VerifyReports.cs
+#:include Verification/Verification.cs
+#:include Checking/DeepChecks.cs
+#:include Checking/BindingImage.cs
+#:include Checking/DeepCheckInputs.cs
+#:include Checking/LeanDiagnostics.cs
+#:include Checking/FailureReports.cs
+#:include Checking/VerifyReports.cs
 
 static void Require(bool condition, string message, string? text = null)
 {

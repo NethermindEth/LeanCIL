@@ -1,12 +1,12 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
-#:include ../scripts/Verification.cs
+#:include ../scripts/Verification/Verification.cs
 #:include DirectoryLinks.cs
-#:include ../scripts/DeepChecks.cs
-#:include ../scripts/FailureReports.cs
-#:include ../scripts/LeanDiagnostics.cs
-#:include ../scripts/BindingImage.cs
-#:include ../scripts/DeepCheckInputs.cs
+#:include ../scripts/Checking/DeepChecks.cs
+#:include ../scripts/Checking/FailureReports.cs
+#:include ../scripts/Checking/LeanDiagnostics.cs
+#:include ../scripts/Checking/BindingImage.cs
+#:include ../scripts/Checking/DeepCheckInputs.cs
 
 // Child mode: an independent process holding the use lock of one entry until told to stop.
 if (args is ["hold-entry", var heldByChild, var childSignal, var childStop])

@@ -4,7 +4,7 @@
 
 This page describes the format in which CI passes the certified library between jobs, how to
 measure packing and restoring it, and how to produce the library assets of a release. Read it
-before changing `scripts/CertifiedLibraryArchive.cs` or the library steps of the verification
+before changing `scripts/CI/CertifiedLibraryArchive.cs` or the library steps of the verification
 workflow, or before packing a release. [CI operation](../CI.md#certified-library) describes which
 runs may donate a library and which artifact a suite job takes.
 

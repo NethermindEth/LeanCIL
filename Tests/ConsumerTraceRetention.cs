@@ -1,7 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ConsumerTraceDirectory.cs
-#:include ../scripts/VerificationTimings.cs
+#:include ../scripts/CI/VerificationTimings.cs
 
 var root = Path.Combine(Path.GetTempPath(), "LeanCIL-TraceRetention-" + Guid.NewGuid().ToString("N"));
 var savedTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");

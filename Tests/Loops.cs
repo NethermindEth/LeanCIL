@@ -1,14 +1,14 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:package Mono.Cecil
-#:include ../scripts/Verification.cs
+#:include ../scripts/Verification/Verification.cs
 #:include ContractVariants.cs
 #:include ExceptionMembers.cs
-#:include ../scripts/DeepChecks.cs
-#:include ../scripts/FailureReports.cs
-#:include ../scripts/LeanDiagnostics.cs
-#:include ../scripts/BindingImage.cs
-#:include ../scripts/DeepCheckInputs.cs
+#:include ../scripts/Checking/DeepChecks.cs
+#:include ../scripts/Checking/FailureReports.cs
+#:include ../scripts/Checking/LeanDiagnostics.cs
+#:include ../scripts/Checking/BindingImage.cs
+#:include ../scripts/Checking/DeepCheckInputs.cs
 #:include WordArrayOutlines.cs
 
 using System.Reflection;
