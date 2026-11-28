@@ -618,15 +618,39 @@ theorem unmanagedTypeConstraint_eq :
       runtimeScope ++ "::System.ValueType" := by decide +kernel
 #print axioms unmanagedTypeConstraint_eq
 
+/-- Whether `argument` is an admitted value-type argument (every admitted raw layout is
+    reference-free). Classes, arrays, references and runtime spans fail value-type and unmanaged
+    constraints; a byref-like aggregate requires the `allows ref struct` flag `0x20`. -/
+def valueTypeArgument (table : LayoutTable) (allowByRefLike : Bool) (argument : TypeExpr) : Bool :=
+  match argument with
+  | .primitive type => type.fieldType?.isSome
+  | .enum .. => true
+  | .aggregate identity index => match table.entry index with
+    | some layout => layout.identity == identity && (allowByRefLike || !layout.byRefLike)
+    | none => false
+  | .apply (.constructor scope name) (.primitive element) =>
+    scope == layoutIntrinsicsScope &&
+      element ∈ [.uint64, .int64, .uint32, .int32, .byte, .double, .single] &&
+      (name == "System.Runtime.Intrinsics.Vector128`1" ||
+       name == "System.Runtime.Intrinsics.Vector256`1" ||
+       name == "System.Runtime.Intrinsics.Vector512`1")
+  | _ => false
+
 /-- Value-type flags and exact direct interface identities constrain a closed type argument. -/
 def genericConstraintValidWith (table : LayoutTable) (argument : TypeExpr)
     (flags : Nat) (types : List String) : Bool :=
-  flags &&& 56 == flags && types.all fun type =>
-    type == valueTypeConstraint || type == unmanagedTypeConstraint || match argument with
-    | .aggregate identity index => match table.entry index with
-      | some layout => layout.identity == identity && layout.interfaces.contains type
-      | none => false
-    | _ => false
+  let allowByRefLike := flags &&& 0x20 != 0
+  let needsValueType := flags &&& 0x08 != 0
+  flags &&& 56 == flags &&
+    (!needsValueType || valueTypeArgument table allowByRefLike argument) &&
+    types.all fun type =>
+      if type == valueTypeConstraint || type == unmanagedTypeConstraint then
+        valueTypeArgument table allowByRefLike argument
+      else match argument with
+        | .aggregate identity index => match table.entry index with
+          | some layout => layout.identity == identity && layout.interfaces.contains type
+          | none => false
+        | _ => false
 
 /-- `genericConstraintValidWith` reading a raw layout list. -/
 def genericConstraintValid (layouts : List RawLayout) (argument : TypeExpr)

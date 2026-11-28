@@ -74,21 +74,41 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                 GenericParameterAttributes.DefaultConstructorConstraint | (GenericParameterAttributes)0x20;
             if ((parameter.Attributes & ~allowed) != 0)
                 throw new InvalidDataException($"Unsupported generic method constraints: {definition.FullName}");
+            bool allowsRefStruct = ((uint)parameter.Attributes & 0x20u) != 0;
+            bool requiresValueType =
+                (parameter.Attributes & GenericParameterAttributes.NotNullableValueTypeConstraint) != 0;
+            bool IsAdmittedValueType(bool unmanaged) =>
+                argument.IsValueType && !Spans.Is(argument) &&
+                (allowsRefStruct || !MetadataValidation.IsByRefLike(argument)) &&
+                (!unmanaged || Arrays.Primitive(argument) is not null || EnumTypes.IsEnum(argument) ||
+                    MetadataValidation.IntegerVectorWidth(argument) is not null ||
+                    MetadataValidation.IsAggregate(argument, module));
+            if (requiresValueType && !IsAdmittedValueType(unmanaged: false))
+                throw new InvalidDataException(
+                    $"Generic argument violates value-type constraint: {reference.FullName}");
             foreach (var constraint in parameter.Constraints)
             {
                 var type = constraint.ConstraintType;
+                bool unmanaged = false;
                 if (type is RequiredModifierType modifier &&
                     modifier.ModifierType.FullName == "System.Runtime.InteropServices.UnmanagedType" &&
                     RuntimeModels.ExactScope(modifier.ModifierType, PlatformAssemblies.SystemRuntime))
+                {
+                    unmanaged = true;
                     type = modifier.ElementType;
+                }
                 // A constraint naming parameters, such as `T : I<T>`, is checked at these arguments.
-                if (GenericStructs.DirectInterfaceConstraint(
+                if (!unmanaged && GenericStructs.DirectInterfaceConstraint(
                         type.ContainsGenericParameter && type is GenericInstanceType ? Substitute(type) : type,
                         argument, module))
                     continue;
                 if (type.FullName != "System.ValueType" ||
                     !RuntimeModels.ExactScope(type, PlatformAssemblies.SystemRuntime))
                     throw new InvalidDataException($"Unsupported generic method constraints: {definition.FullName}");
+                if (!IsAdmittedValueType(unmanaged))
+                    throw new InvalidDataException(
+                        $"Generic argument violates {(unmanaged ? "unmanaged" : "value-type")} constraint: " +
+                        reference.FullName);
                 RuntimeModels.ValidateTypeIdentity(type, module, architecture);
             }
         }
