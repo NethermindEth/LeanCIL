@@ -56,7 +56,8 @@ partial class Program
     /// <summary>LeanCIL's own example and test modules, which the tool does not ship.</summary>
     static HashSet<string> RepositoryModules() => [.. Regex.Matches(File.ReadAllText(At("lakefile.toml")),
             @"^\[\[lean_lib\]\]\r?\nname = ""([^""]+)""", RegexOptions.Multiline)
-        .Select(match => match.Groups[1].Value).Where(name => name != "CIL"), "Examples.Support"];
+        .Select(match => match.Groups[1].Value).Where(name => name is not ("CIL" or "StrictBinding")),
+        "Examples.Support"];
 
     // Importing one fails later as a missing Lake source; name the module and its replacement instead.
     static void RejectRepositoryImports(string proof)
