@@ -848,7 +848,7 @@ def utf16Chars? : List Nat → Option (List Char)
     else none
 
 /-- Inclusive code point ranges of the characters in Unicode categories Cc, Cf, Zl and Zp and
-    of the non-ASCII characters in Zs, as the .NET 10 runtime classifies them. -/
+    of the non-ASCII characters in Zs, as the .NET 11 runtime classifies them. -/
 def invisibleRanges : List (Nat × Nat) :=
   [(0x0000, 0x001F), (0x007F, 0x00A0), (0x00AD, 0x00AD), (0x0600, 0x0605), (0x061C, 0x061C),
     (0x06DD, 0x06DD), (0x070F, 0x070F), (0x0890, 0x0891), (0x08E2, 0x08E2), (0x1680, 0x1680),

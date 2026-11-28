@@ -4,14 +4,14 @@ import CIL.Safety.InstructionMemory
 # Reference-free heap arrays
 
 Array allocation reuses fresh allocation identities and existing typed array views, enforcing
-the .NET 10 element-count ceiling. Success still assumes runtime allocation availability;
+the .NET 11 element-count ceiling. Success still assumes runtime allocation availability;
 the model does not certify heap capacity or GC behavior.
 Composite payloads retain the runtime's eight-byte base alignment independently of element stride.
 -/
 
 namespace CIL.Safety
 
-/-- The .NET 10 CoreCLR single-dimensional array element-count ceiling. -/
+/-- The .NET 11 CoreCLR single-dimensional array element-count ceiling. -/
 def maxArrayLength : Nat := 0x7fffffc7
 
 /-- For a count above `maxArrayLength`, CoreCLR checks whether it fits an `Int32` before

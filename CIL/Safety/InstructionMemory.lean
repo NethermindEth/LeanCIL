@@ -1171,7 +1171,7 @@ def stringLiteralInstruction (text : String) (stack : List Value) (memory : Memo
   return (memory, (← literalObject memory text) :: stack)
 
 /-- `ArgumentNullException.ThrowIfNull(argument, paramName)`: a null argument throws
-    `ArgumentNullException` and any other object passes, as in .NET 10. The parameter name on top
+    `ArgumentNullException` and any other object passes, as in .NET 11. The parameter name on top
     of the stack is popped unread. Memory is unchanged. -/
 def throwIfNullInstruction (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) :=

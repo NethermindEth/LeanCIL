@@ -4,7 +4,7 @@
 
 ## Runtime assumptions
 
-Deployment must use the selected supported 64-bit, little-endian .NET 10 profile. Feature flags
+Deployment must use the selected supported 64-bit, little-endian .NET 11 profile. Feature flags
 describe runtime/OS-visible availability and remain fixed during execution. ISA-specific operations
 require their features; portable operations use software semantics. Profile validity is checked,
 but the verifier does not discover a deployment's actual CPU, runtime or resource availability.
@@ -47,7 +47,7 @@ not be canonical.
 
 `Unsafe.Add<T>(void*, int)` and `Unsafe.Subtract<T>(void*, int)` use the same checked,
 allocation-relative element offsets as their managed-reference counterparts. Runtime correspondence
-assumes .NET 10's native-width multiplication by `sizeof(T)` followed by addition or subtraction.
+assumes .NET 11's native-width multiplication by `sizeof(T)` followed by addition or subtraction.
 They admit existing storage for supported integer,
 enum, vector and reference-free aggregate types; neither fabricates addresses nor grants authority.
 Negative offsets wrap at native width before the resulting reference is checked for lifetime and
@@ -174,13 +174,13 @@ identities survive frame return, including for empty arrays. Payloads start zero
 Negative lengths and native counts above `0x7fffffff` raise `OverflowException`.
 Counts from `0x7fffffc8` through `0x7fffffff` raise `OutOfMemoryException` before allocation.
 For valid lengths, ordinary execution assumes global heap availability. GC and object headers
-remain outside the model. [CoreCLR array allocation](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/gchelpers.cpp)
+remain outside the model. [CoreCLR array allocation](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/vm/gchelpers.cpp)
 
 Array component sizes range from 1 to 65535 bytes, matching CoreCLR's
-[16-bit component-size field](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/methodtable.h).
+[16-bit component-size field](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/vm/methodtable.h).
 Composite payloads have eight-byte base alignment on the admitted 64-bit targets, independent of
-element stride: the [array header](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/object.h)
-preserves the [GC pointer alignment](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/gc/env/gcenv.base.h).
+element stride: the [array header](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/vm/object.h)
+preserves the [GC pointer alignment](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/gc/env/gcenv.base.h).
 Vector arrays do not acquire 16-, 32- or 64-byte alignment from their element width. Padding bytes,
 like fields, start initialized to zero. Byref-like structs cannot be array elements or fields of
 heap-storable structs. The raw byref-like marker is decoded from metadata; faithful decoding and
@@ -603,7 +603,7 @@ value arrays are rejected.
 so within a run one text always loads one object, and two loads of it are identical. ECMA-335
 III.4.16 gives this guarantee. Roslyn marks assemblies
 `CompilationRelaxations(NoStringInterning)`, which lets a runtime drop that guarantee, so the
-claim rests on CoreCLR: in .NET 10,
+claim rests on CoreCLR: in .NET 11,
 `StringLiteralMap::GetStringLiteral` (`src/coreclr/vm/stringliteralmap.cpp`) resolves every
 literal through the one `SystemDomain::GetGlobalStringLiteralMap()`, collectible modules
 included, and never consults the relaxation.
@@ -627,7 +627,7 @@ An unpaired UTF-16 surrogate has no corresponding Unicode scalar and is rejected
 `.thrown .argumentNull` or `.thrown .argumentOutOfRange` exactly
 when its condition holds, and otherwise pops its operands and leaves memory unchanged
 ([GuardCount](../Examples/Proofs/GuardCount.lean), [GuardIndex](../Examples/Proofs/GuardIndex.lean),
-[GuardRequired](../Examples/Proofs/GuardRequired.lean)). The contracts follow the .NET 10 sources:
+[GuardRequired](../Examples/Proofs/GuardRequired.lean)). The contracts follow the .NET 11 sources:
 
 - `src/libraries/System.Private.CoreLib/src/System/ArgumentNullException.cs`: `ThrowIfNull` throws
   `new ArgumentNullException(paramName)` when `argument is null` and returns otherwise.
@@ -668,7 +668,7 @@ Open or class generic owners, explicit/auto generic layouts, reference/float fie
 and recursive/depth-over-128 layouts are rejected. Vector512 fields are excluded because their aggregate
 alignment is not modeled. Storage is managed layout and is not interop marshalling.
 Correspondence to
-[CoreCLR layout](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/classlayoutinfo.cpp)
+[CoreCLR layout](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/vm/classlayoutinfo.cpp)
 is assumed; runtime probes and kernel layout bounds supply different kinds of evidence.
 
 ## Value tuples
@@ -747,7 +747,7 @@ target. A tuple result requires both raw fields to match the declared integer, d
 natural alignment, and two consecutive element-width fields in the checked layout.
 
 `Math.DivRem` and the 32-bit and signed 64-bit `Math.BigMul` overloads are modelled from the
-pinned .NET 10 `Math.cs` source: the quotient reuses CIL `div`, narrow operands divide in
+pinned .NET 11 `Math.cs` source: the quotient reuses CIL `div`, narrow operands divide in
 `int` and wrap, and the remainder is `left - quotient * right`. The equal-width tuple layout is
 recomputed from metadata and probed at run time. Correspondence to the runtime remains an
 assumption backed by exact signature checks and boundary comparisons that include both faults.

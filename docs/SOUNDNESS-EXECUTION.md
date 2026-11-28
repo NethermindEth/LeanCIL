@@ -51,9 +51,9 @@ A zero-size request returns null. Nonempty reservations round to 16 bytes and ch
 a deployment premise; it excludes ordinary frames, calls and probing overhead and does not prove
 physical stack availability. Quota failure is a model fault; it is not automatically a CLR
 exception.
-The conventions assume the admitted .NET 10
-[x64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenxarch.cpp) and
-[ARM64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenarm64.cpp)
+The conventions assume the admitted .NET 11
+[x64](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/jit/codegenxarch.cpp) and
+[ARM64](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/jit/codegenarm64.cpp)
 implementations. Heap-array lifetime and resource assumptions are in
 [runtime storage](SOUNDNESS-RUNTIME.md).
 

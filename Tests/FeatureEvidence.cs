@@ -38,7 +38,7 @@ var sharedCases = RuntimeProfileValidation.Observations(
 // that omit or split a nested flag are refused.
 foreach (var (nested, baseFlag, getter, _) in RuntimeProfileValidation.NestedGetters)
 {
-    var evidence = nested is "advSimd64" or "armAes64" ? "macos-arm64-net10.json" : "windows-x64-net11.json";
+    var evidence = nested is "advSimd64" or "armAes64" ? "macos-arm64-net11.json" : "windows-x64-net11.json";
     var recorded = JsonNode.Parse(File.ReadAllText(At($"docs/evidence/runtime-profiles/{evidence}")))!;
     foreach (var (name, mutate) in new (string, Action<JsonObject>)[]
     {

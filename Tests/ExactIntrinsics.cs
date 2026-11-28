@@ -1725,7 +1725,7 @@ static byte[] RuntimeShuffle(MethodInfo method, byte[] source, byte[] control)
     return bytes;
 }
 
-// .NET 10 reports AVX2 only with BMI1/BMI2 and AVX-512 F/DQ/VL only together; any other profile certifies no runtime.
+// .NET 11 reports AVX2 only with BMI1/BMI2 and AVX-512 F/DQ/VL only together; any other profile certifies no runtime.
 static void RequireRuntimeGroups(string output, bool wide)
 {
     using JsonDocument identity = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "identity.json")));
@@ -1734,7 +1734,7 @@ static void RequireRuntimeGroups(string output, bool wide)
     bool v3 = Flag("Avx2") && Flag("Bmi1") && Flag("Bmi2");
     bool v4 = Flag("Avx512F") && Flag("Avx512FVL") && Flag("Avx512DQ") && Flag("Avx512DQVL");
     if (!v3 || v4 != wide)
-        throw new InvalidOperationException("Exact intrinsic profile matches no .NET 10 x64 ISA level: " + profile);
+        throw new InvalidOperationException("Exact intrinsic profile matches no .NET 11 x64 ISA level: " + profile);
 }
 
 partial class Program

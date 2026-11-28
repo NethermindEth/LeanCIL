@@ -8,7 +8,7 @@ The hardware capabilities a method can observe through `IsSupported` and
 `IsHardwareAccelerated`. A `FeatureProfile` fixes them for a whole execution; `step` reads
 it for feature tests and intrinsic availability.
 
-Supported deployment policy: .NET 10 CoreCLR on 64-bit little-endian hosts.
+Supported deployment policy: .NET 11 CoreCLR on 64-bit little-endian hosts.
 IsSupported includes OS support and runtime disabling, not just CPU capability.
 On x64 the .NET 11 runtime requires x86-64-v2: its X86Base group holds SSE through SSE4.2 and
 POPCNT, so SSE2 is never reported without SSSE3, SSE4.1 and SSE4.2.
@@ -19,10 +19,10 @@ includes it.
 ARM64 enables ArmBase and AdvSimd together. Vector128 acceleration follows the
 baseline SIMD group; Vector256 acceleration requires AVX2 but may be disabled
 independently by the preferred vector width.
-Pinned runtime sources, measured x64/ARM64 versions, and migration guidance:
+Pinned runtime sources, measured x64/ARM64 versions, and profile selection:
 docs/RUNTIME-PROFILES.md
-https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/vm/codeman.cpp
-https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/tools/Common/JitInterface/ThunkGenerator/InstructionSetDesc.txt
+https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/vm/codeman.cpp
+https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/tools/Common/JitInterface/ThunkGenerator/InstructionSetDesc.txt
 https://github.com/dotnet/runtime/blob/v11.0.0/src/native/minipal/cpufeatures.c
 `FeatureProfile.valid_iff_prerequisites` spells out every operation prerequisite `Valid` implies.
 -/
@@ -42,7 +42,7 @@ inductive Architecture where
   deriving DecidableEq, Repr
 
 /-- Runtime-visible flags are fixed throughout an execution. `Valid` constrains
-runtime disabling to the supported .NET 10 CoreCLR capability groups. -/
+runtime disabling to the supported .NET 11 CoreCLR capability groups. -/
 structure FeatureProfile where
   architecture : Architecture := .scalar
   nativeWidth : Nat := 64
@@ -135,7 +135,7 @@ instance (p : FeatureProfile) : Decidable p.Valid := inferInstanceAs (Decidable 
 theorem FeatureProfile.scalar_valid : scalar.Valid := by decide
 
 /-- `Valid` is equivalent to its expanded form, which also lists every prerequisite that the
-    runtime groups and the x86 chain already imply; dropping those weakened nothing. -/
+    runtime groups and the x86 chain already imply. -/
 theorem FeatureProfile.valid_iff_prerequisites (p : FeatureProfile) : p.Valid ↔
     p.nativeWidth = 64 ∧ p.littleEndian = true ∧
     (p.advSimd = true → p.architecture = .arm64) ∧

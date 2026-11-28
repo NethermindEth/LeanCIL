@@ -1,9 +1,9 @@
-# .NET 10 runtime profiles
+# .NET 11 runtime profiles
 
 Read this page to choose the execution profile for an extraction, to write a custom profile
 or to see which deployments a proof under a profile covers.
 
-Execution profiles describe the capabilities reported by a deployed .NET 10
+Execution profiles describe the capabilities reported by a deployed .NET 11
 CoreCLR process. They are not arbitrary CPU feature subsets. Both
 `FeatureProfile.Validate()` and Lean's `FeatureProfile.Valid` enforce the groups
 below. Passing these checks does not establish that a particular deployment uses
@@ -11,40 +11,35 @@ the selected profile: the deployment must match the recorded capabilities.
 
 ## Evidence
 
-The runtime sources pin this policy to .NET 10, except for the x64 baseline, which follows .NET 11:
+The .NET 11.0.0 runtime sources pin this policy:
 
 - [InstructionSetDesc.txt, v11.0.0](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/tools/Common/JitInterface/ThunkGenerator/InstructionSetDesc.txt)
-  puts SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2 and POPCNT in X86Base, and its base x64 group is
-  `x86-64-v2`. [cpufeatures.c, v11.0.0](https://github.com/dotnet/runtime/blob/v11.0.0/src/native/minipal/cpufeatures.c) marks a CPU that
-  lacks any of them invalid, and [codeman.cpp, v11.0.0](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/vm/codeman.cpp) then stops
-  the runtime with an error naming them. On other CPUs codeman.cpp enables X86Base whenever
-  EnableHWIntrinsic is set, and [clrconfigvalues.h, v11.0.0](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/inc/clrconfigvalues.h)
-  defines no EnableSSE42 switch. A .NET 11 x64 process therefore reports SSE2, SSSE3, SSE4.1 and
-  SSE4.2 all on, or all off under `DOTNET_EnableHWIntrinsic=0`, never SSE2 alone.
-- [InstructionSetDesc.txt, v10.0.13](https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/tools/Common/JitInterface/ThunkGenerator/InstructionSetDesc.txt)
-  assigns BMI1/BMI2 to AVX2 and AVX-512 F/DQ/VL to one group. Avx512Vbmi and Avx512Vbmi_VL belong to the separate
-  AVX512v2 group, which implies AVX512; the `x86-64-v4` group is `x86-64-v3` plus AVX512 only.
-- [codeman.cpp, v10.0.13](https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/vm/codeman.cpp)
-  enables groups from CPU capabilities and runtime switches. On ARM64 it enables
-  ArmBase and AdvSimd together under EnableHWIntrinsic. On x64 it enables AVX512v2 under
-  its own EnableAVX512v2 switch, after AVX512.
-- [cpufeatures.c, v10.0.14](https://github.com/dotnet/runtime/blob/v10.0.14/src/native/minipal/cpufeatures.c)
-  reports AVX512v2 only when the CPU has both AVX512-IFMA and AVX512-VBMI on top of AVX-512.
-  Machines with AVX-512 F/BW/CD/DQ/VL, such as Skylake-SP and Cascade Lake, lack VBMI, so
-  x86-64-v4 hardware differs on it. InstructionSetDesc.txt, codeman.cpp and cpufeatures.c are
-  unchanged between v10.0.13 and v10.0.14.
-- The same InstructionSetDesc.txt puts x86 Aes and Pclmulqdq in an AES group that implies only
-  X86Base, and ARM64 Aes in its own set that implies only ArmBase. No x86-64-v2/v3/v4 group
-  includes either, and each has a 64-bit variant (`Aes.X64`, `Aes.Arm64`).
-- [corinfoinstructionset.h, v10.0.13](https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/inc/corinfoinstructionset.h)
-  defines ArmBase_Arm64 and AdvSimd_Arm64 only for ARM64 targets. `Set64BitInstructionSetVariants`
-  adds each exactly when its base set is enabled, and `EnsureInstructionSetFlagsAreValid`
-  removes either one when the other is absent. Both files are unchanged in v10.0.14.
+  puts SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2 and POPCNT in X86Base, with `x86-64-v2` as the base
+  x64 group. It assigns BMI1/BMI2 to AVX2 and AVX-512 F/DQ/VL to one group, puts `Avx512Vbmi` and
+  `Avx512Vbmi_VL` in the separate AVX512v2 group (which implies AVX512, leaving `x86-64-v4` as
+  `x86-64-v3` plus AVX512 only), puts x86 `Aes` and `Pclmulqdq` in an AES group implying only
+  X86Base, and puts ARM64 `Aes` in its own set implying only ArmBase. No x86-64-v2/v3/v4 group
+  includes AES, and each AES set has a 64-bit variant (`Aes.X64`, `Aes.Arm64`).
+- [cpufeatures.c, v11.0.0](https://github.com/dotnet/runtime/blob/v11.0.0/src/native/minipal/cpufeatures.c)
+  marks an x64 CPU lacking any `x86-64-v2` instruction set invalid, and reports AVX512v2 only when
+  the CPU has both AVX512-IFMA and AVX512-VBMI on top of AVX-512 (which Skylake-SP and Cascade
+  Lake lack, so `x86-64-v4` hardware differs on it).
+- [codeman.cpp, v11.0.0](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/vm/codeman.cpp)
+  stops startup on an invalid x64 CPU, enables X86Base whenever `EnableHWIntrinsic` is set, enables
+  ArmBase and AdvSimd together on ARM64 under `EnableHWIntrinsic`, and enables AVX512v2 on x64
+  under its own `EnableAVX512v2` switch after AVX512.
+  [clrconfigvalues.h, v11.0.0](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/inc/clrconfigvalues.h)
+  defines no `EnableSSE42` switch, so a .NET 11 x64 process reports SSE2, SSSE3, SSE4.1 and SSE4.2
+  all on, or all off under `DOTNET_EnableHWIntrinsic=0`, never SSE2 alone.
+- [corinfoinstructionset.h, v11.0.0](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/inc/corinfoinstructionset.h)
+  defines `ArmBase_Arm64` and `AdvSimd_Arm64` only for ARM64 targets.
+  `Set64BitInstructionSetVariants` adds each exactly when its base set is enabled, and
+  `EnsureInstructionSetFlagsAreValid` removes either one when the other is absent.
 
 Fresh-process observations are checked in:
 
 - [Windows x64, .NET 11.0.0, AMD Ryzen 9 9950X](evidence/runtime-profiles/windows-x64-net11.json).
-- [macOS ARM64, .NET 10.0.14, GitHub `macos-15` runner](evidence/runtime-profiles/macos-arm64-net10.json).
+- [macOS ARM64, .NET 11.0.0, GitHub `macos-26` runner](evidence/runtime-profiles/macos-arm64-net11.json).
 
 Each record includes the actual runtime version, process architecture, OS, switch
 and observed flags. Reproduce with:
@@ -106,7 +101,7 @@ their absence from the built-in list is not a deployment restriction.
 The `evidence` suite runs the same built-in, mutated and recorded-observation
 cases through the production C# validator and generated kernel-checked Lean
 theorems. The runtime-profile drift workflow probes Linux x64 and ARM64 weekly,
-on demand and on policy changes, using the installed .NET 10 servicing runtime.
+on demand and on policy changes, using the installed .NET 11 servicing runtime.
 Its artifacts record the actual runtime version and architecture; a successful
 job validates only those observations, not every possible deployment.
 The [ARM64 AES workflow](CI.md#other-workflows) checks the AES model and the runtime groups on
@@ -156,4 +151,4 @@ each affected method/profile, re-export interfaces and rebuild full-verification
 bundles. Update gates only after those proofs pass. Do not reuse certificates from another
 profile, merely rename a profile, suppress the group checks, or weaken a
 contract to keep a gate passing. Cross-version runtime support needs its own
-explicit evidence and policy rather than relaxing these .NET 10 constraints.
+explicit evidence and policy rather than relaxing these .NET 11 constraints.

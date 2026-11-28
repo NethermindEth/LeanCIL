@@ -12,11 +12,11 @@ bound to modeled memory calls. In caller storage a vector is
 stored little-endian, byte by byte, like scalars in `CIL.Memory`, so vector and scalar
 accesses to the same bytes agree. A scalar local holds a whole vector value instead.
 
-Exact overload references (.NET 10):
-   https://learn.microsoft.com/dotnet/api/system.runtime.compilerservices.unsafe.add?view=net-10.0
-   https://learn.microsoft.com/dotnet/api/system.runtime.compilerservices.unsafe.bitcast?view=net-10.0
-   https://learn.microsoft.com/dotnet/api/system.runtime.interopservices.memorymarshal.getreference?view=net-10.0
-   https://learn.microsoft.com/dotnet/api/system.readonlyspan-1.-ctor?view=net-10.0
+Exact overload references (.NET 11):
+   https://learn.microsoft.com/dotnet/api/system.runtime.compilerservices.unsafe.add?view=net-11.0
+   https://learn.microsoft.com/dotnet/api/system.runtime.compilerservices.unsafe.bitcast?view=net-11.0
+   https://learn.microsoft.com/dotnet/api/system.runtime.interopservices.memorymarshal.getreference?view=net-11.0
+   https://learn.microsoft.com/dotnet/api/system.readonlyspan-1.-ctor?view=net-11.0
    Unsafe.Add scales by element size. BitCast preserves storage bits.
    Checked static, array-backed and reference-backed spans use the memory rules in CIL.Safety.
    Static bytes come from the extracted RVA field.

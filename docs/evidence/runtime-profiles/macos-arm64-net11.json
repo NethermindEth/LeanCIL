@@ -2,10 +2,10 @@
   {
     "configuration": "default",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -35,10 +35,10 @@
   {
     "configuration": "EnableHWIntrinsic=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": false,
       "advSimd64": false,
       "armBase64": false,
@@ -68,10 +68,10 @@
   {
     "configuration": "EnableSSE2=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -101,10 +101,10 @@
   {
     "configuration": "EnableSSSE3=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -134,10 +134,10 @@
   {
     "configuration": "EnableSSE41=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -167,10 +167,10 @@
   {
     "configuration": "EnableSSE42=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -200,10 +200,10 @@
   {
     "configuration": "EnableAVX=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -233,10 +233,10 @@
   {
     "configuration": "EnableAVX2=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -266,10 +266,10 @@
   {
     "configuration": "EnableBMI1=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -299,10 +299,10 @@
   {
     "configuration": "EnableBMI2=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -332,10 +332,10 @@
   {
     "configuration": "EnableAVX512=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -365,10 +365,10 @@
   {
     "configuration": "EnableAVX512DQ=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -398,10 +398,10 @@
   {
     "configuration": "EnableAVX512v2=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -431,10 +431,10 @@
   {
     "configuration": "EnableAVX512F_VL=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -464,10 +464,10 @@
   {
     "configuration": "EnableAES=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -497,10 +497,10 @@
   {
     "configuration": "EnableArm64AdvSimd=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -530,10 +530,10 @@
   {
     "configuration": "EnableArm64Aes=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -563,10 +563,10 @@
   {
     "configuration": "EnableArm64=0",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -596,10 +596,10 @@
   {
     "configuration": "PreferredVectorBitWidth=128",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,
@@ -629,10 +629,10 @@
   {
     "configuration": "PreferredVectorBitWidth=64",
     "observed": {
-      "runtime": ".NET 10.0.14",
-      "runtimeVersion": "10.0.14",
+      "runtime": ".NET 11.0.0",
+      "runtimeVersion": "11.0.0",
       "architecture": "Arm64",
-      "os": "macOS 15.8.2",
+      "os": "macOS 26.7.2",
       "advSimd": true,
       "advSimd64": true,
       "armBase64": true,

@@ -16,7 +16,7 @@ def ssseAlignBytes (high low : V128) (count : Nat) : V128 :=
 def sseShiftLeftBytes (x : V128) (count : Nat) : V128 := x <<< (8 * count)
 
 /-- PMULUDQ multiplies the even UInt32 lanes, 0 and 2, and widens each product to UInt64.
-https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/Sse2.cs -/
+https://github.com/dotnet/runtime/blob/v11.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/Sse2.cs -/
 def sseMultiplyEven32 (left right : V128) : V128 :=
   let product (index : Nat) :=
     (lane32 left index).zeroExtend 64 * (lane32 right index).zeroExtend 64
