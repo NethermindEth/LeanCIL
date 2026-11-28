@@ -16,25 +16,31 @@ using Mono.Cecil;
 // Admission of LeanCIL's own assembly under the scalar profile against its baseline of admitted methods.
 // Fails on any difference, so a lost admission, an unrecorded gain or a removed method all need review.
 const string Usage = "Usage: SelfAdmission.cs [--update] [--baseline baseline.txt] [--assembly assembly.dll] " +
-    "[--reuse-report] [--lean-check]";
+    "[--reuse-report] [--lean-check] [--shard index/count]";
 const string Profile = "scalar";
 const int ListedBlockers = 10;
 const int ListedMethods = 20;
 var baselinePath = At("Tests/SelfAdmissionBaseline.txt");
 var assemblyPath = ExtractorPath;
 bool update = false, reuse = false, leanCheck = false;
+(int Index, int Count)? shard = null;
 for (var index = 0; index < args.Length; index++)
     switch (args[index])
     {
         case "--update": update = true; break;
         // The gate's own tests compare an existing report with altered baselines.
         case "--reuse-report": reuse = true; break;
-        // Run by hand: elaborates the extraction of every admitted method, hours of CPU time in all.
+        // Elaborates the extraction of every admitted method against CIL; runs weekly in CI across shards.
         case "--lean-check": leanCheck = true; break;
+        case "--shard" when index + 1 < args.Length:
+            shard = ParseShard(args[++index]);
+            break;
         case "--baseline" when index + 1 < args.Length: baselinePath = Path.GetFullPath(args[++index]); break;
         case "--assembly" when index + 1 < args.Length: assemblyPath = Path.GetFullPath(args[++index]); break;
         default: throw new ArgumentException(Usage);
     }
+if (shard is not null && !leanCheck)
+    throw new ArgumentException("--shard requires --lean-check.\n" + Usage);
 var directory = At("artifacts/SelfAdmission");
 Directory.CreateDirectory(directory);
 
@@ -139,12 +145,24 @@ if (gained.Length != 0 || removed.Length != 0)
         $"{removed.Length} removed methods (refresh with `dotnet run --file Tests/SelfAdmission.cs -- --update`).");
 Console.WriteLine($"PASS self-admission: {Count('A')} of {current.Count} methods admitted with no regressions");
 
-// Extracts each admitted method alone and elaborates it against the checkout's CIL; an admission the Lean
-// checks refuse is a drift between the extractor and the checker, so any refusal fails.
+(int Index, int Count) ParseShard(string value)
+{
+    var parts = value.Split('/');
+    if (parts.Length != 2 || !int.TryParse(parts[0], out var index) || !int.TryParse(parts[1], out var count) ||
+        count < 1 || index < 1 || index > count)
+        throw new ArgumentException($"Invalid --shard value '{value}'; expected 1-based index/count.");
+    return (index, count);
+}
+
+// Extracts each admitted method alone and elaborates it against the certified CIL library; an admission
+// the Lean checks refuse is a drift between the extractor and the checker, so any refusal fails.
 void CheckAdmittedInLean(string[] methods)
 {
+    var selected = shard is { } slice
+        ? methods.Where((_, index) => index % slice.Count == slice.Index - 1).ToArray()
+        : methods;
+    var label = shard is { } active ? $"shard {active.Index}/{active.Count}" : "all methods";
     using var verification = new Program();
-    Run(["lake", "build", "CIL"], verification.CheckoutPackage());
     var leanPath = verification.CheckoutLeanPath();
     var root = Path.Combine(directory, "lean");
     if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
@@ -153,7 +171,7 @@ void CheckAdmittedInLean(string[] methods)
     var clock = Stopwatch.StartNew();
     // Each elaboration peaks near 1 GB, so a quarter of the cores bounds memory as well as time.
     var options = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 4) };
-    Parallel.ForEach(methods.Index(), options, entry =>
+    Parallel.ForEach(selected.Index(), options, entry =>
     {
         var output = Path.Combine(root, entry.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
         var result = Execute(["dotnet", ExtractorPath, "extract", assemblyPath, entry.Item, output, Profile]);
@@ -166,12 +184,37 @@ void CheckAdmittedInLean(string[] methods)
             refusals.Add((entry.Item, result.Output.Split('\n').FirstOrDefault(line => line.Contains(": error: ",
                 StringComparison.Ordinal))?.Trim() ?? result.Output.Split('\n')[0].Trim()));
         if (Interlocked.Increment(ref finished) % 100 == 0)
-            Console.WriteLine($"Lean check: {finished} of {methods.Length} in {clock.Elapsed.TotalMinutes:F0} min");
+            Console.WriteLine($"Lean check ({label}): {finished} of {selected.Length} in " +
+                $"{clock.Elapsed.TotalMinutes:F0} min");
     });
     var refused = refusals.OrderBy(refusal => refusal.Method, StringComparer.Ordinal).ToArray();
+    var refusalsPath = Path.Combine(directory, "lean-refusals.txt");
+    if (refused.Length == 0) File.Delete(refusalsPath);
+    else File.WriteAllLines(refusalsPath, refused.Select(refusal => $"{refusal.Method}\t{refusal.Reason}"));
+    var leanSummary = new List<string>
+    {
+        $"## Self-admission Lean check ({label})", "",
+        "| Checked | Admitted total | Refused | Minutes |",
+        "| ---: | ---: | ---: | ---: |",
+        $"| {selected.Length} | {methods.Length} | {refused.Length} | {clock.Elapsed.TotalMinutes:F1} |", ""
+    };
+    if (refused.Length != 0)
+    {
+        leanSummary.Add("Refused methods:");
+        leanSummary.Add("");
+        leanSummary.Add("| Method | Lean diagnostic |");
+        leanSummary.Add("| --- | --- |");
+        leanSummary.AddRange(refused.Select(refusal =>
+            $"| `{refusal.Method.Replace("|", "\\|")}` | `{refusal.Reason.Replace("|", "\\|")}` |"));
+        leanSummary.Add("");
+    }
+    File.WriteAllLines(Path.Combine(directory, "lean-check-summary.md"), leanSummary);
+    if (Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY") is { Length: > 0 } stepSummaryFile && !reuse)
+        File.AppendAllLines(stepSummaryFile, leanSummary);
     foreach (var (method, reason) in refused) Console.WriteLine($"REFUSED {method}\n  {reason}");
     if (refused.Length != 0)
-        throw new InvalidOperationException($"Lean refuses {refused.Length} of {methods.Length} admitted methods.");
-    Console.WriteLine($"PASS Lean check: {methods.Length} admitted methods elaborate, " +
+        throw new InvalidOperationException(
+            $"Lean refuses {refused.Length} of {selected.Length} admitted methods ({label}).");
+    Console.WriteLine($"PASS Lean check ({label}): {selected.Length} admitted methods elaborate, " +
         $"{clock.Elapsed.TotalMinutes:F0} min");
 }
